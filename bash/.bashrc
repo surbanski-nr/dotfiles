@@ -121,8 +121,6 @@ if ! shopt -oq posix; then
 fi
 
 
-source <(kubectl completion bash)
-
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
 export GITUSER="surbanski"
@@ -156,3 +154,4 @@ bind -x '"\C-l":clear'
 
 # export VISUAL=nvim
 # export EDITOR=nvim
+
