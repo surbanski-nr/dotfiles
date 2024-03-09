@@ -61,7 +61,7 @@ fi
 
 if [ "$color_prompt" = yes ]; then
     #PS1='${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
-	PS1='\[\e[38;5;178;2m\]$?\[\e[0m\] \[\e[38;5;214m\]\u@\h\[\e[0m\] \[\e[38;5;214m\]\W\[\e[0m\] \[\e[38;5;142m\]\\$\[\e[0m\] '
+    PS1='\[\e[38;5;214m\]$?\[\e[0m\] \[\e[38;5;214m\]\u@\h\[\e[0m\] \[\e[38;5;214m\]\W\[\e[0m\] \[\e[38;5;142m\]\\$\[\e[0m\] '
 else
     PS1='${debian_chroot:+($debian_chroot)}\u@\h:\w\$ '
 fi
@@ -130,20 +130,13 @@ export LAB="$GHREPOS/lab"
 export NOTES="$GHREPOS/notes-md"
 export DOTFILES="$GHREPOS/dotfiles"
 
-export GIT_PS1_SHOWDIRTYSTATE=1
-export GIT_PS1_SHOWSTASHSTATE=1
-export GIT_PS1_SHOWUNTRACKEDFILES=1
-export GIT_PS1_SHOWCOLORHINTS=1
-export GIT_PS1_DESCRIBE_STYLE="branch"
-# export GIT_PS1_SHOWUPSTREAM="auto git"
+export GIT_PROMPT_THEME=Single_line_Ubuntu
 
 export BROWSER="google-chrome"
 # export BROWSER="firefox"
 # export BROWSER="microsoft-edge"
 
-export GOBIN="$HOME/.local/bin"
 export GOPRIVATE="github.com/$GITUSER/*,gitlab.com/$GITUSER/*"
-export GOPATH="$HOME/go/"
 
 # set -o vi
 
