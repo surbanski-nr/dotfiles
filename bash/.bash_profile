@@ -9,7 +9,7 @@ if [ -z "$XDG_CONFIG_HOME" ]; then
     export XDG_CONFIG_HOME="$HOME/.config"
 fi
 
-if [ -z "$SSH_AUTH_SOCK" ] && ! pgrep -u "$USER" ssh-agent >/dev/null; then
+if [ -z "$SSH_AUTH_SOCK" ]; then
     eval "$(ssh-agent -s)"
     ssh-add ~/.ssh/github
 fi
