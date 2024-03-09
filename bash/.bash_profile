@@ -1,4 +1,3 @@
-
 if [ -f ~/.bashrc ]; then
     source ~/.bashrc
 fi
@@ -10,8 +9,8 @@ if [ -z "$XDG_CONFIG_HOME" ]; then
 fi
 
 if [ -z "$SSH_AUTH_SOCK" ]; then
-    eval "$(ssh-agent -s)"
-    ssh-add ~/.ssh/github
+    eval "$(ssh-agent -s)" >/dev/null 2>&1
+    ssh-add ~/.ssh/github >/dev/null 2>&1
 fi
 
 
@@ -30,4 +29,10 @@ then
 fi
 
 source <(kubectl completion bash)
+
+if [ -f "$(brew --prefix)/opt/bash-git-prompt/share/gitprompt.sh" ]; then
+  __GIT_PROMPT_DIR=$(brew --prefix)/opt/bash-git-prompt/share
+  GIT_PROMPT_ONLY_IN_REPO=1
+  source "$(brew --prefix)/opt/bash-git-prompt/share/gitprompt.sh"
+fi
 
