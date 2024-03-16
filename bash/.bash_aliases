@@ -24,6 +24,7 @@ alias cdnotes='cd $NOTES'
 alias cdlab='cd $LAB'
 alias cddot='cd $DOTFILES'
 alias cdrepos='cd $GHREPOS'
+alias cdwork='cd $WORK'
 alias c="clear"
 alias in="cd \$NOTES/0-inbox/"
 

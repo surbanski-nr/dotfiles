@@ -10,9 +10,8 @@ return {
       typescript = { "eslint_d" },
       javascriptreact = { "eslint_d" },
       typescriptreact = { "eslint_d" },
-      -- svelte = { "eslint_d" },
       python = { "pylint" },
-      markdown = { "vale" },
+      -- markdown = { "vale" },
       ansible = { "ansible_lint" },
       cloudformation = { "cfn_lint" },
       json = { "jsonlint" },
@@ -20,7 +19,7 @@ return {
       yaml = { "yamllint" },
       dockerfile = { "hadolint" },
       terraform = { "tflint" },
-      text = { "vale" },
+      -- text = { "vale" },
     }
 
     local lint_augroup = vim.api.nvim_create_augroup("lint", { clear = true })
