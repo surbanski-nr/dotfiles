@@ -1,7 +1,7 @@
-# use fp to do a fzf search and preview the files
-alias fg="fzf --preview 'bat --style=numbers --color=always --line-range :500 {}'"
-# search for a file with fzf and open it in vim
-alias vf='nvim $(fp)'
+alias ff="fzf -m --preview 'bat --style=numbers --color=always --line-range :500 {}'"
+alias ffv='nvim $(ff)'
+
+alias zz='z -'
 
 alias kc='kubectx'
 alias kn='kubens'
@@ -9,9 +9,10 @@ alias k='kubectl'
 
 alias tp='terraform plan'
 
+alias ga='git add .'
 alias gf='git fetch'
-alias gp='git pull'
 alias gs='git status'
+alias gc='git commit -m'
 
 # finds all files recursively and sorts by last modification, ignore hidden files
 alias last='find . -type f -not -path "*/\.*" -exec ls -lrt {} +'

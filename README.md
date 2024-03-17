@@ -45,6 +45,7 @@ brew install bat
 brew install fd
 brew install xclip
 brew install zoxide
+#brew install exa -- no longer maintained
 
 brew install tree
 brew install mc

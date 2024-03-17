@@ -1,7 +1,7 @@
 local M = {}
 
 M.ui = {
-  theme = "material-darker",
+  theme = "github_dark",
 }
 
 return M
