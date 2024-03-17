@@ -31,6 +31,22 @@
           "style": "plain",
           "template": "<#ffffff>on</> {{ .HEAD }}{{if .BranchStatus }} {{ .BranchStatus }}{{ end }}{{ if .Working.Changed }} \uf044 {{ .Working.String }}{{ end }}{{ if and (.Working.Changed) (.Staging.Changed) }} |{{ end }}{{ if .Staging.Changed }} \uf046 {{ .Staging.String }}{{ end }}{{ if gt .StashCount 0 }} \ueb4b {{ .StashCount }}{{ end }} ",
           "type": "git"
+        },
+        {
+          "type": "status",
+          "style": "plain",
+          "foreground": "#ffffff",
+          "foreground_templates": ["{{ if .Error }}#e91e63{{ end }}"],
+          "template": " ",
+          "properties": {
+            "always_enabled": true
+          }
+        },
+        {
+          "type": "root",
+          "style": "plain",
+          "foreground": "#ffff66",
+          "template": ""
         }
       ],
       "type": "prompt"
