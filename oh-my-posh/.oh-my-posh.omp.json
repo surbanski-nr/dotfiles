@@ -2,23 +2,6 @@
   "$schema": "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/schema.json",
   "blocks": [
     {
-      "segments": [
-        {
-          "foreground": "cyan",
-          "style": "diamond",
-          "template": "<#ffffff>RAM</> {{ round .PhysicalPercentUsed .Precision }}% ",
-          "type": "sysinfo"
-        },
-        {
-          "foreground": "cyan",
-          "style": "diamond",
-          "template": "{{ (div ((sub .PhysicalTotalMemory .PhysicalFreeMemory)|float64) 1073741824.0) }}/{{ (div .PhysicalTotalMemory 1073741824.0) }}GB ",
-          "type": "sysinfo"
-        }
-      ],
-      "type": "rprompt"
-    },
-    {
       "alignment": "left",
       "segments": [
         {
