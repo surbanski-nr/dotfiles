@@ -6,6 +6,7 @@ alias zz='z -'
 alias kc='kubectx'
 alias kn='kubens'
 alias k='kubectl'
+complete -F __start_kubectl k
 
 alias tp='terraform plan'
 
