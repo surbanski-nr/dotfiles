@@ -1,23 +1,9 @@
 return {
   {
-    "stevearc/conform.nvim",
-    config = function()
-      require "configs.conform"
-    end,
-  },
-
-  {
-    "nvim-tree/nvim-tree.lua",
-    opts = {
-      git = { enable = true },
-    },
-  },
-
-  {
     "nvim-treesitter/nvim-treesitter",
     opts = {
       ensure_installed = {
-        -- defaults 
+        -- defaults
         "vim",
         "lua",
         "vimdoc",
@@ -44,17 +30,17 @@ return {
         "comment",
         "diff",
 
-        -- web dev 
+        -- web dev
         "html",
         "css",
         "javascript",
         "typescript",
         "tsx",
 
-       -- low level
+        -- low level
         "c",
-        "zig"
+        "zig",
       },
     },
-  }
+  },
 }
