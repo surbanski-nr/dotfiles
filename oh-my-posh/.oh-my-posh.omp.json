@@ -22,7 +22,7 @@
         {
           "foreground": "#ff94df",
           "properties": {
-            "branch_icon": " <#ff94df><b>\ue0a0 </b></>",
+            "branch_icon": "<#ff94df><b>\ue0a0 </b></>",
             "branch_max_length": 25,
             "fetch_stash_count": true,
             "fetch_status": true,
