@@ -47,6 +47,7 @@ brew install xclip
 brew install zoxide
 #brew install exa -- no longer maintained
 
+brew install krew
 brew install tree
 brew install mc
 brew install kubectx
