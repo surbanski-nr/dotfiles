@@ -129,7 +129,7 @@ export GHREPOS="$HOME/github.com/$GITUSER"
 export LAB="$GHREPOS/lab"
 export NOTES="$GHREPOS/notes-md"
 export DOTFILES="$GHREPOS/dotfiles"
-export WORK="$GHREPOS/work"
+export WORK="$HOME/work"
 
 export GIT_PROMPT_THEME=Single_line_Ubuntu
 
