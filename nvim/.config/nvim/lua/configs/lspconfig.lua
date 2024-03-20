@@ -33,7 +33,7 @@ lspconfig["yamlls"].setup {
   settings = {
     yaml = {
       schemas = {
-        -- kubernetes = "*.yaml",
+        kubernetes = "*.yaml",
         -- ["https://raw.githubusercontent.com/instrumenta/kubernetes-json-schema/master/v1.18.0-standalone-strict/all.json"] = "/*.k8s.yaml",
         ["http://json.schemastore.org/github-workflow"] = ".github/workflows/*",
         ["http://json.schemastore.org/github-action"] = ".github/action.{yml,yaml}",
