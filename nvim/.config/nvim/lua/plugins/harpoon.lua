@@ -5,75 +5,93 @@ return {
     event = "VeryLazy",
     opts = {},
     keys = {
-      { "<Leader>ua", "ga", desc = "Show character under cursor" },
       {
         "<Leader>a",
         function()
           require("harpoon"):list():append()
         end,
-        desc = "Add location",
+        desc = "Add location - Harpoon",
       },
       {
         "<C-n>",
         function()
           require("harpoon"):list():next()
         end,
-        desc = "Next location",
+        desc = "Next location - Harpoon",
       },
       {
         "<C-p>",
         function()
           require("harpoon"):list():prev()
         end,
-        desc = "Previous location",
+        desc = "Previous location - Harpoon",
       },
       {
         "<Leader>mr",
         function()
           require("harpoon"):list():remove()
         end,
-        desc = "Remove location",
+        desc = "Remove location - Harpoon",
       },
       {
         "<Leader>1",
         function()
           require("harpoon"):list():select(1)
         end,
-        desc = "Harpoon select 1",
+        desc = "Harpoon select 1 - Harpoon",
       },
       {
         "<Leader>2",
         function()
           require("harpoon"):list():select(2)
         end,
-        desc = "Harpoon select 2",
+        desc = "Harpoon select 2 - Harpoon",
       },
       {
         "<Leader>3",
         function()
           require("harpoon"):list():select(3)
         end,
-        desc = "Harpoon select 3",
+        desc = "Harpoon select 3 - Harpoon",
       },
       {
         "<Leader>4",
         function()
           require("harpoon"):list():select(4)
         end,
-        desc = "Harpoon select 4",
+        desc = "Harpoon select 4 - Harpoon",
       },
 
       {
         "<Leader>lh",
         function()
           local harpoon = require "harpoon"
-          if not require("lazyvim.util").has "telescope.nvim" then
-            harpoon.ui:toggle_quick_menu(harpoon:list())
-            return
+
+          -- REQUIRED
+          harpoon:setup()
+          -- REQUIRED
+
+          local conf = require("telescope.config").values
+          local function toggle_telescope(harpoon_files)
+            local file_paths = {}
+            for _, item in ipairs(harpoon_files.items) do
+              table.insert(file_paths, item.value)
+            end
+
+            require("telescope.pickers")
+              .new({}, {
+                prompt_title = "Harpoon",
+                finder = require("telescope.finders").new_table {
+                  results = file_paths,
+                },
+                previewer = conf.file_previewer {},
+                sorter = conf.generic_sorter {},
+              })
+              :find()
           end
-          return require "telescope._extensions.marks"()
+          return toggle_telescope(harpoon:list())
         end,
-        desc = "List locations",
+        desc = "List locations - Harpoon",
       },
     },
   },
