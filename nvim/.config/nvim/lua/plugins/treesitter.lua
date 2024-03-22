@@ -14,6 +14,7 @@ return {
         "dockerfile",
         "helm",
         "terraform",
+        "hcl",
         "bicep",
         "groovy",
         "go",
