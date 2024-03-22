@@ -54,7 +54,8 @@ brew install kubectx
 brew install coreutils
 brew install awscli
 brew install azure-cli
-brew install terraform
+brew tap hashicorp/tap
+brew install hashicorp/tap/terraform
 brew install terragrunt
 brew install helm
 brew install k9s
