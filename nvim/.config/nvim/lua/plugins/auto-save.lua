@@ -4,6 +4,7 @@ return {
     cmd = "ASToggle", -- optional for lazy loading on command
     event = { "InsertLeave", "TextChanged" }, -- optional for lazy loading on trigger events
     opts = {
+      enabled = false,
       debounce_delay = 3000,
     },
   },
