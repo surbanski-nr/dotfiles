@@ -17,6 +17,9 @@ map("n", "gl", "g$", { desc = "Jump to last screen character" })
 
 map("n", "<leader>as", "<CMD>ASToggle<CR>", { desc = "Auto-save toggle" })
 
+map("n", "<M-c>", "<CMD>CopilotChatToggle<CR>", { desc = "Copilot chat toggle" })
+
+map("n", "<leader>gh", "<CMD>Telescope git_commits<CR>", { desc = "Telescope Git History" })
 -- map("n", "<leader>uf", function()
 --   LazyVim.format.toggle()
 -- end, { desc = "Toggle auto format (global)" })

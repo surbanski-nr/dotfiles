@@ -1,4 +1,5 @@
 return {
+  -- :Copilot auth
   {
     "zbirenbaum/copilot.lua",
 
@@ -9,12 +10,12 @@ return {
       require("copilot").setup {
         suggestion = { enabled = false },
         panel = { enabled = false },
-        filetypes = {
-          yaml = true,
-          helm = true,
-          hcl = true,
-          lua = true,
-        },
+        -- filetypes = {
+        --   yaml = true,
+        --   helm = true,
+        --   hcl = true,
+        --   lua = true,
+        -- },
       }
     end,
   },
@@ -24,7 +25,10 @@ return {
       require("copilot_cmp").setup()
     end,
   },
-  { "AndreM222/copilot-lualine" },
+  {
+    "AndreM222/copilot-lualine",
+    event = "VeryLazy",
+  },
   {
     "CopilotC-Nvim/CopilotChat.nvim",
     branch = "canary",
@@ -32,16 +36,14 @@ return {
       { "zbirenbaum/copilot.lua" }, -- or github/copilot.vim
       { "nvim-lua/plenary.nvim" }, -- for curl, log wrapper
     },
+    event = "VeryLazy",
     opts = {
-      debug = true, -- Enable debugging
-      -- See Configuration section for rest
+      debug = false, -- Enable debugging
     },
     config = function()
       require("CopilotChat").setup {
         debug = true, -- Enable debugging
-        -- See Configuration section for rest
       }
     end,
-    -- See Commands section for default commands if you want to lazy load on them
   },
 }
