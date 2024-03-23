@@ -1,6 +1,8 @@
 return {
   {
     "kevinhwang91/nvim-ufo",
+    event = "VeryLazy",
+    -- event = "LspAttach",
     dependencies = { "kevinhwang91/promise-async" },
     opts = {
       filetype_exclude = { "help", "alpha", "dashboard", "neo-tree", "Trouble", "lazy", "mason" },
@@ -21,7 +23,9 @@ return {
       vim.o.foldlevel = 99 -- Using ufo provider need a large value, feel free to decrease the value
       vim.o.foldlevelstart = 99
       vim.o.foldenable = true
-      require("ufo").setup(opts)
+      -- vim.o.fillchars = [[eob: ,fold: ,foldopen:,foldsep: ,foldclose:]]
+
+      require("ufo").setup()
     end,
   },
 }
