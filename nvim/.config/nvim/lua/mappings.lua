@@ -11,11 +11,10 @@ map("n", "<leader>qq", "<CMD>qa!<CR>", { desc = "󰗼 Exit" })
 
 map("n", "<leader>ll", "<CMD>Lazy<CR>", { desc = "Lazy" })
 
-map("n", "<leader>fp", "<CMD>Telescope persisted<CR>", { desc = "Telescope Persisted" })
 map("n", "<leader>fg", "<CMD>Telescope git_commits<CR>", { desc = "Telescope Git History" })
 
 map("n", "gh", "g^", { desc = "Jump to first screen character" })
-map("n", "gl", "g$", { desc = "Jump to last screen character" })
+map("n", "gt", "g$", { desc = "Jump to last screen character" })
 
 map("n", "<leader>as", "<CMD>ASToggle<CR>", { desc = "Auto-save toggle" })
 
