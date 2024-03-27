@@ -7,10 +7,12 @@ local map = vim.keymap.set
 -- map("n", ";", ":", { desc = "CMD enter command mode" })
 map("i", "jk", "<ESC>")
 
-map("n", "<leader>q", "<CMD>q<CR>", { desc = "󰗼 Close" })
 map("n", "<leader>qq", "<CMD>qa!<CR>", { desc = "󰗼 Exit" })
 
 map("n", "<leader>ll", "<CMD>Lazy<CR>", { desc = "Lazy" })
+
+map("n", "<leader>fp", "<CMD>Telescope persisted<CR>", { desc = "Telescope Persisted" })
+map("n", "<leader>fg", "<CMD>Telescope git_commits<CR>", { desc = "Telescope Git History" })
 
 map("n", "gh", "g^", { desc = "Jump to first screen character" })
 map("n", "gl", "g$", { desc = "Jump to last screen character" })
@@ -19,7 +21,6 @@ map("n", "<leader>as", "<CMD>ASToggle<CR>", { desc = "Auto-save toggle" })
 
 map("n", "<M-c>", "<CMD>CopilotChatToggle<CR>", { desc = "Copilot chat toggle" })
 
-map("n", "<leader>gh", "<CMD>Telescope git_commits<CR>", { desc = "Telescope Git History" })
 -- map("n", "<leader>uf", function()
 --   LazyVim.format.toggle()
 -- end, { desc = "Toggle auto format (global)" })
