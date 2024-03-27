@@ -3,9 +3,9 @@ return {
     "olimorris/persisted.nvim",
     keys = {
       {
-        "<leader>fp",
+        "<leader>fs",
         "<cmd>Telescope persisted<cr>",
-        desc = "Telescope persisted",
+        desc = "Telescope Per[s]isted",
       },
     },
     lazy = false, -- make sure the plugin is always loaded at startup
@@ -13,7 +13,7 @@ return {
     event = "VimEnter",
     opts = {
       autosave = true, -- automatically save session files when exiting Neovim
-      autoload = true, -- automatically load the session for the cwd on Neovim startup
+      autoload = false, -- automatically load the session for the cwd on Neovim startup
       on_autoload_no_session = function()
         vim.notify "No existing session to load."
       end,

@@ -10,60 +10,94 @@ return {
         function()
           require("harpoon"):list():append()
         end,
-        desc = "Add location - Harpoon",
+        desc = "Harpoon Add location",
       },
       {
         "<C-n>",
         function()
           require("harpoon"):list():next()
         end,
-        desc = "Next location - Harpoon",
+        desc = "Harpoon Next location",
       },
       {
         "<C-p>",
         function()
           require("harpoon"):list():prev()
         end,
-        desc = "Previous location - Harpoon",
+        desc = "Harpoon Previous location",
       },
       {
         "<Leader>mr",
         function()
           require("harpoon"):list():remove()
         end,
-        desc = "Remove location - Harpoon",
+        desc = "Harpoon Remove location",
       },
       {
         "<Leader>1",
         function()
           require("harpoon"):list():select(1)
         end,
-        desc = "Harpoon select 1 - Harpoon",
+        desc = "Harpoon select 1",
       },
       {
         "<Leader>2",
         function()
           require("harpoon"):list():select(2)
         end,
-        desc = "Harpoon select 2 - Harpoon",
+        desc = "Harpoon select 2",
       },
       {
         "<Leader>3",
         function()
           require("harpoon"):list():select(3)
         end,
-        desc = "Harpoon select 3 - Harpoon",
+        desc = "Harpoon select 3",
       },
       {
         "<Leader>4",
         function()
           require("harpoon"):list():select(4)
         end,
-        desc = "Harpoon select 4 - Harpoon",
+        desc = "Harpoon select 4",
       },
-
       {
-        "<Leader>lh",
+        "<Leader>5",
+        function()
+          require("harpoon"):list():select(5)
+        end,
+        desc = "Harpoon select 5",
+      },
+      {
+        "<Leader>6",
+        function()
+          require("harpoon"):list():select(6)
+        end,
+        desc = "Harpoon select 6",
+      },
+      {
+        "<Leader>7",
+        function()
+          require("harpoon"):list():select(7)
+        end,
+        desc = "Harpoon select 7",
+      },
+      {
+        "<Leader>8",
+        function()
+          require("harpoon"):list():select(8)
+        end,
+        desc = "Harpoon select 8",
+      },
+      {
+        "<Leader>9",
+        function()
+          require("harpoon"):list():select(9)
+        end,
+        desc = "Harpoon select 9",
+      },
+      {
+        "<Leader>fm",
         function()
           local harpoon = require "harpoon"
 
@@ -91,7 +125,7 @@ return {
           end
           return toggle_telescope(harpoon:list())
         end,
-        desc = "List locations - Harpoon",
+        desc = "Telescope Harpoon",
       },
     },
   },

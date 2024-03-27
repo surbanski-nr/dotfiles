@@ -23,6 +23,7 @@ return {
         "json-lsp",
         "jsonlint",
         "markdownlint",
+        "marksman",
         -- "nginx-language-server",
         "pylint",
         "pyright",

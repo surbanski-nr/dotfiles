@@ -20,16 +20,6 @@ return {
     end,
   },
   {
-    "zbirenbaum/copilot-cmp",
-    config = function()
-      require("copilot_cmp").setup()
-    end,
-  },
-  {
-    "AndreM222/copilot-lualine",
-    event = "VeryLazy",
-  },
-  {
     "CopilotC-Nvim/CopilotChat.nvim",
     branch = "canary",
     dependencies = {
