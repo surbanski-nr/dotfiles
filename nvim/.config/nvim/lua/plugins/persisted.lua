@@ -1,6 +1,13 @@
 return {
   {
     "olimorris/persisted.nvim",
+    keys = {
+      {
+        "<leader>fp",
+        "<cmd>Telescope persisted<cr>",
+        desc = "Telescope persisted",
+      },
+    },
     lazy = false, -- make sure the plugin is always loaded at startup
     config = true,
     event = "VimEnter",
