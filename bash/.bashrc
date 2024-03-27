@@ -17,7 +17,6 @@ shopt -s histappend
 
 # for setting history length see HISTSIZE and HISTFILESIZE in bash(1)
 HISTSIZE=25000
-SAVEHIST=25000
 HISTFILESIZE=2000
 HISTFILE=~/.histfile
 HISTCONTROL=ignorespace
@@ -148,6 +147,24 @@ export FZF_DEFAULT_COMMAND='fd --type f --strip-cwd-prefix --hidden --follow --e
 
 eval "$(zoxide init bash)"
 
+source <(kubectl completion bash)
+
+eval "$(oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json")"
+
 # export VISUAL=nvim
 # export EDITOR=nvim
+
+if type brew &>/dev/null
+then
+  HOMEBREW_PREFIX="$(brew --prefix)"
+  if [[ -r "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh" ]]
+  then
+    source "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh"
+  else
+    for COMPLETION in "${HOMEBREW_PREFIX}/etc/bash_completion.d/"*
+    do
+      [[ -r "${COMPLETION}" ]] && source "${COMPLETION}"
+    done
+  fi
+fi
 

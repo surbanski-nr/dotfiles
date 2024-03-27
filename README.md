@@ -11,28 +11,40 @@ mv ~/.bashrc ~/bashrc_backup
 mv ~/.bash_profile ~/bash_profile_backup
 mv ~/.bash_aliases ~/bash_aliases_backup
 
-ssh-keygen -t rsa -b 4096 -C "122265380+surbanski-nr@users.noreply.github.com"
-cat .ssh/github.pub
+ssh-keygen -t rsa -b 4096 -C "122265380+surbanski-nr@users.noreply.github.com" -f ~/.ssh/github
+cat ~/.ssh/github.pub
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/github
 
+## Homebrew
+sudo apt install build-essential procps curl file git
+
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+/home/linuxbrew/.linuxbrew/bin/brew install stow
+
+-- optionally if you forgot about brew dependencies: brew reinstall gcc
+
+## Stow
 GH_REPOS=$HOME/github.com/surbanski
 mkdir -p $GH_REPOS
 git clone git@github.com:surbanski-nr/notes-md.git $GH_REPOS/notes-md
 git clone git@github.com:surbanski-nr/dotfiles.git $GH_REPOS/dotfiles
 
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
-/home/linuxbrew/.linuxbrew/bin/brew install stow
-
 cd $GH_REPOS/dotfiles
-stow -vvv -t ~ git
-stow -vvv -t ~ tmux
-stow -vvv -t ~ bash
-stow -vvv -t ~ oh-my-posh
-mkdir -p ~/.config/k9s && stow -vvv -t ~ k9s
-mkdir -p ~/.config/nvim && stow -vvv -t ~ nvim
+/home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ git
+/home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ tmux
+/home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ bash
+/home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ oh-my-posh
+mkdir -p ~/.config/k9s && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ k9s
+mkdir -p ~/.config/nvim && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ nvim
 
+-- On Ubuntu Desktop
+mkdir -p ~/.config/kitty && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ kitty
+
+## Tmux
+git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
+
+## Tools
 brew update && brew upgrade
 brew install jandedobbeleer/oh-my-posh/oh-my-posh
 brew install tmux
@@ -47,6 +59,10 @@ brew install xclip
 brew install zoxide
 #brew install exa -- no longer maintained
 
+brew install gcc
+brew install make
+brew install xsel
+brew install vim
 brew install krew
 brew install tree
 brew install mc
@@ -75,7 +91,7 @@ $(brew --prefix)/opt/fzf/install
 
 # for podman
 sudo apt install uidmap
-# for nvim
+# for nvim - is it needed?
 sudo apt install g++
 
 
