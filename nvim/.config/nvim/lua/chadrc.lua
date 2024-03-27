@@ -5,7 +5,7 @@ M.ui = {
   theme = "github_dark",
 
   statusline = {
-    order = { "mode", "file", "git", "%=", "lsp_msg", "%=", "diagnostics", "lsp", "cwd", "cursor" },
+    -- order = { "copilot", "mode", "file", "git", "%=", "lsp_msg", "%=", "diagnostics", "lsp", "cwd", "cursor" },
     --   theme = "minimal",
     --   separator_style = "round",
     --   overriden_modules = nil,

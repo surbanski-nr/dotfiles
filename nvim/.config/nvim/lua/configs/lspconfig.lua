@@ -12,6 +12,7 @@ local servers = {
   "dockerls",
   "terraformls",
   "helm_ls",
+  "marksman",
   "jsonls",
   "tsserver",
   "nginx_language_server",
