@@ -6,14 +6,14 @@ return {
       {
         "gpd",
         function()
-          require("goto-preview").goto_preview_definition({})
+          require("goto-preview").goto_preview_definition {}
         end,
         { noremap = true },
       },
       {
         "gpi",
         function()
-          require("goto-preview").goto_preview_implementation({})
+          require("goto-preview").goto_preview_implementation {}
         end,
         { noremap = true },
       },
@@ -27,7 +27,7 @@ return {
       {
         "gpr",
         function()
-          require("goto-preview").goto_preview_references({})
+          require("goto-preview").goto_preview_references {}
         end,
         { noremap = true },
       },
