@@ -6,6 +6,7 @@ alias zz='z -'
 alias kc='kubectx'
 alias kn='kubens'
 alias k='kubectl'
+alias kgp='kubectl get pods | grep'
 complete -F __start_kubectl k
 
 alias tp='terraform plan'
@@ -21,6 +22,8 @@ alias last='find . -type f -not -path "*/\.*" -exec ls -lrt {} +'
 alias t='tmux'
 alias e='exit'
 
+alias mkdir='mkdir -p'
+
 alias ..="cd .."
 alias cdnotes='cd $NOTES'
 alias cdlab='cd $LAB'
@@ -28,5 +31,5 @@ alias cddot='cd $DOTFILES'
 alias cdrepos='cd $GHREPOS'
 alias cdwork='cd $WORK'
 alias c="clear"
-alias in="cd \$NOTES/0-inbox/"
+alias in="cd \$NOTES/00-inbox/"
 
