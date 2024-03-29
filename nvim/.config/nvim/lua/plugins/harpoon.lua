@@ -27,7 +27,7 @@ return {
         desc = "Harpoon Previous location",
       },
       {
-        "<Leader>mr",
+        "<Leader>r",
         function()
           require("harpoon"):list():remove()
         end,
@@ -97,7 +97,7 @@ return {
         desc = "Harpoon select 9",
       },
       {
-        "<Leader>fm",
+        "<Leader>fr",
         function()
           local harpoon = require "harpoon"
 
@@ -125,7 +125,7 @@ return {
           end
           return toggle_telescope(harpoon:list())
         end,
-        desc = "Telescope Harpoon",
+        desc = "Telescope Ha[r]poon",
       },
     },
   },

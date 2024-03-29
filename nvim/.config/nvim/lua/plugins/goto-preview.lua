@@ -31,12 +31,19 @@ return {
         end,
         { noremap = true },
       },
+      {
+        "gpt",
+        function()
+          require("goto-preview").goto_preview_type_definition {}
+        end,
+        { noremap = true },
+      },
     },
     opts = {
       width = 78,
       height = 15,
       default_mappings = false,
-      opacity = 10,
+      opacity = 0,
       post_open_hook = function(_, win)
         vim.api.nvim_win_set_config(win, {
           border = { "╭", "─", "╮", "│", "╯", "─", "╰", "│" },

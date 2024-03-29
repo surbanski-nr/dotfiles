@@ -61,7 +61,6 @@ brew install zoxide
 
 brew install gcc
 brew install make
-brew install xsel
 brew install vim
 brew install krew
 brew install tree
