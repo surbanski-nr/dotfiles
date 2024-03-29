@@ -16,6 +16,7 @@ map("n", "<leader>qq", "<CMD>qa!<CR>", { desc = "󰗼 Exit" })
 map("n", "<leader>ll", "<CMD>Lazy<CR>", { desc = "Lazy" })
 
 map("n", "<leader>fg", "<CMD>Telescope git_commits<CR>", { desc = "Telescope Git History" })
+map("n", "<leader>fl", "<CMD>Telescope yaml_schema<CR>", { desc = "Telescope Yaml Schema" })
 
 map("n", "gh", "g^", { desc = "Jump to first screen character" })
 map("n", "gt", "g$", { desc = "Jump to last screen character" })
