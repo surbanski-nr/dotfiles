@@ -68,3 +68,9 @@ map("n", "<Leader>uu", "<cmd>nohlsearch<CR>", { desc = "Hide Search Highlight" }
 map("n", "<Leader>ui", vim.show_pos, { desc = "Show Treesitter Node" })
 
 map("n", "<Leader>z", "<cmd>%bd|e#<CR>", { desc = "Close all buffers except current one" })
+
+map("n", "<C-d>", "<C-d>zz")
+map("n", "<C-u>", "<C-u>zz")
+
+map("n", "n", "nzzzv")
+map("n", "N", "Nzzzv")
