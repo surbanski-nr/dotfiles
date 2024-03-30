@@ -90,10 +90,8 @@ $(brew --prefix)/opt/fzf/install
 
 # for podman
 sudo apt install uidmap
-# for nvim - is it needed?
-sudo apt install g++
 
-
+# for tools where I use multiple versions of
 asdf plugin add kubectl https://github.com/asdf-community/asdf-kubectl.git
 asdf install kubectl 1.27.11
 asdf global kubectl 1.27.11

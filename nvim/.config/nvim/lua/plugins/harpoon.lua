@@ -13,14 +13,14 @@ return {
         desc = "Harpoon Add location",
       },
       {
-        "<C-n>",
+        "<Leader>mn",
         function()
           require("harpoon"):list():next()
         end,
         desc = "Harpoon Next location",
       },
       {
-        "<C-p>",
+        "<Leader>mp",
         function()
           require("harpoon"):list():prev()
         end,
