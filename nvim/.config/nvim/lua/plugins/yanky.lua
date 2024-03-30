@@ -6,7 +6,7 @@ return {
       function()
         require("telescope").extensions.yank_history.yank_history {}
       end,
-      desc = "Open Yank History",
+      desc = "Telescope [Y]ank History",
     },
     { "y", "<Plug>(YankyYank)", mode = { "n" }, desc = "Yank text" },
     { "p", "<Plug>(YankyPutAfter)", mode = { "n" }, desc = "Put yanked text after cursor" },

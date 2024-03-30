@@ -8,14 +8,16 @@ case $- in
       *) return;;
 esac
 
+PROMPT_COMMAND='history -a; history -r'
+
 # for setting history length
-export HISTSIZE=-1
-export HISTFILESIZE=-1
-export HISTFILE=~/.histfile
+HISTSIZE=-1
+HISTFILESIZE=-1
+HISTFILE=~/.histfile
 
 # don't put duplicate lines or lines starting with space in the history.
 # See bash(1) for more options
-export HISTCONTROL=ignoreboth:erasedups
+HISTCONTROL=ignoreboth:erasedups
 
 # append to the history file, don't overwrite it
 shopt -s histappend

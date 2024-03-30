@@ -27,7 +27,7 @@ return {
         desc = "Harpoon Previous location",
       },
       {
-        "<Leader>r",
+        "<Leader>mr",
         function()
           require("harpoon"):list():remove()
         end,
