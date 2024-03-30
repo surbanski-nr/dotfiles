@@ -2,7 +2,7 @@ return {
   {
     "folke/todo-comments.nvim",
     dependencies = { "nvim-lua/plenary.nvim" },
-    event = "VeryLazy",
+    event = "VimEnter",
     opts = {},
     keys = {
       {
@@ -19,7 +19,8 @@ return {
         end,
         desc = "Previous todo comment",
       },
-      { "<leader>ft", "<cmd>TodoTelescope<cr>", desc = "Telescope Todo" },
+      { "<leader>ft", "<cmd>TodoTelescope<cr>", desc = "Telescope [T]odo" },
+      { "<leader>tq", "<cmd>TodoQuickFix<cr>", desc = "[Q]uickFix Todo" },
     },
   },
 }
