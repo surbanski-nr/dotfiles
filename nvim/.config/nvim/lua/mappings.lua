@@ -26,8 +26,6 @@ map("n", "<leader>aa", function()
   require("cmp").setup.buffer { enabled = not vim.b.x }
 end, { desc = "Toggle [A]uto-completion" })
 
-map("n", "<leader>as", "<CMD>ASToggle<CR>", { desc = "Toggle Auto-[s]ave" })
-
 map("n", "<leader>aq", function()
   local qf_exists = false
   for _, win in pairs(vim.fn.getwininfo()) do
@@ -43,8 +41,6 @@ map("n", "<leader>aq", function()
     vim.cmd "copen"
   end
 end, { desc = "Toggle [Q]uickfix" })
-
-map("n", "<leader>ac", "<CMD>CopilotChatToggle<CR>", { desc = "Toggle [C]opilot Chat" })
 
 -- map("n", "<leader>uf", function()
 --   LazyVim.format.toggle()
