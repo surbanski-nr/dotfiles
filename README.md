@@ -37,6 +37,7 @@ cd $GH_REPOS/dotfiles
 /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ oh-my-posh
 mkdir -p ~/.config/k9s && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ k9s
 mkdir -p ~/.config/nvim && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ nvim
+mkdir -p ~/.gnupg && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ gnupg
 
 -- On Ubuntu Desktop
 mkdir -p ~/.config/kitty && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ kitty
@@ -55,13 +56,17 @@ brew install fzf
 brew install ripgrep
 brew install bat
 brew install fd
-brew install xclip
+brew install xsel
 brew install zoxide
 #brew install exa -- no longer maintained
 
 brew install gcc
 brew install make
 brew install vim
+brew install htop
+brew install pass
+brew install gnupg
+brew install pwgen
 brew install krew
 brew install tree
 brew install mc
@@ -90,6 +95,9 @@ $(brew --prefix)/opt/fzf/install
 
 # for podman
 sudo apt install uidmap
+
+# for pass
+sudo apt install wl-clipboard
 
 # for tools where I use multiple versions of
 asdf plugin add kubectl https://github.com/asdf-community/asdf-kubectl.git
