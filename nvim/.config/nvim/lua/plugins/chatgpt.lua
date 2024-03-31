@@ -23,9 +23,9 @@ return {
     keys = {
       { "<leader>ag", "<CMD>ChatGPT<CR>", desc = "Toggle [G]PT Chat" },
       { "<leader>sct", "<CMD>ChatGPTRun add_tests<CR>", desc = "ChatGPT Add [T]ests" },
-      { "<leader>sco", "<CMD>ChatGPT optimize_code<CR>", desc = "ChatGPT [O]ptimize Code" },
-      { "<leader>scs", "<CMD>ChatGPT summarize<CR>", desc = "chatGPT [S]ummarize" },
-      { "<leader>scf", "<CMD>ChatGPT fix_bugs<CR>", desc = "ChatGPT [F]ix Bugs" },
+      { "<leader>sco", "<CMD>ChatGPTRun optimize_code<CR>", desc = "ChatGPT [O]ptimize Code" },
+      { "<leader>scs", "<CMD>ChatGPTRun summarize<CR>", desc = "chatGPT [S]ummarize" },
+      { "<leader>scf", "<CMD>ChatGPTRun fix_bugs<CR>", desc = "ChatGPT [F]ix Bugs" },
     },
   },
 }
