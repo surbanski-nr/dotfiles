@@ -4,7 +4,6 @@ return {
     "zbirenbaum/copilot.lua",
 
     cmd = "Copilot",
-    -- build = ":Copilot auth",
     event = "InsertEnter",
     config = function()
       require("copilot").setup {
@@ -28,11 +27,14 @@ return {
     },
     event = "VeryLazy",
     opts = {
-      debug = false, -- Enable debugging
+      debug = false,
+    },
+    keys = {
+      { "<leader>ac", "<CMD>CopilotChatToggle<CR>", desc = "Toggle [C]opilot Chat" },
     },
     config = function()
       require("CopilotChat").setup {
-        debug = true, -- Enable debugging
+        debug = true,
       }
     end,
   },
