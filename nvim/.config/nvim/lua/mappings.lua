@@ -21,6 +21,11 @@ map("n", "<leader>fl", "<CMD>Telescope yaml_schema<CR>", { desc = "Telescope Yam
 map("n", "gh", "g^", { desc = "Jump to first screen character" })
 map("n", "gt", "g$", { desc = "Jump to last screen character" })
 
+map("n", "<leader>aa", function()
+  vim.b.x = not vim.b.x
+  require("cmp").setup.buffer { enabled = not vim.b.x }
+end, { desc = "Toggle [A]uto-completion" })
+
 map("n", "<leader>as", "<CMD>ASToggle<CR>", { desc = "Toggle Auto-[s]ave" })
 
 map("n", "<leader>aq", function()
