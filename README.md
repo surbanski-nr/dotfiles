@@ -56,7 +56,7 @@ brew install fzf
 brew install ripgrep
 brew install bat
 brew install fd
-brew install xsel
+brew install xclip
 brew install zoxide
 #brew install exa -- no longer maintained
 
