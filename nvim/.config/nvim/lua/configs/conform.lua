@@ -16,6 +16,9 @@ local options = {
     graphql = { "prettier" },
     handlebars = { "prettier" },
     xml = { "xmlformatter" },
+    go = { "goimports", "gofumpt" },
+    sh = { "shfmt" },
+    terraform = { "terraform_fmt" },
   },
 
   format_on_save = {
