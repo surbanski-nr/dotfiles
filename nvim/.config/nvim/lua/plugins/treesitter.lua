@@ -22,6 +22,7 @@ return {
 
         -- productivity
         "markdown",
+        "markdown_inline",
         "xml",
         "yaml",
         "regex",
