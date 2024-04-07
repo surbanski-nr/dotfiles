@@ -4,6 +4,12 @@ return {
     "zbirenbaum/copilot.lua",
     cmd = "Copilot",
     event = "InsertEnter",
+    keys = {
+      { "<leader>sct", "<CMD>CopilotChatTests<CR>", desc = "Copilot [T]ests" },
+      { "<leader>sco", "<CMD>CopilotChatOptimize<CR>", desc = "Copilot [O]ptimize" },
+      { "<leader>scf", "<CMD>CopilotChatFix<CR>", desc = "Copilot [F]ix Bugs" },
+      { "<leader>scd", "<CMD>CopilotChatFixDiagnostic<CR>", desc = "Copilot fix [D]iagnostic" },
+    },
     config = function()
       require("copilot").setup {
         suggestion = { enabled = false },

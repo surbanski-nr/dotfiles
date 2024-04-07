@@ -27,12 +27,12 @@ return {
     },
     keys = {
       { "<leader>ag", mode = { "n", "v" }, "<CMD>ChatGPT<CR>", desc = "Toggle [G]PT Chat" },
-      { "<leader>sct", mode = { "n", "v" }, "<CMD>ChatGPTRun add_tests<CR>", desc = "ChatGPT Add [T]ests" },
-      { "<leader>sco", mode = { "n", "v" }, "<CMD>ChatGPTRun optimize_code<CR>", desc = "ChatGPT [O]ptimize Code" },
-      { "<leader>scs", mode = { "n", "v" }, "<CMD>ChatGPTRun summarize<CR>", desc = "ChatGPT [S]ummarize" },
-      { "<leader>scf", mode = { "n", "v" }, "<CMD>ChatGPTRun fix_bugs<CR>", desc = "ChatGPT [F]ix Bugs" },
-      { "<leader>scd", mode = { "n", "v" }, "<CMD>ChatGPTRun docstring<CR>", desc = "ChatGPT [D]ocstring" },
-      { "<leader>sce", mode = { "n", "v" }, "<CMD>ChatGPTEditWithInstruction<CR>", desc = "ChatGPT [E]dit" },
+      { "<leader>sgt", mode = { "n", "v" }, "<CMD>ChatGPTRun add_tests<CR>", desc = "ChatGPT Add [T]ests" },
+      { "<leader>sgo", mode = { "n", "v" }, "<CMD>ChatGPTRun optimize_code<CR>", desc = "ChatGPT [O]ptimize Code" },
+      { "<leader>sgs", mode = { "n", "v" }, "<CMD>ChatGPTRun summarize<CR>", desc = "ChatGPT [S]ummarize" },
+      { "<leader>sgf", mode = { "n", "v" }, "<CMD>ChatGPTRun fix_bugs<CR>", desc = "ChatGPT [F]ix Bugs" },
+      { "<leader>sgd", mode = { "n", "v" }, "<CMD>ChatGPTRun docstring<CR>", desc = "ChatGPT [D]ocstring" },
+      { "<leader>sge", mode = { "n", "v" }, "<CMD>ChatGPTEditWithInstruction<CR>", desc = "ChatGPT [E]dit" },
     },
   },
 }
