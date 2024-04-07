@@ -30,9 +30,6 @@ for _, lsp in ipairs(servers) do
   }
 end
 
-local cfg = require("yaml-companion").setup {}
-require("lspconfig")["yamlls"].setup(cfg)
-
 -- lspconfig["yamlls"].setup {
 --   capabilities = capabilities,
 --   on_attach = on_attach,

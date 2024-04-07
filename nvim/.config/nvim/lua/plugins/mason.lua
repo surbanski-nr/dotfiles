@@ -56,7 +56,6 @@ return {
         "xmlformatter",
         "vale",
         "yaml-language-server",
-        "yamlfix",
         "yamllint",
         "yq",
       },
