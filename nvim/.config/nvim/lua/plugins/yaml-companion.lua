@@ -1,12 +1,15 @@
 return {
   {
-    "someone-stole-my-name/yaml-companion.nvim",
+    -- "someone-stole-my-name/yaml-companion.nvim",
+    "msvechla/yaml-companion.nvim", -- fork that adds CRD support
     requires = {
       { "neovim/nvim-lspconfig" },
       { "nvim-lua/plenary.nvim" },
       { "nvim-telescope/telescope.nvim" },
     },
-    config = function()
+    config = function(_, opts)
+      local cfg = require("yaml-companion").setup(opts)
+      require("lspconfig")["yamlls"].setup(cfg)
       require("telescope").load_extension "yaml_schema"
     end,
   },

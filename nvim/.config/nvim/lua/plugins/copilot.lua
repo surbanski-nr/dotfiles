@@ -2,7 +2,6 @@ return {
   -- :Copilot auth
   {
     "zbirenbaum/copilot.lua",
-
     cmd = "Copilot",
     event = "InsertEnter",
     config = function()
@@ -36,6 +35,17 @@ return {
       require("CopilotChat").setup {
         debug = true,
       }
+    end,
+  },
+  {
+    "jonahgoldwastaken/copilot-status.nvim",
+    dependencies = {
+      { "zbirenbaum/copilot.lua" },
+    },
+    lazy = true,
+    event = "BufReadPost",
+    config = function()
+      require("copilot_status").setup {}
     end,
   },
 }
