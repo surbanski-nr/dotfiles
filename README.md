@@ -92,6 +92,7 @@ brew install podman-compose
 
 # post brew installation
 $(brew --prefix)/opt/fzf/install
+git clone git@github.com:surbanski-nr/secrets.git ~/.password-store
 
 # for podman
 sudo apt install uidmap
