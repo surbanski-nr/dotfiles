@@ -89,6 +89,7 @@ brew install gpg
 brew install gawk
 brew install podman
 brew install podman-compose
+brew install libnotify # for pomodoro
 
 # post brew installation
 $(brew --prefix)/opt/fzf/install
