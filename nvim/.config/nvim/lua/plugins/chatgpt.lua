@@ -32,7 +32,8 @@ return {
       { "<leader>sgs", mode = { "n", "v" }, "<CMD>ChatGPTRun summarize<CR>", desc = "ChatGPT [S]ummarize" },
       { "<leader>sgf", mode = { "n", "v" }, "<CMD>ChatGPTRun fix_bugs<CR>", desc = "ChatGPT [F]ix Bugs" },
       { "<leader>sgd", mode = { "n", "v" }, "<CMD>ChatGPTRun docstring<CR>", desc = "ChatGPT [D]ocstring" },
-      { "<leader>sge", mode = { "n", "v" }, "<CMD>ChatGPTEditWithInstruction<CR>", desc = "ChatGPT [E]dit" },
+      { "<leader>sgx", mode = { "n", "v" }, "<CMD>ChatGPTRun explain_code<CR>", desc = "ChatGPT E[X]plain Code" },
+      { "<leader>sge", mode = { "n", "v" }, "<CMD>ChatGPTEditWithInstructions<CR>", desc = "ChatGPT [E]dit" },
     },
   },
 }

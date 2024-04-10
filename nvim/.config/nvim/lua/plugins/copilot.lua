@@ -5,10 +5,12 @@ return {
     cmd = "Copilot",
     event = "InsertEnter",
     keys = {
-      { "<leader>sct", "<CMD>CopilotChatTests<CR>", desc = "Copilot [T]ests" },
-      { "<leader>sco", "<CMD>CopilotChatOptimize<CR>", desc = "Copilot [O]ptimize" },
-      { "<leader>scf", "<CMD>CopilotChatFix<CR>", desc = "Copilot [F]ix Bugs" },
-      { "<leader>scd", "<CMD>CopilotChatFixDiagnostic<CR>", desc = "Copilot fix [D]iagnostic" },
+      { "<leader>sct", mode = { "n", "v" }, "<CMD>CopilotChatTests<CR>", desc = "Copilot [T]ests" },
+      { "<leader>sco", mode = { "n", "v" }, "<CMD>CopilotChatOptimize<CR>", desc = "Copilot [O]ptimize" },
+      { "<leader>scf", mode = { "n", "v" }, "<CMD>CopilotChatFix<CR>", desc = "Copilot [F]ix Bugs" },
+      { "<leader>scg", mode = { "n", "v" }, "<CMD>CopilotChatFixDiagnostic<CR>", desc = "Copilot fix Dia[g]nostic" },
+      { "<leader>scd", mode = { "n", "v" }, "<CMD>CopilotChatDocs<CR>", desc = "Copilot [D]ocs" },
+      { "<leader>scx", mode = { "n", "v" }, "<CMD>CopilotChatExplain<CR>", desc = "Copilot E[x]plain" },
     },
     config = function()
       require("copilot").setup {
