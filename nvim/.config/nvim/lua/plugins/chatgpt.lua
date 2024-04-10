@@ -6,16 +6,17 @@ return {
     event = "VeryLazy",
     config = function()
       require("chatgpt").setup {
-        api_key_cmd = "pass chatgpt/copilot-mvp",
+        api_key_cmd = "pass chatgpt/invhub-shared-oai",
         api_type_cmd = "echo azure",
-        azure_api_base_cmd = "echo https://copilot-mvp.openai.azure.com",
-        azure_api_engine_cmd = "echo GPT4_demo_32",
+        azure_api_base_cmd = "echo https://invhub-shared-oai.openai.azure.com",
+        azure_api_engine_cmd = "echo gpt-4_1106-Preview",
         azure_api_version_cmd = "echo 2023-12-01-preview",
         openai_params = {
-          model = "gpt-4-32k",
+          model = "gpt-4",
+          max_tokens = 4000,
         },
         openai_edit_params = {
-          model = "gpt-4-32k",
+          model = "gpt-4",
         },
       }
     end,
