@@ -6,7 +6,7 @@ return {
     opts = {},
     keys = {
       {
-        "<Leader>a",
+        "<Leader>mh",
         function()
           require("harpoon"):list():append()
         end,
