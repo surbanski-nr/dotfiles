@@ -8,7 +8,7 @@ return {
     "rcarriga/nvim-notify",
   },
   keys = {
-    { "<leader>ts", ":TimerStart 25m Work<CR>", desc = "Timer [S]tart" },
+    { "<leader>ts", ":TimerStart 25m Work<CR>:TimerHide<CR>", desc = "Timer [S]tart" },
     { "<leader>to", ":TimerStop -1<CR>", desc = "Timer [O]ff" },
     { "<leader>tp", ":TimerPause <CR>", desc = "Timer [P]ause" },
     { "<leader>tr", ":TimerResume <CR>", desc = "Timer [R]esume" },
