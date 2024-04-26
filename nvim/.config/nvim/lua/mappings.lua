@@ -26,6 +26,15 @@ map("n", "<leader>aa", function()
   require("cmp").setup.buffer { enabled = not vim.b.x }
 end, { desc = "Toggle [A]uto-completion" })
 
+map("n", "<leader>af", function()
+  vim.b.d = not vim.b.d
+  if not vim.b.d then
+    vim.cmd "windo diffoff"
+  else
+    vim.cmd "windo diffthis"
+  end
+end, { desc = "Toggle Di[F]f" })
+
 map("n", "<leader>aq", function()
   local qf_exists = false
   for _, win in pairs(vim.fn.getwininfo()) do
