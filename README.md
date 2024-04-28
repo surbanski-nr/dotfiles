@@ -81,7 +81,7 @@ brew install helm
 brew install k9s
 brew install docker
 brew install docker-compose
-brew install lazygit
+brew install jesseduffield/lazygit/lazygit
 brew install gh
 brew install gcc
 brew install unzip
