@@ -2,13 +2,18 @@ require "nvchad.mappings"
 
 local nomap = vim.keymap.del
 
-nomap("i", "<C-k>")
-nomap("n", "<C-k>")
+-- nomap("i", "<C-k>")
+-- nomap("n", "<C-k>")
+-- nomap("n", "<leader>fm>")
 
 local map = vim.keymap.set
 
 map("n", ";", ":", { desc = "CMD enter command mode" })
+
 map("i", "jk", "<ESC>")
+
+map("n", "<leader>+", "<C-a>", { desc = "Increment number" }) -- increment
+map("n", "<leader>-", "<C-x>", { desc = "Decrement number" }) -- decrement
 
 map("n", "<leader>qq", "<CMD>qa!<CR>", { desc = "󰗼 Exit" })
 
@@ -49,32 +54,6 @@ map("n", "<leader>aq", function()
     vim.cmd "copen"
   end
 end, { desc = "Toggle [Q]uickfix" })
-
--- map("n", "<leader>uf", function()
---   LazyVim.format.toggle()
--- end, { desc = "Toggle auto format (global)" })
--- map("n", "<leader>uF", function()
---   LazyVim.format.toggle(true)
--- end, { desc = "Toggle auto format (buffer)" })
--- map("n", "<leader>us", function()
---   LazyVim.toggle "spell"
--- end, { desc = "Toggle Spelling" })
--- map("n", "<leader>uw", function()
---   LazyVim.toggle "wrap"
--- end, { desc = "Toggle Word Wrap" })
--- map("n", "<leader>uL", function()
---   LazyVim.toggle "relativenumber"
--- end, { desc = "Toggle Relative Line Numbers" })
--- map("n", "<leader>ul", function()
---   LazyVim.toggle.number()
--- end, { desc = "Toggle Line Numbers" })
--- map("n", "<leader>ud", function()
---   LazyVim.toggle.diagnostics()
--- end, { desc = "Toggle Diagnostics" })
-
-map("n", "<Leader>uo", "<cmd>setlocal nolist!<CR>", { desc = "Toggle Whitespace Symbols" })
-map("n", "<Leader>uu", "<cmd>nohlsearch<CR>", { desc = "Hide Search Highlight" })
-map("n", "<Leader>ui", vim.show_pos, { desc = "Show Treesitter Node" })
 
 map("n", "<Leader>z", "<cmd>%bd|e#<CR>", { desc = "Close all buffers except current one" })
 

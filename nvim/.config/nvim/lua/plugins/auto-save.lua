@@ -8,7 +8,7 @@ return {
     },
     opts = {
       enabled = false,
-      debounce_delay = 3000,
+      debounce_delay = 500,
     },
   },
 }
