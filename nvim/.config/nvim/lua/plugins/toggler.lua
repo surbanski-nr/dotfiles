@@ -9,7 +9,7 @@ return {
     end,
     keys = {
       {
-        "go",
+        "gk",
         mode = { "n", "v" },
         function()
           require("nvim-toggler").toggle()
