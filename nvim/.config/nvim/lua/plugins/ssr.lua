@@ -16,7 +16,7 @@ return {
     },
     keys = {
       {
-        "<leader>sr",
+        "<leader>sx",
         function()
           require("ssr").open()
         end,
