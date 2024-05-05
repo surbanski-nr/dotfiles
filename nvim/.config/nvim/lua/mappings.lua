@@ -3,7 +3,7 @@ require "nvchad.mappings"
 -- map("i", "<C-b>", "<ESC>^i", { desc = "move beginning of line" })
 -- map("i", "<C-e>", "<End>", { desc = "move end of line" })
 -- map("t", "<C-x>", "<C-\\><C-N>", { desc = "terminal escape terminal mode" })
--- n / c / p / h / v
+-- n / p / h / v
 --
 local nomap = vim.keymap.del
 
@@ -19,6 +19,12 @@ nomap("n", "<leader>gt")
 nomap("n", "<leader>pt")
 nomap("n", "<leader>h")
 nomap("n", "<leader>v")
+-- nomap("n", "<leader>ra")
+-- nomap("n", "<leader>D")
+-- nomap("n", "<leader>wa")
+-- nomap("n", "<leader>wl")
+-- nomap("n", "<leader>wr")
+-- nomap("n", "<leader>sh")
 
 local map = vim.keymap.set
 
@@ -32,6 +38,12 @@ map("n", "<leader>-", "<C-x>", { desc = "Decrement number" })
 map("n", "<leader>qq", "<CMD>qa!<CR>", { desc = "󰗼 Exit" })
 
 map("n", "<leader>al", "<CMD>Lazy<CR>", { desc = "Toggle [L]azy" })
+
+map("n", "<leader>sr", function()
+  require "nvchad.lsp.renamer"()
+end, { desc = "NvRenamer" })
+
+map("n", "<leader>ch", vim.lsp.buf.signature_help, { desc = "Show signature help" }, "Show signature help")
 
 map("n", "<leader>fc", "<CMD>Telescope git_commits<CR>", { desc = "Telescope Git [C]ommits" })
 map("n", "<leader>fs", "<CMD>Telescope git_status<CR>", { desc = "Telescope Git [S]tatus" })

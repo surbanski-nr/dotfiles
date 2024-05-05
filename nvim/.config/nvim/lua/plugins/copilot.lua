@@ -5,12 +5,12 @@ return {
     cmd = "Copilot",
     event = "InsertEnter",
     keys = {
-      { "<leader>sct", mode = { "n", "v" }, "<CMD>CopilotChatTests<CR>", desc = "Copilot [T]ests" },
-      { "<leader>sco", mode = { "n", "v" }, "<CMD>CopilotChatOptimize<CR>", desc = "Copilot [O]ptimize" },
-      { "<leader>scf", mode = { "n", "v" }, "<CMD>CopilotChatFix<CR>", desc = "Copilot [F]ix Bugs" },
-      { "<leader>scg", mode = { "n", "v" }, "<CMD>CopilotChatFixDiagnostic<CR>", desc = "Copilot fix Dia[g]nostic" },
-      { "<leader>scd", mode = { "n", "v" }, "<CMD>CopilotChatDocs<CR>", desc = "Copilot [D]ocs" },
-      { "<leader>scx", mode = { "n", "v" }, "<CMD>CopilotChatExplain<CR>", desc = "Copilot E[x]plain" },
+      { "<leader>vt", mode = { "n", "v" }, "<CMD>CopilotChatTests<CR>", desc = "Copilot [T]ests" },
+      { "<leader>vo", mode = { "n", "v" }, "<CMD>CopilotChatOptimize<CR>", desc = "Copilot [O]ptimize" },
+      { "<leader>vf", mode = { "n", "v" }, "<CMD>CopilotChatFix<CR>", desc = "Copilot [F]ix Bugs" },
+      { "<leader>vg", mode = { "n", "v" }, "<CMD>CopilotChatFixDiagnostic<CR>", desc = "Copilot fix Dia[g]nostic" },
+      { "<leader>vd", mode = { "n", "v" }, "<CMD>CopilotChatDocs<CR>", desc = "Copilot [D]ocs" },
+      { "<leader>vx", mode = { "n", "v" }, "<CMD>CopilotChatExplain<CR>", desc = "Copilot E[x]plain" },
     },
     config = function()
       require("copilot").setup {
