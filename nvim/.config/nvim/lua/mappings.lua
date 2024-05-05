@@ -1,10 +1,24 @@
 require "nvchad.mappings"
 
+-- map("i", "<C-b>", "<ESC>^i", { desc = "move beginning of line" })
+-- map("i", "<C-e>", "<End>", { desc = "move end of line" })
+-- map("t", "<C-x>", "<C-\\><C-N>", { desc = "terminal escape terminal mode" })
+-- n / c / p / h / v
+--
 local nomap = vim.keymap.del
 
--- nomap("i", "<C-k>")
--- nomap("n", "<C-k>")
--- nomap("n", "<leader>fm>")
+nomap("n", "<leader>fm")
+nomap("n", "<leader>n")
+nomap("n", "<leader>rn")
+nomap("n", "<leader>ch")
+nomap("n", "<leader>lf")
+nomap("n", "<leader>q")
+nomap("n", "<leader>cm")
+nomap("n", "<leader>ma")
+nomap("n", "<leader>gt")
+nomap("n", "<leader>pt")
+nomap("n", "<leader>h")
+nomap("n", "<leader>v")
 
 local map = vim.keymap.set
 
@@ -12,18 +26,24 @@ map("n", ";", ":", { desc = "CMD enter command mode" })
 
 map("i", "jk", "<ESC>")
 
-map("n", "<leader>+", "<C-a>", { desc = "Increment number" }) -- increment
-map("n", "<leader>-", "<C-x>", { desc = "Decrement number" }) -- decrement
+map("n", "<leader>+", "<C-a>", { desc = "Increment number" })
+map("n", "<leader>-", "<C-x>", { desc = "Decrement number" })
 
 map("n", "<leader>qq", "<CMD>qa!<CR>", { desc = "󰗼 Exit" })
 
 map("n", "<leader>al", "<CMD>Lazy<CR>", { desc = "Toggle [L]azy" })
 
-map("n", "<leader>fg", "<CMD>Telescope git_commits<CR>", { desc = "Telescope [G]it History" })
+map("n", "<leader>fc", "<CMD>Telescope git_commits<CR>", { desc = "Telescope Git [C]ommits" })
+map("n", "<leader>fs", "<CMD>Telescope git_status<CR>", { desc = "Telescope Git [S]tatus" })
+map("n", "<leader>fm", "<CMD>Telescope marks<CR>", { desc = "Telescope [M]arks" })
 map("n", "<leader>fl", "<CMD>Telescope yaml_schema<CR>", { desc = "Telescope Yam[l] Schema" })
 
 map("n", "gh", "g^", { desc = "Jump to first screen character" })
 map("n", "gt", "g$", { desc = "Jump to last screen character" })
+
+map("n", "gm", function()
+  require("conform").format { lsp_fallback = true }
+end, { desc = "Format files" })
 
 map("n", "<leader>aa", function()
   vim.b.x = not vim.b.x
