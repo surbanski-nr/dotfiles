@@ -3,9 +3,9 @@ return {
     "iamcco/markdown-preview.nvim",
     keys = {
       {
-        "<leader>am",
+        "<leader>ap",
         "<cmd>MarkdownPreviewToggle<cr>",
-        desc = "Toggle [M]arkdown Preview",
+        desc = "Toggle Markdown [P]review",
       },
     },
     cmd = { "MarkdownPreviewToggle", "MarkdownPreview", "MarkdownPreviewStop" },
