@@ -10,14 +10,14 @@ return {
       },
       view = {
         adaptive_size = true,
-        centralize_selection = true,
+        -- centralize_selection = true,
       },
       -- diagnostics = {
       --   enable = true,
       -- },
-      update_focused_file = {
-        enable = true,
-      },
+      -- update_focused_file = {
+      --   enable = true,
+      -- },
     },
   },
 }

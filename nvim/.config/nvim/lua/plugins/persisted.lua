@@ -3,9 +3,9 @@ return {
     "olimorris/persisted.nvim",
     keys = {
       {
-        "<leader>fs",
+        "<leader>fi",
         "<cmd>Telescope persisted<cr>",
-        desc = "Telescope Per[s]isted",
+        desc = "Telescope Pers[i]sted",
       },
     },
     lazy = false, -- make sure the plugin is always loaded at startup

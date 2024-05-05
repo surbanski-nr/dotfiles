@@ -2,7 +2,7 @@
 local M = {}
 
 M.ui = {
-  theme = "decay",
+  theme = "material-darker",
 
   statusline = {
     order = {

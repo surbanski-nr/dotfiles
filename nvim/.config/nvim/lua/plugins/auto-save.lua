@@ -7,7 +7,7 @@ return {
       { "<leader>as", "<CMD>ASToggle<CR>", desc = "Toggle Auto-[s]ave" },
     },
     opts = {
-      enabled = false,
+      enabled = true,
       debounce_delay = 500,
     },
   },
