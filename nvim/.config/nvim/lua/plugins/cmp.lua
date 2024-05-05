@@ -10,6 +10,10 @@ return {
       },
     },
     opts = {
+      enabled = function()
+        return (vim.bo.ft ~= "markdown")
+      end,
+
       sources = {
         { name = "nvim_lsp" },
         { name = "copilot" },

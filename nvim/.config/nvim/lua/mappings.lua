@@ -32,6 +32,14 @@ map("n", ";", ":", { desc = "CMD enter command mode" })
 
 map("i", "jk", "<ESC>")
 
+map("n", "J", "mzJ`z", { desc = "Join line" })
+
+-- Don't leave visual mode when changing indent
+map("x", ">", ">gv", { noremap = true })
+map("x", "<", "<gv", { noremap = true })
+
+map("i", "<C-BS>", "<Esc>cvb", { desc = "Delete previous word" })
+
 map("n", "<leader>+", "<C-a>", { desc = "Increment number" })
 map("n", "<leader>-", "<C-x>", { desc = "Decrement number" })
 
@@ -52,6 +60,9 @@ map("n", "<leader>fl", "<CMD>Telescope yaml_schema<CR>", { desc = "Telescope Yam
 
 map("n", "gh", "g^", { desc = "Jump to first screen character" })
 map("n", "gt", "g$", { desc = "Jump to last screen character" })
+
+map("n", "gO", "<Cmd>call append(line('.') - 1, repeat([''], v:count1))<CR>")
+map("n", "go", "<Cmd>call append(line('.'),     repeat([''], v:count1))<CR>")
 
 map("n", "gm", function()
   require("conform").format { lsp_fallback = true }
