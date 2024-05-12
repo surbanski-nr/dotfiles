@@ -31,7 +31,7 @@ M.ui = {
         if status == nil then
           return ""
         end
-        return "/ " .. status .. " "
+        return "| " .. status .. " "
       end,
       yaml_schema = function()
         local ok, yamlcomp = pcall(require, "yaml-companion")
@@ -42,7 +42,7 @@ M.ui = {
         if schema.result[1].name == "none" then
           return ""
         end
-        return "/ 󰨁 " .. schema.result[1].name .. " "
+        return "| 󰨁 " .. schema.result[1].name .. " "
       end,
       pomo = function()
         local ok, pomo = pcall(require, "pomo")
@@ -53,11 +53,11 @@ M.ui = {
         if timer == nil then
           return ""
         end
-        return "/ 󰄉 " .. tostring(timer) .. " "
+        return "| 󰄉 " .. tostring(timer) .. " "
       end,
     },
-    --   theme = "minimal",
-    separator_style = "round",
+    -- theme = "minimal",
+    -- separator_style = "round",
   },
 
   -- telescope = { style = "bordered" },
