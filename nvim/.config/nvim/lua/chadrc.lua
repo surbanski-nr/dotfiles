@@ -2,7 +2,8 @@
 local M = {}
 
 M.ui = {
-  theme = "material-darker",
+  theme = "github_dark",
+  theme_toggle = { "github_dark", "github_light" },
 
   statusline = {
     order = {
