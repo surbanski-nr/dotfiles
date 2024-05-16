@@ -50,8 +50,8 @@ return {
     dependencies = {
       { "zbirenbaum/copilot.lua" },
     },
-    lazy = true,
-    event = "BufReadPost",
+    lazy = false,
+    -- event = "BufReadPost",
     config = function()
       require("copilot_status").setup {}
     end,
