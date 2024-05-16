@@ -103,5 +103,10 @@ map("n", "<Leader>z", "<cmd>%bd|e#<CR>", { desc = "Close all buffers except curr
 map("n", "<C-d>", "<C-d>zz")
 map("n", "<C-u>", "<C-u>zz")
 
+map("n", "<A-j>", "<cmd>m .+1<CR>==", { desc = "move the line up", silent = true })
+map("n", "<A-k>", "<cmd>m .-2<CR>==", { desc = "move the line down", silent = true })
+map("v", "<A-j>", "<cmd>m '>+1<CR>gv=gv", { desc = "move the selected text up", silent = true })
+map("v", "<A-k>", "<cmd>m '<-2<CR>gv=gv", { desc = "move the selected text down", silent = true })
+
 map("n", "n", "nzzzv")
 map("n", "N", "Nzzzv")
