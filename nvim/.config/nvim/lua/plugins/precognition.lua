@@ -1,6 +1,6 @@
 return {
   "tris203/precognition.nvim",
-  event = "VeryLazy",
+  lazy = true,
   keys = {
     {
       "<leader>an",

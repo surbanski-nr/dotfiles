@@ -1,8 +1,7 @@
 return {
   "epwalsh/pomo.nvim",
   version = "*", -- Recommended, use latest release instead of latest commit
-  -- lazy = true,
-  event = "VeryLazy",
+  lazy = true,
   cmd = { "TimerStart", "TimerRepeat" },
   dependencies = {
     "rcarriga/nvim-notify",
