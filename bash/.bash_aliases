@@ -9,7 +9,13 @@ alias zz='z -'
 alias kc='kubectx'
 alias kn='kubens'
 alias k='kubectl'
-alias kgp='kubectl get pods --sort-by=.metadata.creationTimestamp | grep'
+kgp() {
+	if [ "$#" -eq 0 ]; then
+		kubectl get pods --sort-by=.metadata.creationTimestamp
+	else
+		kubectl get pods --sort-by=.metadata.creationTimestamp | grep "$1"
+	fi
+}
 complete -F __start_kubectl k
 
 alias tp='terraform plan'

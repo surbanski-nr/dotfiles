@@ -2,7 +2,7 @@ return {
   -- :Codeium Auth
   -- :Codeium Enable
   -- :Codeium Disable
-  {
+  --[[ {
     "Exafunction/codeium.vim",
     event = "VeryLazy",
     config = function()
@@ -28,7 +28,7 @@ return {
         markdown = false,
       }
     end,
-  },
+  }, ]]
   -- {
   --   "Exafunction/codeium.nvim",
   --   event = "VeryLazy",
