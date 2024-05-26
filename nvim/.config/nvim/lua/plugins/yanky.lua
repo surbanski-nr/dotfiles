@@ -9,6 +9,7 @@ return {
       desc = "Telescope [Y]ank History",
     },
     { "y", "<Plug>(YankyYank)", mode = { "n" }, desc = "Yank text" },
+    { "Y", "<Plug>(YankyYank)$", mode = { "n" }, desc = "Yank text till the end of the line" },
     { "p", "<Plug>(YankyPutAfter)", mode = { "n" }, desc = "Put yanked text after cursor" },
     { "P", "<Plug>(YankyPutBefore)", mode = { "n" }, desc = "Put yanked text before cursor" },
     { "[y", "<Plug>(YankyCycleForward)", desc = "Cycle forward through yank history" },
