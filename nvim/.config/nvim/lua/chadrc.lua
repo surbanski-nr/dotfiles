@@ -9,6 +9,7 @@ M.ui = {
     order = {
       "mode",
       "file",
+      "harpoon",
       "git",
       "%=",
       "lsp_msg",
@@ -54,6 +55,17 @@ M.ui = {
           return ""
         end
         return "| 󰄉 " .. tostring(timer) .. " "
+      end,
+      harpoon = function()
+        local ok, harpoonline = pcall(require, "harpoonline")
+        if not ok then
+          return ""
+        end
+        local hline = harpoonline.format()
+        if hline == nil then
+          return ""
+        end
+        return "%#St_file_bg# " .. hline .. ""
       end,
     },
   },

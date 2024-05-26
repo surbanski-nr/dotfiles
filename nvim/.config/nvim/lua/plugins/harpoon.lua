@@ -8,9 +8,17 @@ return {
       {
         "<Leader>ma",
         function()
-          require("harpoon"):list():append()
+          require("harpoon"):list():add()
         end,
         desc = "Harpoon Add location",
+      },
+      {
+        "<Leader>ml",
+        function()
+          local harpoon = require "harpoon"
+          harpoon.ui:toggle_quick_menu(harpoon:list())
+        end,
+        desc = "Harpoon List",
       },
       {
         "<Leader>mn",
@@ -128,5 +136,10 @@ return {
         desc = "Telescope Ha[r]poon",
       },
     },
+  },
+  {
+    "abeldekat/harpoonline",
+    version = "*",
+    config = {},
   },
 }
