@@ -5,7 +5,9 @@ alias vz='NVIM_APPNAME=nvim-lazy nvim'
 alias v='nvim'
 
 alias zz='z -'
-
+kl() {
+	kubectl logs "$1" | batcat --style=numbers --color=always
+}
 alias kc='kubectx'
 alias kn='kubens'
 alias k='kubectl'

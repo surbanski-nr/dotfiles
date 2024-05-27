@@ -28,12 +28,12 @@ return {
             dismiss = "<C-]>",
           },
         },
-        -- filetypes = {
-        --   yaml = true,
-        --   helm = true,
-        --   hcl = true,
-        --   lua = true,
-        -- },
+        filetypes = {
+          yaml = true,
+          helm = true,
+          hcl = true,
+          lua = true,
+        },
       }
     end,
   },
