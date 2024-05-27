@@ -6,19 +6,19 @@ return {
     opts = {},
     keys = {
       {
-        "<Leader>ma",
-        function()
-          require("harpoon"):list():add()
-        end,
-        desc = "Harpoon Add location",
-      },
-      {
         "<Leader>ml",
         function()
           local harpoon = require "harpoon"
           harpoon.ui:toggle_quick_menu(harpoon:list())
         end,
         desc = "Harpoon List",
+      },
+      {
+        "<Leader>mm",
+        function()
+          require("harpoon"):list():add()
+        end,
+        desc = "Harpoon Add location",
       },
       {
         "<Leader>mn",
@@ -136,10 +136,5 @@ return {
         desc = "Telescope Ha[r]poon",
       },
     },
-  },
-  {
-    "abeldekat/harpoonline",
-    version = "*",
-    config = {},
   },
 }
