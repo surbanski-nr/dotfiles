@@ -18,6 +18,13 @@ kgp() {
 		kubectl get pods --sort-by=.metadata.creationTimestamp | grep "$1"
 	fi
 }
+kge() {
+	if [ "$#" -eq 0 ]; then
+		kubectl get events --sort-by=.metadata.creationTimestamp -w
+	else
+		kubectl get events --sort-by=.metadata.creationTimestamp -w -n "$1"
+	fi
+}
 complete -F __start_kubectl k
 
 alias tp='terraform plan'
