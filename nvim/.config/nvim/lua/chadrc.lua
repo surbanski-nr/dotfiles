@@ -95,7 +95,7 @@ M.ui = {
     DiffAdd = { bg = "NONE", fg = "#bada9f" },
     -- DiffChange = { fg = "#e5d5ac", bold = true },
     DiffDelete = { bg = "NONE", fg = "#ffb0b0" },
-    DiffText = { fg = "orange", bold = true },
+    DiffText = { fg = "#e5d5ac", bold = true },
     WildMenu = { fg = "black" },
     -- Search = { fg = "black", bg = "blue" },
     -- CurSearch = { fg = "black", bg = "blue" },
