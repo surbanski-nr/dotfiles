@@ -47,6 +47,15 @@
           "style": "plain",
           "foreground": "#ffff66",
           "template": ""
+        },
+	{
+          "type": "kubectl",
+          "style": "plain",
+          "foreground": "lightBlue",
+          "template": " <#ffffff>\udb84\udcfe</> {{.Context}} :: {{if .Namespace}}{{.Namespace}}{{else}}default{{end}}", 
+          "properties": {
+	    "display_error": true
+	  }
         }
       ],
       "type": "prompt"
