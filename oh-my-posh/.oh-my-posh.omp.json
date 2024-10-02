@@ -37,7 +37,7 @@
           "style": "plain",
           "foreground": "#ffffff",
           "foreground_templates": ["{{ if .Error }}#e91e63{{ end }}"],
-          "template": "󰇥 ",
+          "template": "󰇥  ",
           "properties": {
             "always_enabled": true
           }
@@ -52,7 +52,7 @@
           "type": "kubectl",
           "style": "plain",
           "foreground": "lightBlue",
-          "template": " <#ffffff>\udb84\udcfe</> {{.Context}} :: {{if .Namespace}}{{.Namespace}}{{else}}default{{end}}", 
+          "template": "\udb84\udcfe {{.Context}}::{{if .Namespace}}{{.Namespace}}{{else}}default{{end}}", 
           "properties": {
 	    "display_error": true
 	  }
