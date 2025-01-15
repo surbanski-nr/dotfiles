@@ -1,7 +1,7 @@
 ---@type ChadrcConfig
 local M = {}
 
-M.ui = {
+M.base46 = {
   theme = "github_dark",
   theme_toggle = { "github_dark", "github_light" },
 
