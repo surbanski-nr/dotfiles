@@ -1,7 +1,8 @@
 return {
   {
     -- "someone-stole-my-name/yaml-companion.nvim",
-    "szechp/yaml-companion.nvim", -- fork that adds CRD support
+    -- "szechp/yaml-companion.nvim", -- fork that adds CRD support
+    "mosheavni/yaml-companion.nvim",
     dependencies = {
       { "neovim/nvim-lspconfig" },
       { "nvim-lua/plenary.nvim" },
