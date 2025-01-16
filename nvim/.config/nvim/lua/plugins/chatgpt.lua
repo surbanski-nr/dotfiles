@@ -6,7 +6,7 @@ return {
     event = "VeryLazy",
     config = function()
       require("chatgpt").setup {
-        -- api_key_cmd = "pass chatgpt/invhub-shared-oai",
+        api_key_cmd = "pass chatgpt/invhub-shared-oai",
         api_type_cmd = "echo azure",
         azure_api_base_cmd = "echo https://invhub-shared-oai.openai.azure.com",
         azure_api_engine_cmd = "echo gpt-4_1106-Preview",
