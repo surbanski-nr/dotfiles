@@ -5,6 +5,37 @@ M.base46 = {
   theme = "github_dark",
   theme_toggle = { "github_dark", "github_light" },
 
+  hl_add = {
+    WinBar = { link = "Normal" },
+    WinBarNC = { link = "Normal" },
+    LspInlayHint = { link = "Comment" },
+  },
+
+  hl_override = {
+    Comment = {
+      italic = true,
+    },
+    ["@comment"] = { italic = true },
+    DiffAdd = { bg = "NONE", fg = "#bada9f" },
+    -- DiffChange = { fg = "#e5d5ac", bold = true },
+    DiffDelete = { bg = "NONE", fg = "#ffb0b0" },
+    DiffText = { fg = "#e5d5ac", bold = true },
+    WildMenu = { fg = "black" },
+    -- Search = { fg = "black", bg = "blue" },
+    -- CurSearch = { fg = "black", bg = "blue" },
+    -- IncSearch = { fg = "black", bg = "red" },
+    NvDashAscii = { bg = "NONE", fg = "orange" },
+    NvDashButtons = { bg = "NONE" },
+    FoldColumn = { bg = "NONE" },
+    TblineFill = { link = "Normal" },
+    NvimTreeRootFolder = { link = "NvimTreeFolderName" },
+    ["@keyword.exception"] = {
+      link = "Conditional",
+    },
+  },
+}
+
+M.ui = {
   statusline = {
     order = {
       "mode",
@@ -55,58 +86,6 @@ M.base46 = {
         end
         return "| 󰄉 " .. tostring(timer) .. " "
       end,
-    },
-  },
-
-  nvdash = {
-    load_on_startup = false,
-
-    header = {
-      "                                                     ",
-      "  ███╗   ██╗███████╗ ██████╗ ██╗   ██╗██╗███╗   ███╗ ",
-      "  ████╗  ██║██╔════╝██╔═══██╗██║   ██║██║████╗ ████║ ",
-      "  ██╔██╗ ██║█████╗  ██║   ██║██║   ██║██║██╔████╔██║ ",
-      "  ██║╚██╗██║██╔══╝  ██║   ██║╚██╗ ██╔╝██║██║╚██╔╝██║ ",
-      "  ██║ ╚████║███████╗╚██████╔╝ ╚████╔╝ ██║██║ ╚═╝ ██║ ",
-      "  ╚═╝  ╚═══╝╚══════╝ ╚═════╝   ╚═══╝  ╚═╝╚═╝     ╚═╝ ",
-      "                                                     ",
-    },
-
-    buttons = {
-      { "  Find File", "Spc f f", "Telescope find_files" },
-      { "󰈚  Recent Files", "Spc f o", "Telescope oldfiles" },
-      { "󰈭  Find Word", "Spc f w", "Telescope live_grep" },
-      { "  Projects", "Spc f p", "Telescope projects" },
-      { "  Lazy", "Spc a l", "Lazy" },
-    },
-  },
-
-  gl_add = {
-    WinBar = { link = "Normal" },
-    WinBarNC = { link = "Normal" },
-    LspInlayHint = { link = "Comment" },
-  },
-
-  hl_override = {
-    Comment = {
-      italic = true,
-    },
-    ["@comment"] = { italic = true },
-    DiffAdd = { bg = "NONE", fg = "#bada9f" },
-    -- DiffChange = { fg = "#e5d5ac", bold = true },
-    DiffDelete = { bg = "NONE", fg = "#ffb0b0" },
-    DiffText = { fg = "#e5d5ac", bold = true },
-    WildMenu = { fg = "black" },
-    -- Search = { fg = "black", bg = "blue" },
-    -- CurSearch = { fg = "black", bg = "blue" },
-    -- IncSearch = { fg = "black", bg = "red" },
-    NvDashAscii = { bg = "NONE", fg = "orange" },
-    NvDashButtons = { bg = "NONE" },
-    FoldColumn = { bg = "NONE" },
-    TblineFill = { link = "Normal" },
-    NvimTreeRootFolder = { link = "NvimTreeFolderName" },
-    ["@keyword.exception"] = {
-      link = "Conditional",
     },
   },
 }
