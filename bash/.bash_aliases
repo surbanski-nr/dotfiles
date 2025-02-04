@@ -6,24 +6,28 @@ alias v='nvim'
 
 alias zz='z -'
 kl() {
-	kubectl logs "$1" | batcat --style=numbers --color=always
+  kubectl logs "$1" | batcat --style=numbers --color=always
 }
 alias kc='kubectx'
 alias kn='kubens'
 alias k='kubectl'
 kgp() {
-	if [ "$#" -eq 0 ]; then
-		kubectl get pods --sort-by=.metadata.creationTimestamp
-	else
-		kubectl get pods --sort-by=.metadata.creationTimestamp | grep "$1"
-	fi
+  if [ "$#" -eq 0 ]; then
+    kubectl get pods --sort-by=.metadata.creationTimestamp
+  else
+    kubectl get pods --sort-by=.metadata.creationTimestamp | grep "$1"
+  fi
 }
 kge() {
-	if [ "$#" -eq 0 ]; then
-		kubectl get events --sort-by=.metadata.creationTimestamp -w
-	else
-		kubectl get events --sort-by=.metadata.creationTimestamp -w -n "$1"
-	fi
+  if [ "$#" -eq 0 ]; then
+    kubectl get events --sort-by=.metadata.creationTimestamp -w
+  else
+    kubectl get events --sort-by=.metadata.creationTimestamp -w -n "$1"
+  fi
+}
+kpl() {
+  pods=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep "^$1")
+  for pod in $pods; do kubectl logs $pod >$pod.log; done
 }
 complete -F __start_kubectl k
 

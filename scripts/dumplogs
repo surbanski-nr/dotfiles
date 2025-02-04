@@ -1,16 +1,16 @@
 #!/bin/bash
 
 POD_PREFIXES=(
-	"api"
-	"web"
-	"invhub-interaction-engine"
-	"invhub-prompt-engine"
-	"invhub-context-engine"
-	"invhub-websearch"
-	"copilot-interaction-engine"
-	"copilot-prompt-engine"
-	"copilot-context-engine"
-	"copilot-websearch"
+  "api"
+  "web"
+  "invhub-interaction-engine"
+  "invhub-prompt-engine"
+  "invhub-context-engine"
+  "invhub-websearch"
+  "invhub-interaction-engine"
+  "invhub-prompt-engine"
+  "invhub-context-engine"
+  "invhub-websearch"
 )
 
 TIMESTAMP=$(date "+%Y-%m-%d_%H-%M-%S")
@@ -20,17 +20,17 @@ mkdir -p "$LOG_DIR"
 
 SINCE_PARAM=""
 if [ -n "$1" ]; then
-	SINCE_PARAM="--since=$1"
+  SINCE_PARAM="--since=$1"
 fi
 
 for PREFIX in "${POD_PREFIXES[@]}"; do
-	PODS=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep "^$PREFIX")
+  PODS=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep "^$PREFIX")
 
-	for POD in $PODS; do
-		if [ -n "$POD" ]; then
-			LOG_FILE="${LOG_DIR}/${POD}.log"
-			kubectl logs $SINCE_PARAM $POD >$LOG_FILE
-			echo "Logs for $POD saved to $LOG_FILE"
-		fi
-	done
+  for POD in $PODS; do
+    if [ -n "$POD" ]; then
+      LOG_FILE="${LOG_DIR}/${POD}.log"
+      kubectl logs $SINCE_PARAM $POD >$LOG_FILE
+      echo "Logs for $POD saved to $LOG_FILE"
+    fi
+  done
 done
