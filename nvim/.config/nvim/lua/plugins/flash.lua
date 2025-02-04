@@ -1,5 +1,6 @@
 return {
   {
+    -- navigate your code with search labels
     "folke/flash.nvim",
     event = "VeryLazy",
     ---@type Flash.Config

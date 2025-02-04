@@ -1,4 +1,5 @@
 return {
+
   {
     "hrsh7th/nvim-cmp",
 
@@ -10,8 +11,8 @@ return {
         end,
       },
     },
-
     opts = {
+      enabled = false,
       -- enabled = function()
       --   local context = require "cmp.config.context"
       --   local disabled = false
@@ -25,7 +26,7 @@ return {
 
       sources = {
         { name = "nvim_lsp" },
-        { name = "copilot" },
+        -- { name = "copilot" },
         -- { name = "codeium" },
         { name = "luasnip" },
         { name = "buffer" },
