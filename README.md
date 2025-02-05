@@ -114,3 +114,33 @@ asdf plugin add nodejs https://github.com/asdf-vm/asdf-nodejs.git
 asdf install nodejs latest
 asdf global nodejs latest
 ```
+
+### For issues with stow
+
+```bash
+shopt -s dotglob  # Include hidden files in globbing
+for file in tmux/*; do
+  ln -sv "$PWD/$file" ~/
+done
+shopt -u dotglob
+
+shopt -s dotglob  # Include hidden files in globbing
+for file in bash/*; do
+  ln -sv "$PWD/$file" ~/
+done
+shopt -u dotglob
+
+shopt -s dotglob  # Include hidden files in globbing
+for file in oh-my-posh/*; do
+  ln -sv "$PWD/$file" ~/
+done
+shopt -u dotglob
+
+mkdir -p ~/.config/nvim
+shopt -s dotglob  # Include hidden files in globbing
+for file in nvim/*; do
+  ln -sv "$PWD/$file" ~/.config/nvim/
+done
+shopt -u dotglob
+
+```
