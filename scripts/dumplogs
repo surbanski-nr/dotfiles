@@ -5,6 +5,7 @@ POD_PREFIXES=(
   "disc-api"
   "transac-api"
   "web"
+  "cdc"
   "search-indexing"
   "invhub-interaction-engine"
   "invhub-prompt-engine"
