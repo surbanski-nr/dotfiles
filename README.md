@@ -144,3 +144,9 @@ done
 shopt -u dotglob
 
 ```
+
+### Fixing asdf Cellar errors
+
+```bash
+asdf reshim
+```
