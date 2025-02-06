@@ -2,15 +2,18 @@
 
 POD_PREFIXES=(
   "api"
+  "disc-api"
+  "transac-api"
   "web"
+  "search-indexing"
   "invhub-interaction-engine"
   "invhub-prompt-engine"
   "invhub-context-engine"
   "invhub-websearch"
-  "invhub-interaction-engine"
-  "invhub-prompt-engine"
-  "invhub-context-engine"
-  "invhub-websearch"
+  "copilot-interaction-engine"
+  "copilot-prompt-engine"
+  "copilot-context-engine"
+  "copilot-websearch"
 )
 
 TIMESTAMP=$(date "+%Y-%m-%d_%H-%M-%S")
