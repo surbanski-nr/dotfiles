@@ -19,6 +19,7 @@ local options = {
     go = { "goimports", "gofumpt" },
     sh = { "shfmt" },
     terraform = { "terraform_fmt" },
+    hcl = { "terraform_fmt" },
   },
 
   format_on_save = function(bufnr)

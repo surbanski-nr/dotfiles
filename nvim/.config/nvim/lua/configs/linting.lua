@@ -14,6 +14,7 @@ lint.linters_by_ft = {
   yaml = { "yamllint" },
   dockerfile = { "hadolint" },
   terraform = { "tflint" },
+  hcl = { "tflint" },
   -- text = { "vale" },
   go = { "golangcilint" },
 }
