@@ -3,7 +3,12 @@ return {
     "ThePrimeagen/harpoon",
     branch = "harpoon2",
     event = "VeryLazy",
-    opts = {},
+    requires = { { "nvim-lua/plenary.nvim" } },
+    config = function()
+      local harpoon = require "harpoon"
+      harpoon:setup {}
+    end,
+
     keys = {
       {
         "<Leader>ml",
@@ -110,7 +115,7 @@ return {
           local harpoon = require "harpoon"
 
           -- REQUIRED
-          harpoon:setup()
+          -- harpoon:setup()
           -- REQUIRED
 
           local conf = require("telescope.config").values
