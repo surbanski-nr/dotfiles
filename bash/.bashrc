@@ -125,16 +125,30 @@ add_to_path() {
   fi
 }
 
-add_to_path "$HOME/.krew/bin"
-add_to_path "$DOTFILES/scripts"
+add_to_path "$HOME/.local/share/nvim/mason/bin"
 add_to_path "$HOME/homebrew/bin"
 add_to_path "$HOME/homebrew/sbin"
 add_to_path "/home/linuxbrew/.linuxbrew/bin"
 add_to_path "/home/linuxbrew/.linuxbrew/sbin"
-add_to_path "$HOME/.local/share/nvim/mason/bin"
-add_to_path "$HOME/.asdf/shims"
+
+if type brew &>/dev/null; then
+  HOMEBREW_PREFIX="$(brew --prefix)"
+  eval "$("${HOMEBREW_PREFIX}"/bin/brew shellenv)"
+  if [[ -r "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh" ]]; then
+    source "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh"
+  else
+    for COMPLETION in "${HOMEBREW_PREFIX}/etc/bash_completion.d/"*; do
+      [[ -r "${COMPLETION}" ]] && source "${COMPLETION}"
+    done
+  fi
+fi
+
 add_to_path "$HOME/bin"
 add_to_path "$HOME/.local/bin"
+add_to_path "$DOTFILES/scripts"
+add_to_path "$HOME/dotfiles/scripts"
+add_to_path "$HOME/.krew/bin"
+add_to_path "$HOME/.asdf/shims"
 
 export GITUSER="surbanski"
 export GHREPOS="$HOME/github.com/$GITUSER"
@@ -157,6 +171,7 @@ export GOPRIVATE="github.com/$GITUSER/*,gitlab.com/$GITUSER/*"
 bind -x '"\C-l":clear'
 
 export FZF_DEFAULT_COMMAND='fd --type f --strip-cwd-prefix --hidden --follow --exclude .git'
+
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
 
 eval "$(zoxide init bash)"
@@ -167,15 +182,3 @@ eval "$(oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json")"
 
 # export VISUAL=nvim
 # export EDITOR=nvim
-
-if type brew &>/dev/null; then
-  HOMEBREW_PREFIX="$(brew --prefix)"
-  eval "$("${HOMEBREW_PREFIX}"/bin/brew shellenv)"
-  if [[ -r "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh" ]]; then
-    source "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh"
-  else
-    for COMPLETION in "${HOMEBREW_PREFIX}/etc/bash_completion.d/"*; do
-      [[ -r "${COMPLETION}" ]] && source "${COMPLETION}"
-    done
-  fi
-fi
