@@ -1,6 +1,7 @@
 return {
   {
     "nvim-telescope/telescope.nvim",
+    event = "VeryLazy",
     config = function()
       require("telescope").setup {
         pickers = {
