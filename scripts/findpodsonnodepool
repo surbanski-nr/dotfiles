@@ -1,0 +1,21 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+  echo "Usage: $0 kubernetes.azure.com/agentpool=nodepool1"
+  exit 1
+fi
+
+NODEPOOL_LABEL="$1"
+
+NODES=$(kubectl get nodes --selector=$NODEPOOL_LABEL -o jsonpath='{.items[*].metadata.name}')
+
+if [ -z "$NODES" ]; then
+  echo "No nodes found for the label $NODEPOOL_LABEL"
+  exit 1
+fi
+
+for NODE in $NODES; do
+  echo "Pods on node $NODE:"
+  kubectl get pods --all-namespaces --field-selector=spec.nodeName=$NODE -o wide
+  echo "---------------------------------"
+done
