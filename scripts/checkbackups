@@ -1,0 +1,13 @@
+#!/bin/bash
+  
+contexts=("invhub-preprod-uksouth-aks" "invhub-dev-uksouth-aks")  
+  
+for context in "${contexts[@]}"; do  
+  echo "Checking context: $context"  
+    
+  kubectl config use-context "$context"  
+    
+  kubectl get Backup --all-namespaces -o custom-columns=NAME:.metadata.name,AGE:.metadata.creationTimestamp,NAMESPACE:.metadata.namespace,STATUS:.status.phase | grep -v 'completed'  
+    
+  echo "-----------------------------------------"  
+done  

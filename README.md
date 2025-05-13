@@ -16,13 +16,15 @@ cat ~/.ssh/github.pub
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/github
 
-## Homebrew
+## Homebrew dependencies
 sudo apt install build-essential procps curl file git
+## Asdf dependencies
+sudo apt install dirmngr gpg curl gawk
 
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 /home/linuxbrew/.linuxbrew/bin/brew install stow
 
--- optionally if you forgot about brew dependencies: brew reinstall gcc
+# optionally if you forgot about brew dependencies: brew reinstall gcc
 
 ## Stow
 GH_REPOS=$HOME/github.com/surbanski
@@ -39,7 +41,7 @@ mkdir -p ~/.config/k9s && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ k9s
 mkdir -p ~/.config/nvim && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ nvim
 mkdir -p ~/.gnupg && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ gnupg
 
--- On Ubuntu Desktop
+# On Ubuntu Desktop
 mkdir -p ~/.config/kitty && /home/linuxbrew/.linuxbrew/bin/stow -vvv -t ~ kitty
 
 ## Tmux
@@ -83,17 +85,19 @@ brew install docker
 brew install docker-compose
 brew install jesseduffield/lazygit/lazygit
 brew install gh
-brew install gcc
 brew install unzip
 brew install gpg
 brew install gawk
 brew install podman
 brew install podman-compose
+brew install pipx
 brew install libnotify # for pomodoro
+brew install graphviz # for diagrams
 
 # post brew installation
 $(brew --prefix)/opt/fzf/install
 git clone git@github.com:surbanski-nr/secrets.git ~/.password-store
+pipx install KubeDiagrams
 
 # for podman
 sudo apt install uidmap
@@ -113,39 +117,40 @@ asdf global golang latest
 asdf plugin add nodejs https://github.com/asdf-vm/asdf-nodejs.git
 asdf install nodejs latest
 asdf global nodejs latest
+
+asdf plugin add python https://github.com/asdf-community/asdf-python.git
+asdf list all python
+asdf install python latest
+asdf global python latest
+
 ```
 
-### For issues with stow
+### For issues when stow cannon be installed
 
 ```bash
-shopt -s dotglob  # Include hidden files in globbing
-for file in tmux/*; do
-  ln -sv "$PWD/$file" ~/
-done
-shopt -u dotglob
+shopt -s dotglob
 
-shopt -s dotglob  # Include hidden files in globbing
-for file in bash/*; do
-  ln -sv "$PWD/$file" ~/
-done
-shopt -u dotglob
+directories=("tmux" "bash" "oh-my-posh" "nvim")
+base_dest=~
 
-shopt -s dotglob  # Include hidden files in globbing
-for file in oh-my-posh/*; do
-  ln -sv "$PWD/$file" ~/
-done
-shopt -u dotglob
+for dir in "${directories[@]}"; do
+  if [ "$dir" == "nvim" ]; then
+    dest="$base_dest/.config/nvim"
+    mkdir -p "$dest"
+  else
+    dest="$base_dest"
+  fi
 
-mkdir -p ~/.config/nvim
-shopt -s dotglob  # Include hidden files in globbing
-for file in nvim/*; do
-  ln -sv "$PWD/$file" ~/.config/nvim/
+  for file in "$dir"/*; do
+    ln -sv "$PWD/$file" "$dest"
+  done
 done
+
 shopt -u dotglob
 
 ```
 
-### Fixing asdf Cellar errors
+### Fixing asdf Cellar errors, after brew upgrade
 
 ```bash
 asdf reshim
