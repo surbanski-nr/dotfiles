@@ -29,6 +29,8 @@ kpl() {
   pods=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep "^$1")
   for pod in $pods; do kubectl logs $pod >$pod.log; done
 }
+alias kcl='kubectl get pods --sort-by=.metadata.creationTimestamp --no-headers | grep "^configurator-" | tail -n1 | awk "{print \$1}" | xargs kubectl logs | less'
+
 complete -F __start_kubectl k
 
 alias tp='terraform plan'
