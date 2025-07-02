@@ -42,6 +42,7 @@ alias gs='git status'
 alias gd='git diff'
 alias gdc='git diff --cached'
 alias gc='git commit -m'
+alias gti='git'
 
 # finds all files recursively and sorts by last modification, ignore hidden files
 alias last='find . -type f -not -path "*/\.*" -exec ls -lrt {} +'
