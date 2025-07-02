@@ -1,48 +1,48 @@
 return {
-  {
-    "olimorris/codecompanion.nvim",
-    event = "VeryLazy",
-    dependencies = {
-      "nvim-lua/plenary.nvim",
-      "nvim-treesitter/nvim-treesitter",
-    },
-    keys = {
-      { "<leader>ac", mode = { "n", "v" }, "<CMD>CodeCompanionChat<CR>", desc = "Copilot [C]hat" },
-    },
-    opts = {
-      strategies = {
-        chat = {
-          adapter = "copilot",
-          slash_commands = {
-            ["file"] = {
-              callback = "strategies.chat.slash_commands.file",
-              description = "Select a file using Telescope",
-              opts = {
-                provider = "telescope", -- Other options include 'default', 'mini_pick', 'fzf_lua', snacks
-                contains_code = true,
-              },
-            },
-          },
-        },
-        inline = {
-          adapter = "copilot",
-          keymaps = {
-            accept_change = {
-              modes = { n = "ga" },
-              description = "Accept the suggested change",
-            },
-            reject_change = {
-              modes = { n = "gr" },
-              description = "Reject the suggested change",
-            },
-          },
-        },
-      },
-      opts = {
-        log_level = "INFO",
-      },
-    },
-  },
+  -- {
+  --   "olimorris/codecompanion.nvim",
+  --   event = "VeryLazy",
+  --   dependencies = {
+  --     "nvim-lua/plenary.nvim",
+  --     "nvim-treesitter/nvim-treesitter",
+  --   },
+  --   keys = {
+  --     { "<leader>ac", mode = { "n", "v" }, "<CMD>CodeCompanionChat<CR>", desc = "Copilot [C]hat" },
+  --   },
+  --   opts = {
+  --     strategies = {
+  --       chat = {
+  --         adapter = "copilot",
+  --         slash_commands = {
+  --           ["file"] = {
+  --             callback = "strategies.chat.slash_commands.file",
+  --             description = "Select a file using Telescope",
+  --             opts = {
+  --               provider = "telescope", -- Other options include 'default', 'mini_pick', 'fzf_lua', snacks
+  --               contains_code = true,
+  --             },
+  --           },
+  --         },
+  --       },
+  --       inline = {
+  --         adapter = "copilot",
+  --         keymaps = {
+  --           accept_change = {
+  --             modes = { n = "ga" },
+  --             description = "Accept the suggested change",
+  --           },
+  --           reject_change = {
+  --             modes = { n = "gr" },
+  --             description = "Reject the suggested change",
+  --           },
+  --         },
+  --       },
+  --     },
+  --     opts = {
+  --       log_level = "INFO",
+  --     },
+  --   },
+  -- },
   -- keys = {
   --   { "<leader>vt", mode = { "n", "v" }, "<CMD>CopilotChatTests<CR>", desc = "Copilot [T]ests" },
   --   { "<leader>vo", mode = { "n", "v" }, "<CMD>CopilotChatOptimize<CR>", desc = "Copilot [O]ptimize" },
