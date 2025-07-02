@@ -91,6 +91,7 @@ brew install gawk
 brew install podman
 brew install podman-compose
 brew install pipx
+brew install chart-testing
 brew install libnotify # for pomodoro
 brew install graphviz # for diagrams
 
