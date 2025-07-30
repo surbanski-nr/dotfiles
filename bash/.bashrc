@@ -26,6 +26,11 @@ shopt -s histappend
 # update the values of LINES and COLUMNS.
 shopt -s checkwinsize
 
+# prevent sending end-of-file (EOF) on Ctrl-D
+# This is useful to prevent accidentally exiting the shell
+set -o ignoreeof
+export IGNOREEOF=10000
+
 # If set, the pattern "**" used in a pathname expansion context will
 # match all files and zero or more directories and subdirectories.
 #shopt -s globstar
