@@ -2,7 +2,7 @@
 local M = {}
 
 M.base46 = {
-  theme = "github_light",
+  theme = "github_dark",
   theme_toggle = { "github_dark", "github_light" },
 
   hl_add = {
@@ -48,7 +48,7 @@ M.ui = {
       "lsp",
       "yaml_schema",
       "pomo",
-      "copilot",
+      -- "copilot",
       "cwd",
       "cursor",
     },
