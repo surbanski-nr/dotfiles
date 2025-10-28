@@ -1,17 +1,30 @@
 return {
-  {
-    -- "someone-stole-my-name/yaml-companion.nvim",
-    -- "szechp/yaml-companion.nvim", -- fork that adds CRD support
-    "mosheavni/yaml-companion.nvim",
-    dependencies = {
-      { "neovim/nvim-lspconfig" },
-      { "nvim-lua/plenary.nvim" },
-      { "nvim-telescope/telescope.nvim" },
-    },
-    config = function(_, opts)
-      local cfg = require("yaml-companion").setup(opts)
-      require("lspconfig")["yamlls"].setup(cfg)
-      require("telescope").load_extension "yaml_schema"
-    end,
-  },
+  --   {
+  --     -- "someone-stole-my-name/yaml-companion.nvim",
+  --     -- "szechp/yaml-companion.nvim", -- fork that adds CRD support
+  --     "mosheavni/yaml-companion.nvim",
+  --     dependencies = {
+  --       { "neovim/nvim-lspconfig" },
+  --       { "nvim-lua/plenary.nvim" },
+  --       { "nvim-telescope/telescope.nvim" },
+  --     },
+  --     config = function(_, opts)
+  --       local cfg = require("yaml-companion").setup({
+  --   -- Add any options here, or leave empty to use the default settings
+  --   -- lspconfig = {
+  --   --   cmd = {"yaml-language-server"}
+  --   -- },
+  -- })
+  -- require("lspconfig")["yamlls"].setup(cfg)
+  --       require("telescope").load_extension "yaml_schema"
+  --       -- local cfg = require("yaml-companion").setup(opts)
+  --       -- if vim.lsp.config.yamlls then
+  --       --   vim.lsp.config.yamlls.setup(cfg)
+  --       -- else
+  --       --   print "yamlls config not found in vim.lsp.config"
+  --       -- end
+  --       -- --vim.lsp.config.yamlls.setup(cfg)
+  --       -- require("telescope").load_extension "yaml_schema"
+  --     end,
+  --   },
 }
