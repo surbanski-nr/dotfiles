@@ -187,3 +187,7 @@ eval "$(oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json")"
 
 # export VISUAL=nvim
 # export EDITOR=nvim
+
+if [ -f ~/.extras ]; then
+  source ~/.extras
+fi
