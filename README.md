@@ -89,7 +89,7 @@ Install tools via Homebrew (only when missing in `apt`/`dnf`):
 
 ```bash
 brew update && brew upgrade
-brew install asdf krew helm k9s terragrunt
+brew install asdf krew helm k9s terragrunt kind
 brew tap hashicorp/tap
 brew install hashicorp/tap/terraform
 ```
