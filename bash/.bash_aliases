@@ -2,7 +2,8 @@ alias ff="fzf -m --preview 'bat --style=numbers --color=always --line-range :500
 alias ffv='nvim $(ff)'
 
 alias vz='NVIM_APPNAME=nvim-lazy nvim'
-alias v='nvim'
+alias vn='nvim'
+alias v='NVIM_APPNAME=nvim2 nvim'
 
 alias zz='z -'
 kl() {
