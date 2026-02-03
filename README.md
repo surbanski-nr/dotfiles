@@ -33,7 +33,10 @@ Ubuntu / Debian:
 sudo apt update
 sudo apt install -y \
   git stow curl unzip coreutils \
-  gcc make ripgrep fd-find xclip neovim
+  gcc make \
+  neovim ripgrep fd-find xclip \
+  tmux dos2unix fzf bat zoxide htop tree mc kubectx \
+  gnupg
 ```
 
 Fedora / RHEL (dnf/yum):
@@ -41,7 +44,10 @@ Fedora / RHEL (dnf/yum):
 ```bash
 sudo dnf install -y \
   git stow curl unzip coreutils \
-  gcc make ripgrep fd-find neovim
+  gcc make \
+  neovim ripgrep fd-find xclip \
+  tmux dos2unix fzf bat zoxide htop tree mc kubectx \
+  gnupg2
 ```
 
 Note: on Debian/Ubuntu, the `fd-find` package installs the `fdfind` binary. If you need `fd` in `PATH`:
@@ -49,6 +55,43 @@ Note: on Debian/Ubuntu, the `fd-find` package installs the `fdfind` binary. If y
 ```bash
 mkdir -p ~/bin
 ln -sf "$(command -v fdfind)" ~/bin/fd
+```
+
+Note: on Debian/Ubuntu, `bat` is sometimes installed as `batcat`. If you need `bat` in `PATH`:
+
+```bash
+mkdir -p ~/bin
+ln -sf "$(command -v batcat)" ~/bin/bat
+```
+
+### Optional: Homebrew (fallback for missing tools)
+
+If your distro packages are missing or too old for a specific tool, use Homebrew.
+
+```bash
+# Ubuntu / Debian prerequisites
+sudo apt-get install -y build-essential procps curl file git
+
+# Fedora
+# sudo dnf group install -y development-tools
+# sudo dnf install -y procps-ng curl file git
+
+# CentOS Stream / RHEL
+# sudo dnf group install -y 'Development Tools'
+# sudo dnf install -y procps-ng curl file git
+
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Follow the linuxbrew "brew shellenv" output after install.
+```
+
+Install tools via Homebrew (only when missing in `apt`/`dnf`):
+
+```bash
+brew update && brew upgrade
+brew install asdf krew helm k9s terragrunt
+brew tap hashicorp/tap
+brew install hashicorp/tap/terraform
 ```
 
 ### Oh My Posh
@@ -101,8 +144,8 @@ Example plugin setup:
 ```bash
 asdf plugin add kubectl https://github.com/asdf-community/asdf-kubectl.git
 asdf list all kubectl
-asdf install kubectl 1.33
-asdf global kubectl 1.33
+asdf install kubectl 1.33.7
+asdf global kubectl 1.33.7
 
 asdf plugin add golang https://github.com/asdf-community/asdf-golang.git
 asdf install golang latest
@@ -116,19 +159,6 @@ asdf plugin add python https://github.com/asdf-community/asdf-python.git
 asdf list all python
 asdf install python latest
 asdf global python latest
-```
-
-### Optional: Homebrew (fallback only)
-
-If your distro packages are missing or too old for a specific tool:
-
-```bash
-# Ubuntu / Debian dependencies for linuxbrew
-sudo apt install -y build-essential procps curl file git
-
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Follow the linuxbrew "brew shellenv" output after install.
 ```
 
 ### For issues when stow cannot be installed

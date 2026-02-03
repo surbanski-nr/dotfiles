@@ -177,7 +177,20 @@ bind -x '"\C-l":clear'
 
 export FZF_DEFAULT_COMMAND='fd --type f --strip-cwd-prefix --hidden --follow --exclude .git'
 
-[ -f ~/.fzf.bash ] && source ~/.fzf.bash
+# fzf key bindings (prefer distro packages, fallback to user install if compatible)
+if command -v fzf >/dev/null 2>&1; then
+  if [ -r /usr/share/doc/fzf/examples/key-bindings.bash ]; then
+    source /usr/share/doc/fzf/examples/key-bindings.bash
+  elif [ -r /usr/share/fzf/shell/key-bindings.bash ]; then
+    source /usr/share/fzf/shell/key-bindings.bash
+  elif [ -r ~/.fzf.bash ]; then
+    if fzf --bash >/dev/null 2>&1; then
+      source ~/.fzf.bash
+    elif ! grep -q "fzf --bash" ~/.fzf.bash 2>/dev/null; then
+      source ~/.fzf.bash
+    fi
+  fi
+fi
 
 eval "$(zoxide init bash)"
 
