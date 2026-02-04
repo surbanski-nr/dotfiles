@@ -1,9 +1,6 @@
 k9s:
   liveViewAutoRefresh: false
-  gpuVendors: {}
-  screenDumpDir: /home/surbanski/.local/state/k9s/screen-dumps
   refreshRate: 2
-  apiServerTimeout: 2m0s
   maxConnRetry: 5
   readOnly: false
   noExitOnCtrlC: false
@@ -17,7 +14,6 @@ k9s:
     reactive: false
     noIcons: false
     defaultsToFullScreen: false
-    useFullGVRTitle: false
     skin: catppuccin-mocha
   skipLatestRevCheck: false
   disablePodCounting: false
@@ -46,4 +42,3 @@ k9s:
     memory:
       critical: 90
       warn: 70
-  defaultView: ""
