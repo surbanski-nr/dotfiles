@@ -2,4 +2,6 @@
   email = 122265380+surbanski-nr@users.noreply.github.com
   name = Szymon Urbański
 [core]
-  editor = v
+  editor = vim
+[push]
+  autoSetupRemote = true
