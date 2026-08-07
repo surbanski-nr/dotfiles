@@ -915,6 +915,14 @@ do
     end
   end, { bang = true, desc = 'Enable format-on-save' })
 
+  vim.api.nvim_create_user_command('FormatToggle', function()
+    vim.g.disable_autoformat = not vim.g.disable_autoformat
+    local state = vim.g.disable_autoformat and 'disabled' or 'enabled'
+    vim.notify('Format-on-save ' .. state .. ' for this Neovim session')
+  end, { desc = 'Toggle format-on-save for this Neovim session' })
+
+  vim.keymap.set('n', '<leader>tf', '<Cmd>FormatToggle<CR>', { desc = '[T]oggle [F]ormat-on-save' })
+
   require('conform').setup {
     notify_on_error = false,
     format_on_save = function(bufnr)

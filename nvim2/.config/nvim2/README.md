@@ -58,6 +58,13 @@ tooling details are in
 | `todo-comments.nvim` | Highlight and search TODO-style comments |
 | `which-key.nvim` | Show available mappings after a key prefix |
 
+Most plugin setup is intentionally kept in `init.lua`. Persistence,
+render-markdown and color highlighting are installed and configured together
+in `SECTION 4: UI / CORE UX PLUGINS`. Telescope, LSP, Conform, completion and
+Treesitter have their own numbered sections. Gitsigns, linting and Neo-tree use
+files under `lua/kickstart/plugins/`. The `lua/custom/plugins/` loader remains
+disabled, so placing a file there does not currently enable it.
+
 ## Discover mappings inside Neovim
 
 These are the fastest ways to find a mapping when this README is outdated or
@@ -322,6 +329,7 @@ Markdown snippets live under `snippets/`.
 | Action | Keys or command |
 |---|---|
 | Format buffer or visual selection | `<leader>f` |
+| Toggle format-on-save for this Neovim session | `<leader>tf` or `:FormatToggle` |
 | Disable format-on-save globally | `:FormatDisable` |
 | Disable format-on-save for current buffer | `:FormatDisable!` |
 | Enable format-on-save globally | `:FormatEnable` |
@@ -330,9 +338,12 @@ Markdown snippets live under `snippets/`.
 | Inspect or install external tools | `:Mason` |
 | Install all managed tools and parsers synchronously | `:Nvim2ToolsInstallSync` |
 
-Conform formats configured filetypes on save. Ruff sorts imports and formats
-Python. `nvim-lint` runs configured CLI linters after saving; it has no manual
-mapping.
+Conform formats configured filetypes on save. `<leader>tf` is useful when one
+Neovim process is opened for a repository that should not be reformatted. The
+toggle lasts for that process and does not change repository files or settings.
+Manual formatting with `<leader>f` remains available while format-on-save is
+disabled. Ruff sorts imports and formats Python. `nvim-lint` runs configured
+CLI linters after saving; it has no manual mapping.
 
 ## Git and Gitsigns
 
