@@ -197,7 +197,27 @@ Notation used below:
 | Show registers | `:registers` |
 | Paste latest explicit yank | `"0p` |
 | Paste from numbered yank ring | `"1p` through `"9p` |
+| Delete without changing any register | `"_d{motion}`, for example `"_dd` or `"_diw` |
+| Delete a selection without changing any register | Select text, then `"_d` |
+| Yank into and paste from named register `a` | `"ay{motion}`, then `"ap` |
 | Use system clipboard explicitly | `"+y`, `"+p` |
+
+Registers are small text storage slots. The `"{register}` prefix selects a
+register for the next operation:
+
+- `"` is the unnamed register used by plain `y`, `d`, `p` and `P`.
+- `0` keeps the latest explicit yank, even after a later normal delete. Use
+  `"0p` when plain `p` would paste recently deleted text instead.
+- `1` through `9` form this profile's small yank history: `"1p` pastes the
+  newest saved yank, `"2p` the previous one, and so on. Normal deletes can
+  still alter these numbered registers.
+- `a` through `z` are manual named registers. For example, `"ayy` stores a
+  line in `a`, `"ap` pastes it, and `"Ayy` appends another line to it.
+- `_` is the black-hole register. Text sent there is discarded, so `"_dd`,
+  `"_diw` and visual `"_d` do not replace text waiting to be pasted.
+
+Use `:registers 0 1 2 3 4 5 6 7 8 9` to inspect the yank history, or
+`:registers` to inspect every register.
 
 This profile changes register behavior:
 
