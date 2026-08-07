@@ -32,7 +32,7 @@ Ubuntu / Debian:
 ```bash
 sudo apt update
 sudo apt install -y \
-  git stow curl unzip coreutils \
+  git curl unzip coreutils \
   gcc make \
   neovim ripgrep fd-find xclip \
   tmux dos2unix fzf bat zoxide htop tree mc \
@@ -43,7 +43,7 @@ Fedora / RHEL (dnf/yum):
 
 ```bash
 sudo dnf install -y \
-  git stow curl unzip coreutils \
+  git curl unzip coreutils \
   gcc make \
   neovim ripgrep fd-find xclip \
   tmux dos2unix fzf bat zoxide htop tree mc \
