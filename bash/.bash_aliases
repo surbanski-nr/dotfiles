@@ -27,12 +27,22 @@ kge() {
   fi
 }
 kpl() {
-  pods=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep "^$1")
-  for pod in $pods; do kubectl logs $pod >$pod.log; done
+  local pod
+  while IFS= read -r pod; do
+    kubectl logs "$pod" >"$pod.log"
+  done < <(kubectl get pods --no-headers -o custom-columns=":metadata.name" |
+    awk -v prefix="${1:-}" 'index($0, prefix) == 1')
 }
-alias kcl='kubectl get pods --sort-by=.metadata.creationTimestamp --no-headers | grep "^configurator-" | tail -n1 | awk "{print \$1}" | xargs kubectl logs | less'
-
-complete -F __start_kubectl k
+kcl() {
+  local pod
+  pod=$(kubectl get pods --sort-by=.metadata.creationTimestamp --no-headers |
+    awk '/^configurator-/ { pod=$1 } END { print pod }')
+  if [ -z "$pod" ]; then
+    echo "No configurator pod found" >&2
+    return 1
+  fi
+  kubectl logs "$pod" | less
+}
 
 alias tp='terraform plan'
 
