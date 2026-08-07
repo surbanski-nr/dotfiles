@@ -181,6 +181,13 @@ Or reload from the shell: `tmux source-file ~/.tmux.conf`
 Tmux mouse handling and automatic copy-on-select are disabled. Text selection,
 copy, and paste are handled by the terminal.
 
+### Neovim
+
+The `nvim2` profile is the minimal development setup. Run it with
+`NVIM_APPNAME=nvim2 nvim` after stowing the package, or use the `v` Bash alias.
+See [the Neovim profile documentation](docs/neovim-nvchad-to-kickstart.md) for
+language tooling, installation, and key mappings.
+
 ### asdf
 
 Ubuntu / Debian dependencies:
