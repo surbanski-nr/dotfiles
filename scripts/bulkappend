@@ -1,6 +1,14 @@
 #!/bin/bash
-line1='cluster_name = \"AKS20VIRTUELETREIN02100-TA\"'
-line2='cluster_resource_group_name = \"RG20VIRTUELETREIN02BASE200-STAGING\"'
 
-find . -type f -exec sh -c "echo $line1 >> {}" \;
-find . -type f -exec sh -c "echo $line2 >> {}" \;
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+	echo "Usage: $0 LINE1 LINE2 [DIRECTORY]" >&2
+	exit 1
+fi
+
+line1=$1
+line2=$2
+root=${3:-.}
+
+while IFS= read -r -d '' file; do
+	printf '%s\n%s\n' "$line1" "$line2" >>"$file"
+done < <(find "$root" -type f -print0)

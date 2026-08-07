@@ -1,5 +1,13 @@
 #!/bin/bash
-for i in $(find . -type d -depth 1); do
-	newdir=${i#./NSCO.Workload.}
-	mv "$i" "$newdir"
+
+shopt -s nullglob
+
+for directory in ./NSCO.Workload.*/; do
+	target=${directory#./NSCO.Workload.}
+	target=${target%/}
+	if [[ -e $target ]]; then
+		echo "Target already exists: $target" >&2
+		exit 1
+	fi
+	mv -- "$directory" "$target"
 done

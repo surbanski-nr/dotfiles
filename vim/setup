@@ -1,10 +1,10 @@
 #!/bin/sh
 
-if [ -z "$(which vim)" -o -z "$(which vimtutor)" ]; then
+if ! command -v vim >/dev/null 2>&1 || ! command -v vimtutor >/dev/null 2>&1; then
   echo "Warning, doesn't look like you have full Vim version."
 fi
 
-ln -sf "$PWD/.vimrc" "$HOME/.vimrc"
-mkdir "$HOME/.vim/" "$HOME/.vim/autoload"
-ln -sf "$PWD/.vim/autoload/plug.vim" "$HOME/.vim/autoload/plug.vim"
-
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+ln -sf "$script_dir/.vimrc" "$HOME/.vimrc"
+mkdir -p "$HOME/.vim/autoload"
+ln -sf "$script_dir/.vim/autoload/plug.vim" "$HOME/.vim/autoload/plug.vim"

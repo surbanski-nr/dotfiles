@@ -9,7 +9,7 @@ echo "Use this script with caution!"
 echo "You are about to delete all resource groups in the subscription: $subscription"
 
 # prompt for confirmation
-read -p "Are you sure? (y/n) " will_delete
+read -rp "Are you sure? (y/n) " will_delete
 
 if [[ $will_delete == [Yy]* ]]; then
 	echo "Deleting resource groups..."

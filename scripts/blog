@@ -7,7 +7,7 @@ HOSTING_REPO="$REPOS/github.com/"
 
 # get_filename prompts the user for a filename
 get_filename() {
-	read -p "Enter a filename: " filename
+	read -rp "Enter a filename: " filename
 }
 
 # open_file creates and opens a file in the specified directory
@@ -28,27 +28,23 @@ open_file() {
 	title="${title//-/ }"
 
 	# set up the yaml frontmatter
-	echo "---" >>"$1/$filename.md"
-	echo "title: " >>"$1/$filename.md"
-	echo "date: $date" >>"$1/$filename.md"
+	{
+		echo "---"
+		echo "title: "
+		echo "date: $date"
 
-	if [[ $2 = "zet" ]]; then
-		echo "tags:" >>"$1/$filename.md"
-		echo "- " >>"$1/$filename.md"
-	fi
+		if [[ $2 = "zet" ]]; then
+			echo "tags:"
+			echo "- "
+		fi
 
-	if [[ $2 = "article" ]]; then
-		echo "tags:" >>"$1/$filename.md"
-		echo "- Article" >>"$1/$filename.md"
-	fi
+		if [[ $2 = "article" ]]; then
+			echo "tags:"
+			echo "- Article"
+		fi
 
-	echo "---" >>"$1/$filename.md"
-	echo -en "\n" >>"$1/$filename.md"
-	echo -en "\n" >>"$1/$filename.md"
-	echo -en "\n" >>"$1/$filename.md"
-	echo "## Links:" >>"$1/$filename.md"
-	echo -en "\n" >>"$1/$filename.md"
-	echo "$timestamp" >>"$1/$filename.md"
+		printf '%s\n\n\n\n## Links:\n\n%s\n' "---" "$timestamp"
+	} >>"$1/$filename.md"
 
 	# Open the file in Neovim
 	nvim '+ normal 2GzzA' "$1/$filename.md" -c :NoNeckPain
@@ -82,12 +78,12 @@ reset)
 
 pub)
 	# ask for commit message, rebuild the site, push to blog repo, then push to hosting repo
-	read -p "Enter commit message: " commitmessage
+	read -rp "Enter commit message: " commitmessage
 
-	read -p "Would you like to tweet + toot that? (y/n) " will_tweet
+	read -rp "Would you like to tweet + toot that? (y/n) " will_tweet
 
 	if [[ $will_tweet == [Yy]* ]]; then
-		read -p "Enter tags, or press enter to post without tags: " tags
+		read -rp "Enter tags, or press enter to post without tags: " tags
 	fi
 
 	cd "$HOME/websites/blog/" || exit

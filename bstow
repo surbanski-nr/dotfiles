@@ -23,7 +23,7 @@ log() {
 }
 
 success() {
-    echo -e "${GREEN}[✓]${NC} $*" >&2
+    echo -e "${GREEN}[OK]${NC} $*" >&2
 }
 
 warn() {
@@ -31,7 +31,7 @@ warn() {
 }
 
 error() {
-    echo -e "${RED}[✗]${NC} $*" >&2
+    echo -e "${RED}[ERROR]${NC} $*" >&2
 }
 
 # Get relative path from target to source
@@ -149,7 +149,7 @@ stow_package() {
     # Find all files in package
     while IFS= read -r -d '' file; do
         # Get relative path from package dir
-        local rel_path="${file#$package_dir/}"
+        local rel_path="${file#"$package_dir"/}"
         local src="$package_dir/$rel_path"
         local dest="$TARGET_DIR/$rel_path"
         
@@ -174,7 +174,7 @@ unstow_package() {
     
     # Find all files in package
     while IFS= read -r -d '' file; do
-        local rel_path="${file#$package_dir/}"
+        local rel_path="${file#"$package_dir"/}"
         local src="$package_dir/$rel_path"
         local dest="$TARGET_DIR/$rel_path"
         
