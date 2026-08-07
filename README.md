@@ -173,8 +173,13 @@ Quick reference (prefix is `Ctrl+a`):
 | Reload config | `Ctrl+a` then `:source-file ~/.tmux.conf` |
 | Install plugins | `Ctrl+a` then `Shift+I` |
 | Update plugins | `Ctrl+a` then `Shift+U` |
+| Copy selected text | `Ctrl+Shift+C` |
+| Paste text | `Ctrl+Shift+V` |
 
 Or reload from the shell: `tmux source-file ~/.tmux.conf`
+
+Tmux mouse handling and automatic copy-on-select are disabled. Text selection,
+copy, and paste are handled by the terminal.
 
 ### asdf
 
