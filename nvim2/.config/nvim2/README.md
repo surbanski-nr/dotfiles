@@ -31,32 +31,41 @@ tooling details are in
 
 ## Enabled plugin set
 
-| Plugin | Purpose in this profile |
-|---|---|
-| `LuaSnip` | Expand the custom global, Lua and Markdown snippets under `snippets/` |
-| `blink.cmp` | Provide completion from LSP, filesystem paths and LuaSnip |
-| `conform.nvim` | Format manually and on save, including Ruff formatting for Python |
-| `fidget.nvim` | Show language-server progress without a permanent UI panel |
-| `gitsigns.nvim` | Show Git changes and provide hunk, blame and diff actions |
-| `guess-indent.nvim` | Detect indentation settings from the current file |
-| `mason-lspconfig.nvim` | Connect Mason-installed servers to Neovim's LSP configuration names |
-| `mason-tool-installer.nvim` | Install the selected servers, formatters and linters automatically |
-| `mason.nvim` | Provide the external-tool registry, installer and `:Mason` interface |
-| `mini.nvim` | Supply text objects, surroundings, alignment, statusline, icons and buffer removal |
-| `neo-tree.nvim` | Provide the sidebar filesystem browser and file operations |
-| `nvim-highlight-colors` | Preview color values inline |
-| `nvim-lint` | Publish Hadolint, TFLint and yamllint results as diagnostics |
-| `nvim-lspconfig` | Supply default commands, filetypes and root detection for language servers |
-| `nvim-treesitter` | Provide parsing, highlighting, indentation and language injections |
-| `nui.nvim` | Supply popup and layout components required by Neo-tree |
-| `persistence.nvim` | Save and restore directory-based sessions |
-| `plenary.nvim` | Supply shared Lua utilities required by Telescope |
-| `render-markdown.nvim` | Render Markdown headings, lists, tables and code blocks inside Neovim |
-| `telescope-fzf-native.nvim` | Speed up Telescope sorting with its compiled FZF matcher |
-| `telescope-ui-select.nvim` | Display `vim.ui.select` choices in a Telescope dropdown |
-| `telescope.nvim` | Search files, text, buffers, commands, symbols and diagnostics |
-| `todo-comments.nvim` | Highlight and search TODO-style comments |
-| `which-key.nvim` | Show available mappings after a key prefix |
+None of these plugins is bundled with Neovim. `vim.pack` downloads every one
+from its own repository. “Kickstart module” means the configuration file came
+with the Kickstart template, not that the plugin comes with Neovim.
+
+| Plugin | Configuration source | Purpose in this profile |
+|---|---|---|
+| `LuaSnip` | Main `init.lua` | Expand the custom global, Lua and Markdown snippets under `snippets/` |
+| `blink.cmp` | Main `init.lua` | Provide completion from LSP, filesystem paths and LuaSnip |
+| `conform.nvim` | Main `init.lua` | Format manually and on save, including Ruff formatting for Python |
+| `fidget.nvim` | Main `init.lua` | Show language-server progress without a permanent UI panel |
+| `gitsigns.nvim` | Kickstart module | Show Git changes and provide hunk, blame and diff actions |
+| `guess-indent.nvim` | Main `init.lua` | Detect indentation settings from the current file |
+| `mason-lspconfig.nvim` | Main `init.lua` | Connect Mason-installed servers to Neovim's LSP configuration names |
+| `mason-tool-installer.nvim` | Main `init.lua` | Install the selected servers, formatters and linters automatically |
+| `mason.nvim` | Main `init.lua` | Provide the external-tool registry, installer and `:Mason` interface |
+| `mini.nvim` | Main `init.lua` | Supply text objects, surroundings, alignment, statusline, icons and buffer removal |
+| `neo-tree.nvim` | Kickstart module | Provide the sidebar filesystem browser and file operations |
+| `nvim-highlight-colors` | Custom module | Preview color values inline |
+| `nvim-lint` | Kickstart module | Publish Hadolint, TFLint and yamllint results as diagnostics |
+| `nvim-lspconfig` | Main `init.lua` | Supply default commands, filetypes and root detection for language servers |
+| `nvim-treesitter` | Main `init.lua` | Install parsers and queries used by Neovim's built-in Treesitter runtime |
+| `nui.nvim` | Neo-tree dependency | Supply popup and layout components required by Neo-tree |
+| `persistence.nvim` | Custom module | Save and restore directory-based sessions |
+| `plenary.nvim` | Telescope and Neo-tree dependency | Supply shared Lua utilities required by those plugins |
+| `render-markdown.nvim` | Custom module | Render Markdown headings, lists, tables and code blocks inside Neovim |
+| `telescope-fzf-native.nvim` | Main `init.lua` | Speed up Telescope sorting with its compiled FZF matcher |
+| `telescope-ui-select.nvim` | Main `init.lua` | Display `vim.ui.select` choices in a Telescope dropdown |
+| `telescope.nvim` | Main `init.lua` | Search files, text, buffers, commands, symbols and diagnostics |
+| `todo-comments.nvim` | Main `init.lua` | Highlight and search TODO-style comments |
+| `which-key.nvim` | Main `init.lua` | Show available mappings after a key prefix |
+
+Neovim itself supplies `vim.pack`, the LSP client, the Treesitter runtime,
+diagnostic APIs, netrw and the default colorscheme. In particular,
+`nvim-lspconfig` and `nvim-treesitter` are external plugins despite their
+names.
 
 The user-selected additions are under `lua/custom/plugins/`: `init.lua` lists
 their sources and the other files hold each plugin's setup. Core setup remains
