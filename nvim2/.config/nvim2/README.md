@@ -1,358 +1,576 @@
-# kickstart.nvim
+# nvim2
 
-This copy is the `nvim2` development profile in the dotfiles repository. See
-[`docs/neovim-nvchad-to-kickstart.md`](../../../docs/neovim-nvchad-to-kickstart.md)
-for its language tooling, selected plugins, and launch commands.
+`nvim2` is the minimal development Neovim profile in this dotfiles
+repository. It is based on
+[kickstart.nvim](https://github.com/nvim-lua/kickstart.nvim), uses Neovim
+0.12's built-in `vim.pack`, and tracks plugin revisions in
+`nvim-pack-lock.json`.
 
-## Introduction
+The leader key is `Space`. This guide focuses on common daily tasks rather
+than every Neovim command.
 
-A starting point for Neovim that is:
+## Start the profile
 
-* Small
-* Single-file
-* Completely Documented
-
-**NOT** a Neovim distribution, but instead a starting point for your configuration.
-
-## Installation
-
-### Install Neovim
-
-Kickstart.nvim targets *only* the latest
-['stable'](https://github.com/neovim/neovim/releases/tag/stable) and latest
-['nightly'](https://github.com/neovim/neovim/releases/tag/nightly) of Neovim.
-If you are experiencing issues, please make sure you have at least the latest
-stable version. Most likely, you want to install neovim via a [package
-manager](https://github.com/neovim/neovim/blob/master/INSTALL.md#install-from-package).
-To check your neovim version, run `nvim --version` and make sure it is not
-below the latest
-['stable'](https://github.com/neovim/neovim/releases/tag/stable) version. If
-your chosen install method only gives you an outdated version of neovim, find
-alternative [installation methods below](#alternative-neovim-installation-methods).
-
-### Install External Dependencies
-
-External Requirements:
-- Basic utils: `git`, `make`, `unzip`, C Compiler (`gcc`)
-- [ripgrep](https://github.com/BurntSushi/ripgrep#installation),
-  [fd-find](https://github.com/sharkdp/fd#installation)
-- [tree-sitter CLI](https://github.com/tree-sitter/tree-sitter/blob/master/crates/cli/README.md#installation)
-- Clipboard tool (xclip/xsel/win32yank or other depending on the platform)
-- A [Nerd Font](https://www.nerdfonts.com/): optional, provides various icons
-  - if you have it set `vim.g.have_nerd_font` in `init.lua` to true
-- Emoji fonts (Ubuntu only, and only if you want emoji!) `sudo apt install fonts-noto-color-emoji`
-- Language Setup:
-  - If you want to write Typescript, you need `npm`
-  - If you want to write Golang, you will need `go`
-  - etc.
-
-> [!NOTE]
-> See [Install Recipes](#Install-Recipes) for additional Windows and Linux specific notes
-> and quick install snippets
-
-### Install Kickstart
-
-> [!NOTE]
-> [Backup](#FAQ) your previous configuration (if any exists)
-
-Neovim's configurations are located under the following paths, depending on your OS:
-
-| OS | PATH |
-| :- | :--- |
-| Linux, MacOS | `$XDG_CONFIG_HOME/nvim`, `~/.config/nvim` |
-| Windows (cmd)| `%localappdata%\nvim\` |
-| Windows (powershell)| `$env:LOCALAPPDATA\nvim\` |
-
-#### Recommended Step
-
-Create your own copy of this repo using GitHub's
-["Use this template"](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template)
-button so that you have your own copy that you can modify, then install by
-cloning your new repo to your machine using one of the commands below,
-depending on your OS.
-
-Alternatively, you can [fork](https://docs.github.com/en/get-started/quickstart/fork-a-repo)
-this repo if you prefer an easy upstream sync path (e.g., keeping your config
-on a separate branch and fast-forwarding `master` from upstream). See the
-[discussion in #1740](https://github.com/nvim-lua/kickstart.nvim/issues/1740)
-for the tradeoffs between the two approaches.
-
-> [!NOTE]
-> Your repo's URL will be something like this:
-> `https://github.com/<your_github_username>/kickstart.nvim.git`
-
-You likely want to remove `nvim-pack-lock.json` from your repo's `.gitignore`
-file too - it's ignored in the kickstart repo to make maintenance easier, but
-it's recommended to track it in version control (see `:help vim.pack-lockfile`).
-
-#### Clone kickstart.nvim
-
-> [!NOTE]
-> If following the recommended step above (i.e., creating your own repo from
-> the template or fork), replace `nvim-lua` with `<your_github_username>`
-> in the commands below
-
-<details><summary> Linux and Mac </summary>
-
-```sh
-git clone https://github.com/nvim-lua/kickstart.nvim.git "${XDG_CONFIG_HOME:-$HOME/.config}"/nvim
-```
-
-</details>
-
-<details><summary> Windows </summary>
-
-If you're using `cmd.exe`:
-
-```
-git clone https://github.com/nvim-lua/kickstart.nvim.git "%localappdata%\nvim"
-```
-
-If you're using `powershell.exe`
-
-```
-git clone https://github.com/nvim-lua/kickstart.nvim.git "${env:LOCALAPPDATA}\nvim"
-```
-
-</details>
-
-### Post Installation
-
-Start Neovim
-
-```sh
-nvim
-```
-
-That's it! `vim.pack` will install all the plugins from your config. Use
-`:lua vim.pack.update(nil, { offline = true })` to inspect plugin state and
-`:lua vim.pack.update()` to fetch updates (`:write` applies updates, `:quit`
-cancels them).
-
-#### Read The Friendly Documentation
-
-Read through the `init.lua` file in your configuration folder for more
-information about extending and exploring Neovim. That also includes
-examples of adding popularly requested plugins.
-
-> [!NOTE]
-> For more information about a particular plugin check its repository's documentation.
-
-
-### Getting Started
-
-[The Only Video You Need to Get Started with Neovim](https://youtu.be/m8C0Cq9Uv9o)
-
-### FAQ
-
-* What should I do if I already have a pre-existing Neovim configuration?
-  * You should back it up and then delete all associated files.
-  * This includes your existing init.lua and the Neovim files in `~/.local`
-    which can be deleted with `rm -rf ~/.local/share/nvim/`
-* Can I keep my existing configuration in parallel to kickstart?
-  * Yes! You can use [NVIM_APPNAME](https://neovim.io/doc/user/starting.html#%24NVIM_APPNAME)`=nvim-NAME`
-    to maintain multiple configurations. For example, you can install the kickstart
-    configuration in `~/.config/nvim-kickstart` and create an alias:
-    ```
-    alias nvim-kickstart='NVIM_APPNAME="nvim-kickstart" nvim'
-    ```
-    When you run Neovim using `nvim-kickstart` alias it will use the alternative
-    config directory and the matching local directory
-    `~/.local/share/nvim-kickstart`. You can apply this approach to any Neovim
-    distribution that you would like to try out.
-* What if I want to "uninstall" this configuration:
-  * Remove your config directory and local data directory (for example,
-    `~/.config/nvim` and `~/.local/share/nvim`).
-* Why is the kickstart `init.lua` a single file? Wouldn't it make sense to split it into multiple files?
-  * The main purpose of kickstart is to serve as a teaching tool and a reference
-    configuration that someone can easily use to `git clone` as a basis for their own.
-    As you progress in learning Neovim and Lua, you might consider splitting `init.lua`
-    into smaller parts. A fork of kickstart that does this while maintaining the
-    same functionality is available here:
-    * [kickstart-modular.nvim](https://github.com/dam9000/kickstart-modular.nvim)
-  * Discussions on this topic can be found here:
-    * [Restructure the configuration](https://github.com/nvim-lua/kickstart.nvim/issues/218)
-    * [Reorganize init.lua into a multi-file setup](https://github.com/nvim-lua/kickstart.nvim/pull/473)
-
-### Install Recipes
-
-Below you can find OS specific install instructions for Neovim and dependencies.
-
-After installing all the dependencies continue with the [Install Kickstart](#install-kickstart) step.
-
-#### Windows Installation
-
-<details><summary>Windows with Microsoft C++ Build Tools and CMake</summary>
-Kickstart's default config is make-only for `telescope-fzf-native.nvim`.
-If `make` is unavailable, the plugin is skipped.
-
-Recommended: install `make` (see the chocolatey section below).
-
-If you want a CMake-only setup, customize `init.lua` in two places:
-
-1. Include `telescope-fzf-native.nvim` when `cmake` is available:
-
-```lua
-if vim.fn.executable 'make' == 1 or vim.fn.executable 'cmake' == 1 then
-  table.insert(plugins, gh 'nvim-telescope/telescope-fzf-native.nvim')
-end
-```
-
-2. In the `PackChanged` hook, use CMake when `make` is unavailable:
-
-```lua
-if name == 'telescope-fzf-native.nvim' then
-  if vim.fn.executable 'make' == 1 then
-    run_build(name, { 'make' }, ev.data.path)
-  elseif vim.fn.executable 'cmake' == 1 then
-    run_build(name, { 'cmake', '-S.', '-Bbuild', '-DCMAKE_BUILD_TYPE=Release' }, ev.data.path)
-    run_build(name, { 'cmake', '--build', 'build', '--config', 'Release', '--target', 'install' }, ev.data.path)
-  end
-  return
-end
-```
-
-See `telescope-fzf-native` documentation for [build details](https://github.com/nvim-telescope/telescope-fzf-native.nvim#installation).
-</details>
-<details><summary>Windows with gcc/make using chocolatey</summary>
-Alternatively, one can install gcc and make which don't require changing the config,
-the easiest way is to use choco:
-
-1. install [chocolatey](https://chocolatey.org/install)
-either follow the instructions on the page or use winget,
-run in cmd as **admin**:
-```
-winget install --accept-source-agreements chocolatey.chocolatey
-```
-
-2. install all requirements using choco, exit the previous cmd and
-open a new one so that choco path is set, and run in cmd as **admin**:
-```
-choco install -y neovim git ripgrep wget fd unzip gzip mingw make tree-sitter
-```
-</details>
-<details><summary>WSL (Windows Subsystem for Linux)</summary>
-
-```
-wsl --install
-wsl
-sudo add-apt-repository ppa:neovim-ppa/unstable -y
-sudo apt update
-sudo apt install make gcc ripgrep fd-find tree-sitter-cli unzip git xclip neovim
-```
-</details>
-
-#### Linux Install
-<details><summary>Ubuntu Install Steps</summary>
-
-```
-sudo add-apt-repository ppa:neovim-ppa/unstable -y
-sudo apt update
-sudo apt install make gcc ripgrep fd-find tree-sitter-cli unzip git xclip neovim
-```
-</details>
-<details><summary>Debian Install Steps</summary>
-
-```
-sudo apt update
-sudo apt install make gcc ripgrep fd-find tree-sitter-cli unzip git xclip curl
-
-# Now we install nvim
-curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.tar.gz
-sudo rm -rf /opt/nvim-linux-x86_64
-sudo mkdir -p /opt/nvim-linux-x86_64
-sudo chmod a+rX /opt/nvim-linux-x86_64
-sudo tar -C /opt -xzf nvim-linux-x86_64.tar.gz
-
-# make it available in /usr/local/bin, distro installs to /usr/bin
-sudo ln -sf /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/
-```
-</details>
-<details><summary>Fedora Install Steps</summary>
-
-```
-sudo dnf install -y gcc make git ripgrep fd-find tree-sitter-cli unzip neovim
-```
-</details>
-
-<details><summary>Arch Install Steps</summary>
-
-```
-sudo pacman -S --noconfirm --needed gcc make git ripgrep fd tree-sitter-cli unzip neovim
-```
-</details>
-
-### Alternative neovim installation methods
-
-For some systems it is not unexpected that the [package manager installation
-method](https://github.com/neovim/neovim/blob/master/INSTALL.md#install-from-package)
-recommended by neovim is significantly behind. If that is the case for you,
-pick one of the following methods that are known to deliver fresh neovim versions very quickly.
-They have been picked for their popularity and because they make installing and updating
-neovim to the latest versions easy. You can also find more detail about the
-available methods being discussed
-[here](https://github.com/nvim-lua/kickstart.nvim/issues/1583).
-
-
-<details><summary>Bob</summary>
-
-[Bob](https://github.com/MordechaiHadad/bob) is a Neovim version manager for
-all platforms. Simply install
-[rustup](https://rust-lang.github.io/rustup/installation/other.html),
-and run the following commands:
+After stowing `nvim2`:
 
 ```bash
-rustup default stable
-rustup update stable
-cargo install bob-nvim
-bob use stable
+NVIM_APPNAME=nvim2 nvim
 ```
 
-</details>
-
-<details><summary>Homebrew</summary>
-
-[Homebrew](https://brew.sh) is a package manager popular on Mac and Linux.
-Simply install using [`brew install`](https://formulae.brew.sh/formula/neovim).
-
-</details>
-
-<details><summary>Flatpak</summary>
-
-Flatpak is a package manager for applications that allows developers to package their applications
-just once to make it available on all Linux systems. Simply [install flatpak](https://flatpak.org/setup/)
-and setup [flathub](https://flathub.org/setup) to [install neovim](https://flathub.org/apps/io.neovim.nvim).
-
-</details>
-
-<details><summary>asdf and mise-en-place</summary>
-
-[asdf](https://asdf-vm.com/) and [mise](https://mise.jdx.dev/) are tool version managers,
-mostly aimed towards project-specific tool versioning. However both support managing tools
-globally in the user-space as well:
-
-<details><summary>mise</summary>
-
-[Install mise](https://mise.jdx.dev/getting-started.html), then run:
+The Bash configuration also provides the `v` alias. To start directly from
+this repository:
 
 ```bash
-mise plugins install neovim
-mise use neovim@stable
+cd /home/surbanski/work/githubactions/dotfilesneovim/dotfiles/nvim2/.config/nvim2
+XDG_CONFIG_HOME="$(dirname "$PWD")" NVIM_APPNAME=nvim2 nvim
 ```
 
-</details>
+Use current Neovim 0.12 stable or a recent nightly. Language installation and
+tooling details are in
+[`docs/neovim-nvchad-to-kickstart.md`](../../../docs/neovim-nvchad-to-kickstart.md).
 
-<details><summary>asdf</summary>
+## Enabled plugin set
 
-[Install asdf](https://asdf-vm.com/guide/getting-started.html), then run:
+| Plugin | Purpose in this profile |
+|---|---|
+| `LuaSnip` | Expand the custom global, Lua and Markdown snippets under `snippets/` |
+| `blink.cmp` | Provide completion from LSP, filesystem paths and LuaSnip |
+| `conform.nvim` | Format manually and on save, including Ruff formatting for Python |
+| `fidget.nvim` | Show language-server progress without a permanent UI panel |
+| `gitsigns.nvim` | Show Git changes and provide hunk, blame and diff actions |
+| `guess-indent.nvim` | Detect indentation settings from the current file |
+| `mason-lspconfig.nvim` | Connect Mason-installed servers to Neovim's LSP configuration names |
+| `mason-tool-installer.nvim` | Install the selected servers, formatters and linters automatically |
+| `mason.nvim` | Provide the external-tool registry, installer and `:Mason` interface |
+| `mini.nvim` | Supply text objects, surroundings, alignment, statusline, icons and buffer removal |
+| `nvim-highlight-colors` | Preview color values inline |
+| `nvim-lint` | Publish Hadolint, TFLint and yamllint results as diagnostics |
+| `nvim-lspconfig` | Supply default commands, filetypes and root detection for language servers |
+| `nvim-treesitter` | Provide parsing, highlighting, indentation and language injections |
+| `persistence.nvim` | Save and restore directory-based sessions |
+| `plenary.nvim` | Supply shared Lua utilities required by Telescope |
+| `render-markdown.nvim` | Render Markdown headings, lists, tables and code blocks inside Neovim |
+| `telescope-fzf-native.nvim` | Speed up Telescope sorting with its compiled FZF matcher |
+| `telescope-ui-select.nvim` | Display `vim.ui.select` choices in a Telescope dropdown |
+| `telescope.nvim` | Search files, text, buffers, commands, symbols and diagnostics |
+| `todo-comments.nvim` | Highlight and search TODO-style comments |
+| `which-key.nvim` | Show available mappings after a key prefix |
 
-```bash
-asdf plugin add neovim
-asdf install neovim stable
-asdf set neovim stable --home
-asdf reshim neovim
-```
+## Discover mappings inside Neovim
 
-</details>
+These are the fastest ways to find a mapping when this README is outdated or
+incomplete:
 
-</details>
+| Action | Command |
+|---|---|
+| Show the next available leader keys | Press `Space` and wait for which-key |
+| Search configured mappings | `<leader>sk` |
+| Inspect a normal-mode mapping | `:verbose nmap <keys>` |
+| Inspect an insert-mode mapping | `:verbose imap <keys>` |
+| Read help for a key | `:help <keys>` |
+| List commands | `<leader>sc` |
+
+Notation used below:
+
+- `<leader>` means `Space`.
+- `<C-x>` means `Ctrl+x`.
+- `<S-x>` means `Shift+x`.
+- `<A-x>` means `Alt+x`.
+- Normal mode is the default mode reached with `Esc`.
+
+## Daily Neovim basics
+
+### Files and commands
+
+| Action | Keys or command |
+|---|---|
+| Open a file | `:edit path/to/file` |
+| Save current file | `:write` or `:w` |
+| Save all changed files | `:wall` or `:wa` |
+| Save and quit | `:wq` |
+| Quit current window | `:quit` or `:q` |
+| Quit without saving | `:q!` |
+| Quit Neovim | `:qa` |
+| Repeat the last command-line command | `@:` |
+| Repeat the last normal-mode change | `.` |
+| Open path or URL under cursor | `gx` |
+| Open built-in directory browser | `:Explore` |
+| Open directory browser on the left | `:Lexplore` |
+
+`netrw` supplies `:Explore` and is enabled. Neo-tree is available as a
+bundled optional module but is not enabled; see
+[Bundled optional modules](#bundled-optional-modules).
+
+### Movement and search
+
+| Action | Keys |
+|---|---|
+| Move left, down, up, right | `h`, `j`, `k`, `l` |
+| Next or previous word | `w`, `b` |
+| End of word | `e` |
+| Start, first text, or end of line | `0`, `^`, `$` |
+| First or last line | `gg`, `G` |
+| Jump to a line | `<line>G`, for example `42G` |
+| Previous or next paragraph/block | `{`, `}` |
+| Matching bracket | `%` |
+| Half-page down or up | `<C-d>`, `<C-u>` |
+| Center current line | `zz` |
+| Find character forward | `f<char>` |
+| Move before character forward | `t<char>` |
+| Repeat or reverse character search | `;`, `,` |
+| Search forward or backward | `/text`, `?text` |
+| Next or previous search match | `n`, `N` |
+| Search word under cursor | `*` forward, `#` backward |
+| Clear search highlighting | `<Esc>` |
+| Jump back or forward in jump list | `<C-o>`, `<C-i>` |
+
+### Editing, selection, undo and registers
+
+| Action | Keys |
+|---|---|
+| Insert before or after cursor | `i`, `a` |
+| Insert at start or end of line | `I`, `A` |
+| Open line below or above | `o`, `O` |
+| Delete character | `x` |
+| Delete line | `dd` |
+| Delete inside word | `diw` |
+| Change inside word | `ciw` |
+| Yank line | `yy` |
+| Yank inside word | `yiw` |
+| Paste after or before cursor | `p`, `P` |
+| Undo or redo | `u`, `<C-r>` |
+| Character, line, or block selection | `v`, `V`, `<C-v>` |
+| Reselect last visual selection | `gv` |
+| Indent or unindent selection | `>`, `<` |
+| Join current line with next | `J` |
+| Add an empty line below or above | `]<Space>`, `[<Space>` |
+| Show registers | `:registers` |
+| Paste latest explicit yank | `"0p` |
+| Paste from numbered yank ring | `"1p` through `"9p` |
+| Use system clipboard explicitly | `"+y`, `"+p` |
+
+This profile changes register behavior:
+
+- `c`, `C`, `cc`, and visual `c` use the black-hole register, so changing text
+  does not overwrite the latest yank.
+- Visual `p` preserves the latest yank instead of replacing it with the
+  selected text.
+- Successful yanks are copied into registers `1` through `9` as a small yank
+  ring.
+- `clipboard=unnamedplus` is enabled, so normal yanks and pastes also use the
+  system clipboard when a clipboard provider is available.
+
+### Comments, spell checking and folds
+
+These are Neovim mappings, not separate plugins.
+
+| Action | Keys |
+|---|---|
+| Toggle comment on current line | `gcc` |
+| Toggle comment over a motion | `gc<motion>`, for example `gcap` |
+| Toggle comment on selection | Select text, then `gc` |
+| Next or previous misspelling | `]s`, `[s` |
+| Suggest spelling corrections | `z=` |
+| Add word to dictionary | `zg` |
+| Mark word as incorrect | `zw` |
+| Toggle fold | `za` |
+| Open or close fold | `zo`, `zc` |
+| Open or close all folds | `zR`, `zM` |
+| Move to next or previous fold | `zj`, `zk` |
+
+Spell checking is enabled automatically for Markdown, text, and Git commit
+buffers. The profile uses marker folds (`{{{` and `}}}`).
+
+## Buffers, windows and terminal mode
+
+### Buffers
+
+| Action | Keys or command |
+|---|---|
+| Pick an open buffer | `<leader><leader>` |
+| Remove current buffer without breaking the layout | `<C-x>` |
+| List buffers | `:ls` |
+| Next or previous buffer | `]b`, `[b` or `:bnext`, `:bprevious` |
+| Switch by buffer number or name | `:buffer <number-or-name>` |
+| Delete current buffer | `:bdelete` |
+
+`<C-x>` normally decrements a number in stock Neovim. This profile replaces
+it with Mini buffer removal.
+
+### Windows and splits
+
+| Action | Keys or command |
+|---|---|
+| Horizontal split | `:split` or `<C-w>s` |
+| Vertical split | `:vsplit` or `<C-w>v` |
+| Focus left, down, up, right split | `<C-h>`, `<C-j>`, `<C-k>`, `<C-l>` |
+| Close current split | `<C-w>c` |
+| Keep only current split | `<C-w>o` |
+| Make splits equal size | `<C-w>=` |
+| Move split to far left, bottom, top, right | `<C-w>H`, `<C-w>J`, `<C-w>K`, `<C-w>L` |
+
+Splits are automatically resized evenly when the terminal size changes.
+
+### Terminal mode and terminal clipboard
+
+| Action | Keys |
+|---|---|
+| Open a terminal buffer | `:terminal` |
+| Leave terminal input mode | `<Esc><Esc>` |
+| Copy terminal selection | `Ctrl+Shift+C` |
+| Paste in terminal | `Ctrl+Shift+V` |
+
+Mouse handling is disabled in Neovim so terminal selection stays under the
+terminal emulator's control. Direct SSH sessions use OSC 52 for clipboard
+copying. Tmux can block OSC 52 because its configuration currently uses
+`set-clipboard off`.
+
+## Search and Telescope
+
+| Action | Keys |
+|---|---|
+| Find files | `<leader>sf` |
+| Live grep project text | `<leader>sg` |
+| Search word under cursor or visual selection | `<leader>sw` |
+| Search current buffer | `<leader>/` |
+| Search text only in open files | `<leader>s/` |
+| Search open buffers | `<leader><leader>` |
+| Recent files | `<leader>s.` |
+| Search diagnostics | `<leader>sd` |
+| Search help | `<leader>sh` |
+| Search mappings | `<leader>sk` |
+| Search commands | `<leader>sc` |
+| List Telescope pickers | `<leader>ss` |
+| Resume last picker | `<leader>sr` |
+| Search this Neovim configuration | `<leader>sn` |
+
+Common keys inside a Telescope picker:
+
+| Action | Insert mode | Normal mode |
+|---|---|---|
+| Move to next or previous result | `<C-n>`, `<C-p>` | `j`, `k` |
+| Open result | `<CR>` | `<CR>` |
+| Open in horizontal split | `<C-x>` | `<C-x>` |
+| Open in vertical split | `<C-v>` | `<C-v>` |
+| Open in a tab | `<C-t>` | `<C-t>` |
+| Scroll preview | `<C-d>`, `<C-u>` | `<C-d>`, `<C-u>` |
+| Close picker | `<Esc>` | `q` |
+| Show picker mappings | `<C-/>` | `?` |
+
+## LSP, diagnostics and completion
+
+LSP mappings become useful when a configured language server attaches to the
+current buffer.
+
+### Code navigation and actions
+
+| Action | Keys |
+|---|---|
+| Hover documentation | `K` |
+| Go to definition with Telescope | `grd` |
+| Go to declaration | `grD` |
+| Find references | `grr` |
+| Find implementations | `gri` |
+| Go to type definition | `grt` |
+| Rename symbol | `grn` |
+| Code action | `gra` in normal or visual mode |
+| Document symbols | `gO` |
+| Workspace symbols | `gW` |
+| Return from a jump | `<C-t>` |
+| Toggle inlay hints when supported | `<leader>th` |
+| Signature help in insert mode | `<C-s>` or `<C-k>` |
+| Expand to outer LSP selection range | `an` in visual/operator-pending mode |
+| Shrink to inner LSP selection range | `in` in visual/operator-pending mode |
+
+Treesitter provides syntax highlighting, indentation, injections and parser
+support automatically. It has no custom daily mapping in this profile. The
+`an` and `in` mappings above are Neovim 0.12 LSP selection ranges, while
+Mini.ai uses `aa` and `ii` for its next-textobject variants.
+
+### Diagnostics
+
+| Action | Keys |
+|---|---|
+| Next or previous diagnostic | `]d`, `[d` |
+| Last or first diagnostic in buffer | `]D`, `[D` |
+| Show diagnostic at cursor | `<C-w>d` |
+| Put diagnostics in location list | `<leader>q` |
+| Search diagnostics with Telescope | `<leader>sd` |
+| Next or previous location-list item | `]l`, `[l` or `:lnext`, `:lprevious` |
+| Next or previous quickfix item | `]q`, `[q` or `:cnext`, `:cprevious` |
+
+The diagnostic float opens automatically after jumping with `[d` or `]d`.
+
+### Completion and snippets
+
+| Action | Keys |
+|---|---|
+| Open completion or documentation | `<C-Space>` |
+| Next or previous completion item | `<C-n>`, `<C-p>` or arrows |
+| Accept selected completion | `<C-y>` |
+| Close completion menu | `<C-e>` |
+| Toggle signature help | `<C-k>` |
+| Move forward or backward through snippet fields | `<Tab>`, `<S-Tab>` |
+| Expand custom snippet or choose next option | `<C-c>` |
+
+Blink supplies completion from LSP, paths and LuaSnip. Custom global, Lua and
+Markdown snippets live under `snippets/`.
+
+## Formatting, linting and tools
+
+| Action | Keys or command |
+|---|---|
+| Format buffer or visual selection | `<leader>f` |
+| Disable format-on-save globally | `:FormatDisable` |
+| Disable format-on-save for current buffer | `:FormatDisable!` |
+| Enable format-on-save globally | `:FormatEnable` |
+| Enable format-on-save for current buffer | `:FormatEnable!` |
+| Inspect formatter selection | `:ConformInfo` |
+| Inspect or install external tools | `:Mason` |
+| Run synchronous managed-tool installation | `:MasonToolsInstallSync` |
+
+Conform formats configured filetypes on save. Ruff sorts imports and formats
+Python. `nvim-lint` runs configured CLI linters after saving; it has no manual
+mapping.
+
+## Git and Gitsigns
+
+Gitsigns mappings are buffer-local and appear in files inside a Git working
+tree.
+
+| Action | Keys |
+|---|---|
+| Next or previous hunk | `]c`, `[c` |
+| Stage hunk | `<leader>hs` |
+| Reset hunk | `<leader>hr` |
+| Stage selected lines | Select lines, then `<leader>hs` |
+| Reset selected lines | Select lines, then `<leader>hr` |
+| Stage whole buffer | `<leader>hS` |
+| Reset whole buffer | `<leader>hR` |
+| Preview hunk | `<leader>hp` |
+| Preview hunk inline | `<leader>hi` |
+| Blame current line | `<leader>hb` |
+| Diff against index | `<leader>hd` |
+| Diff against last commit | `<leader>hD` |
+| Current-file hunks in quickfix | `<leader>hq` |
+| Repository hunks in quickfix | `<leader>hQ` |
+| Toggle current-line blame | `<leader>tb` |
+| Toggle word-level diff | `<leader>tw` |
+| Select current hunk | `vih` or use `ih` with an operator |
+
+## Mini editing modules
+
+### Text objects
+
+Mini.ai extends normal `a` and `i` text objects and searches up to 500 lines.
+Examples:
+
+| Action | Keys |
+|---|---|
+| Select around parentheses | `va)` |
+| Change inside quotes | `ci'` |
+| Yank inside the next quote | `yiiq` |
+| Go to left or right edge of an around-object | `g[<object>`, `g]<object>` |
+
+### Surroundings
+
+| Action | Keys |
+|---|---|
+| Add surroundings | `sa<motion><char>`, for example `saiw)` |
+| Add surroundings to selection | Select text, then `sa<char>` |
+| Delete surroundings | `sd<char>`, for example `sd'` |
+| Replace surroundings | `sr<old><new>`, for example `sr)'` |
+| Find surrounding to right or left | `sf<char>`, `sF<char>` |
+| Highlight surrounding | `sh<char>` |
+
+### Alignment and buffer removal
+
+| Action | Keys |
+|---|---|
+| Align selected text interactively | Select text, press `ga`, then follow the prompt |
+| Align with live preview | Select text, press `gA`, then follow the prompt |
+| Remove current buffer | `<C-x>` |
+
+## Sessions, Markdown, colors and TODO comments
+
+| Action | Keys or command |
+|---|---|
+| Restore session for current directory | `<leader>pr` |
+| Select a saved session | `<leader>ps` |
+| Toggle Markdown rendering globally | `:RenderMarkdown toggle` |
+| Toggle Markdown rendering for current buffer | `:RenderMarkdown buf_toggle` |
+| Open a side-by-side rendered Markdown preview | `:RenderMarkdown preview` |
+| Toggle inline color previews | `:HighlightColors Toggle` |
+| Search TODO comments | `:TodoTelescope` |
+| Put TODO comments in quickfix | `:TodoQuickFix` |
+
+The old TODO mappings (`]t`, `[t`, `<leader>ft`, `<leader>tq`) have not been
+restored. Adding mappings requires no new plugin because
+`todo-comments.nvim` is already installed. Prefer `<leader>tn` and
+`<leader>tp` for TODO navigation: `[t`/`]t` and `[T`/`]T` are Neovim's
+built-in tag-list mappings.
+
+## Plugin and configuration maintenance
+
+| Action | Command |
+|---|---|
+| Inspect plugin state without network access | `:lua vim.pack.update(nil, { offline = true })` |
+| Fetch and review plugin updates | `:lua vim.pack.update()` |
+| Apply proposed plugin updates | `:write` in the update window |
+| Cancel proposed plugin updates | `:quit` in the update window |
+| Check profile health | `:checkhealth kickstart` |
+| Check LSP health | `:checkhealth vim.lsp` |
+| Check Treesitter health | `:checkhealth nvim-treesitter` |
+
+Commit `nvim-pack-lock.json` whenever accepted plugin revisions change.
+
+## Bundled optional modules
+
+Files under `lua/kickstart/plugins/` are configuration examples, not proof
+that their plugins are installed. The bottom of `init.lua` decides which
+modules are enabled.
+
+| Module | State | What it adds |
+|---|---|---|
+| `gitsigns.lua` | Enabled | Git signs, hunk actions and mappings listed above |
+| `lint.lua` | Enabled | Hadolint, TFLint and yamllint integration after save |
+| `neo-tree.lua` | Disabled | Sidebar file tree; `\` reveals the current file and `\` closes the tree |
+| `debug.lua` | Disabled | DAP UI and Go debugging |
+| `autopairs.lua` | Disabled | Automatic closing pairs while typing |
+| `indent_line.lua` | Disabled | Indentation guides |
+
+To enable one, uncomment its `require` line near the bottom of `init.lua` and
+restart Neovim. If Neo-tree is enabled, its common daily keys are:
+
+| Action in Neo-tree | Keys |
+|---|---|
+| Reveal current file or focus tree | `\` |
+| Open item | `<CR>` |
+| Add file or directory | `a`, `A` |
+| Rename or delete | `r`, `d` |
+| Refresh | `R` |
+| Close tree | `\` or `q` |
+| Show Neo-tree's authoritative mapping help | `?` |
+
+If the debug module is enabled, it configures:
+
+| Debug action | Keys |
+|---|---|
+| Start or continue | `<F5>` |
+| Step into, over, or out | `<F1>`, `<F2>`, `<F3>` |
+| Toggle breakpoint | `<leader>b` |
+| Set conditional breakpoint | `<leader>B` |
+| Toggle DAP UI | `<F7>` |
+
+The bundled debug example is Go-focused and is not part of the current
+language scope.
+
+## Previous `nvim` plugin comparison
+
+The previous profile imports `NvChad/NvChad` v2.5 and contains 48 files under
+`nvim/.config/nvim/lua/plugins/`: 44 contain active plugin configuration and
+four are fully commented-out experiments. The tables below compare those
+active configurations with `nvim2`.
+
+### Kept, replaced or partly covered
+
+| Previous plugin | Status in `nvim2` | Difference that remains |
+|---|---|---|
+| `hrsh7th/nvim-cmp` | Replaced by `blink.cmp` | Different completion UI and keys; Blink is enabled by default, but its current sources omit buffer-word and Copilot completion |
+| `numToStr/Comment.nvim` and `nvim-ts-context-commentstring` | Replaced by Neovim's `gc` and Treesitter-aware comment support | No meaningful daily feature is missing |
+| `stevearc/conform.nvim` | Kept | New profile has broader format-on-save rules and uses Ruff for Python |
+| `gbprod/cutlass.nvim` | Partly replaced by black-hole change mappings | Deletes can still alter delete registers; use `"_d` when that matters |
+| `lewis6991/gitsigns.nvim` | Kept | New profile has more hunk, diff and blame mappings |
+| `lukas-reineke/headlines.nvim` | Replaced by `render-markdown.nvim` | Browser rendering is still separate from in-editor rendering |
+| `mfussenegger/nvim-lint` | Kept | Linter set is limited to the selected development languages |
+| `neovim/nvim-lspconfig` | Kept | Uses the Neovim 0.12 API and the selected server list |
+| `mason-org/mason.nvim` | Kept | Mason LSP and tool installers now manage the complete selected tool set |
+| `olimorris/persisted.nvim` | Replaced by `folke/persistence.nvim` | Session picker mappings changed to `<leader>pr` and `<leader>ps` |
+| `kylechui/nvim-surround` | Replaced by `mini.surround` | Surrounding keys use Mini's `sa`, `sd` and `sr` grammar |
+| `nvim-telescope/telescope.nvim` | Kept | Search mappings moved from `<leader>f...` to `<leader>s...`; the old override included hidden files and custom ignore patterns while the current profile uses Telescope defaults |
+| `folke/todo-comments.nvim` | Kept | Old TODO navigation/search mappings are not configured and gutter signs are disabled |
+| `nvim-treesitter/nvim-treesitter` | Kept | Parsers are deliberately limited to selected languages |
+| `pearofducks/ansible-vim` | Replaced by Ansible filetype detection, parser and LSP | Some legacy Vim-specific Ansible syntax behavior may differ |
+| `towolf/vim-helm` | Replaced by Helm filetype detection, parser and LSP | No separate Vimscript Helm syntax plugin |
+| `gbprod/yanky.nvim` | Partly replaced by registers `1` through `9` and preserved visual paste | No 50-item history, Telescope yank picker, or `[y` and `]y` history cycling |
+
+### Active old features that are genuinely missing
+
+| Previous plugin | What it provided | Minimal recommendation |
+|---|---|---|
+| `okuuva/auto-save.nvim` | Saved automatically after text changes or leaving insert mode | Do not add initially; explicit saves make format/lint timing predictable |
+| `kevinhwang91/nvim-bqf` | Quickfix previews, filtering and split-opening helpers | Keep built-in quickfix until it becomes painful |
+| `zbirenbaum/copilot.lua`, `copilot-cmp`, `copilot-status.nvim` | Inline AI suggestions, completion integration and status | Add only `copilot.lua` if AI completion is intentionally wanted; skip the integration/status extras |
+| `folke/flash.nvim` | Label-based jumps and Treesitter-aware selection | Native `/`, `f`, `t`, LSP selection and Telescope are enough for now |
+| `ray-x/go.nvim` and `guihua.lua` | Go commands, test/code helpers and tool installation | Do not add unless Go returns to the supported language list; prefer a small `gopls` setup first |
+| `rmagatti/goto-preview` | Definitions, references and implementations in floating previews | Current Telescope LSP pickers cover navigation; add only if floating previews are missed |
+| `ThePrimeagen/harpoon` | Persistent short list of frequently used files | Consider later only if `<leader><leader>` is too slow for repeated file switching |
+| `tzachar/highlight-undo.nvim` | Briefly highlighted text affected by undo and redo | Cosmetic; do not add |
+| `kevinhwang91/nvim-hlslens` | Search match counts and search markers integrated with scrollbar | Neovim search count and normal `n`/`N` are sufficient |
+| `iamcco/markdown-preview.nvim` | Browser-based Markdown preview | Add only when browser-accurate rendering is needed; current render-markdown is in-editor |
+| `karb94/neoscroll.nvim` | Animated smooth scrolling | Cosmetic; do not add |
+| `shortcuts/no-neck-pain.nvim` | Centered editing column with side padding | Cosmetic; use splits when focus space is needed |
+| `nacro90/numb.nvim` | Previewed a target line while entering `:<line>` | Small convenience; do not add initially |
+| `epwalsh/pomo.nvim` and `nvim-notify` | Pomodoro timers and notifications | Keep time management outside the editor |
+| `tris203/precognition.nvim` | On-screen hints for available Vim motions | Useful while learning, but not part of a stable daily setup |
+| `ahmedkhalf/project.nvim` | Project-root detection and Telescope project switching | Sessions, current working directory and file search cover the common cases |
+| `petertriho/nvim-scrollbar` | Scrollbar with diagnostic and search markers | Cosmetic; signs, diagnostics and Telescope already expose this information |
+| `utilyre/sentiment.nvim` | Enhanced matching-pair highlighting | Built-in match highlighting is enough |
+| `nvim-pack/nvim-spectre` | Interactive project-wide search and replace | Consider only if project-wide replacements are frequent; otherwise use quickfix plus `:cdo` |
+| `cshuaimin/ssr.nvim` | Treesitter structural search and replace | Add only for recurring AST-aware refactors |
+| `nguyenvukhang/nvim-toggler` | Toggled values such as `true`/`false` or `on`/`off` | Small convenience; a mapping or substitution is simpler than another plugin |
+| `nvim-tree/nvim-tree.lua` | Persistent sidebar file explorer | Try Telescope and `:Explore`; if a tree is still wanted, enable bundled Neo-tree instead |
+| `Wansmer/treesj` | Split or joined syntax nodes with `gj` | Best small candidate to reconsider if structured YAML, JSON, Lua or Terraform editing needs it daily |
+| `folke/trouble.nvim` | Dedicated diagnostics, references and quickfix-style panels | Telescope diagnostics and location lists cover the common workflow |
+| `kevinhwang91/nvim-ufo` and `promise-async` | Treesitter/indent folds and fold previews | Keep marker folds initially; configure native Treesitter folds before adding a plugin |
+| `szw/vim-maximizer` | Toggled the current split between normal and maximized size | Use built-in window sizing commands such as `<C-w>_` and `<C-w>=`, or add a small mapping later |
+| `sustech-data/wildfire.nvim` | Repeatedly expanded visual selection to surrounding objects | Mini.ai text objects and LSP `an`/`in` selections cover most cases |
+
+### NvChad platform features no longer present
+
+The old profile inherited these through `NvChad/NvChad`, rather than through
+individual files in `lua/plugins/`:
+
+| NvChad component | What is different now |
+|---|---|
+| `nvchad/base46` | Replaced by the local Isekai colorscheme and palette |
+| `nvchad/ui` | Mini statusline remains, but there is no NvChad dashboard or buffer tabline |
+| `nvzone/volt`, `menu`, `minty` | No NvChad menus or color-picker UI |
+| NvChad's nvim-cmp stack and sources | Replaced by Blink with LSP, path and LuaSnip sources |
+| NvChad's NvimTree integration | No sidebar is enabled; Neo-tree is available but disabled |
+
+Re-adding NvChad's UI stack would work against the goal of keeping this
+profile small and easy to manage.
+
+### Old plugin files that were already disabled
+
+These files contain only commented specs and were not active in the previous
+profile:
+
+| File | Experiment |
+|---|---|
+| `codecompanion.lua` | CodeCompanion chat and inline AI workflows |
+| `kustomize.lua` | Kustomize build, resource and validation commands |
+| `local-highlight.lua` | Local same-word highlighting |
+| `yaml-companion.lua` | Interactive YAML schema selection and Telescope integration |
+
+## Suggested minimal path
+
+Keep the current plugin set unchanged for normal use before restoring old
+features. Then add only in response to a repeated workflow problem:
+
+1. Add TODO mappings if TODO navigation is used regularly. This adds no
+   dependency; prefer `<leader>tn` and `<leader>tp` instead of overriding
+   built-in tag keys.
+2. Use Telescope plus `:Explore`; enable the bundled Neo-tree module only if a
+   persistent sidebar is genuinely faster.
+3. Consider `treesj` as the first new plugin if split/join operations are
+   frequent in YAML, JSON, Lua or Terraform.
+4. Consider Spectre only for frequent interactive project-wide replacements.
+5. Consider Harpoon only if the buffer picker does not cover repeated jumps
+   among a small working set.
+6. Avoid re-adding cosmetic UI plugins, alternate completion stacks, NvChad
+   platform plugins, or language plugins outside the supported language list.
+
+This keeps each addition tied to an observed daily need and avoids rebuilding
+the previous distribution one plugin at a time.

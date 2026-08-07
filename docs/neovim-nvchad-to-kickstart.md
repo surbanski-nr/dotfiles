@@ -90,6 +90,9 @@ The Isekai colorscheme, palette, and custom LuaSnip snippets are adapted from
 
 ## Key commands
 
+See the [`nvim2` README](../nvim2/.config/nvim2/README.md) for the full daily
+key reference, bundled optional modules, and previous-plugin comparison.
+
 | Action | Command or mapping |
 |---|---|
 | Format buffer or selection | `<leader>f` |
