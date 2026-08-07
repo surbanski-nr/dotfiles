@@ -457,38 +457,12 @@ do
     },
   }
 
-  vim.cmd.colorscheme 'isekai'
+  vim.o.background = 'dark'
+  vim.cmd.colorscheme 'default'
 
   -- Highlight todo, notes, etc in comments
   vim.pack.add { gh 'folke/todo-comments.nvim' }
   require('todo-comments').setup { signs = false }
-
-  vim.pack.add {
-    gh 'folke/persistence.nvim',
-    gh 'MeanderingProgrammer/render-markdown.nvim',
-    gh 'brenoprata10/nvim-highlight-colors',
-  }
-
-  require('persistence').setup()
-  vim.keymap.set('n', '<leader>pr', function() require('persistence').load() end, { desc = '[R]estore session' })
-  vim.keymap.set('n', '<leader>ps', function() require('persistence').select() end, { desc = '[S]elect session' })
-
-  require('render-markdown').setup {
-    file_types = { 'markdown' },
-    heading = { sign = false, position = 'overlay' },
-    code = {
-      language_icon = false,
-      language_name = false,
-      language_info = false,
-      left_pad = 1,
-      right_pad = 1,
-      width = 'block',
-      border = 'thin',
-    },
-    latex = { enabled = false },
-  }
-
-  require('nvim-highlight-colors').setup()
 
   -- [[ mini.nvim ]]
   --  A collection of various small independent plugins/modules
@@ -1233,12 +1207,13 @@ do
   -- require 'kickstart.plugins.autopairs'
   require 'kickstart.plugins.neo-tree'
   -- require 'kickstart.plugins.gitsigns' -- adds gitsigns recommended keymaps
-
-  -- NOTE: You can add your own plugins, configuration, etc from `lua/custom/plugins/*.lua`
-  --
-  --  Uncomment the following line and add your plugins to `lua/custom/plugins/*.lua` to get going.
-  -- require 'custom.plugins'
 end
+
+-- ============================================================
+-- SECTION 11: CUSTOM PLUGINS
+-- User-selected additions from lua/custom/plugins/
+-- ============================================================
+require 'custom.plugins'
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
