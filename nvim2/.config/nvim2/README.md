@@ -298,13 +298,17 @@ current buffer.
 | Return from a jump | `<C-t>` |
 | Toggle inlay hints when supported | `<leader>th` |
 | Signature help in insert mode | `<C-s>` or `<C-k>` |
-| Expand to outer LSP selection range | `an` in visual/operator-pending mode |
-| Shrink to inner LSP selection range | `in` in visual/operator-pending mode |
+| Start and expand an LSP selection | `van` from normal mode, then repeat `an` |
+| Shrink the current LSP selection | `in` while still in visual mode |
 
 Treesitter provides syntax highlighting, indentation, injections and parser
 support automatically. It has no custom daily mapping in this profile. The
-`an` and `in` mappings above are Neovim 0.12 LSP selection ranges, while
-Mini.ai uses `aa` and `ii` for its next-textobject variants.
+`an` and `in` mappings above are Neovim 0.12 LSP selection ranges. They are not
+normal-mode or leader mappings: normal-mode `a` enters insert mode. The
+language server must support `textDocument/selectionRange`. Mini.ai uses `aa`
+and `ii` for its next-textobject variants. Those are prefixes rather than
+standalone normal-mode mappings; for example, `vaa)` selects around the next
+parenthesized text and `dii)` deletes inside the next parenthesized text.
 
 ### Diagnostics
 
@@ -568,7 +572,7 @@ active configurations with `nvim2`.
 | `folke/trouble.nvim` | Dedicated diagnostics, references and quickfix-style panels | Telescope diagnostics and location lists cover the common workflow |
 | `kevinhwang91/nvim-ufo` and `promise-async` | Treesitter/indent folds and fold previews | Keep marker folds initially; configure native Treesitter folds before adding a plugin |
 | `szw/vim-maximizer` | Toggled the current split between normal and maximized size | Use built-in window sizing commands such as `<C-w>_` and `<C-w>=`, or add a small mapping later |
-| `sustech-data/wildfire.nvim` | Repeatedly expanded visual selection to surrounding objects | Mini.ai text objects and LSP `an`/`in` selections cover most cases |
+| `sustech-data/wildfire.nvim` | Repeatedly expanded visual selection to surrounding objects | First try `van` from normal mode, then repeat `an` to expand or use `in` to shrink; this requires an LSP with selection-range support, so Wildfire can still help when language-independent expansion is needed |
 
 ### NvChad platform features no longer present
 
