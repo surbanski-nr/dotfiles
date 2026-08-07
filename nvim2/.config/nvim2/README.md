@@ -542,7 +542,7 @@ active configurations with `nvim2`.
 | `cshuaimin/ssr.nvim` | Treesitter structural search and replace | Add only for recurring AST-aware refactors |
 | `nguyenvukhang/nvim-toggler` | Toggled values such as `true`/`false` or `on`/`off` | Small convenience; a mapping or substitution is simpler than another plugin |
 | `nvim-tree/nvim-tree.lua` | Persistent sidebar file explorer | Replaced by the enabled Neo-tree module |
-| `Wansmer/treesj` | Split or joined syntax nodes with `gj` | Best small candidate to reconsider if structured YAML, JSON, Lua or Terraform editing needs it daily |
+| `Wansmer/treesj` | Split or joined syntax nodes with `gj` | Try `mini.splitjoin` first because Mini is already installed; reconsider Treesj only if syntax-aware splitting is needed |
 | `folke/trouble.nvim` | Dedicated diagnostics, references and quickfix-style panels | Telescope diagnostics and location lists cover the common workflow |
 | `kevinhwang91/nvim-ufo` and `promise-async` | Treesitter/indent folds and fold previews | Keep marker folds initially; configure native Treesitter folds before adding a plugin |
 | `szw/vim-maximizer` | Toggled the current split between normal and maximized size | Use built-in window sizing commands such as `<C-w>_` and `<C-w>=`, or add a small mapping later |
@@ -576,6 +576,33 @@ profile:
 | `local-highlight.lua` | Local same-word highlighting |
 | `yaml-companion.lua` | Interactive YAML schema selection and Telescope integration |
 
+## Potential additions reviewed
+
+These sources are documented for later decisions. None of them is enabled by
+this section.
+
+| Source | What it does | Overlap with `nvim2` | Recommendation |
+|---|---|---|---|
+| [MiniMax configs](https://nvim-mini.org/MiniMax/configs/) | Generates a Neovim configuration built mostly from `mini.nvim`, with version-specific examples for `vim.pack`, native LSP, Treesitter, formatting and snippets | `nvim2` already uses `vim.pack`, six Mini modules, native LSP, Treesitter and Conform; MiniMax alternatives for files, picking, completion, snippets, sessions, Git and key hints would replace active plugins | Use it as a reference and borrow individual Mini modules; do not replace the current profile |
+| [diffbandit.nvim](https://github.com/CoreyKaylor/diffbandit.nvim) | Shows two-way diffs without padding either document, using a connector gutter; also provides editable targets, file and folder diffs, Git queues, staging, a commit panel, branch and commit review, binary hex diffs and a three-way merge resolver | Gitsigns already covers signs, hunk navigation, staging, reset, preview and blame, but it does not provide a full review, folder-diff or merge UI | Trial it only if Git review or conflict resolution inside Neovim becomes a regular workflow; otherwise keep Gitsigns |
+| [tunnelvision.nvim](https://github.com/leolaurindo/tunnelvision.nvim) | Dims unrelated lines around a selected symbol and navigates its path; static, dynamic and experimental flow modes use LSP highlights, Treesitter or word matching | The current LSP setup already highlights document references on cursor hold and Telescope searches references; TunnelVision adds a focused presentation and assignment-flow view | Skip initially; add only if symbol-focused reading is useful enough to justify another visual mode |
+| [nvim_native](https://github.com/smnatale/nvim_native) | Demonstrates a zero-plugin setup using native LSP and completion, `findfunc` fuzzy search, ripgrep with quickfix, netrw, a custom statusline and basic format-on-save | Blink, Telescope, Neo-tree, Mini statusline and Conform already provide those workflows | Keep as a dependency-reduction reference, not an addition. The repository currently has no license, so do not copy its code unless that changes |
+
+### MiniMax modules worth considering
+
+`mini.nvim` is already installed, so enabling another Mini module does not add
+a plugin dependency. It still adds mappings and behavior that need maintenance.
+
+| Module | What it adds | Recommendation |
+|---|---|---|
+| `mini.splitjoin` | Toggles bracketed arguments between one line and one item per line with `gS` | Try it for JSON, Lua, Terraform and YAML flow collections; use Treesj if syntax-aware structures need better coverage |
+| `mini.trailspace` | Highlights trailing whitespace and exposes a trim function | Consider it for filetypes not covered by format-on-save; it is unnecessary where Conform already cleans the file |
+| `mini.bracketed` | Provides consistent `[` and `]` navigation for buffers, diagnostics, quickfix, jumps and other targets | Enable only selected targets because its defaults can collide with Gitsigns hunk keys and native diagnostic keys |
+| `mini.visits` | Tracks file and directory visits for frecency search and user labels | Consider only if Telescope buffers, old files and persistence sessions are not enough |
+| `mini.jump` and `mini.jump2d` | Extend `f`/`t` movement and add label-based jumps within visible text | Similar benefit to Flash; keep native movement until this becomes a repeated navigation problem |
+| `mini.operators` | Adds exchange, multiply, replace, sort and evaluate operators | Do not enable wholesale because its default `gr` family overlaps Neovim's LSP mappings; configure individual operators if needed |
+| Other MiniMax modules | Add a file browser, picker, completion, snippets, sessions, Git helpers, diff signs, key hints, color highlighting, pairs and UI elements | Avoid the overlapping replacements while Neo-tree, Telescope, Blink, LuaSnip, persistence, Gitsigns, which-key and the current color tools remain enabled |
+
 ## Suggested minimal path
 
 Keep the current plugin set unchanged for normal use before restoring old
@@ -586,12 +613,15 @@ features. Then add only in response to a repeated workflow problem:
    built-in tag keys.
 2. Keep Neo-tree as the only sidebar browser; do not add a second file-tree
    plugin.
-3. Consider `treesj` as the first new plugin if split/join operations are
-   frequent in YAML, JSON, Lua or Terraform.
-4. Consider Spectre only for frequent interactive project-wide replacements.
-5. Consider Harpoon only if the buffer picker does not cover repeated jumps
+3. Try `mini.splitjoin` first if split/join operations are frequent. It uses the
+   existing Mini dependency; add Treesj only if its pattern-based behavior is
+   not accurate enough.
+4. Trial DiffBandit only if full Git review, folder diffs or merge resolution
+   are regular in-editor tasks.
+5. Consider Spectre only for frequent interactive project-wide replacements.
+6. Consider Harpoon only if the buffer picker does not cover repeated jumps
    among a small working set.
-6. Avoid re-adding cosmetic UI plugins, alternate completion stacks, NvChad
+7. Avoid re-adding cosmetic UI plugins, alternate completion stacks, NvChad
    platform plugins, or language plugins outside the supported language list.
 
 This keeps each addition tied to an observed daily need and avoids rebuilding
