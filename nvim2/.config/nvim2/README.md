@@ -76,6 +76,37 @@ The active colorscheme is Neovim's built-in `default` with its dark
 `NvimDark*` palette. The custom Isekai colorscheme and palette remain under
 `colors/isekai.lua` and `lua/palette.lua` but are not loaded.
 
+### Switch the colorscheme
+
+To try Isekai for the current Neovim session:
+
+```vim
+:colorscheme isekai
+```
+
+Return to Neovim's default dark palette with:
+
+```vim
+:colorscheme default
+```
+
+For a persistent change, edit the colorscheme line in `init.lua`. Use this for
+Isekai:
+
+```lua
+vim.cmd.colorscheme 'isekai'
+```
+
+Use this to switch back to the Neovim default:
+
+```lua
+vim.cmd.colorscheme 'default'
+```
+
+Restart Neovim after editing the file, or run `:source $MYVIMRC`. Isekai keeps
+syntax groups such as methods, functions, delimiters, docstrings and return
+keywords unbolded; Markdown strong text and headings remain bold by design.
+
 ## Discover mappings inside Neovim
 
 These are the fastest ways to find a mapping when this README is outdated or
