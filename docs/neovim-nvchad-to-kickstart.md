@@ -54,6 +54,7 @@ Format-on-save is enabled for the configured languages and common web file
 types. Helm templates are excluded because generic YAML formatters can damage
 Go template expressions. Use `:FormatDisable` globally or `:FormatDisable!`
 for the current buffer; use `:FormatEnable` or `:FormatEnable!` to restore it.
+Press `<leader>tf` to toggle format-on-save for the current Neovim process.
 
 CLI linters run after saving. Expensive project-wide tools such as TFLint do
 not run on every insert-mode change.
@@ -86,7 +87,8 @@ buffer removal. Press `Ctrl+x` to remove the current buffer.
 - SSH sessions use Neovim's OSC 52 clipboard provider. Tmux currently has
   `set-clipboard off`, so tmux may block OSC 52 while direct SSH terminals work.
 
-The Isekai colorscheme, palette, and custom LuaSnip snippets are adapted from
+The active colorscheme is Neovim's built-in `default` with its dark
+`NvimDark*` palette. The retained but disabled Isekai colorscheme, palette, and
 
 ## Key commands
 

@@ -58,12 +58,14 @@ tooling details are in
 | `todo-comments.nvim` | Highlight and search TODO-style comments |
 | `which-key.nvim` | Show available mappings after a key prefix |
 
-Most plugin setup is intentionally kept in `init.lua`. Persistence,
-render-markdown and color highlighting are installed and configured together
-in `SECTION 4: UI / CORE UX PLUGINS`. Telescope, LSP, Conform, completion and
-Treesitter have their own numbered sections. Gitsigns, linting and Neo-tree use
-files under `lua/kickstart/plugins/`. The `lua/custom/plugins/` loader remains
-disabled, so placing a file there does not currently enable it.
+The user-selected additions are under `lua/custom/plugins/`: `init.lua` lists
+their sources and the other files hold each plugin's setup. Core setup remains
+in the numbered sections of the main `init.lua`; bundled Kickstart modules such
+as Gitsigns, linting and Neo-tree are under `lua/kickstart/plugins/`.
+
+The active colorscheme is Neovim's built-in `default` with its dark
+`NvimDark*` palette. The custom Isekai colorscheme and palette remain under
+`colors/isekai.lua` and `lua/palette.lua` but are not loaded.
 
 ## Discover mappings inside Neovim
 
