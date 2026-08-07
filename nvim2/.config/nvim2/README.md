@@ -276,6 +276,40 @@ Common keys inside a Telescope picker:
 | Close picker | `<Esc>` | `q` |
 | Show picker mappings | `<C-/>` | `?` |
 
+## Quickfix list
+
+Quickfix is a project-wide list of file locations. Common ways to populate it
+in this profile are Telescope searches, Gitsigns (`<leader>hq` or
+`<leader>hQ`) and `:TodoQuickFix`.
+
+Inside any Telescope picker:
+
+| Action | Keys |
+|---|---|
+| Replace quickfix with all currently filtered results and open it | `<C-q>` |
+| Mark or unmark individual results | `<Tab>`, `<S-Tab>` |
+| Replace quickfix with only the marked results and open it | `<M-q>` (Alt-q) |
+
+Both Telescope actions replace the current quickfix list; they do not append
+to it. `<M-q>` may depend on the terminal correctly sending Alt-modified keys.
+
+Using the resulting quickfix list:
+
+| Action | Keys or command |
+|---|---|
+| Open or close the quickfix window | `:copen`, `:cclose` |
+| Open the entry under the cursor | `<CR>` |
+| Open the entry in a new split | `<C-w><CR>` |
+| Next or previous entry | `]q`, `[q` or `:cnext`, `:cprevious` |
+| Last or first entry | `]Q`, `[Q` or `:clast`, `:cfirst` |
+| Remove the entry under the cursor from this list | `dd` in the quickfix window |
+| Run an Ex command for every entry | `:cdo {command}` |
+
+`dd` only removes the selected location from the current quickfix list. It
+does not delete a file, change source code or affect a window-local location
+list. Diagnostic `<leader>q` uses a location list instead; open and close that
+with `:lopen` and `:lclose`, and navigate it with `]l` and `[l`.
+
 ## LSP, diagnostics and completion
 
 LSP mappings become useful when a configured language server attaches to the
@@ -336,8 +370,28 @@ The diagnostic float opens automatically after jumping with `[d` or `]d`.
 | Move forward or backward through snippet fields | `<Tab>`, `<S-Tab>` |
 | Expand custom snippet or choose next option | `<C-c>` |
 
-Blink supplies completion from LSP, paths and LuaSnip. Custom global, Lua and
-Markdown snippets live under `snippets/`.
+Blink supplies completion from LSP, paths and LuaSnip. Regular snippets can be
+accepted from Blink with `<C-y>` or expanded with `<C-c>` after typing their
+trigger. Autosnippets expand as soon as their complete trigger is typed.
+
+The custom snippets under `snippets/` are:
+
+| File and type | Triggers | What they produce |
+|---|---|---|
+| `all.lua`, autosnippets in every filetype | `(`, `[`, `{`, `'`, `"` | Matching delimiters or quotes with the cursor between them |
+| `markdown.lua`, regular | `` ` ``, `l`, `ll`, `t`, `tb`, `tb2`, `tb3`, `cn`, `ct`, `ci`, `cw`, `cc` | Inline code, links, images, tasks, one-to-three-column tables and GitHub NOTE/TIP/IMPORTANT/WARNING/CAUTION callouts |
+| `markdown.lua`, autosnippets | `` ``` ``, `**`, `__`, `*_`, `~~`, `<<` | Fenced code, bold, italic, bold italic, strikethrough and angle brackets |
+| `lua.lua`, regular | `l`, `ll`, `lm`, `lf`, `lff`, `lr`, `if`, `eif`, `for`, `forn`, `fori`, `w`, `f`, `fm`, `p`, `pi` | Local declarations, modules, functions, control flow, loops, `require`, `print` and `vim.inspect` templates |
+
+These snippets are optional conveniences, not part of LSP support. `lua.lua`
+is useful when editing this Neovim configuration, especially `lr`, `lm`, `lf`
+and `pi`. The Markdown tables and callouts are useful when writing GitHub
+documentation. The global delimiter autosnippets and Markdown formatting
+autosnippets are the weakest fit for a minimal setup: they expand broadly,
+have no syntax-aware checks and can be surprising when typing literal quotes
+or Markdown punctuation. Keep them only if that automatic behavior is useful;
+otherwise remove those autosnippet tables while retaining the smaller regular
+Lua and Markdown set.
 
 ## Formatting, linting and tools
 

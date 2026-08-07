@@ -332,6 +332,35 @@ do
     end,
   })
 
+  vim.api.nvim_create_autocmd('FileType', {
+    desc = 'Allow removing individual quickfix entries',
+    group = vim.api.nvim_create_augroup('kickstart-quickfix', { clear = true }),
+    pattern = 'qf',
+    callback = function(event)
+      local wininfo = vim.fn.getwininfo(vim.api.nvim_get_current_win())[1]
+      if not wininfo or wininfo.loclist == 1 then return end
+
+      vim.keymap.set('n', 'dd', function()
+        local row = vim.api.nvim_win_get_cursor(0)[1]
+        local qf = vim.fn.getqflist { all = 0 }
+        if not qf.items[row] then return end
+
+        table.remove(qf.items, row)
+        local replacement = {
+          id = qf.id,
+          title = qf.title,
+          context = qf.context,
+          items = qf.items,
+          quickfixtextfunc = qf.quickfixtextfunc,
+        }
+        if #qf.items > 0 then replacement.idx = math.min(row, #qf.items) end
+
+        vim.fn.setqflist({}, 'r', replacement)
+        if #qf.items > 0 then vim.api.nvim_win_set_cursor(0, { math.min(row, #qf.items), 0 }) end
+      end, { buffer = event.buf, desc = 'Delete quickfix entry' })
+    end,
+  })
+
   vim.api.nvim_create_autocmd('BufReadPost', {
     desc = 'Restore the cursor to the last edit position',
     group = vim.api.nvim_create_augroup('kickstart-restore-cursor', { clear = true }),
