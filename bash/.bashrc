@@ -82,7 +82,11 @@ esac
 
 # enable color support of ls and also add handy aliases
 if [ -x /usr/bin/dircolors ]; then
-  test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+  if [ -r ~/.dircolors ]; then
+    eval "$(dircolors -b ~/.dircolors)"
+  else
+    eval "$(dircolors -b)"
+  fi
   alias ls='ls --color=auto'
   #alias dir='dir --color=auto'
   #alias vdir='vdir --color=auto'
@@ -125,10 +129,19 @@ if ! shopt -oq posix; then
 fi
 
 add_to_path() {
-  if [ -d "$1" ]; then
-    export PATH="$1${PATH:+":$PATH"}"
+  if [ -d "$1" ] && [[ ":${PATH:-}:" != *":$1:"* ]]; then
+    PATH="$1${PATH:+":$PATH"}"
+    export PATH
   fi
 }
+
+export GITUSER="surbanski"
+export GHREPOS="$HOME/github.com/$GITUSER"
+
+export LAB="$GHREPOS/lab"
+export NOTES="$GHREPOS/notes-md"
+export DOTFILES="$GHREPOS/dotfiles"
+export WORK="$HOME/work"
 
 add_to_path "$HOME/.local/share/nvim/mason/bin"
 add_to_path "$HOME/homebrew/bin"
@@ -151,17 +164,8 @@ fi
 add_to_path "$HOME/bin"
 add_to_path "$HOME/.local/bin"
 add_to_path "$DOTFILES/scripts"
-add_to_path "$HOME/dotfiles/scripts"
 add_to_path "$HOME/.krew/bin"
 add_to_path "$HOME/.asdf/shims"
-
-export GITUSER="surbanski"
-export GHREPOS="$HOME/github.com/$GITUSER"
-
-export LAB="$GHREPOS/lab"
-export NOTES="$GHREPOS/notes-md"
-export DOTFILES="$GHREPOS/dotfiles"
-export WORK="$HOME/work"
 
 export GIT_PROMPT_THEME=Single_line_Ubuntu
 
@@ -192,11 +196,18 @@ if command -v fzf >/dev/null 2>&1; then
   fi
 fi
 
-eval "$(zoxide init bash)"
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init bash)"
+fi
 
-source <(kubectl completion bash)
+if command -v kubectl >/dev/null 2>&1; then
+  source <(kubectl completion bash)
+  complete -F __start_kubectl k
+fi
 
-eval "$(oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json")"
+if command -v oh-my-posh >/dev/null 2>&1; then
+  eval "$(oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json")"
+fi
 
 # export VISUAL=nvim
 # export EDITOR=nvim
