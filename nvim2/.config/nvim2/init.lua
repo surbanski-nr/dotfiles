@@ -404,12 +404,6 @@ do
         if vim.fn.has 'win32' ~= 1 and vim.fn.executable 'make' == 1 then run_build(name, { 'make', 'install_jsregexp' }, ev.data.path) end
         return
       end
-
-      if name == 'nvim-treesitter' then
-        if not ev.data.active then vim.cmd.packadd 'nvim-treesitter' end
-        vim.cmd 'TSUpdate'
-        return
-      end
     end,
   })
 end
@@ -1133,16 +1127,37 @@ do
     -- 'typescript',
     -- 'vue',
   }
-  local function install_parsers()
-    if vim.fn.executable 'tree-sitter' == 1 then require('nvim-treesitter').install(parsers) end
+  local installing_tools_synchronously = false
+
+  ---@param wait boolean
+  local function maintain_parsers(wait)
+    if vim.fn.executable 'tree-sitter' ~= 1 then return end
+
+    local treesitter = require 'nvim-treesitter'
+    if wait then
+      treesitter.install(parsers):wait(300000)
+      treesitter.update(parsers):wait(300000)
+    else
+      treesitter.install(parsers):await(function() treesitter.update(parsers) end)
+    end
   end
 
-  install_parsers()
   vim.api.nvim_create_autocmd('User', {
-    desc = 'Install Treesitter parsers after Mason installs tree-sitter-cli',
+    desc = 'Maintain Treesitter parsers after Mason installs tree-sitter-cli',
     pattern = 'MasonToolsUpdateCompleted',
-    callback = install_parsers,
+    callback = function()
+      if not installing_tools_synchronously then maintain_parsers(false) end
+    end,
   })
+
+  vim.api.nvim_create_user_command('Nvim2ToolsInstallSync', function()
+    installing_tools_synchronously = true
+    local mason_ok, mason_error = pcall(vim.cmd, 'MasonToolsInstallSync')
+    installing_tools_synchronously = false
+    if not mason_ok then error(mason_error) end
+    if vim.fn.executable 'tree-sitter' ~= 1 then error 'Mason did not install tree-sitter-cli' end
+    maintain_parsers(true)
+  end, { desc = 'Install Mason tools and Treesitter parsers synchronously' })
 
   ---@param buf integer
   ---@param language string
@@ -1208,7 +1223,7 @@ do
   -- require 'kickstart.plugins.indent_line'
   require 'kickstart.plugins.lint'
   -- require 'kickstart.plugins.autopairs'
-  -- require 'kickstart.plugins.neo-tree'
+  require 'kickstart.plugins.neo-tree'
   -- require 'kickstart.plugins.gitsigns' -- adds gitsigns recommended keymaps
 
   -- NOTE: You can add your own plugins, configuration, etc from `lua/custom/plugins/*.lua`

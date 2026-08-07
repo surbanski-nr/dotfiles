@@ -43,10 +43,12 @@ tooling details are in
 | `mason-tool-installer.nvim` | Install the selected servers, formatters and linters automatically |
 | `mason.nvim` | Provide the external-tool registry, installer and `:Mason` interface |
 | `mini.nvim` | Supply text objects, surroundings, alignment, statusline, icons and buffer removal |
+| `neo-tree.nvim` | Provide the sidebar filesystem browser and file operations |
 | `nvim-highlight-colors` | Preview color values inline |
 | `nvim-lint` | Publish Hadolint, TFLint and yamllint results as diagnostics |
 | `nvim-lspconfig` | Supply default commands, filetypes and root detection for language servers |
 | `nvim-treesitter` | Provide parsing, highlighting, indentation and language injections |
+| `nui.nvim` | Supply popup and layout components required by Neo-tree |
 | `persistence.nvim` | Save and restore directory-based sessions |
 | `plenary.nvim` | Supply shared Lua utilities required by Telescope |
 | `render-markdown.nvim` | Render Markdown headings, lists, tables and code blocks inside Neovim |
@@ -97,9 +99,8 @@ Notation used below:
 | Open built-in directory browser | `:Explore` |
 | Open directory browser on the left | `:Lexplore` |
 
-`netrw` supplies `:Explore` and is enabled. Neo-tree is available as a
-bundled optional module but is not enabled; see
-[Bundled optional modules](#bundled-optional-modules).
+`netrw` supplies `:Explore`. Neo-tree is the enabled sidebar browser; press
+`\` to reveal the current file or focus the tree.
 
 ### Movement and search
 
@@ -327,7 +328,7 @@ Markdown snippets live under `snippets/`.
 | Enable format-on-save for current buffer | `:FormatEnable!` |
 | Inspect formatter selection | `:ConformInfo` |
 | Inspect or install external tools | `:Mason` |
-| Run synchronous managed-tool installation | `:MasonToolsInstallSync` |
+| Install all managed tools and parsers synchronously | `:Nvim2ToolsInstallSync` |
 
 Conform formats configured filetypes on save. Ruff sorts imports and formats
 Python. `nvim-lint` runs configured CLI linters after saving; it has no manual
@@ -434,23 +435,44 @@ modules are enabled.
 |---|---|---|
 | `gitsigns.lua` | Enabled | Git signs, hunk actions and mappings listed above |
 | `lint.lua` | Enabled | Hadolint, TFLint and yamllint integration after save |
-| `neo-tree.lua` | Disabled | Sidebar file tree; `\` reveals the current file and `\` closes the tree |
+| `neo-tree.lua` | Enabled | Sidebar file tree and file-management actions |
 | `debug.lua` | Disabled | DAP UI and Go debugging |
 | `autopairs.lua` | Disabled | Automatic closing pairs while typing |
 | `indent_line.lua` | Disabled | Indentation guides |
 
-To enable one, uncomment its `require` line near the bottom of `init.lua` and
-restart Neovim. If Neo-tree is enabled, its common daily keys are:
+To enable a disabled module, uncomment its `require` line near the bottom of
+`init.lua` and restart Neovim. Neo-tree is enabled; its common daily keys are:
 
 | Action in Neo-tree | Keys |
 |---|---|
 | Reveal current file or focus tree | `\` |
-| Open item | `<CR>` |
+| Open file or expand directory | `<CR>` or `<Space>` |
+| Preview file | `P` |
+| Open in horizontal split, vertical split or tab | `S`, `s`, `t` |
+| Close directory or all directories | `C`, `z` |
 | Add file or directory | `a`, `A` |
-| Rename or delete | `r`, `d` |
+| Rename, move, copy or delete | `r`, `m`, `c`, `d` |
+| Mark for copy or move | `y`, `x` |
+| Paste marked items into selected directory | `p` |
+| Clear marked items | `<C-r>` |
 | Refresh | `R` |
 | Close tree | `\` or `q` |
 | Show Neo-tree's authoritative mapping help | `?` |
+
+Usual file-management flow:
+
+1. Press `\`, then select the parent directory with `j` and `k`.
+2. Press `a` to create a file or `A` to create a directory, enter its name,
+   then press `<CR>`.
+3. To rename an item, select it, press `r`, edit the name and press `<CR>`.
+4. To move or copy an item directly, press `m` or `c`, enter its destination
+   path and press `<CR>`.
+5. To move or copy through the tree, mark an item with `x` or `y`, select the
+   destination directory and press `p`.
+6. To remove an item, select it, press `d` and confirm the prompt.
+
+Neo-tree refreshes after these operations. Press `?` inside the tree if a
+less common action or current mapping is needed.
 
 If the debug module is enabled, it configures:
 
@@ -519,7 +541,7 @@ active configurations with `nvim2`.
 | `nvim-pack/nvim-spectre` | Interactive project-wide search and replace | Consider only if project-wide replacements are frequent; otherwise use quickfix plus `:cdo` |
 | `cshuaimin/ssr.nvim` | Treesitter structural search and replace | Add only for recurring AST-aware refactors |
 | `nguyenvukhang/nvim-toggler` | Toggled values such as `true`/`false` or `on`/`off` | Small convenience; a mapping or substitution is simpler than another plugin |
-| `nvim-tree/nvim-tree.lua` | Persistent sidebar file explorer | Try Telescope and `:Explore`; if a tree is still wanted, enable bundled Neo-tree instead |
+| `nvim-tree/nvim-tree.lua` | Persistent sidebar file explorer | Replaced by the enabled Neo-tree module |
 | `Wansmer/treesj` | Split or joined syntax nodes with `gj` | Best small candidate to reconsider if structured YAML, JSON, Lua or Terraform editing needs it daily |
 | `folke/trouble.nvim` | Dedicated diagnostics, references and quickfix-style panels | Telescope diagnostics and location lists cover the common workflow |
 | `kevinhwang91/nvim-ufo` and `promise-async` | Treesitter/indent folds and fold previews | Keep marker folds initially; configure native Treesitter folds before adding a plugin |
@@ -537,7 +559,7 @@ individual files in `lua/plugins/`:
 | `nvchad/ui` | Mini statusline remains, but there is no NvChad dashboard or buffer tabline |
 | `nvzone/volt`, `menu`, `minty` | No NvChad menus or color-picker UI |
 | NvChad's nvim-cmp stack and sources | Replaced by Blink with LSP, path and LuaSnip sources |
-| NvChad's NvimTree integration | No sidebar is enabled; Neo-tree is available but disabled |
+| NvChad's NvimTree integration | Replaced by Neo-tree |
 
 Re-adding NvChad's UI stack would work against the goal of keeping this
 profile small and easy to manage.
@@ -562,8 +584,8 @@ features. Then add only in response to a repeated workflow problem:
 1. Add TODO mappings if TODO navigation is used regularly. This adds no
    dependency; prefer `<leader>tn` and `<leader>tp` instead of overriding
    built-in tag keys.
-2. Use Telescope plus `:Explore`; enable the bundled Neo-tree module only if a
-   persistent sidebar is genuinely faster.
+2. Keep Neo-tree as the only sidebar browser; do not add a second file-tree
+   plugin.
 3. Consider `treesj` as the first new plugin if split/join operations are
    frequent in YAML, JSON, Lua or Terraform.
 4. Consider Spectre only for frequent interactive project-wide replacements.

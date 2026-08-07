@@ -116,8 +116,8 @@ tool install:
 
 ```bash
 cd /home/surbanski/work/githubactions/dotfilesneovim/dotfiles/nvim2/.config/nvim2
-XDG_CONFIG_HOME="$(dirname "$PWD")" NVIM_APPNAME=nvim2 \
-  nvim --headless '+MasonToolsInstallSync' '+qa'
+timeout 600s env XDG_CONFIG_HOME="$(dirname "$PWD")" NVIM_APPNAME=nvim2 \
+  nvim --headless '+Nvim2ToolsInstallSync' '+qa'
 ```
 
 The Ansible language server also needs an `ansible` executable on `PATH`:
