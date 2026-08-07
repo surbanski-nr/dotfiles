@@ -8,7 +8,7 @@
 
 # function to prompt the user for a filename
 get_filename() {
-	read -p "Enter a filename: " filename
+	read -rp "Enter a filename: " filename
 	echo "$filename"
 }
 
