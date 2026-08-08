@@ -303,6 +303,37 @@ system clipboard. After pressing `y`, paste it with `Ctrl+a` then `]`, or run
 `tmux paste-buffer`. Terminal `Ctrl+Shift+C` and `Ctrl+Shift+V` remain a
 separate workflow because `set-clipboard` is disabled.
 
+#### Recover an SSH agent socket
+
+Tmux sessions retain the `SSH_AUTH_SOCK` value they started with. To recover a
+working socket stored in the named `work` session from another shell:
+
+```bash
+agent_sock=$(tmux show-environment -t work SSH_AUTH_SOCK | sed 's/^SSH_AUTH_SOCK=//')
+if [[ -S "$agent_sock" ]]; then
+  export SSH_AUTH_SOCK="$agent_sock"
+else
+  printf 'The tmux SSH agent socket is missing or stale: %s\n' "$agent_sock" >&2
+fi
+ssh-add -l
+```
+
+Replace `work` with a name from `tmux list-sessions`. Run `git push` only after
+`ssh-add -l` lists the expected key. If a new agent works outside tmux, publish
+its socket to the session:
+
+```bash
+tmux set-environment -t work SSH_AUTH_SOCK "$SSH_AUTH_SOCK"
+```
+
+Existing pane shells still hold their old exported value. In each affected
+pane, reload it and verify the key:
+
+```bash
+export SSH_AUTH_SOCK="$(tmux show-environment SSH_AUTH_SOCK | sed 's/^SSH_AUTH_SOCK=//')"
+ssh-add -l
+```
+
 ### Neovim
 
 The `nvim2` profile is the default development editor. Bash exports
