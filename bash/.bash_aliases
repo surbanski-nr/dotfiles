@@ -12,6 +12,8 @@ elif command -v batcat >/dev/null 2>&1; then
   alias cat='batcat'
 fi
 
+# Remove the old alias before parsing its function replacement on reload.
+unalias ff 2>/dev/null
 ff() {
   local preview viewer
   if viewer=$(_bat_path); then
