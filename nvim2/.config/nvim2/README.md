@@ -17,8 +17,10 @@ After stowing `nvim2`:
 NVIM_APPNAME=nvim2 nvim
 ```
 
-The Bash configuration also provides the `v` alias. To start directly from
-this repository:
+The stowed Bash configuration makes this profile the default for `nvim`,
+`vim`, `vi`, `v`, `$EDITOR`, `$VISUAL` and the FZF-based `ffv` command. Use
+`vn` when the older `~/.config/nvim` profile is explicitly needed. To start
+directly from this repository:
 
 ```bash
 cd /home/surbanski/work/githubactions/dotfilesneovim/dotfiles/nvim2/.config/nvim2
@@ -166,6 +168,11 @@ Return to Neovim's default dark palette with:
 ```vim
 :colorscheme default
 ```
+
+Nvim2 captures the startup `default` highlights after its plugins are
+configured. Returning from Isekai therefore restores the same white-and-green
+appearance seen at startup, including Telescope and Markdown groups, and
+clears Isekai's terminal palette.
 
 For a persistent change, edit the colorscheme line in `init.lua`. Use this for
 Isekai:

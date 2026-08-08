@@ -2,7 +2,7 @@
   email = 122265380+surbanski-nr@users.noreply.github.com
   name = Szymon Urbański
 [core]
-  editor = vim
+  editor = env NVIM_APPNAME=nvim2 nvim
 [push]
   autoSetupRemote = true
 [credential "https://github.com"]

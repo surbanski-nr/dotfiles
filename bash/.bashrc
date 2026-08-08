@@ -105,9 +105,10 @@ alias ll='ls -alF'
 alias la='ls -A'
 alias l='ls -CF'
 
-# Add an "alert" alias for long running commands.  Use like so:
-#   sleep 10; alert
-alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
+# Add an "alert" alias on desktop systems that provide notify-send.
+if command -v notify-send >/dev/null 2>&1; then
+  alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
+fi
 
 # Alias definitions.
 # You may want to put all your additions into a separate file like
@@ -144,7 +145,7 @@ export NOTES="$GHREPOS/notes-md"
 export DOTFILES="$GHREPOS/dotfiles"
 export WORK="$HOME/work"
 
-add_to_path "$HOME/.local/share/nvim/mason/bin"
+add_to_path "$HOME/.local/share/nvim2/mason/bin"
 add_to_path "$HOME/homebrew/bin"
 add_to_path "$HOME/homebrew/sbin"
 add_to_path "/home/linuxbrew/.linuxbrew/bin"
@@ -170,9 +171,13 @@ add_to_path "$HOME/.asdf/shims"
 
 export GIT_PROMPT_THEME=Single_line_Ubuntu
 
-export BROWSER="google-chrome"
-# export BROWSER="firefox"
-# export BROWSER="microsoft-edge"
+if command -v google-chrome >/dev/null 2>&1; then
+  export BROWSER="google-chrome"
+elif command -v wslview >/dev/null 2>&1; then
+  export BROWSER="wslview"
+elif command -v xdg-open >/dev/null 2>&1; then
+  export BROWSER="xdg-open"
+fi
 
 export GOPRIVATE="github.com/$GITUSER/*,gitlab.com/$GITUSER/*"
 
@@ -180,7 +185,13 @@ export GOPRIVATE="github.com/$GITUSER/*,gitlab.com/$GITUSER/*"
 
 bind -x '"\C-l":clear'
 
-export FZF_DEFAULT_COMMAND='fd --type f --strip-cwd-prefix --hidden --follow --exclude .git'
+if command -v fd >/dev/null 2>&1; then
+  export FZF_DEFAULT_COMMAND='fd --type f --strip-cwd-prefix --hidden --follow --exclude .git'
+elif command -v fdfind >/dev/null 2>&1; then
+  export FZF_DEFAULT_COMMAND='fdfind --type f --strip-cwd-prefix --hidden --follow --exclude .git'
+else
+  export FZF_DEFAULT_COMMAND='find . -type f -not -path "*/.git/*" -print'
+fi
 
 # fzf key bindings (prefer distro packages, fallback to user install if compatible)
 if command -v fzf >/dev/null 2>&1; then
@@ -212,8 +223,9 @@ if command -v oh-my-posh >/dev/null 2>&1; then
   eval "$(oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json")"
 fi
 
-# export VISUAL=nvim
-# export EDITOR=nvim
+export NVIM_APPNAME="${NVIM_APPNAME:-nvim2}"
+export VISUAL=nvim
+export EDITOR=nvim
 
 if [ -f ~/.extras ]; then
   source ~/.extras
