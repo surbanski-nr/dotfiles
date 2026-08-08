@@ -27,17 +27,29 @@ cd /home/surbanski/work/githubactions/dotfilesneovim/dotfiles/nvim2/.config/nvim
 XDG_CONFIG_HOME="$(dirname "$PWD")" NVIM_APPNAME=nvim2 nvim
 ```
 
-If this profile was stowed before it moved under `.config/nvim2`, refresh its
-symlinks after pulling the repository:
+If this profile was stowed before it moved under `.config/nvim2`, first check
+the active path:
 
 ```bash
-cd ~/github.com/surbanski/dotfiles
-./bstow -v -t "$HOME" restow nvim2
 readlink -f ~/.config/nvim2/init.lua
 ```
 
-The resolved path should end in `nvim2/.config/nvim2/init.lua`. A broken
-symlink starts vanilla Neovim without this profile or its commands.
+The resolved path should end in `nvim2/.config/nvim2/init.lua`. If it does not,
+or `bstow` reports a regular file where it needs a symlink, preserve the whole
+old profile and stow a clean one:
+
+```bash
+cd ~/github.com/surbanski/dotfiles
+backup="$HOME/.config/nvim2.backup-$(date -u +%Y%m%d-%H%M%S)"
+mv "$HOME/.config/nvim2" "$backup"
+./bstow -v -t "$HOME" stow nvim2
+readlink -f ~/.config/nvim2/init.lua
+```
+
+Do not delete a conflicting regular file without inspecting it. The backup
+keeps old lockfiles and settings available until the clean profile has been
+verified. A broken `init.lua` symlink starts vanilla Neovim without this
+profile or its commands.
 
 Plugins are restored from `nvim-pack-lock.json` when Neovim starts. External
 tools and Treesitter parsers are deliberately not installed in the background;
