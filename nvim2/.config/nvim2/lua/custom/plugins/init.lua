@@ -1,3 +1,6 @@
+require 'custom.plugins.telescope_git_root'
+require 'custom.plugins.toggle_values'
+require 'custom.plugins.native_folds'
 require 'custom.plugins.highlight_colors'
 -- require 'custom.plugins.persistence'
 require 'custom.plugins.render_markdown'
