@@ -313,6 +313,14 @@ older `~/.config/nvim` profile or `vz` for `nvim-lazy`.
 See [the Neovim profile documentation](docs/neovim-nvchad-to-kickstart.md) for
 language tooling, installation, and key mappings.
 
+Updates are intentionally manual. For plugins, run
+`:lua vim.pack.update()` on a trusted connected machine, review the proposed
+commits, and use `:write` to apply them and rewrite `nvim-pack-lock.json`. For
+Mason tools, update the exact version in `nvim2/.config/nvim2/init.lua`, restart
+Neovim, and run `:Nvim2ToolsInstallSync`; there is no separate Mason lockfile.
+See [Plugin and configuration maintenance](nvim2/.config/nvim2/README.md#plugin-and-configuration-maintenance)
+for the complete review, verification and restricted-VM workflow.
+
 ### asdf
 
 Ubuntu / Debian dependencies:
