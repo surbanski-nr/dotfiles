@@ -16,6 +16,10 @@ fi
 unalias ff 2>/dev/null
 ff() {
   local preview viewer
+  if ! command -v fzf >/dev/null 2>&1; then
+    printf 'ff requires fzf\n' >&2
+    return 127
+  fi
   if viewer=$(_bat_path); then
     preview="$viewer --style=numbers --color=always --line-range=:500 -- {}"
   else
@@ -24,11 +28,21 @@ ff() {
   fzf -m --preview "$preview"
 }
 
-alias ffv='nvim $(ff)'
+unalias ffv 2>/dev/null
+ffv() {
+  local selection
+  local -a files=()
+  selection=$(ff) || return
+  [[ -n $selection ]] || return 0
+  mapfile -t files <<<"$selection"
+  NVIM_APPNAME=nvim2 nvim -- "${files[@]}"
+}
 
 alias vz='NVIM_APPNAME=nvim-lazy nvim'
-alias vn='nvim'
-alias v='NVIM_APPNAME=nvim2 nvim'
+alias vn='NVIM_APPNAME=nvim nvim'
+alias v='nvim'
+alias vi='nvim'
+alias vim='nvim'
 
 alias zz='z -'
 kl() {

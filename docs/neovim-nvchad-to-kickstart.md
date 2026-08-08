@@ -21,7 +21,9 @@ When `nvim2` is stowed into `~/.config/nvim2`:
 NVIM_APPNAME=nvim2 nvim
 ```
 
-The Bash configuration provides the same command through the `v` alias.
+The Bash configuration exports `NVIM_APPNAME=nvim2`, `EDITOR=nvim` and
+`VISUAL=nvim`, so `nvim`, `vim`, `vi`, `v` and `ffv` use this profile by
+default. Use `vn` to open the previous `~/.config/nvim` profile explicitly.
 
 To run directly from the repository without stowing it:
 

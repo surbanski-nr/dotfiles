@@ -41,6 +41,13 @@ sudo apt install -y \
 
 Fedora / RHEL (dnf/yum):
 
+On Rocky/RHEL, enable EPEL first when packages such as `fzf`, `fd-find`,
+`bat` or `zoxide` are unavailable:
+
+```bash
+sudo dnf install -y epel-release
+```
+
 ```bash
 sudo dnf install -y \
   git curl unzip coreutils \
@@ -60,6 +67,27 @@ sudo dnf install -y \
 ```
 
 On Amazon Linux many tools are not in the repos (`neovim`, `ripgrep`, `fd`, `bat`, `zoxide`, `kubectx`). Install them via Homebrew or manual methods described below.
+
+### Portability notes
+
+The Bash, Git and tmux files use Bash and GNU/Linux conventions and are
+portable across WSL Ubuntu, regular Ubuntu, Amazon Linux and Rocky Linux. The
+configuration checks before loading optional desktop and CLI integrations;
+missing tools affect only their related aliases or workflows.
+
+- Bash 4 or newer is required. `ff` supports both the Fedora/RHEL `fd` command
+  and Debian/Ubuntu's `fdfind`, with GNU `find` as a fallback. `ff` and `ffv`
+  still require `fzf` when invoked.
+- Git over HTTPS uses `gh auth git-credential`, so install and authenticate
+  GitHub CLI when that transport is needed. Repositories using Git LFS require
+  `git-lfs`. SSH Git remotes need neither helper.
+- Tmux should provide the `tmux-256color` terminfo entry. Check it with
+  `infocmp tmux-256color`; install the distro's `ncurses-term` package if it is
+  missing. Current Ubuntu, Amazon Linux 2023 and Rocky 9 packages are
+  compatible; Amazon Linux 2 and Rocky 8 may need newer tmux/terminfo packages.
+- TPM is optional for starting tmux, but resurrect and continuum require it.
+  Install or transfer TPM and its plugin directories before using those
+  features on a restricted machine.
 
 Note: on Debian/Ubuntu, the `fd-find` package installs the `fdfind` binary. If you need `fd` in `PATH`:
 
@@ -186,8 +214,11 @@ terminal handle selection, then use `Ctrl+Shift+C` or `Ctrl+Shift+V`.
 
 ### Neovim
 
-The `nvim2` profile is the minimal development setup. Run it with
-`NVIM_APPNAME=nvim2 nvim` after stowing the package, or use the `v` Bash alias.
+The `nvim2` profile is the default development editor. Bash exports
+`NVIM_APPNAME=nvim2`, `EDITOR=nvim` and `VISUAL=nvim`; `nvim`, `vim`, `vi`, `v`
+and `ffv` therefore open Nvim2. `ffv` safely opens one or more files selected
+with FZF, including paths containing spaces. Use `vn` to explicitly open the
+older `~/.config/nvim` profile or `vz` for `nvim-lazy`.
 See [the Neovim profile documentation](docs/neovim-nvchad-to-kickstart.md) for
 language tooling, installation, and key mappings.
 
