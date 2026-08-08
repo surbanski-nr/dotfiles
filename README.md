@@ -2,11 +2,54 @@
 
 My configuration files for bash, neovim, tmux and so forth.
 
-The intention is to be able to run a setup script after cloning the repo on Ubuntu (WSL) system (or any linux) and be up and running very quickly.
+The setup targets WSL Ubuntu, regular Ubuntu, Amazon Linux and Rocky Linux.
 
 Homebrew is still an option, but it is intended as a last resort. Prefer distro package manager (`apt`, `dnf`/`yum`) for most tools. Symlinks are managed by `./bstow` (a bash-based stow replacement included in this repo) -- no need to install GNU `stow`.
 
-## Setup Notes
+## New VM quick start
+
+Use this order on a machine with internet access:
+
+1. Install the packages for the VM's distribution from
+   [Install dependencies](#install-dependencies-preferred-aptdnfyum).
+2. Check that Neovim is version 0.12 or newer. If the distribution package is
+   older, use [Install Neovim 0.12](#install-neovim-012).
+3. Back up any existing dotfiles that would conflict with the symlinks.
+4. Clone and stow the main packages:
+
+   ```bash
+   GH_REPOS="$HOME/github.com/surbanski"
+   mkdir -p "$GH_REPOS"
+   git clone https://github.com/surbanski-nr/dotfiles.git "$GH_REPOS/dotfiles"
+   cd "$GH_REPOS/dotfiles"
+   ./bstow -v -t "$HOME" stow bash git tmux oh-my-posh nvim2
+   source ~/.bashrc
+   ```
+
+5. Install the pinned Nvim2 plugins, Mason tools and Treesitter parsers. The
+   command can take several minutes and requires access to GitHub and the
+   package registries used by Mason:
+
+   ```bash
+   cd "$GH_REPOS/dotfiles"
+   timeout 600s env NVIM_APPNAME=nvim2 \
+     nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
+   ```
+
+   `Nvim2ToolsInstallSync` already runs `MasonToolsInstallSync`; do not run the
+   latter separately. Start `nvim`, then use `:checkhealth kickstart`,
+   `:checkhealth vim.lsp`, `:Mason` and `:ConformInfo` to inspect the result.
+   Install `ansible-core` from the distro package manager when working on
+   Ansible projects. Terraform, Helm and Docker CLIs remain project-level
+   dependencies rather than editor dependencies.
+
+6. Optionally install TPM and its tmux plugins as described under
+   [Tmux](#tmux). Plain tmux works without TPM.
+
+The remaining sections explain each step, optional tools and restricted-network
+setup in more detail.
+
+## Detailed setup
 
 ### Backup existing files (optional)
 
@@ -34,6 +77,7 @@ sudo apt update
 sudo apt install -y \
   git curl unzip coreutils \
   gcc make \
+  python3 python3-venv python3-pip nodejs npm \
   neovim ripgrep fd-find xclip \
   tmux dos2unix fzf bat zoxide htop tree mc \
   gnupg
@@ -52,6 +96,7 @@ sudo dnf install -y epel-release
 sudo dnf install -y \
   git curl unzip coreutils \
   gcc make \
+  python3 python3-pip nodejs npm \
   neovim ripgrep fd-find xclip \
   tmux dos2unix fzf bat zoxide htop tree mc \
   gnupg2
@@ -63,10 +108,47 @@ Amazon Linux:
 sudo dnf install -y \
   git curl unzip coreutils \
   gcc make \
+  python3 python3-pip nodejs npm \
   tmux dos2unix htop tree mc
 ```
 
 On Amazon Linux many tools are not in the repos (`neovim`, `ripgrep`, `fd`, `bat`, `zoxide`, `kubectx`). Install them via Homebrew or manual methods described below.
+
+Mason needs `node`/`npm` for Node-based language servers and Python with
+virtual-environment support for Python-based tools. Package names can vary on
+older Amazon Linux and Rocky releases.
+
+### Install Neovim 0.12
+
+Nvim2 requires Neovim 0.12 or newer. The version supplied by `apt` or `dnf`
+may be too old; check it before continuing:
+
+```bash
+nvim --version | head -n 1
+```
+
+If necessary, install the pinned official Neovim 0.12.0 archive under your
+home directory. This supports x86-64 and ARM64 Linux without writing to
+`/usr/local`:
+
+```bash
+version=v0.12.0
+case "$(uname -m)" in
+  x86_64) asset=nvim-linux-x86_64.tar.gz ;;
+  aarch64) asset=nvim-linux-arm64.tar.gz ;;
+  *) printf 'Unsupported architecture: %s\n' "$(uname -m)" >&2; exit 1 ;;
+esac
+
+install_dir="$HOME/.local/opt/nvim-$version"
+mkdir -p "$install_dir" "$HOME/bin"
+curl -fL "https://github.com/neovim/neovim/releases/download/$version/$asset" \
+  -o "/tmp/$asset"
+tar -xzf "/tmp/$asset" -C "$install_dir" --strip-components=1
+ln -sfn "$install_dir/bin/nvim" "$HOME/bin/nvim"
+"$HOME/bin/nvim" --version | head -n 1
+```
+
+The stowed Bash configuration puts `~/bin` on `PATH`.
 
 ### Portability notes
 
@@ -202,6 +284,10 @@ Quick reference (prefix is `Ctrl+a`):
 | Install plugins | `Ctrl+a` then `Shift+I` |
 | Update plugins | `Ctrl+a` then `Shift+U` |
 | Scroll through pane history | Mouse wheel |
+| Enter tmux copy mode | `Ctrl+a` then `[` |
+| Start a copy-mode selection | Press `v`, then move the cursor |
+| Copy selection to tmux's buffer | Press `y` |
+| Paste tmux's buffer | `Ctrl+a` then `]` |
 | Select text for terminal copy | Hold `Shift` and drag |
 | Copy selected text | `Ctrl+Shift+C` |
 | Paste text | `Ctrl+Shift+V` |
@@ -211,6 +297,11 @@ Or reload from the shell: `tmux source-file ~/.tmux.conf`
 Tmux mouse handling is enabled for pane focus and scrollback. Automatic
 copy-on-select remains disabled. Hold `Shift` while selecting text to let the
 terminal handle selection, then use `Ctrl+Shift+C` or `Ctrl+Shift+V`.
+
+The `v` and `y` copy-mode bindings use tmux's own buffer, not the terminal's
+system clipboard. After pressing `y`, paste it with `Ctrl+a` then `]`, or run
+`tmux paste-buffer`. Terminal `Ctrl+Shift+C` and `Ctrl+Shift+V` remain a
+separate workflow because `set-clipboard` is disabled.
 
 ### Neovim
 
