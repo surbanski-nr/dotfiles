@@ -29,6 +29,62 @@ Use current Neovim 0.12 stable or a recent nightly. Language installation and
 tooling details are in
 [`docs/neovim-nvchad-to-kickstart.md`](../../../docs/neovim-nvchad-to-kickstart.md).
 
+## Transfer to a machine without internet access
+
+An offline copy works when it is prepared on a connected Linux machine that
+matches the target's architecture, Neovim version and home-directory layout.
+First stow this profile on the connected machine, start it, and run:
+
+```vim
+:Nvim2ToolsInstallSync
+```
+
+After it finishes, quit Neovim and archive the installed plugins, Treesitter
+parsers and Mason tools:
+
+```bash
+data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+tar -C "$data_home" -czf "$HOME/nvim2-offline-$(uname -m).tar.gz" \
+  nvim2/site/pack/core \
+  nvim2/site/parser \
+  nvim2/mason
+```
+
+Transfer that archive and this dotfiles repository to the target. Stow the
+`nvim2` profile there, then extract the data archive:
+
+```bash
+data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+mkdir -p "$data_home"
+tar -C "$data_home" -xzf "nvim2-offline-$(uname -m).tar.gz"
+NVIM_APPNAME=nvim2 nvim --headless '+checkhealth vim.lsp' '+qa!'
+```
+
+The archive contains:
+
+- `site/pack/core`: all plugins managed by `vim.pack`, including compiled
+  Telescope and completion components;
+- `site/parser`: the compiled Treesitter parsers;
+- `mason`: language servers, formatters, linters, registries and their local
+  launcher symlinks.
+
+Do not copy `~/.cache/nvim2`; it is disposable. A leftover
+`~/.local/share/nvim2/lazy` directory belongs to the older package setup and is
+not used by this profile. Copy `~/.local/state/nvim2` only if saved sessions,
+ShaDa history and logs are wanted too.
+
+This is not a universal binary bundle. Mason includes native Linux binaries,
+Node programs and Python virtual environments. Treesitter parsers and some
+plugins are compiled. Use the same OS family, CPU architecture and Neovim
+version on both machines. Neovim itself is not included: install a matching
+0.12 package or transfer its complete release directory. Keep the same
+absolute data path and preferably the same username because Python launchers
+contain the original home path. Install runtime dependencies such as `git`,
+`nodejs`, `python3`, `ripgrep` and `fd-find` from the target's package
+repository. If a configured tool is added later, rebuild the archive on the
+connected matching machine; do not run the installer on the isolated target
+and expect missing packages to download.
+
 ## Enabled plugin set
 
 None of these plugins is bundled with Neovim. `vim.pack` downloads every one

@@ -1,4 +1,19 @@
-alias ff="fzf -m --preview 'bat --style=numbers --color=always --line-range :500 {}'"
+# shellcheck shell=bash
+
+_bat_path() {
+  command -v bat 2>/dev/null || command -v batcat 2>/dev/null
+}
+
+ff() {
+  local preview viewer
+  if viewer=$(_bat_path); then
+    preview="$viewer --style=numbers --color=always --line-range=:500 -- {}"
+  else
+    preview='sed -n "1,500p" -- {}'
+  fi
+  fzf -m --preview "$preview"
+}
+
 alias ffv='nvim $(ff)'
 
 alias vz='NVIM_APPNAME=nvim-lazy nvim'
@@ -7,7 +22,12 @@ alias v='NVIM_APPNAME=nvim2 nvim'
 
 alias zz='z -'
 kl() {
-  kubectl logs "$1" | batcat --style=numbers --color=always
+  local viewer
+  if viewer=$(_bat_path); then
+    kubectl logs "$1" | "$viewer" --style=numbers --color=always
+  else
+    kubectl logs "$1" | less
+  fi
 }
 alias kc='kubectx'
 alias kn='kubens'
