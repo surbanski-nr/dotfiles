@@ -578,6 +578,16 @@ and `ii` for its next-textobject variants. Those are prefixes rather than
 standalone normal-mode mappings; for example, `vaa)` selects around the next
 parenthesized text and `dii)` deletes inside the next parenthesized text.
 
+The complete select-then-operate flow is:
+
+1. From normal mode, type `v`, then `an`. This is the three-key sequence
+   `van`; it enters visual mode and asks the attached LSP for the first range.
+2. While the selection remains in visual mode, repeat `an` to expand it or
+   press `in` to shrink it.
+3. Finish with `y` to yank, `d` to delete into the normal register, `"_d` to
+   delete without changing registers, or `c` to replace the selection without
+   changing the previous yank. Each operator leaves visual mode.
+
 ### Diagnostics
 
 | Action | Keys |
