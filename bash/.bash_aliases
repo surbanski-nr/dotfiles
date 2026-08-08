@@ -4,6 +4,14 @@ _bat_path() {
   command -v bat 2>/dev/null || command -v batcat 2>/dev/null
 }
 
+# bat pages long output with less: j/k scroll, Space/b page, / searches,
+# n/N moves between matches, g/G jumps to the ends, h shows help, and q quits.
+if command -v bat >/dev/null 2>&1; then
+  alias cat='bat'
+elif command -v batcat >/dev/null 2>&1; then
+  alias cat='batcat'
+fi
+
 ff() {
   local preview viewer
   if viewer=$(_bat_path); then
