@@ -9,7 +9,7 @@
           "properties": {
             "cache_duration": "none"
           },
-          "template": "{{ .UserName }} ",
+          "template": "{{ if .SSHSession }} {{ end }}{{ .UserName }} ",
           "foreground": "lightYellow",
           "type": "session",
           "style": "plain"
