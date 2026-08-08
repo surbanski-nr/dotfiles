@@ -1,4 +1,17 @@
 local function run()
+  local plugin_loader = require 'custom.plugin_loader'
+  local fixture_dir = vim.fn.tempname()
+  vim.fn.mkdir(fixture_dir, 'p')
+  vim.fn.writefile({ 'return true' }, vim.fs.joinpath(fixture_dir, 'valid.lua'))
+  vim.uv.fs_symlink('/nvim2-missing-plugin.lua', vim.fs.joinpath(fixture_dir, 'broken.lua'))
+  local fixture_ok, fixture_error = xpcall(function()
+    local modules, broken = plugin_loader.scan(fixture_dir)
+    assert(vim.deep_equal(modules, { 'valid' }), 'plugin loader did not isolate the valid module')
+    assert(#broken == 1 and vim.fs.basename(broken[1]) == 'broken.lua', 'plugin loader did not report the dangling symlink')
+  end, debug.traceback)
+  vim.fs.rm(fixture_dir, { recursive = true, force = true })
+  assert(fixture_ok, fixture_error)
+
   require('custom.checks').assert_all { tools = vim.env.NVIM2_CHECK_TOOLS ~= '0' }
 
   vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'init.lua'))
