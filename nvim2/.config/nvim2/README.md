@@ -48,7 +48,7 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `mason.nvim` | Main `init.lua` | Provide the external-tool registry, installer and `:Mason` interface |
 | `mini.nvim` | Main `init.lua` | Supply text objects, surroundings, alignment, statusline, icons and buffer removal |
 | `neo-tree.nvim` | Kickstart module | Provide the sidebar filesystem browser and file operations |
-| `nvim-highlight-colors` | Custom module | Preview color values inline |
+| `nvim-highlight-colors` | Custom module | Preview color values inline on demand; lazy-loaded by `<leader>tc` |
 | `nvim-lint` | Kickstart module | Publish Hadolint, TFLint and yamllint results as diagnostics |
 | `nvim-lspconfig` | Main `init.lua` | Supply default commands, filetypes and root detection for language servers |
 | `nvim-treesitter` | Main `init.lua` | Install parsers and queries used by Neovim's built-in Treesitter runtime |
@@ -534,9 +534,15 @@ Examples:
 | Toggle Markdown rendering globally | `:RenderMarkdown toggle` |
 | Toggle Markdown rendering for current buffer | `:RenderMarkdown buf_toggle` |
 | Open a side-by-side rendered Markdown preview | `:RenderMarkdown preview` |
-| Toggle inline color previews | `:HighlightColors Toggle` |
+| Toggle inline color previews | `<leader>tc` |
 | Search TODO comments | `:TodoTelescope` |
 | Put TODO comments in quickfix | `:TodoQuickFix` |
+
+`nvim-highlight-colors` is not loaded at startup because its scroll refreshes
+can make large highlighted buffers less responsive. The first `<leader>tc`
+loads it and immediately highlights the current buffer; later presses disable
+or re-enable it. Its `:HighlightColors` command becomes available after that
+first load.
 
 The old TODO mappings (`]t`, `[t`, `<leader>ft`, `<leader>tq`) have not been
 restored. Adding mappings requires no new plugin because
