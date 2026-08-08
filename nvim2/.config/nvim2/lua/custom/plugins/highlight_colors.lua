@@ -1,3 +1,5 @@
+vim.pack.add { 'https://github.com/brenoprata10/nvim-highlight-colors' }
+
 local highlight_colors
 
 vim.keymap.set('n', '<leader>tc', function()
