@@ -673,9 +673,14 @@ built-in tag-list mappings.
 ### Disabled session persistence
 
 `persistence.nvim` is retained in `lua/custom/plugins/persistence.lua`, but its
-`require` is commented out in `lua/custom/plugins/init.lua`. To restore it,
-uncomment that line and restart Neovim. It then saves sessions automatically
-on exit and provides:
+`require` is commented out in `lua/custom/plugins/init.lua`. It is also absent
+from `nvim-pack-lock.json`, so a clean VM does not download it. On a VM where
+it was installed previously, remove its old package and lock entry once with
+`:lua vim.pack.del { 'persistence.nvim' }`.
+
+To restore persistence, uncomment its `require` line and restart Neovim. The
+module's `vim.pack.add` call then installs it and records it in the lockfile. It
+saves sessions automatically on exit and provides:
 
 | Action | Keys |
 |---|---|
@@ -714,6 +719,17 @@ modules are enabled.
 | `debug.lua` | Disabled | DAP UI and Go debugging |
 | `autopairs.lua` | Disabled | Automatic closing pairs while typing |
 | `indent_line.lua` | Disabled | Indentation guides |
+
+A disabled module's `vim.pack.add` call is not executed. Its plugin must also
+be absent from `nvim-pack-lock.json`, because a clean `vim.pack` setup installs
+every lockfile entry. Debug, autopairs, indentation guides and persistence are
+currently absent from the lockfile.
+
+The visible `>` before tab-indented lines and `·` after trailing spaces are
+Neovim's built-in `listchars`, not indentation guides. Hide them temporarily
+with `:set nolist` and restore them with `:set list`. Neo-tree draws separate
+hierarchy lines only inside its sidebar; `guess-indent.nvim` detects indentation
+settings but draws no guides.
 
 To enable a disabled module, uncomment its `require` line near the bottom of
 `init.lua` and restart Neovim. Neo-tree is enabled; its common daily keys are:
