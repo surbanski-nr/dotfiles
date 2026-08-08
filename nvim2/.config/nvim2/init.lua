@@ -99,7 +99,7 @@ do
   vim.g.maplocalleader = ' '
 
   -- Set to true if you have a Nerd Font installed and selected in the terminal
-  vim.g.have_nerd_font = true
+  vim.g.have_nerd_font = false
 
   -- [[ Setting options ]]
   --  See `:help vim.o`
@@ -108,11 +108,12 @@ do
 
   -- Make line numbers default
   vim.o.number = true
-  vim.o.relativenumber = true
+  -- You can also add relative line numbers, to help with jumping.
+  --  Experiment for yourself to see if you like it!
+  -- vim.o.relativenumber = true
 
-  -- Keep selection and clipboard shortcuts under terminal control.
-  vim.o.mouse = ''
-  vim.o.winborder = 'rounded'
+  -- Enable mouse mode, can be useful for resizing splits for example!
+  vim.o.mouse = 'a'
 
   -- Don't show the mode, since it's already in the status line
   vim.o.showmode = false
@@ -125,8 +126,6 @@ do
 
   -- Enable break indent
   vim.o.breakindent = true
-  vim.o.wrap = true
-  vim.o.showbreak = '↪ '
 
   -- Enable undo/redo changes even after closing and reopening a file
   vim.o.undofile = true
@@ -157,7 +156,7 @@ do
   --   See `:help lua-options`
   --   and `:help lua-guide-options`
   vim.o.list = true
-  vim.opt.listchars = { extends = '…', nbsp = '␣', precedes = '…', tab = '> ', trail = '·' }
+  vim.opt.listchars = { tab = '» ', trail = '·', nbsp = '␣' }
 
   -- Preview substitutions live, as you type!
   vim.o.inccommand = 'split'
@@ -166,70 +165,13 @@ do
   vim.o.cursorline = true
 
   -- Minimal number of screen lines to keep above and below the cursor.
-  vim.o.scrolloff = 15
-
-  vim.o.foldmethod = 'marker'
-  vim.o.foldmarker = '{{{,}}}'
-  vim.o.foldlevel = 99
-  vim.o.foldlevelstart = 99
+  vim.o.scrolloff = 10
 
   -- if performing an operation that would fail due to unsaved changes in the buffer (like `:q`),
   -- instead raise a dialog asking if you wish to save the current file(s)
   -- See `:help 'confirm'`
   vim.o.confirm = true
-
-  if vim.env.SSH_CONNECTION then
-    local function paste_from_register() return vim.split(vim.fn.getreg '"', '\n') end
-
-    vim.g.clipboard = {
-      name = 'OSC 52',
-      copy = {
-        ['+'] = require('vim.ui.clipboard.osc52').copy '+',
-        ['*'] = require('vim.ui.clipboard.osc52').copy '*',
-      },
-      paste = {
-        ['+'] = paste_from_register,
-        ['*'] = paste_from_register,
-      },
-    }
-  end
 end
-
-local function yaml_filetype(path)
-  local normalized = vim.fs.normalize(path)
-  local filename = vim.fs.basename(normalized)
-
-  if
-    filename:match '^docker%-compose.*%.yaml$'
-    or filename:match '^docker%-compose.*%.yml$'
-    or filename:match '^compose.*%.yaml$'
-    or filename:match '^compose.*%.yml$'
-  then
-    return 'yaml.docker-compose'
-  end
-
-  local chart_root = vim.fs.root(normalized, { 'Chart.yaml' })
-  if chart_root then
-    if normalized:find('/templates/', 1, true) then return 'helm' end
-    if filename:match '^values.*%.yaml$' or filename:match '^values.*%.yml$' then return 'yaml.helm-values' end
-  end
-
-  if vim.fs.root(normalized, { 'ansible.cfg', '.ansible-lint' }) then return 'yaml.ansible' end
-  if normalized:match '/playbooks/' then return 'yaml.ansible' end
-  for _, directory in ipairs { 'defaults', 'handlers', 'meta', 'tasks', 'vars' } do
-    if normalized:match('/roles/[^/]+/' .. directory .. '/') then return 'yaml.ansible' end
-  end
-end
-
-vim.filetype.add {
-  pattern = {
-    ['.*%.yaml'] = yaml_filetype,
-    ['.*%.yml'] = yaml_filetype,
-    ['.*/templates/.*%.tpl'] = function(path)
-      if vim.fs.root(path, { 'Chart.yaml' }) then return 'helm' end
-    end,
-  },
-}
 
 -- ============================================================
 -- SECTION 2: KEYMAPS & AUTOCMDS
@@ -242,13 +184,6 @@ do
   -- Clear highlights on search when pressing <Esc> in normal mode
   --  See `:help hlsearch`
   vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
-
-  vim.keymap.set('n', 'c', '"_c')
-  vim.keymap.set('n', 'C', '"_C')
-  vim.keymap.set('n', 'cc', '"_cc')
-  vim.keymap.set('n', 'dd', '"_dd', { desc = 'Delete line without replacing yank register' })
-  vim.keymap.set('x', 'c', '"_c')
-  vim.keymap.set('x', 'p', 'p:let @+=@0<CR>:let @"=@0<CR>', { desc = 'Paste without replacing yank register' })
 
   -- Diagnostic Config & Keymaps
   --  See `:help vim.diagnostic.Opts`
@@ -312,76 +247,82 @@ do
   --  Try it with `yap` in normal mode
   --  See `:help vim.hl.on_yank()`
   vim.api.nvim_create_autocmd('TextYankPost', {
-    desc = 'Highlight yanked text and update the yank ring',
+    desc = 'Highlight when yanking (copying) text',
     group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
-    callback = function()
-      vim.hl.on_yank { higroup = 'IncSearch', timeout = 300 }
-      if vim.v.event.operator == 'y' then
-        for index = 9, 1, -1 do
-          vim.fn.setreg(tostring(index), vim.fn.getreg(tostring(index - 1)))
-        end
-      end
-    end,
-  })
-
-  vim.api.nvim_create_autocmd('FileType', {
-    desc = 'Enable spell checking for prose',
-    pattern = { 'gitcommit', 'markdown', 'text' },
-    callback = function()
-      vim.opt_local.spell = true
-      vim.opt_local.spelllang = { 'en_us', 'en_gb' }
-    end,
-  })
-
-  vim.api.nvim_create_autocmd('FileType', {
-    desc = 'Allow removing individual quickfix entries',
-    group = vim.api.nvim_create_augroup('kickstart-quickfix', { clear = true }),
-    pattern = 'qf',
-    callback = function(event)
-      local wininfo = vim.fn.getwininfo(vim.api.nvim_get_current_win())[1]
-      if not wininfo or wininfo.loclist == 1 then return end
-
-      vim.keymap.set('n', 'dd', function()
-        local row = vim.api.nvim_win_get_cursor(0)[1]
-        local qf = vim.fn.getqflist { all = 0 }
-        if not qf.items[row] then return end
-
-        table.remove(qf.items, row)
-        local replacement = {
-          id = qf.id,
-          title = qf.title,
-          context = qf.context,
-          items = qf.items,
-          quickfixtextfunc = qf.quickfixtextfunc,
-        }
-        if #qf.items > 0 then replacement.idx = math.min(row, #qf.items) end
-
-        vim.fn.setqflist({}, 'r', replacement)
-        if #qf.items > 0 then vim.api.nvim_win_set_cursor(0, { math.min(row, #qf.items), 0 }) end
-      end, { buffer = event.buf, desc = 'Delete quickfix entry' })
-    end,
-  })
-
-  vim.api.nvim_create_autocmd('BufReadPost', {
-    desc = 'Restore the cursor to the last edit position',
-    group = vim.api.nvim_create_augroup('kickstart-restore-cursor', { clear = true }),
-    callback = function(event)
-      local mark = vim.api.nvim_buf_get_mark(event.buf, '"')
-      local line_count = vim.api.nvim_buf_line_count(event.buf)
-      if mark[1] > 0 and mark[1] <= line_count then pcall(vim.api.nvim_win_set_cursor, 0, mark) end
-    end,
-  })
-
-  vim.api.nvim_create_autocmd('VimResized', {
-    desc = 'Resize splits when the terminal changes size',
-    command = 'wincmd =',
+    callback = function() vim.hl.on_yank() end,
   })
 end
 
+require 'custom.core'
+
 -- ============================================================
--- SECTION 3: PLUGIN MANAGER HELPERS
--- vim.pack source helper
+-- SECTION 3: PLUGIN MANAGER INTRO
+-- vim.pack intro, build hooks
 -- ============================================================
+do
+  -- [[ Intro to `vim.pack` ]]
+  -- `vim.pack` is a new plugin manager built into Neovim,
+  --  which provides a Lua interface for installing and managing plugins.
+  --
+  --  See `:help vim.pack`, `:help vim.pack-examples` or the
+  --  excellent blog post from the creator of vim.pack and mini.nvim:
+  --  https://echasnovski.com/blog/2026-03-13-a-guide-to-vim-pack
+  --
+  --  To inspect plugin state and pending updates, run
+  --    :lua vim.pack.update(nil, { offline = true })
+  --
+  --  To update plugins, run
+  --    :lua vim.pack.update()
+  --
+  --
+  --  Throughout the rest of the config there will be examples
+  --  of how to install and configure plugins using `vim.pack`.
+  --
+  --  In this section we set up some autocommands to run build
+  --  steps for certain plugins after they are installed or updated.
+
+  local function run_build(name, cmd, cwd)
+    local result = vim.system(cmd, { cwd = cwd }):wait()
+    if result.code ~= 0 then
+      local stderr = result.stderr or ''
+      local stdout = result.stdout or ''
+      local output = stderr ~= '' and stderr or stdout
+      if output == '' then output = 'No output from build command.' end
+      vim.notify(('Build failed for %s:\n%s'):format(name, output), vim.log.levels.ERROR)
+    end
+  end
+
+  -- This autocommand runs after a plugin is installed or updated and
+  --  runs the appropriate build command for that plugin if necessary.
+  --
+  -- See `:help vim.pack-events`
+  vim.api.nvim_create_autocmd('PackChanged', {
+    callback = function(ev)
+      local name = ev.data.spec.name
+      local kind = ev.data.kind
+      if kind ~= 'install' and kind ~= 'update' then return end
+
+      if name == 'telescope-fzf-native.nvim' and vim.fn.executable 'make' == 1 then
+        run_build(name, { 'make' }, ev.data.path)
+        return
+      end
+
+      if name == 'LuaSnip' then
+        if vim.fn.has 'win32' ~= 1 and vim.fn.executable 'make' == 1 then run_build(name, { 'make', 'install_jsregexp' }, ev.data.path) end
+        return
+      end
+
+      if name == 'nvim-treesitter' then
+        if not ev.data.active then vim.cmd.packadd 'nvim-treesitter' end
+        vim.cmd 'TSUpdate'
+        return
+      end
+    end,
+  })
+end
+
+require 'custom.hardening'
+
 ---Because most plugins are hosted on GitHub, you can use the helper
 ---function to have less repetition in the following sections.
 ---@param repo string
@@ -413,7 +354,16 @@ do
   --
   -- See `:help gitsigns` to understand what each configuration key does.
   -- Adds git related signs to the gutter, as well as utilities for managing changes
-  require 'kickstart.plugins.gitsigns'
+  vim.pack.add { gh 'lewis6991/gitsigns.nvim' }
+  require('gitsigns').setup {
+    signs = {
+      add = { text = '+' }, ---@diagnostic disable-line: missing-fields
+      change = { text = '~' }, ---@diagnostic disable-line: missing-fields
+      delete = { text = '_' }, ---@diagnostic disable-line: missing-fields
+      topdelete = { text = '‾' }, ---@diagnostic disable-line: missing-fields
+      changedelete = { text = '~' }, ---@diagnostic disable-line: missing-fields
+    },
+  }
 
   -- Useful plugin to show you pending keybinds.
   vim.pack.add { gh 'folke/which-key.nvim' }
@@ -424,9 +374,7 @@ do
     -- Document existing key chains
     spec = {
       { '<leader>s', group = '[S]earch', mode = { 'n', 'v' } },
-      { '<leader>p', group = '[P]ersistence' },
       { '<leader>t', group = '[T]oggle' },
-      { '<leader>v', group = '[V]isits' },
       { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } }, -- Enable gitsigns recommended keymaps first
       { 'gr', group = 'LSP Actions', mode = { 'n' } },
     },
@@ -471,21 +419,6 @@ do
   -- - sd'   - [S]urround [D]elete [']quotes
   -- - sr)'  - [S]urround [R]eplace [)] [']
   require('mini.surround').setup()
-  require('mini.align').setup()
-  require('mini.splitjoin').setup()
-
-  local visits = require 'mini.visits'
-  visits.setup()
-  local frecent = visits.gen_sort.default { recency_weight = 0.5 }
-  local visit_opts = { sort = frecent }
-
-  vim.keymap.set('n', '<leader>vv', function() visits.select_path(vim.fn.getcwd(), visit_opts) end, { desc = '[V]isited files in cwd' })
-  vim.keymap.set('n', '<leader>vV', function() visits.select_path('', visit_opts) end, { desc = 'All [V]isited files' })
-  vim.keymap.set('n', '<leader>va', function() visits.add_label() end, { desc = '[A]dd label to current file' })
-  vim.keymap.set('n', '<leader>vr', function() visits.remove_label() end, { desc = '[R]emove label from current file' })
-  vim.keymap.set('n', '<leader>vl', function() visits.select_label('', '', visit_opts) end, { desc = 'Select visited [L]abel' })
-
-  vim.keymap.set('n', '<C-x>', function() require('mini.bufremove').delete() end, { desc = 'Delete buffer' })
 
   -- Simple and easy statusline.
   --  You could remove this setup call if you don't like it,
@@ -610,7 +543,7 @@ do
   vim.keymap.set('n', '<leader>/', function()
     -- You can pass additional configuration to Telescope to change the theme, layout, etc.
     builtin.current_buffer_fuzzy_find(require('telescope.themes').get_dropdown {
-      winblend = 0,
+      winblend = 10,
       previewer = false,
     })
   end, { desc = '[/] Fuzzily search in current buffer' })
@@ -739,68 +672,8 @@ do
   -- Enable the following language servers
   --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
   --  See `:help lsp-config` for information about keys and how to configure
-  ---@type table<string, vim.lsp.Config>
-  local servers = {
-    ansiblels = {},
-    bashls = {},
-    cssls = {},
-    docker_language_server = {},
-    helm_ls = {},
-    jsonls = {},
-    markdown_oxide = {},
-    pyright = {},
-    ruff = {
-      on_attach = function(client) client.server_capabilities.hoverProvider = false end,
-    },
-    taplo = {},
-    terraformls = {
-      -- Older 0.12 development builds lack the API used by lspconfig's default callback.
-      on_attach = function(_, bufnr)
-        if vim.lsp.codelens.enable then vim.lsp.codelens.enable(true, { bufnr = bufnr }) end
-      end,
-    },
-    yamlls = {
-      settings = {
-        redhat = { telemetry = { enabled = false } },
-        yaml = { format = { enable = false } },
-      },
-    },
-
-    -- Special Lua Config, as recommended by neovim help docs
-    lua_ls = {
-      on_init = function(client)
-        client.server_capabilities.documentFormattingProvider = false -- Disable formatting (formatting is done by stylua)
-
-        if client.workspace_folders then
-          local path = client.workspace_folders[1].name
-          if path ~= vim.fn.stdpath 'config' and (vim.uv.fs_stat(path .. '/.luarc.json') or vim.uv.fs_stat(path .. '/.luarc.jsonc')) then return end
-        end
-
-        local current_settings = client.config.settings --[[@as lspconfig.settings.lua_ls]]
-        client.config.settings.Lua = vim.tbl_deep_extend('force', current_settings.Lua, {
-          runtime = {
-            version = 'LuaJIT',
-            path = { 'lua/?.lua', 'lua/?/init.lua' },
-          },
-          workspace = {
-            checkThirdParty = false,
-            -- NOTE: this is a lot slower and will cause issues when working on your own configuration.
-            --  See https://github.com/neovim/nvim-lspconfig/issues/3189
-            library = vim.tbl_extend('force', vim.api.nvim_get_runtime_file('', true), {
-              '${3rd}/luv/library',
-              '${3rd}/busted/library',
-            }),
-          },
-        })
-      end,
-      ---@type lspconfig.settings.lua_ls
-      settings = {
-        Lua = {
-          format = { enable = false }, -- Disable formatting (formatting is done by stylua)
-        },
-      },
-    },
-  }
+  local custom_lsp = require 'custom.lsp'
+  local servers = custom_lsp.servers
 
   vim.pack.add {
     gh 'neovim/nvim-lspconfig',
@@ -817,37 +690,7 @@ do
     automatic_enable = false, -- Change this to true if you want to automatically enable servers that are installed manually (e.g. via :Mason / :MasonInstall)
   }
 
-  local ensure_installed = {
-    { 'ansible-language-server', version = '1.2.3' },
-    { 'ansible-lint', version = '26.1.1' },
-    { 'bash-language-server', version = '5.6.0' },
-    { 'css-lsp', version = '4.10.0' },
-    { 'docker-language-server', version = 'v0.20.1' },
-    { 'hadolint', version = 'v2.15.1' },
-    { 'helm-ls', version = 'v0.5.4' },
-    { 'json-lsp', version = '4.10.0' },
-    { 'lua-language-server', version = '3.17.1' },
-    { 'markdown-oxide', version = 'v0.25.12' },
-    { 'prettier', version = '3.9.6' },
-    { 'pyright', version = '1.1.408' },
-    { 'ruff', version = '0.16.1' },
-    { 'shellcheck', version = 'v0.11.0' },
-    { 'shfmt', version = 'v3.13.1' },
-    { 'stylua', version = 'v2.3.1' },
-    { 'taplo', version = '0.10.0' },
-    { 'terraform-ls', version = 'v0.38.3' },
-    { 'tflint', version = 'v0.64.0' },
-    { 'tree-sitter-cli', version = 'v0.26.11' },
-    { 'yaml-language-server', version = '1.19.2' },
-    { 'yamlfmt', version = 'v0.21.0' },
-    { 'yamllint', version = '1.38.0' },
-  }
-
-  require('mason-tool-installer').setup {
-    ensure_installed = ensure_installed,
-    auto_update = false,
-    run_on_start = false,
-  }
+  custom_lsp.setup_tools()
 
   for name, server in pairs(servers) do
     vim.lsp.config(name, server)
@@ -862,101 +705,7 @@ end
 do
   -- [[ Formatting ]]
   vim.pack.add { gh 'stevearc/conform.nvim' }
-
-  vim.api.nvim_create_user_command('FormatDisable', function(args)
-    if args.bang then
-      vim.b.disable_autoformat = true
-    else
-      vim.g.disable_autoformat = true
-    end
-  end, { bang = true, desc = 'Disable format-on-save' })
-
-  vim.api.nvim_create_user_command('FormatEnable', function(args)
-    if args.bang then
-      vim.b.disable_autoformat = false
-    else
-      vim.g.disable_autoformat = false
-    end
-  end, { bang = true, desc = 'Enable format-on-save' })
-
-  vim.api.nvim_create_user_command('FormatToggle', function()
-    vim.g.disable_autoformat = not vim.g.disable_autoformat
-    local state = vim.g.disable_autoformat and 'disabled' or 'enabled'
-    vim.notify('Format-on-save ' .. state .. ' for this Neovim session')
-  end, { desc = 'Toggle format-on-save for this Neovim session' })
-
-  vim.keymap.set('n', '<leader>tf', '<Cmd>FormatToggle<CR>', { desc = '[T]oggle [F]ormat-on-save' })
-
-  require('conform').setup {
-    notify_on_error = false,
-    format_on_save = function(bufnr)
-      if vim.g.disable_autoformat or vim.b[bufnr].disable_autoformat then return nil end
-
-      local enabled_filetypes = {
-        bash = true,
-        css = true,
-        dockerfile = true,
-        graphql = true,
-        handlebars = true,
-        html = true,
-        javascript = true,
-        json = true,
-        jsonc = true,
-        less = true,
-        lua = true,
-        markdown = true,
-        python = true,
-        scss = true,
-        sh = true,
-        svelte = true,
-        terraform = true,
-        ['terraform-vars'] = true,
-        toml = true,
-        typescript = true,
-        vue = true,
-        yaml = true,
-        ['yaml.ansible'] = true,
-        ['yaml.docker-compose'] = true,
-        ['yaml.helm-values'] = true,
-      }
-      if enabled_filetypes[vim.bo[bufnr].filetype] then
-        return { timeout_ms = 1000 }
-      else
-        return nil
-      end
-    end,
-    default_format_opts = {
-      lsp_format = 'fallback', -- Use external formatters if configured below, otherwise use LSP formatting. Set to `false` to disable LSP formatting entirely.
-    },
-    formatters_by_ft = {
-      bash = { 'shfmt' },
-      css = { 'prettier' },
-      graphql = { 'prettier' },
-      handlebars = { 'prettier' },
-      html = { 'prettier' },
-      javascript = { 'prettier' },
-      json = { 'prettier' },
-      jsonc = { 'prettier' },
-      less = { 'prettier' },
-      lua = { 'stylua' },
-      markdown = { 'prettier' },
-      python = { 'ruff_organize_imports', 'ruff_format' },
-      scss = { 'prettier' },
-      sh = { 'shfmt' },
-      svelte = { 'prettier' },
-      terraform = { 'terraform_fmt' },
-      ['terraform-vars'] = { 'terraform_fmt' },
-      toml = { 'taplo' },
-      typescript = { 'prettier' },
-      vue = { 'prettier' },
-      yaml = { 'yamlfmt' },
-      ['yaml.ansible'] = { 'yamlfmt' },
-      ['yaml.docker-compose'] = { 'yamlfmt' },
-      ['yaml.helm-values'] = { 'yamlfmt' },
-    },
-  }
-
-  vim.keymap.set({ 'n', 'v' }, '<leader>f', function() require('conform').format { async = true } end, { desc = '[F]ormat buffer' })
+  require('custom.conform').setup()
 end
 
 -- ============================================================
@@ -969,21 +718,7 @@ do
   -- NOTE: You can also specify plugin using a version range for its git tag.
   --  See `:help vim.version.range()` for more info
   vim.pack.add { { src = gh 'L3MON4D3/LuaSnip', version = vim.version.range '2.*' } }
-  local luasnip = require 'luasnip'
-  luasnip.setup {
-    update_events = { 'TextChanged', 'TextChangedI' },
-    delete_check_events = 'TextChanged',
-    enable_autosnippets = true,
-  }
-  require('luasnip.loaders.from_lua').lazy_load { paths = vim.fn.stdpath 'config' .. '/snippets' }
-
-  vim.keymap.set({ 'i', 's' }, '<C-c>', function()
-    if luasnip.expandable() then
-      luasnip.expand()
-    elseif luasnip.choice_active() then
-      luasnip.change_choice(1)
-    end
-  end, { silent = true, desc = 'Expand snippet or select next choice' })
+  require('custom.luasnip').setup()
 
   -- `friendly-snippets` contains a variety of premade snippets.
   --    See the README about individual language/framework/plugin snippets:
@@ -1068,56 +803,9 @@ do
   -- NOTE: You can also specify a branch or a specific commit
   vim.pack.add { { src = gh 'nvim-treesitter/nvim-treesitter', version = 'main' } }
 
-  local parsers = {
-    'bash',
-    'css',
-    'dockerfile',
-    'hcl',
-    'helm',
-    'json',
-    'lua',
-    'markdown',
-    'markdown_inline',
-    'python',
-    'query',
-    'terraform',
-    'toml',
-    'vim',
-    'vimdoc',
-    'yaml',
-
-    -- 'c',
-    -- 'diff',
-    -- 'git_config',
-    -- 'gitignore',
-    -- 'html',
-    -- 'javascript',
-    -- 'luadoc',
-    -- 'regex',
-    -- 'scss',
-    -- 'svelte',
-    -- 'typescript',
-    -- 'vue',
-  }
-  ---@param wait boolean
-  local function maintain_parsers(wait)
-    if vim.fn.executable 'tree-sitter' ~= 1 then return end
-
-    local treesitter = require 'nvim-treesitter'
-    if wait then
-      treesitter.install(parsers):wait(300000)
-      treesitter.update(parsers):wait(300000)
-    else
-      treesitter.install(parsers):await(function() treesitter.update(parsers) end)
-    end
-  end
-
-  vim.api.nvim_create_user_command('Nvim2ToolsInstallSync', function()
-    local mason_ok, mason_error = pcall(vim.cmd, 'MasonToolsInstallSync')
-    if not mason_ok then error(mason_error) end
-    if vim.fn.executable 'tree-sitter' ~= 1 then error 'Mason did not install tree-sitter-cli' end
-    maintain_parsers(true)
-  end, { desc = 'Install Mason tools and Treesitter parsers synchronously' })
+  local custom_treesitter = require 'custom.treesitter'
+  local parsers = custom_treesitter.parsers
+  custom_treesitter.setup_tools_command()
 
   ---@param buf integer
   ---@param language string
@@ -1167,47 +855,15 @@ do
   --
   -- require 'kickstart.plugins.debug'
   -- require 'kickstart.plugins.indent_line'
-  require 'kickstart.plugins.lint'
+  -- require 'kickstart.plugins.lint'
   -- require 'kickstart.plugins.autopairs'
-  require 'kickstart.plugins.neo-tree'
+  -- require 'kickstart.plugins.neo-tree'
   -- require 'kickstart.plugins.gitsigns' -- adds gitsigns recommended keymaps
-end
 
--- ============================================================
--- SECTION 11: CUSTOM PLUGINS
--- User-selected additions from lua/custom/plugins/
--- ============================================================
-require 'custom.plugins'
-
-do
-  if vim.g.colors_name == 'default' then
-    local startup_highlights = vim.deepcopy(vim.api.nvim_get_hl(0, {}))
-    local startup_terminal_colors = {}
-    for index = 0, 15 do
-      startup_terminal_colors[index] = vim.g['terminal_color_' .. index]
-    end
-    local startup_terminal_background = vim.g.terminal_color_background
-    local startup_terminal_foreground = vim.g.terminal_color_foreground
-
-    vim.api.nvim_create_autocmd('ColorScheme', {
-      desc = 'Restore Nvim2 startup highlights after returning to default',
-      group = vim.api.nvim_create_augroup('nvim2-default-colors', { clear = true }),
-      pattern = 'default',
-      callback = function()
-        for name, value in pairs(startup_highlights) do
-          local restored = vim.deepcopy(value)
-          restored.default = nil
-          restored.force = true
-          vim.api.nvim_set_hl(0, name, restored)
-        end
-        for index = 0, 15 do
-          vim.g['terminal_color_' .. index] = startup_terminal_colors[index]
-        end
-        vim.g.terminal_color_background = startup_terminal_background
-        vim.g.terminal_color_foreground = startup_terminal_foreground
-      end,
-    })
-  end
+  -- NOTE: You can add your own plugins, configuration, etc from `lua/custom/plugins/*.lua`
+  --
+  --  Uncomment the following line and add your plugins to `lua/custom/plugins/*.lua` to get going.
+  require 'custom.plugins'
 end
 
 -- The line beneath this is called `modeline`. See `:help modeline`
