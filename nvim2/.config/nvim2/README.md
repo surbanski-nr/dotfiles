@@ -67,10 +67,25 @@ diagnostic APIs, netrw and the default colorscheme. In particular,
 `nvim-lspconfig` and `nvim-treesitter` are external plugins despite their
 names.
 
-The user-selected additions are under `lua/custom/plugins/`: `init.lua` lists
-their sources and the other files hold each plugin's setup. Core setup remains
-in the numbered sections of the main `init.lua`; bundled Kickstart modules such
-as Gitsigns, linting and Neo-tree are under `lua/kickstart/plugins/`.
+The user-selected additions are under `lua/custom/plugins/`. Each plugin file
+owns both its `vim.pack.add` declaration and its setup; `init.lua` only loads
+those files. Core setup remains in the numbered sections of the main
+`init.lua`; bundled Kickstart modules such as Gitsigns, linting and Neo-tree
+are under `lua/kickstart/plugins/`.
+
+Plugins with direct actions have workflows in the sections below. Some work
+automatically or only support another plugin, so they do not need a daily key
+sequence:
+
+| Plugin | Day-to-day behavior |
+|---|---|
+| `guess-indent.nvim` | Detects indentation when a buffer opens; use `:GuessIndent` to run it again and `:setlocal shiftwidth? tabstop? expandtab?` to inspect the result |
+| `fidget.nvim` | Shows LSP progress in a temporary notification; use `:Fidget history` to inspect earlier messages |
+| `mason-lspconfig.nvim`, `mason-tool-installer.nvim`, `nvim-lspconfig` | Connect and install the configured language servers; use `:Mason`, `:LspInfo` and the LSP workflows below |
+| `nvim-treesitter` | Supplies parsing, highlighting, indentation and injections automatically for installed languages |
+| `nvim-lint` | Runs configured linters after save and publishes their results through the diagnostic workflow below |
+| `nui.nvim`, `plenary.nvim` | Runtime libraries for Neo-tree and Telescope; there is nothing to invoke directly |
+| `telescope-fzf-native.nvim`, `telescope-ui-select.nvim` | Improve Telescope sorting and selection dialogs transparently; use the normal Telescope workflow |
 
 The active colorscheme is Neovim's built-in `default` with its dark
 `NvimDark*` palette. The custom Isekai colorscheme and palette remain under
@@ -329,6 +344,29 @@ Common keys inside a Telescope picker:
 | Close picker | `<Esc>` | `q` |
 | Show picker mappings | `<C-/>` | `?` |
 
+`<leader>/` searches only the current buffer, so it never searches an entire
+workspace. `<leader>sf`, `<leader>sg` and `<leader>sw` use the current working
+directory shown by `:pwd`. Scope file or text search to one repository or
+subdirectory without changing that directory:
+
+```vim
+:Telescope find_files cwd=repo-a
+:Telescope live_grep cwd=repo-a
+```
+
+Paths can be absolute or relative to `:pwd`. Alternatively, use
+`:tcd path/to/repo` to give the current tab its own working directory; the
+regular Telescope mappings in that tab will then search that repository.
+`:lcd` does the same for only the current window, while `:cd` changes the
+working directory globally.
+
+One Neovim process over several repositories is valid, especially for
+cross-repository changes. LSP and Gitsigns determine roots per buffer, while
+Telescope and persistence are sensitive to the current working directory. A
+useful compromise is one tab and `:tcd` per active repository. Use separate
+Neovim processes when the repositories need independent sessions, working
+directories or tool state.
+
 ## Quickfix list
 
 Quickfix is a project-wide list of file locations. Common ways to populate it
@@ -362,6 +400,35 @@ Using the resulting quickfix list:
 does not delete a file, change source code or affect a window-local location
 list. Diagnostic `<leader>q` uses a location list instead; open and close that
 with `:lopen` and `:lclose`, and navigate it with `]l` and `[l`.
+
+### Find and replace with review
+
+For one buffer, confirm every replacement with:
+
+```vim
+:%s#old#new#gc
+```
+
+For a directory or repository:
+
+1. Run `:Telescope live_grep cwd=path/to/repo` and search for `old`.
+2. Press `<C-q>` to put all filtered matches in quickfix. To keep only some
+   matches, mark them with `<Tab>` and press `<M-q>` instead.
+3. Review entries with `]q` and `[q`; press `dd` in the quickfix window to
+   remove any location that must not change.
+4. Run `:cdo s#old#new#gc | update` to visit only the listed lines and confirm
+   every replacement.
+
+At each confirmation, use `y` for yes, `n` for no, `a` for all remaining, or
+`q` to stop. The substitute pattern is a Vim regular expression. Prefix a
+literal search with `\V`, for example `:cdo s#\Vold.name#new_name#gc | update`.
+
+To replace without per-occurrence confirmation, use
+`:cfdo %s#old#new#g | update`. `:cfdo` runs once per file represented in
+quickfix and searches the complete file; `:cdo` is safer after removing
+individual quickfix locations because it operates only on listed lines. The
+initial Telescope `cwd` is what keeps either command inside the chosen
+directory.
 
 ## LSP, diagnostics and completion
 
@@ -529,6 +596,7 @@ Examples:
 
 | Action | Keys or command |
 |---|---|
+| Save the current session now | `<leader>pw` |
 | Restore session for current directory | `<leader>pr` |
 | Select a saved session | `<leader>ps` |
 | Toggle Markdown rendering globally | `:RenderMarkdown toggle` |
@@ -537,6 +605,20 @@ Examples:
 | Toggle inline color previews | `<leader>tc` |
 | Search TODO comments | `:TodoTelescope` |
 | Put TODO comments in quickfix | `:TodoQuickFix` |
+
+Persistence saves automatically when Neovim exits with at least one normal
+file open. Sessions are separated by working directory and, for non-default
+Git branches, by branch. A common flow is:
+
+1. Start Neovim in the repository, then open the files and splits you need.
+2. Press `<leader>pw` for an immediate snapshot, or quit normally to let
+   persistence save it automatically.
+3. Start Neovim in the same directory later and press `<leader>pr`.
+4. Use `<leader>ps` when you want to choose a session from another directory;
+   the picker changes to that directory before restoring it.
+
+Sessions are never restored automatically, so opening Neovim remains clean
+until one of the restore mappings is used.
 
 `nvim-highlight-colors` is not loaded at startup because its scroll refreshes
 can make large highlighted buffers less responsive. The first `<leader>tc`
@@ -589,6 +671,11 @@ To enable a disabled module, uncomment its `require` line near the bottom of
 | Preview file | `P` |
 | Open in horizontal split, vertical split or tab | `S`, `s`, `t` |
 | Close directory or all directories | `C`, `z` |
+| Toggle hidden, dot and Git-ignored items | `H` |
+| Fuzzy-find an item or directory | `/`, `D` |
+| Apply a persistent name filter | `f`, type the filter, then `<CR>` |
+| Clear the active filter | `<C-x>` |
+| Use selected directory as root or go to its parent | `.`, `<BS>` |
 | Add file or directory | `a`, `A` |
 | Rename, move, copy or delete | `r`, `m`, `c`, `d` |
 | Mark for copy or move | `y`, `x` |
@@ -602,7 +689,7 @@ Usual file-management flow:
 
 1. Press `\`, then select the parent directory with `j` and `k`.
 2. Press `a` to create a file or `A` to create a directory, enter its name,
-   then press `<CR>`.
+   then press `<CR>`. With `a`, a name ending in `/` also creates a directory.
 3. To rename an item, select it, press `r`, edit the name and press `<CR>`.
 4. To move or copy an item directly, press `m` or `c`, enter its destination
    path and press `<CR>`.
@@ -610,8 +697,10 @@ Usual file-management flow:
    destination directory and press `p`.
 6. To remove an item, select it, press `d` and confirm the prompt.
 
-Neo-tree refreshes after these operations. Press `?` inside the tree if a
-less common action or current mapping is needed.
+Press `H` when a dotfile or Git-ignored item is missing. Use `/` for a quick
+fuzzy jump, or `f` when the tree should stay narrowed until `<C-x>` clears the
+filter. Neo-tree refreshes after file operations. Press `?` inside the tree if
+a less common action or current mapping is needed.
 
 If the debug module is enabled, it configures:
 
