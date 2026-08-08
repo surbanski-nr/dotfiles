@@ -88,8 +88,9 @@ a bracketed argument list and `Ctrl+x` to remove the current buffer.
 - Spell checking is enabled for Markdown, text, and Git commit messages.
 - The last cursor position is restored and splits rebalance after a terminal
   resize.
-- SSH sessions use Neovim's OSC 52 clipboard provider. Tmux currently has
-  `set-clipboard off`, so tmux may block OSC 52 while direct SSH terminals work.
+- Direct SSH sessions use Neovim's OSC 52 clipboard provider. Tmux uses
+  `set-clipboard external`, so tmux copy-mode selections reach the terminal
+  clipboard while OSC 52 writes from applications inside tmux are blocked.
 
 The active colorscheme is Neovim's built-in `default` with its dark
 `NvimDark*` palette. The retained Isekai colorscheme and palette are disabled;

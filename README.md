@@ -321,7 +321,8 @@ Quick reference (prefix is `Ctrl+a`):
 | Scroll through pane history | Mouse wheel |
 | Enter tmux copy mode | `Ctrl+a` then `[` |
 | Start a copy-mode selection | Press `v`, then move the cursor |
-| Copy selection to tmux's buffer | Press `y` |
+| Move through copy-mode history | Arrow keys, `h/j/k/l`, `PageUp`, `PageDown` |
+| Copy selection to tmux and the terminal clipboard | Press `y` |
 | Paste tmux's buffer | `Ctrl+a` then `]` |
 | Select text for terminal copy | Hold `Shift` and drag |
 | Copy selected text | `Ctrl+Shift+C` |
@@ -333,10 +334,13 @@ Tmux mouse handling is enabled for pane focus and scrollback. Automatic
 copy-on-select remains disabled. Hold `Shift` while selecting text to let the
 terminal handle selection, then use `Ctrl+Shift+C` or `Ctrl+Shift+V`.
 
-The `v` and `y` copy-mode bindings use tmux's own buffer, not the terminal's
-system clipboard. After pressing `y`, paste it with `Ctrl+a` then `]`, or run
-`tmux paste-buffer`. Terminal `Ctrl+Shift+C` and `Ctrl+Shift+V` remain a
-separate workflow because `set-clipboard` is disabled.
+For text that spans more than the visible pane, use tmux copy mode: press
+`Ctrl+a` then `[`, move to the start, press `v`, extend the selection and press
+`y`. Tmux stores the text in its own buffer and sends it to the terminal
+clipboard through OSC 52. Paste with `Ctrl+a` then `]` inside tmux or
+`Ctrl+Shift+V` in another application. `set-clipboard external` permits tmux
+copy commands to set the terminal clipboard but blocks applications inside
+tmux from writing tmux buffers.
 
 #### Recover an SSH agent socket
 
