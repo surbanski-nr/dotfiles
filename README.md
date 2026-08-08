@@ -252,14 +252,14 @@ On environments without open internet (e.g. corporate Amazon Linux instances), H
 
 ```bash
 mkdir -p ~/bin
+export PATH="$HOME/bin:$PATH"
 ```
 
 kubectl:
 
 ```bash
 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-chmod +x kubectl
-sudo mv kubectl /usr/local/bin/
+install -m 0755 kubectl ~/bin/kubectl
 ```
 
 helm:
@@ -267,7 +267,7 @@ helm:
 ```bash
 curl -LO https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz
 tar -zxvf helm-v3.17.3-linux-amd64.tar.gz
-sudo mv linux-amd64/helm /usr/local/bin/helm
+install -m 0755 linux-amd64/helm ~/bin/helm
 ```
 
 k9s:
@@ -275,14 +275,14 @@ k9s:
 ```bash
 curl -LO https://github.com/derailed/k9s/releases/download/v0.50.2/k9s_Linux_amd64.tar.gz
 tar -zxvf k9s_Linux_amd64.tar.gz
-sudo mv k9s /usr/local/bin/k9s
+install -m 0755 k9s ~/bin/k9s
 ```
 
 yq:
 
 ```bash
-sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
-sudo chmod 755 /usr/local/bin/yq
+curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o ~/bin/yq
+chmod 0755 ~/bin/yq
 ```
 
 trivy:
@@ -290,21 +290,20 @@ trivy:
 ```bash
 curl -LO https://github.com/aquasecurity/trivy/releases/download/v0.55.2/trivy_0.55.2_Linux-64bit.tar.gz
 tar zxf trivy_0.55.2_Linux-64bit.tar.gz
-sudo mv trivy /usr/local/bin/
+install -m 0755 trivy ~/bin/trivy
 ```
 
 minikube:
 
 ```bash
 curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-sudo install minikube-linux-amd64 /usr/local/bin/minikube
+install -m 0755 minikube-linux-amd64 ~/bin/minikube
 ```
 
 oh-my-posh -- download from [GitHub releases](https://github.com/JanDeDobbeleer/oh-my-posh/releases), then:
 
 ```bash
-chmod +x posh-linux-amd64
-mv posh-linux-amd64 ~/bin/oh-my-posh
+install -m 0755 posh-linux-amd64 ~/bin/oh-my-posh
 ```
 
 ### Manual symlinks (fallback if bstow is unavailable)
