@@ -40,6 +40,15 @@ kl() {
 alias kc='kubectx'
 alias kn='kubens'
 alias k='kubectl'
+kp() {
+  if [[ -n ${POSH_KUBE:-} ]]; then
+    unset POSH_KUBE
+    printf 'Kubernetes prompt disabled\n'
+  else
+    export POSH_KUBE=1
+    printf 'Kubernetes prompt enabled\n'
+  fi
+}
 kgp() {
   if [ "$#" -eq 0 ]; then
     kubectl get pods --sort-by=.metadata.creationTimestamp

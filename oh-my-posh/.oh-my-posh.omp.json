@@ -9,7 +9,7 @@
           "properties": {
             "cache_duration": "none"
           },
-          "template": "{{ if .SSHSession }} {{ end }}{{ .UserName }}@{{ .HostName }} ",
+          "template": "{{ if .SSHSession }} {{ end }}{{ .UserName }}{{ if .SSHSession }}@{{ .HostName }}{{ end }} ",
           "foreground": "lightYellow",
           "type": "session",
           "style": "plain"
@@ -65,7 +65,7 @@
             "cache_duration": "none",
             "display_error": true
           },
-          "template": "󱃾 {{.Context}}::{{if .Namespace}}{{.Namespace}}{{else}}default{{end}}",
+          "template": "{{ if .Env.POSH_KUBE }}󱃾 {{ .Context }}::{{ if .Namespace }}{{ .Namespace }}{{ else }}default{{ end }}{{ end }}",
           "foreground": "lightBlue",
           "type": "kubectl",
           "style": "plain"
