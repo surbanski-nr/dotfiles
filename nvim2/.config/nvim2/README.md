@@ -59,6 +59,12 @@ provision or synchronize their pinned versions explicitly with:
 :Nvim2ToolsInstallSync
 ```
 
+Then validate the complete profile from the shell:
+
+```bash
+bash ~/.config/nvim2/tests/check.sh
+```
+
 Use current Neovim 0.12 stable or a recent nightly. Language installation and
 tooling details are in
 [`docs/neovim-nvchad-to-kickstart.md`](../../../docs/neovim-nvchad-to-kickstart.md).
@@ -91,7 +97,7 @@ Transfer that archive and this dotfiles repository to the target. Stow the
 data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 mkdir -p "$data_home"
 tar -C "$data_home" -xzf "nvim2-offline-$(uname -m).tar.gz"
-NVIM_APPNAME=nvim2 nvim --headless '+checkhealth vim.lsp' '+qa!'
+bash ~/.config/nvim2/tests/check.sh
 ```
 
 The archive contains:
@@ -168,6 +174,7 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 |---|---|
 | `core.lua` | Options, filetype detection, register behavior and general autocommands |
 | `hardening.lua` | Disable plugin-controlled `PackChanged` build hooks |
+| `checks.lua` and `health.lua` | Validate custom behavior through `:Nvim2Check` and headless smoke tests |
 | `lsp.lua` | Language-server configuration and pinned Mason tool versions |
 | `conform.lua` | Formatter selection and format-on-save controls |
 | `luasnip.lua` | Custom snippet loading and expansion mapping |
@@ -178,6 +185,7 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 | `telescope_git_root.lua` | Add `<leader>sF` and `<leader>sG` searches scoped to the nearest Git repository | No; extends the existing Telescope setup |
 | `toggle_values.lua` | Add `<leader>tv` for boolean-like values without `nvim-toggler` | No |
 | `native_folds.lua` | Apply Neovim's native Treesitter fold expression without `nvim-ufo` | No; extends the existing Treesitter setup |
+| `self_check.lua` | Add `:Nvim2Check` without another test plugin | No |
 
 Plugins with direct actions have workflows in the sections below. Some work
 automatically or only support another plugin, so they do not need a daily key
@@ -791,9 +799,54 @@ built-in tag-list mappings.
 | Fetch and review one plugin | `:lua vim.pack.update({ 'PLUGIN' })` |
 | Apply proposed plugin updates | `:write` in the update window |
 | Cancel proposed plugin updates | `:quit` in the update window |
+| Check Nvim2 mappings, plugins, tools and parsers | `:Nvim2Check` |
+| Run smoke tests and startup benchmark | `bash ~/.config/nvim2/tests/check.sh` |
 | Check profile health | `:checkhealth kickstart` |
 | Check LSP health | `:checkhealth vim.lsp` |
 | Check Treesitter health | `:checkhealth nvim-treesitter` |
+
+### Validate the profile
+
+`:Nvim2Check` opens a normal Neovim health report for the custom profile. It
+checks recorded errors, the Neovim version, plugin revisions against
+`nvim-pack-lock.json`, custom modules, public plugin APIs, daily mappings and
+commands, hardening, pinned Mason packages and configured Treesitter parsers.
+It does not install or update anything.
+
+Run the stronger headless check after provisioning a VM and after accepting
+plugin, Mason or parser updates:
+
+```bash
+bash ~/.config/nvim2/tests/check.sh
+```
+
+From this repository's Nvim2 configuration directory, the equivalent command
+is `bash tests/check.sh`. The script exits nonzero when a smoke check fails. It
+also opens `init.lua` to verify Lua filetype detection, Treesitter highlighting
+and folds, Gitsigns attachment, YAML subtype detection, value toggling and the
+Isekai-to-default color restoration flow.
+
+The script performs five isolated headless starts and reports the minimum,
+median and maximum startup time. Startup speed depends on the VM, filesystem
+and cache, so there is no shared default failure limit. After measuring a
+healthy machine, enforce a local median limit when checking future updates:
+
+```bash
+NVIM2_MAX_STARTUP_MS=200 bash ~/.config/nvim2/tests/check.sh
+```
+
+Change `200` to a suitable value for that machine. Use
+`NVIM2_BENCHMARK_RUNS=9` for a steadier measurement or preserve the last raw
+profile for inspection:
+
+```bash
+NVIM2_STARTUP_LOG=/tmp/nvim2-startup.log \
+  bash ~/.config/nvim2/tests/check.sh
+```
+
+Before running `:Nvim2ToolsInstallSync`, use `NVIM2_CHECK_TOOLS=0` to skip only
+the Mason-package and parser-presence checks. All plugin and custom behavior
+checks still run.
 
 ### Update plugins and refresh the lockfile
 
@@ -821,7 +874,8 @@ Perform updates on a connected trusted machine:
    ```
 
 6. Run the health checks and exercise the affected workflows before
-   committing `nvim-pack-lock.json`.
+   committing `nvim-pack-lock.json`. At minimum, run
+   `bash ~/.config/nvim2/tests/check.sh`.
 
 To return to a known revision, restore the wanted lockfile version from Git,
 set that plugin's `version` temporarily to its locked `rev`, restart, and run
@@ -854,8 +908,9 @@ parser list is in `lua/custom/treesitter.lua`.
      nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
    ```
 
-5. Inspect `:Mason`, run the health checks, and test the relevant LSP,
-   formatter or linter. Commit the changed custom module after it passes.
+5. Inspect `:Mason`, run `bash ~/.config/nvim2/tests/check.sh`, and test the
+   relevant LSP, formatter or linter. Commit the changed custom module after
+   it passes.
 
 `Nvim2ToolsInstallSync` already runs `MasonToolsInstallSync` and then
 synchronizes the configured Treesitter parsers. Do not use
