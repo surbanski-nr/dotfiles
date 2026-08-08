@@ -140,12 +140,12 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `nvim-highlight-colors` | Custom module | Preview color values inline on demand; lazy-loaded by `<leader>tc` |
 | `nvim-lint` | Kickstart module | Publish Hadolint, TFLint and yamllint results as diagnostics |
 | `nvim-lspconfig` | Main `init.lua` | Supply default commands, filetypes and root detection for language servers |
-| `nvim-treesitter` | Main `init.lua` | Install parsers and queries used by Neovim's built-in Treesitter runtime |
+| `nvim-treesitter` | Main `init.lua` plus custom native-fold module | Install parsers and queries used by Neovim's built-in Treesitter runtime |
 | `nui.nvim` | Neo-tree dependency | Supply popup and layout components required by Neo-tree |
 | `plenary.nvim` | Telescope and Neo-tree dependency | Supply shared Lua utilities required by those plugins |
 | `render-markdown.nvim` | Custom module | Render Markdown headings, lists, tables and code blocks inside Neovim |
 | `telescope-ui-select.nvim` | Main `init.lua` | Display `vim.ui.select` choices in a Telescope dropdown |
-| `telescope.nvim` | Main `init.lua` | Search files, text, buffers, commands, symbols and diagnostics |
+| `telescope.nvim` | Main `init.lua` plus custom Git-root module | Search files, text, buffers, commands, symbols and diagnostics |
 | `todo-comments.nvim` | Main `init.lua` | Highlight and search TODO-style comments |
 | `which-key.nvim` | Main `init.lua` | Show available mappings after a key prefix |
 
@@ -154,12 +154,18 @@ diagnostic APIs, netrw and the default colorscheme. In particular,
 `nvim-lspconfig` and `nvim-treesitter` are external plugins despite their
 names.
 
-The user-selected additions are under `lua/custom/plugins/`. Each plugin file
-owns both its `vim.pack.add` declaration and its setup; `init.lua` explicitly
-loads the enabled files. Persistence remains there with its `require` commented
-out. Core setup remains in the numbered sections of the main `init.lua`;
-bundled Kickstart modules such as Gitsigns, linting and Neo-tree are under
-`lua/kickstart/plugins/`.
+User-selected additions are under `lua/custom/plugins/` and are loaded through
+one `require 'custom.plugins'` line. External-plugin modules own their
+`vim.pack.add` declaration and setup. Local feature modules install nothing;
+they keep custom behavior out of Kickstart's numbered sections. Persistence
+remains there with its `require` commented out. Bundled Kickstart modules such
+as Gitsigns, linting and Neo-tree remain under `lua/kickstart/plugins/`.
+
+| Local feature module | Purpose | External plugin added |
+|---|---|---|
+| `telescope_git_root.lua` | Add `<leader>sF` and `<leader>sG` searches scoped to the nearest Git repository | No; extends the existing Telescope setup |
+| `toggle_values.lua` | Add `<leader>tv` for boolean-like values without `nvim-toggler` | No |
+| `native_folds.lua` | Apply Neovim's native Treesitter fold expression without `nvim-ufo` | No; extends the existing Treesitter setup |
 
 Plugins with direct actions have workflows in the sections below. Some work
 automatically or only support another plugin, so they do not need a daily key

@@ -231,14 +231,6 @@ vim.filetype.add {
   },
 }
 
----@param bufnr? integer
----@return string
-local function nearest_git_root(bufnr)
-  local path = vim.api.nvim_buf_get_name(bufnr or 0)
-  local start = path ~= '' and vim.fs.dirname(path) or vim.uv.cwd()
-  return vim.fs.root(start, '.git') or vim.fn.getcwd()
-end
-
 -- ============================================================
 -- SECTION 2: KEYMAPS & AUTOCMDS
 -- basic keymaps, basic autocmds
@@ -257,63 +249,6 @@ do
   vim.keymap.set('n', 'dd', '"_dd', { desc = 'Delete line without replacing yank register' })
   vim.keymap.set('x', 'c', '"_c')
   vim.keymap.set('x', 'p', 'p:let @+=@0<CR>:let @"=@0<CR>', { desc = 'Paste without replacing yank register' })
-
-  local toggle_values = {
-    ['true'] = 'false',
-    ['false'] = 'true',
-    ['True'] = 'False',
-    ['False'] = 'True',
-    ['TRUE'] = 'FALSE',
-    ['FALSE'] = 'TRUE',
-    ['yes'] = 'no',
-    ['no'] = 'yes',
-    ['Yes'] = 'No',
-    ['No'] = 'Yes',
-    ['YES'] = 'NO',
-    ['NO'] = 'YES',
-    ['on'] = 'off',
-    ['off'] = 'on',
-    ['On'] = 'Off',
-    ['Off'] = 'On',
-    ['ON'] = 'OFF',
-    ['OFF'] = 'ON',
-    ['enable'] = 'disable',
-    ['disable'] = 'enable',
-    ['enabled'] = 'disabled',
-    ['disabled'] = 'enabled',
-  }
-
-  vim.keymap.set('n', '<leader>tv', function()
-    local cursor = vim.api.nvim_win_get_cursor(0)
-    local row, col = cursor[1] - 1, cursor[2]
-    local line = vim.api.nvim_get_current_line()
-    local index = col + 1
-
-    if not line:sub(index, index):match '[%w_]' then
-      vim.notify('Place the cursor on a toggleable value', vim.log.levels.WARN)
-      return
-    end
-
-    local left, right = index, index
-    while left > 1 and line:sub(left - 1, left - 1):match '[%w_]' do
-      left = left - 1
-    end
-    while right <= #line and line:sub(right, right):match '[%w_]' do
-      right = right + 1
-    end
-
-    local word = line:sub(left, right - 1)
-    local replacement = toggle_values[word]
-    if not replacement then
-      vim.notify(('No toggle configured for %q'):format(word), vim.log.levels.WARN)
-      return
-    end
-
-    vim.api.nvim_buf_set_text(0, row, left - 1, row, right - 1, { replacement })
-    local relative_col = col - (left - 1)
-    local new_col = left - 1 + math.min(relative_col, math.max(#replacement - 1, 0))
-    vim.api.nvim_win_set_cursor(0, { row + 1, new_col })
-  end, { desc = '[T]oggle boolean/[V]alue' })
 
   -- Diagnostic Config & Keymaps
   --  See `:help vim.diagnostic.Opts`
@@ -628,17 +563,9 @@ do
   vim.keymap.set('n', '<leader>sh', builtin.help_tags, { desc = '[S]earch [H]elp' })
   vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = '[S]earch [K]eymaps' })
   vim.keymap.set('n', '<leader>sf', builtin.find_files, { desc = '[S]earch [F]iles' })
-  vim.keymap.set('n', '<leader>sF', function()
-    local root = nearest_git_root()
-    builtin.find_files { cwd = root, prompt_title = 'Find Files: ' .. root }
-  end, { desc = '[S]earch [F]iles in nearest Git root' })
   vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
   vim.keymap.set({ 'n', 'v' }, '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
   vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
-  vim.keymap.set('n', '<leader>sG', function()
-    local root = nearest_git_root()
-    builtin.live_grep { cwd = root, prompt_title = 'Live Grep: ' .. root }
-  end, { desc = '[S]earch by [G]rep in nearest Git root' })
   vim.keymap.set('n', '<leader>sd', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
   vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = '[S]earch [R]esume' })
   vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
@@ -1199,13 +1126,7 @@ do
     if not vim.treesitter.language.add(language) then return end
     -- Enable syntax highlighting and other treesitter features
     vim.treesitter.start(buf, language)
-
-    vim.b[buf].nvim2_treesitter_folds = true
-    for _, win in ipairs(vim.fn.win_findbuf(buf)) do
-      vim.wo[win].foldexpr = 'v:lua.vim.treesitter.foldexpr()'
-      vim.wo[win].foldmethod = 'expr'
-      vim.wo[win].foldlevel = 99
-    end
+    require('custom.plugins.native_folds').attach(buf)
 
     -- Check if treesitter indentation is available for this language, and if so enable it
     -- in case there is no indent query, the indentexpr will fallback to the vim's built in one
@@ -1214,15 +1135,6 @@ do
     -- Enable treesitter based indentation
     if has_indent_query then vim.bo.indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()" end
   end
-
-  vim.api.nvim_create_autocmd('BufWinEnter', {
-    desc = 'Use native Treesitter folds in new windows',
-    callback = function(args)
-      if not vim.b[args.buf].nvim2_treesitter_folds then return end
-      vim.wo.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
-      vim.wo.foldmethod = 'expr'
-    end,
-  })
 
   vim.api.nvim_create_autocmd('FileType', {
     callback = function(args)
