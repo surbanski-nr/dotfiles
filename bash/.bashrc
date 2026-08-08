@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
 # for examples
@@ -201,7 +202,9 @@ if command -v zoxide >/dev/null 2>&1; then
 fi
 
 if command -v kubectl >/dev/null 2>&1; then
-  source <(kubectl completion bash)
+  if ! declare -F __start_kubectl >/dev/null; then
+    source <(kubectl completion bash)
+  fi
   complete -F __start_kubectl k
 fi
 
