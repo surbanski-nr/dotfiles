@@ -109,7 +109,6 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `nvim-lspconfig` | Main `init.lua` | Supply default commands, filetypes and root detection for language servers |
 | `nvim-treesitter` | Main `init.lua` | Install parsers and queries used by Neovim's built-in Treesitter runtime |
 | `nui.nvim` | Neo-tree dependency | Supply popup and layout components required by Neo-tree |
-| `persistence.nvim` | Custom module | Save and restore directory-based sessions |
 | `plenary.nvim` | Telescope and Neo-tree dependency | Supply shared Lua utilities required by those plugins |
 | `render-markdown.nvim` | Custom module | Render Markdown headings, lists, tables and code blocks inside Neovim |
 | `telescope-fzf-native.nvim` | Main `init.lua` | Speed up Telescope sorting with its compiled FZF matcher |
@@ -124,10 +123,11 @@ diagnostic APIs, netrw and the default colorscheme. In particular,
 names.
 
 The user-selected additions are under `lua/custom/plugins/`. Each plugin file
-owns both its `vim.pack.add` declaration and its setup; `init.lua` only loads
-those files. Core setup remains in the numbered sections of the main
-`init.lua`; bundled Kickstart modules such as Gitsigns, linting and Neo-tree
-are under `lua/kickstart/plugins/`.
+owns both its `vim.pack.add` declaration and its setup; `init.lua` explicitly
+loads the enabled files. Persistence remains there with its `require` commented
+out. Core setup remains in the numbered sections of the main `init.lua`;
+bundled Kickstart modules such as Gitsigns, linting and Neo-tree are under
+`lua/kickstart/plugins/`.
 
 Plugins with direct actions have workflows in the sections below. Some work
 automatically or only support another plugin, so they do not need a daily key
@@ -418,10 +418,9 @@ working directory globally.
 
 One Neovim process over several repositories is valid, especially for
 cross-repository changes. LSP and Gitsigns determine roots per buffer, while
-Telescope and persistence are sensitive to the current working directory. A
-useful compromise is one tab and `:tcd` per active repository. Use separate
-Neovim processes when the repositories need independent sessions, working
-directories or tool state.
+Telescope uses the current working directory. A useful compromise is one tab
+and `:tcd` per active repository. Use separate Neovim processes when the
+repositories need independent working directories or tool state.
 
 ## Quickfix list
 
@@ -648,33 +647,16 @@ Examples:
 | Align with live preview | Select text, press `gA`, then follow the prompt |
 | Remove current buffer | `<C-x>` |
 
-## Sessions, Markdown, colors and TODO comments
+## Markdown, colors and TODO comments
 
 | Action | Keys or command |
 |---|---|
-| Save the current session now | `<leader>pw` |
-| Restore session for current directory | `<leader>pr` |
-| Select a saved session | `<leader>ps` |
 | Toggle Markdown rendering globally | `:RenderMarkdown toggle` |
 | Toggle Markdown rendering for current buffer | `:RenderMarkdown buf_toggle` |
 | Open a side-by-side rendered Markdown preview | `:RenderMarkdown preview` |
 | Toggle inline color previews | `<leader>tc` |
 | Search TODO comments | `:TodoTelescope` |
 | Put TODO comments in quickfix | `:TodoQuickFix` |
-
-Persistence saves automatically when Neovim exits with at least one normal
-file open. Sessions are separated by working directory and, for non-default
-Git branches, by branch. A common flow is:
-
-1. Start Neovim in the repository, then open the files and splits you need.
-2. Press `<leader>pw` for an immediate snapshot, or quit normally to let
-   persistence save it automatically.
-3. Start Neovim in the same directory later and press `<leader>pr`.
-4. Use `<leader>ps` when you want to choose a session from another directory;
-   the picker changes to that directory before restoring it.
-
-Sessions are never restored automatically, so opening Neovim remains clean
-until one of the restore mappings is used.
 
 `nvim-highlight-colors` is not loaded at startup because its scroll refreshes
 can make large highlighted buffers less responsive. The first `<leader>tc`
@@ -687,6 +669,22 @@ restored. Adding mappings requires no new plugin because
 `todo-comments.nvim` is already installed. Prefer `<leader>tn` and
 `<leader>tp` for TODO navigation: `[t`/`]t` and `[T`/`]T` are Neovim's
 built-in tag-list mappings.
+
+### Disabled session persistence
+
+`persistence.nvim` is retained in `lua/custom/plugins/persistence.lua`, but its
+`require` is commented out in `lua/custom/plugins/init.lua`. To restore it,
+uncomment that line and restart Neovim. It then saves sessions automatically
+on exit and provides:
+
+| Action | Keys |
+|---|---|
+| Save the current session now | `<leader>pw` |
+| Restore session for current directory | `<leader>pr` |
+| Select a saved session | `<leader>ps` |
+
+Sessions are separated by working directory and, for non-default Git branches,
+by branch. They are never restored automatically.
 
 ## Plugin and configuration maintenance
 
@@ -791,7 +789,7 @@ active configurations with `nvim2`.
 | `mfussenegger/nvim-lint` | Kept | Linter set is limited to the selected development languages |
 | `neovim/nvim-lspconfig` | Kept | Uses the Neovim 0.12 API and the selected server list |
 | `mason-org/mason.nvim` | Kept | Mason LSP and tool installers now manage the complete selected tool set |
-| `olimorris/persisted.nvim` | Replaced by `folke/persistence.nvim` | Session picker mappings changed to `<leader>pr` and `<leader>ps` |
+| `olimorris/persisted.nvim` | Optional replacement retained but disabled as `folke/persistence.nvim` | If enabled, session picker mappings are `<leader>pr` and `<leader>ps` |
 | `kylechui/nvim-surround` | Replaced by `mini.surround` | Surrounding keys use Mini's `sa`, `sd` and `sr` grammar |
 | `nvim-telescope/telescope.nvim` | Kept | Search mappings moved from `<leader>f...` to `<leader>s...`; the old override included hidden files and custom ignore patterns while the current profile uses Telescope defaults |
 | `folke/todo-comments.nvim` | Kept | Old TODO navigation/search mappings are not configured and gutter signs are disabled |
@@ -882,10 +880,10 @@ a plugin dependency. It still adds mappings and behavior that need maintenance.
 | `mini.splitjoin` | Toggles bracketed arguments between one line and one item per line with `gS` | Try it for JSON, Lua, Terraform and YAML flow collections; use Treesj if syntax-aware structures need better coverage |
 | `mini.trailspace` | Highlights trailing whitespace and exposes a trim function | Consider it for filetypes not covered by format-on-save; it is unnecessary where Conform already cleans the file |
 | `mini.bracketed` | Provides consistent `[` and `]` navigation for buffers, diagnostics, quickfix, jumps and other targets | Enable only selected targets because its defaults can collide with Gitsigns hunk keys and native diagnostic keys |
-| `mini.visits` | Tracks file and directory visits for frecency search and user labels | Consider only if Telescope buffers, old files and persistence sessions are not enough |
+| `mini.visits` | Tracks file and directory visits for frecency search and user labels | Consider only if Telescope buffers and old files are not enough |
 | `mini.jump` and `mini.jump2d` | Extend `f`/`t` movement and add label-based jumps within visible text | Similar benefit to Flash; keep native movement until this becomes a repeated navigation problem |
 | `mini.operators` | Adds exchange, multiply, replace, sort and evaluate operators | Do not enable wholesale because its default `gr` family overlaps Neovim's LSP mappings; configure individual operators if needed |
-| Other MiniMax modules | Add a file browser, picker, completion, snippets, sessions, Git helpers, diff signs, key hints, color highlighting, pairs and UI elements | Avoid the overlapping replacements while Neo-tree, Telescope, Blink, LuaSnip, persistence, Gitsigns, which-key and the current color tools remain enabled |
+| Other MiniMax modules | Add a file browser, picker, completion, snippets, sessions, Git helpers, diff signs, key hints, color highlighting, pairs and UI elements | Avoid the overlapping replacements while Neo-tree, Telescope, Blink, LuaSnip, Gitsigns, which-key and the current color tools remain enabled |
 
 ## Suggested minimal path
 
