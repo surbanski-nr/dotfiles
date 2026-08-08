@@ -170,8 +170,8 @@ do
 
   vim.o.foldmethod = 'marker'
   vim.o.foldmarker = '{{{,}}}'
-  vim.o.foldlevel = 0
-  vim.o.foldlevelstart = 0
+  vim.o.foldlevel = 99
+  vim.o.foldlevelstart = 99
 
   -- if performing an operation that would fail due to unsaved changes in the buffer (like `:q`),
   -- instead raise a dialog asking if you wish to save the current file(s)
@@ -231,6 +231,14 @@ vim.filetype.add {
   },
 }
 
+---@param bufnr? integer
+---@return string
+local function nearest_git_root(bufnr)
+  local path = vim.api.nvim_buf_get_name(bufnr or 0)
+  local start = path ~= '' and vim.fs.dirname(path) or vim.uv.cwd()
+  return vim.fs.root(start, '.git') or vim.fn.getcwd()
+end
+
 -- ============================================================
 -- SECTION 2: KEYMAPS & AUTOCMDS
 -- basic keymaps, basic autocmds
@@ -249,6 +257,63 @@ do
   vim.keymap.set('n', 'dd', '"_dd', { desc = 'Delete line without replacing yank register' })
   vim.keymap.set('x', 'c', '"_c')
   vim.keymap.set('x', 'p', 'p:let @+=@0<CR>:let @"=@0<CR>', { desc = 'Paste without replacing yank register' })
+
+  local toggle_values = {
+    ['true'] = 'false',
+    ['false'] = 'true',
+    ['True'] = 'False',
+    ['False'] = 'True',
+    ['TRUE'] = 'FALSE',
+    ['FALSE'] = 'TRUE',
+    ['yes'] = 'no',
+    ['no'] = 'yes',
+    ['Yes'] = 'No',
+    ['No'] = 'Yes',
+    ['YES'] = 'NO',
+    ['NO'] = 'YES',
+    ['on'] = 'off',
+    ['off'] = 'on',
+    ['On'] = 'Off',
+    ['Off'] = 'On',
+    ['ON'] = 'OFF',
+    ['OFF'] = 'ON',
+    ['enable'] = 'disable',
+    ['disable'] = 'enable',
+    ['enabled'] = 'disabled',
+    ['disabled'] = 'enabled',
+  }
+
+  vim.keymap.set('n', '<leader>tv', function()
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local row, col = cursor[1] - 1, cursor[2]
+    local line = vim.api.nvim_get_current_line()
+    local index = col + 1
+
+    if not line:sub(index, index):match '[%w_]' then
+      vim.notify('Place the cursor on a toggleable value', vim.log.levels.WARN)
+      return
+    end
+
+    local left, right = index, index
+    while left > 1 and line:sub(left - 1, left - 1):match '[%w_]' do
+      left = left - 1
+    end
+    while right <= #line and line:sub(right, right):match '[%w_]' do
+      right = right + 1
+    end
+
+    local word = line:sub(left, right - 1)
+    local replacement = toggle_values[word]
+    if not replacement then
+      vim.notify(('No toggle configured for %q'):format(word), vim.log.levels.WARN)
+      return
+    end
+
+    vim.api.nvim_buf_set_text(0, row, left - 1, row, right - 1, { replacement })
+    local relative_col = col - (left - 1)
+    local new_col = left - 1 + math.min(relative_col, math.max(#replacement - 1, 0))
+    vim.api.nvim_win_set_cursor(0, { row + 1, new_col })
+  end, { desc = '[T]oggle boolean/[V]alue' })
 
   -- Diagnostic Config & Keymaps
   --  See `:help vim.diagnostic.Opts`
@@ -379,65 +444,9 @@ do
 end
 
 -- ============================================================
--- SECTION 3: PLUGIN MANAGER INTRO
--- vim.pack intro, build hooks
+-- SECTION 3: PLUGIN MANAGER HELPERS
+-- vim.pack source helper
 -- ============================================================
-do
-  -- [[ Intro to `vim.pack` ]]
-  -- `vim.pack` is a new plugin manager built into Neovim,
-  --  which provides a Lua interface for installing and managing plugins.
-  --
-  --  See `:help vim.pack`, `:help vim.pack-examples` or the
-  --  excellent blog post from the creator of vim.pack and mini.nvim:
-  --  https://echasnovski.com/blog/2026-03-13-a-guide-to-vim-pack
-  --
-  --  To inspect plugin state and pending updates, run
-  --    :lua vim.pack.update(nil, { offline = true })
-  --
-  --  To update plugins, run
-  --    :lua vim.pack.update()
-  --
-  --
-  --  Throughout the rest of the config there will be examples
-  --  of how to install and configure plugins using `vim.pack`.
-  --
-  --  In this section we set up some autocommands to run build
-  --  steps for certain plugins after they are installed or updated.
-
-  local function run_build(name, cmd, cwd)
-    local result = vim.system(cmd, { cwd = cwd }):wait()
-    if result.code ~= 0 then
-      local stderr = result.stderr or ''
-      local stdout = result.stdout or ''
-      local output = stderr ~= '' and stderr or stdout
-      if output == '' then output = 'No output from build command.' end
-      vim.notify(('Build failed for %s:\n%s'):format(name, output), vim.log.levels.ERROR)
-    end
-  end
-
-  -- This autocommand runs after a plugin is installed or updated and
-  --  runs the appropriate build command for that plugin if necessary.
-  --
-  -- See `:help vim.pack-events`
-  vim.api.nvim_create_autocmd('PackChanged', {
-    callback = function(ev)
-      local name = ev.data.spec.name
-      local kind = ev.data.kind
-      if kind ~= 'install' and kind ~= 'update' then return end
-
-      if name == 'telescope-fzf-native.nvim' and vim.fn.executable 'make' == 1 then
-        run_build(name, { 'make' }, ev.data.path)
-        return
-      end
-
-      if name == 'LuaSnip' then
-        if vim.fn.has 'win32' ~= 1 and vim.fn.executable 'make' == 1 then run_build(name, { 'make', 'install_jsregexp' }, ev.data.path) end
-        return
-      end
-    end,
-  })
-end
-
 ---Because most plugins are hosted on GitHub, you can use the helper
 ---function to have less repetition in the following sections.
 ---@param repo string
@@ -482,6 +491,7 @@ do
       { '<leader>s', group = '[S]earch', mode = { 'n', 'v' } },
       { '<leader>p', group = '[P]ersistence' },
       { '<leader>t', group = '[T]oggle' },
+      { '<leader>v', group = '[V]isits' },
       { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } }, -- Enable gitsigns recommended keymaps first
       { 'gr', group = 'LSP Actions', mode = { 'n' } },
     },
@@ -527,6 +537,18 @@ do
   -- - sr)'  - [S]urround [R]eplace [)] [']
   require('mini.surround').setup()
   require('mini.align').setup()
+  require('mini.splitjoin').setup()
+
+  local visits = require 'mini.visits'
+  visits.setup()
+  local frecent = visits.gen_sort.default { recency_weight = 0.5 }
+  local visit_opts = { sort = frecent }
+
+  vim.keymap.set('n', '<leader>vv', function() visits.select_path(vim.fn.getcwd(), visit_opts) end, { desc = '[V]isited files in cwd' })
+  vim.keymap.set('n', '<leader>vV', function() visits.select_path('', visit_opts) end, { desc = 'All [V]isited files' })
+  vim.keymap.set('n', '<leader>va', function() visits.add_label() end, { desc = '[A]dd label to current file' })
+  vim.keymap.set('n', '<leader>vr', function() visits.remove_label() end, { desc = '[R]emove label from current file' })
+  vim.keymap.set('n', '<leader>vl', function() visits.select_label('', '', visit_opts) end, { desc = 'Select visited [L]abel' })
 
   vim.keymap.set('n', '<C-x>', function() require('mini.bufremove').delete() end, { desc = 'Delete buffer' })
 
@@ -576,16 +598,11 @@ do
   -- Telescope picker. This is really useful to discover what Telescope can
   -- do as well as how to actually do it!
 
-  ---@type (string|vim.pack.Spec)[]
-  local telescope_plugins = {
+  vim.pack.add {
     gh 'nvim-lua/plenary.nvim',
     gh 'nvim-telescope/telescope.nvim',
     gh 'nvim-telescope/telescope-ui-select.nvim',
   }
-  if vim.fn.executable 'make' == 1 then table.insert(telescope_plugins, gh 'nvim-telescope/telescope-fzf-native.nvim') end
-
-  -- NOTE: You can install multiple plugins at once
-  vim.pack.add(telescope_plugins)
 
   -- See `:help telescope` and `:help telescope.setup()`
   require('telescope').setup {
@@ -604,7 +621,6 @@ do
   }
 
   -- Enable Telescope extensions if they are installed
-  pcall(require('telescope').load_extension, 'fzf')
   pcall(require('telescope').load_extension, 'ui-select')
 
   -- See `:help telescope.builtin`
@@ -612,9 +628,17 @@ do
   vim.keymap.set('n', '<leader>sh', builtin.help_tags, { desc = '[S]earch [H]elp' })
   vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = '[S]earch [K]eymaps' })
   vim.keymap.set('n', '<leader>sf', builtin.find_files, { desc = '[S]earch [F]iles' })
+  vim.keymap.set('n', '<leader>sF', function()
+    local root = nearest_git_root()
+    builtin.find_files { cwd = root, prompt_title = 'Find Files: ' .. root }
+  end, { desc = '[S]earch [F]iles in nearest Git root' })
   vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
   vim.keymap.set({ 'n', 'v' }, '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
   vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
+  vim.keymap.set('n', '<leader>sG', function()
+    local root = nearest_git_root()
+    builtin.live_grep { cwd = root, prompt_title = 'Live Grep: ' .. root }
+  end, { desc = '[S]earch by [G]rep in nearest Git root' })
   vim.keymap.set('n', '<leader>sd', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
   vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = '[S]earch [R]esume' })
   vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
@@ -866,28 +890,37 @@ do
     automatic_enable = false, -- Change this to true if you want to automatically enable servers that are installed manually (e.g. via :Mason / :MasonInstall)
   }
 
-  -- Ensure the servers and tools above are installed
-  --
-  -- To check the current status of installed tools and/or manually install
-  -- other tools, you can run
-  --    :Mason
-  --
-  -- You can press `g?` for help in this menu.
-  local ensure_installed = vim.tbl_keys(servers or {})
-  vim.list_extend(ensure_installed, {
-    'ansible-lint',
-    'hadolint',
-    'prettier',
-    'shellcheck',
-    'shfmt',
-    'stylua',
-    'tflint',
-    'tree-sitter-cli',
-    'yamlfmt',
-    'yamllint',
-  })
+  local ensure_installed = {
+    { 'ansible-language-server', version = '1.2.3' },
+    { 'ansible-lint', version = '26.1.1' },
+    { 'bash-language-server', version = '5.6.0' },
+    { 'css-lsp', version = '4.10.0' },
+    { 'docker-language-server', version = 'v0.20.1' },
+    { 'hadolint', version = 'v2.15.1' },
+    { 'helm-ls', version = 'v0.5.4' },
+    { 'json-lsp', version = '4.10.0' },
+    { 'lua-language-server', version = '3.17.1' },
+    { 'markdown-oxide', version = 'v0.25.12' },
+    { 'prettier', version = '3.9.6' },
+    { 'pyright', version = '1.1.408' },
+    { 'ruff', version = '0.16.1' },
+    { 'shellcheck', version = 'v0.11.0' },
+    { 'shfmt', version = 'v3.13.1' },
+    { 'stylua', version = 'v2.3.1' },
+    { 'taplo', version = '0.10.0' },
+    { 'terraform-ls', version = 'v0.38.3' },
+    { 'tflint', version = 'v0.64.0' },
+    { 'tree-sitter-cli', version = 'v0.26.11' },
+    { 'yaml-language-server', version = '1.19.2' },
+    { 'yamlfmt', version = 'v0.21.0' },
+    { 'yamllint', version = '1.38.0' },
+  }
 
-  require('mason-tool-installer').setup { ensure_installed = ensure_installed }
+  require('mason-tool-installer').setup {
+    ensure_installed = ensure_installed,
+    auto_update = false,
+    run_on_start = false,
+  }
 
   for name, server in pairs(servers) do
     vim.lsp.config(name, server)
@@ -1139,8 +1172,6 @@ do
     -- 'typescript',
     -- 'vue',
   }
-  local installing_tools_synchronously = false
-
   ---@param wait boolean
   local function maintain_parsers(wait)
     if vim.fn.executable 'tree-sitter' ~= 1 then return end
@@ -1154,18 +1185,8 @@ do
     end
   end
 
-  vim.api.nvim_create_autocmd('User', {
-    desc = 'Maintain Treesitter parsers after Mason installs tree-sitter-cli',
-    pattern = 'MasonToolsUpdateCompleted',
-    callback = function()
-      if not installing_tools_synchronously then maintain_parsers(false) end
-    end,
-  })
-
   vim.api.nvim_create_user_command('Nvim2ToolsInstallSync', function()
-    installing_tools_synchronously = true
     local mason_ok, mason_error = pcall(vim.cmd, 'MasonToolsInstallSync')
-    installing_tools_synchronously = false
     if not mason_ok then error(mason_error) end
     if vim.fn.executable 'tree-sitter' ~= 1 then error 'Mason did not install tree-sitter-cli' end
     maintain_parsers(true)
@@ -1179,10 +1200,12 @@ do
     -- Enable syntax highlighting and other treesitter features
     vim.treesitter.start(buf, language)
 
-    -- Enable treesitter based folds
-    -- For more info on folds see `:help folds`
-    -- vim.wo.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
-    -- vim.wo.foldmethod = 'expr'
+    vim.b[buf].nvim2_treesitter_folds = true
+    for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+      vim.wo[win].foldexpr = 'v:lua.vim.treesitter.foldexpr()'
+      vim.wo[win].foldmethod = 'expr'
+      vim.wo[win].foldlevel = 99
+    end
 
     -- Check if treesitter indentation is available for this language, and if so enable it
     -- in case there is no indent query, the indentexpr will fallback to the vim's built in one
@@ -1192,7 +1215,15 @@ do
     if has_indent_query then vim.bo.indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()" end
   end
 
-  local available_parsers = require('nvim-treesitter').get_available()
+  vim.api.nvim_create_autocmd('BufWinEnter', {
+    desc = 'Use native Treesitter folds in new windows',
+    callback = function(args)
+      if not vim.b[args.buf].nvim2_treesitter_folds then return end
+      vim.wo.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
+      vim.wo.foldmethod = 'expr'
+    end,
+  })
+
   vim.api.nvim_create_autocmd('FileType', {
     callback = function(args)
       local buf, filetype = args.buf, args.match
@@ -1203,16 +1234,7 @@ do
 
       local installed_parsers = require('nvim-treesitter').get_installed 'parsers'
 
-      if vim.tbl_contains(installed_parsers, language) then
-        -- Enable the parser if it is already installed
-        treesitter_try_attach(buf, language)
-      elseif vim.tbl_contains(available_parsers, language) then
-        -- If a parser is available in `nvim-treesitter`, auto-install it and enable it after the installation is done
-        require('nvim-treesitter').install(language):await(function() treesitter_try_attach(buf, language) end)
-      else
-        -- Try to enable treesitter features in case the parser exists but is not available from `nvim-treesitter`
-        treesitter_try_attach(buf, language)
-      end
+      if vim.tbl_contains(installed_parsers, language) then treesitter_try_attach(buf, language) end
     end,
   })
 end

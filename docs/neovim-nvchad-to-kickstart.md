@@ -61,7 +61,7 @@ not run on every insert-mode change.
 
 ## Plugins added to Kickstart
 
-- `persistence.nvim` saves and restores sessions.
+- `persistence.nvim` is retained as a disabled optional module.
 - `render-markdown.nvim` renders Markdown headings, tables, checkboxes, and
   code blocks in the editor.
 - `nvim-highlight-colors` previews color values inline.
@@ -71,13 +71,15 @@ Kickstart's Telescope, which-key, and Mini statusline remain in place. The
 profile does not add FzfLua, Lualine, Mini Clue, inc-rename, navic, Copilot,
 or vim-tmux-navigator.
 
-Mini provides surround and text objects from Kickstart, plus `mini.align` and
-buffer removal. Press `Ctrl+x` to remove the current buffer.
+Mini provides surround and text objects from Kickstart, plus alignment,
+split/join, frecent file visits and buffer removal. Press `gS` to split or join
+a bracketed argument list and `Ctrl+x` to remove the current buffer.
 
 ## Editing behavior
 
 - Relative line numbers, rounded floating-window borders, wrapped-line
-  indentation, visible trailing whitespace, and marker folds are enabled.
+  indentation and visible trailing whitespace are enabled. Supported
+  filetypes use native Treesitter folds; marker folds remain the fallback.
 - Changes use the black-hole register so they do not replace the latest yank.
 - Visual-mode paste preserves the latest yank.
 - Successful yanks are retained in a numbered yank ring.
@@ -88,7 +90,8 @@ buffer removal. Press `Ctrl+x` to remove the current buffer.
   `set-clipboard off`, so tmux may block OSC 52 while direct SSH terminals work.
 
 The active colorscheme is Neovim's built-in `default` with its dark
-`NvimDark*` palette. The retained but disabled Isekai colorscheme, palette, and
+`NvimDark*` palette. The retained Isekai colorscheme and palette are disabled;
+the custom LuaSnip snippets remain active. See
 
 ## Key commands
 
@@ -98,23 +101,25 @@ key reference, bundled optional modules, and previous-plugin comparison.
 | Action | Command or mapping |
 |---|---|
 | Format buffer or selection | `<leader>f` |
-| Restore current session | `<leader>pr` |
-| Select a session | `<leader>ps` |
 | Remove current buffer | `Ctrl+x` |
+| Split or join bracketed arguments | `gS` |
+| Select visited files in current workspace | `<leader>vv` |
+| Toggle a boolean-like value | `<leader>tv` |
 | Next or previous Git hunk | `]c` / `[c` |
 | Stage or reset Git hunk | `<leader>hs` / `<leader>hr` |
 | Preview Git hunk | `<leader>hp` |
 | Blame current line | `<leader>hb` |
 | Search files | `<leader>sf` |
 | Search text | `<leader>sg` |
+| Search files in nearest Git root | `<leader>sF` |
+| Search text in nearest Git root | `<leader>sG` |
 | Search buffers | `<leader><leader>` |
 
 ## Install and verify
 
-Plugin installation happens during the first launch. Mason installs the
-configured language servers, formatters, linters, and the Treesitter CLI.
-Treesitter installs its parsers after the CLI is ready. To force a synchronous
-tool install:
+Plugin installation happens during the first launch. Mason tools and
+Treesitter parsers are version-pinned and are not installed or updated during
+normal startup. Provision them explicitly on a connected trusted machine:
 
 ```bash
 cd /home/surbanski/work/githubactions/dotfilesneovim/dotfiles/nvim2/.config/nvim2
