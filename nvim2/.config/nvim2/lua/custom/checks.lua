@@ -39,6 +39,10 @@ local function check_plugin_lock()
 end
 
 local function check_custom_modules()
+  local plugins_dir = vim.fs.joinpath(vim.fn.stdpath 'config', 'lua', 'custom', 'plugins')
+  local _, broken_links = require('custom.plugin_loader').scan(plugins_dir)
+  assert(#broken_links == 0, 'broken custom plugin symlink: ' .. table.concat(broken_links, ', '))
+
   local modules = {
     'custom.plugins.default_colors',
     'custom.plugins.gitsigns',

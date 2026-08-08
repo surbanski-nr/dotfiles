@@ -51,6 +51,17 @@ keeps old lockfiles and settings available until the clean profile has been
 verified. A broken `init.lua` symlink starts vanilla Neovim without this
 profile or its commands.
 
+When a custom plugin file is removed from the repository, an older `bstow`
+link can remain dangling. The plugin loader skips it so the rest of the profile
+can start, and `:Nvim2Check` reports its exact path. Inspect and remove only the
+reported broken link, then rerun the check:
+
+```bash
+find ~/.config/nvim2/lua/custom/plugins -xtype l -print
+unlink ~/.config/nvim2/lua/custom/plugins/REPORTED_FILE.lua
+bash ~/.config/nvim2/tests/check.sh
+```
+
 Plugins are restored from `nvim-pack-lock.json` when Neovim starts. External
 tools and Treesitter parsers are deliberately not installed in the background;
 provision or synchronize their pinned versions explicitly with:
@@ -175,6 +186,7 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 | `core.lua` | Options, filetype detection, register behavior and general autocommands |
 | `hardening.lua` | Disable plugin-controlled `PackChanged` build hooks |
 | `checks.lua` and `health.lua` | Validate custom behavior through `:Nvim2Check` and headless smoke tests |
+| `plugin_loader.lua` | Load custom modules in a stable order and report dangling stow links |
 | `lsp.lua` | Language-server configuration and pinned Mason tool versions |
 | `conform.lua` | Formatter selection and format-on-save controls |
 | `luasnip.lua` | Custom snippet loading and expansion mapping |
