@@ -22,7 +22,8 @@ Use this order on a machine with internet access:
    mkdir -p "$GH_REPOS"
    git clone https://github.com/surbanski-nr/dotfiles.git "$GH_REPOS/dotfiles"
    cd "$GH_REPOS/dotfiles"
-   ./bstow -v -t "$HOME" stow bash git tmux oh-my-posh nvim2
+   ./bstow -n -v -t "$HOME" stow bash git tmux oh-my-posh nvim2 codex
+   ./bstow -v -t "$HOME" stow bash git tmux oh-my-posh nvim2 codex
    source ~/.bashrc
    ```
 
@@ -263,10 +264,44 @@ cd $GH_REPOS/dotfiles
 ./bstow -v -t ~ stow k9s
 ./bstow -v -t ~ stow nvim2
 ./bstow -v -t ~ stow gnupg
+./bstow -n -v -t ~ stow codex
+./bstow -v -t ~ stow codex
 
 # On Ubuntu Desktop
 ./bstow -v -t ~ stow kitty
 ```
+
+### Codex and workspace agent instructions
+
+The `codex` package manages only `~/.codex/AGENTS.md`. It does not manage
+Codex configuration, authentication, sessions, logs, caches or other runtime
+state. Codex loads this file as personal guidance for every repository, then
+loads more specific `AGENTS.md` files from the active workspace. Back up an
+existing regular `~/.codex/AGENTS.md` before applying the package; `bstow`
+refuses to replace regular files. An existing `~/.codex/AGENTS.override.md`
+takes precedence and remains unmanaged.
+
+Preview and install the global guidance:
+
+```bash
+./bstow -n -v -t "$HOME" stow codex
+./bstow -v -t "$HOME" stow codex
+```
+
+The packages under `agents/` provide workspace-specific guidance. Link only
+the package matching the workspace:
+
+```bash
+./bstow -n -v -d agents -t "$HOME/work/githubactions" stow work
+./bstow -v -d agents -t "$HOME/work/githubactions" stow work
+
+./bstow -n -v -d agents -t "$HOME/work/vuln" stow vuln
+./bstow -v -d agents -t "$HOME/work/vuln" stow vuln
+```
+
+The target workspace directory must already exist. These packages manage only
+the workspace-root `AGENTS.md`; repository-specific behavior remains in each
+repository's authoritative documentation.
 
 ### Tmux
 
@@ -485,6 +520,9 @@ ln -sv "$PWD/k9s/.config/k9s" ~/.config/k9s
 ln -sv "$PWD/kitty/.config/kitty" ~/.config/kitty
 ln -sv "$PWD/nvim/.config/nvim" ~/.config/nvim
 ln -sv "$PWD/nvim2" ~/.config/nvim2
+
+mkdir -p ~/.codex
+ln -sv "$PWD/codex/.codex/AGENTS.md" ~/.codex/AGENTS.md
 
 mkdir -p ~/.gnupg
 ln -sv "$PWD/gnupg/.gnupg/gpg-agent.conf" ~/.gnupg/gpg-agent.conf
