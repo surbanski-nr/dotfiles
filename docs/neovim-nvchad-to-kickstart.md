@@ -126,7 +126,7 @@ normal startup. Provision them explicitly on a connected trusted machine:
 ```bash
 cd /home/surbanski/work/githubactions/dotfilesneovim/dotfiles/nvim2/.config/nvim2
 timeout 600s env XDG_CONFIG_HOME="$(dirname "$PWD")" NVIM_APPNAME=nvim2 \
-  nvim --headless '+Nvim2ToolsInstallSync' '+qa'
+  nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
 ```
 
 The Ansible language server also needs an `ansible` executable on `PATH`:
@@ -147,5 +147,8 @@ Verify the setup inside Neovim:
 :checkhealth kickstart
 ```
 
-Update plugins with `:lua vim.pack.update()`, review the changes, and commit
-the updated `nvim-pack-lock.json` with the configuration.
+Update plugins with `:lua vim.pack.update()`, review the changes, and use
+`:write` to apply them and refresh `nvim-pack-lock.json`. Mason versions are
+pinned separately in `init.lua`; change a pin before running
+`:Nvim2ToolsInstallSync`. The complete workflow is in
+[`Plugin and configuration maintenance`](../nvim2/.config/nvim2/README.md#plugin-and-configuration-maintenance).

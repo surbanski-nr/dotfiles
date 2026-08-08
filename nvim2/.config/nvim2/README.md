@@ -27,6 +27,18 @@ cd /home/surbanski/work/githubactions/dotfilesneovim/dotfiles/nvim2/.config/nvim
 XDG_CONFIG_HOME="$(dirname "$PWD")" NVIM_APPNAME=nvim2 nvim
 ```
 
+If this profile was stowed before it moved under `.config/nvim2`, refresh its
+symlinks after pulling the repository:
+
+```bash
+cd ~/github.com/surbanski/dotfiles
+./bstow -v -t "$HOME" restow nvim2
+readlink -f ~/.config/nvim2/init.lua
+```
+
+The resolved path should end in `nvim2/.config/nvim2/init.lua`. A broken
+symlink starts vanilla Neovim without this profile or its commands.
+
 Plugins are restored from `nvim-pack-lock.json` when Neovim starts. External
 tools and Treesitter parsers are deliberately not installed in the background;
 provision or synchronize their pinned versions explicitly with:
@@ -755,15 +767,81 @@ by branch. They are never restored automatically.
 
 | Action | Command |
 |---|---|
-| Inspect plugin state without network access | `:lua vim.pack.update(nil, { offline = true })` |
+| Inspect installed plugin state without network access | `:lua vim.print(vim.pack.get(nil, { info = false }))` |
 | Fetch and review plugin updates | `:lua vim.pack.update()` |
+| Fetch and review one plugin | `:lua vim.pack.update({ 'PLUGIN' })` |
 | Apply proposed plugin updates | `:write` in the update window |
 | Cancel proposed plugin updates | `:quit` in the update window |
 | Check profile health | `:checkhealth kickstart` |
 | Check LSP health | `:checkhealth vim.lsp` |
 | Check Treesitter health | `:checkhealth nvim-treesitter` |
 
-Commit `nvim-pack-lock.json` whenever accepted plugin revisions change.
+### Update plugins and refresh the lockfile
+
+`nvim-pack-lock.json` is the plugin lockfile. Do not edit it by hand. Applying
+an update with `:write` changes the checked-out plugin revisions and rewrites
+the lockfile automatically.
+
+Perform updates on a connected trusted machine:
+
+1. Make sure the dotfiles repository has no unrelated changes, then start
+   Nvim2 from it.
+2. Run `:lua vim.pack.update()`. To update only one plugin, use
+   `:lua vim.pack.update({ 'gitsigns.nvim' })` with its lockfile name.
+3. Review every old and proposed commit in the update window. `[[` and `]]`
+   move between plugins; `K` shows details; `gra` offers actions such as
+   skipping the plugin under the cursor.
+4. Use `:write` to accept the remaining updates, or `:quit` to discard all
+   pending changes. Then use `:restart` so the new plugin code is loaded.
+5. Review the resulting lockfile and configuration changes:
+
+   ```bash
+   cd ~/github.com/surbanski/dotfiles
+   git diff -- nvim2/.config/nvim2/nvim-pack-lock.json
+   git status --short
+   ```
+
+6. Run the health checks and exercise the affected workflows before
+   committing `nvim-pack-lock.json`.
+
+To return to a known revision, restore the wanted lockfile version from Git,
+set that plugin's `version` temporarily to its locked `rev`, restart, and run
+`vim.pack.update({ 'PLUGIN' }, { force = true })`. See `:help vim.pack` for the
+full recovery procedure.
+
+### Update Mason tools and Treesitter parsers
+
+Mason tools do not use `nvim-pack-lock.json` and there is no separate Mason
+lockfile. Their exact versions and the Treesitter parser list are the
+`ensure_installed` and `parsers` tables in `init.lua`.
+
+1. Run `:MasonUpdate` on a connected trusted machine to refresh Mason's
+   registry metadata. This does not update installed tools.
+2. Open `:Mason`. Put the cursor on a package and press `c` to check its
+   available update, then verify the proposed release with the upstream
+   project.
+3. Change that package's exact `version` in the `ensure_installed` table in
+   `init.lua`. Keep exact versions; do not remove the pin.
+4. Restart Neovim so the changed table is loaded, then run:
+
+   ```vim
+   :Nvim2ToolsInstallSync
+   ```
+
+   For a repeatable headless run from the stowed profile:
+
+   ```bash
+   timeout 600s env NVIM_APPNAME=nvim2 \
+     nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
+   ```
+
+5. Inspect `:Mason`, run the health checks, and test the relevant LSP,
+   formatter or linter. Commit the changed `init.lua` after it passes.
+
+`Nvim2ToolsInstallSync` already runs `MasonToolsInstallSync` and then
+synchronizes the configured Treesitter parsers. Do not use
+`:MasonToolsUpdateSync` to choose newer versions: it does not change the pins
+in `init.lua` and it does not include the parser synchronization.
 
 ### Supply-chain controls
 
@@ -778,27 +856,20 @@ Commit `nvim-pack-lock.json` whenever accepted plugin revisions change.
 - Blink uses its Lua fuzzy matcher instead of downloading its optional native
   matcher.
 
-Review plugin updates on a connected trusted machine:
+When reviewing a proposed plugin commit in another terminal, use its old and
+new revisions from the update window. For example:
 
-1. Run `:lua vim.pack.update()` but do not write the update buffer yet.
-2. Note each old and proposed commit, then inspect its source in another
-   terminal. For example:
+```bash
+git -C ~/.local/share/nvim2/site/pack/core/opt/PLUGIN \
+  diff --stat OLD_COMMIT..NEW_COMMIT
+git -C ~/.local/share/nvim2/site/pack/core/opt/PLUGIN \
+  diff --submodule=log OLD_COMMIT..NEW_COMMIT
+```
 
-   ```bash
-   git -C ~/.local/share/nvim2/site/pack/core/opt/PLUGIN \
-     diff --stat OLD_COMMIT..NEW_COMMIT
-   git -C ~/.local/share/nvim2/site/pack/core/opt/PLUGIN \
-     diff --submodule=log OLD_COMMIT..NEW_COMMIT
-   ```
-
-3. Return to the update buffer and use `:write` only after reviewing it; use
-   `:quit` to reject the update.
-4. Restart Neovim, run the health checks above and exercise the affected
-   workflow before committing the changed lockfile.
-5. Rebuild the offline archive described in
-   [Transfer to a machine without internet access](#transfer-to-a-machine-without-internet-access)
-   and move that tested snapshot to restricted VMs. Do not update plugins,
-   tools or parsers directly on those VMs.
+After accepting and testing updates, rebuild the offline archive described in
+[Transfer to a machine without internet access](#transfer-to-a-machine-without-internet-access)
+and move that tested snapshot to restricted VMs. Do not update plugins, tools
+or parsers directly on those VMs.
 
 ## Bundled optional modules
 
