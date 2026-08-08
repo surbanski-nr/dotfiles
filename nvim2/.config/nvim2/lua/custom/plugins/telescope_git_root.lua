@@ -1,5 +1,17 @@
 local builtin = require 'telescope.builtin'
 
+vim.keymap.set(
+  'n',
+  '<leader>/',
+  function()
+    builtin.current_buffer_fuzzy_find(require('telescope.themes').get_dropdown {
+      winblend = 0,
+      previewer = false,
+    })
+  end,
+  { desc = '[/] Fuzzily search in current buffer' }
+)
+
 ---@param bufnr? integer
 ---@return string
 local function nearest_git_root(bufnr)

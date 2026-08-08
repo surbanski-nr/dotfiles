@@ -126,40 +126,52 @@ with the Kickstart template, not that the plugin comes with Neovim.
 
 | Plugin | Configuration source | Purpose in this profile |
 |---|---|---|
-| `LuaSnip` | Main `init.lua` | Expand the custom global, Lua and Markdown snippets under `snippets/` |
+| `LuaSnip` | Main `init.lua` plus `lua/custom/luasnip.lua` | Expand the custom global, Lua and Markdown snippets under `snippets/` |
 | `blink.cmp` | Main `init.lua` | Provide completion from LSP, filesystem paths and LuaSnip |
-| `conform.nvim` | Main `init.lua` | Format manually and on save, including Ruff formatting for Python |
+| `conform.nvim` | `lua/custom/conform.lua` | Format manually and on save, including Ruff formatting for Python |
 | `fidget.nvim` | Main `init.lua` | Show language-server progress without a permanent UI panel |
-| `gitsigns.nvim` | Kickstart module | Show Git changes and provide hunk, blame and diff actions |
+| `gitsigns.nvim` | Main `init.lua` plus custom Kickstart wrapper | Show Git changes and provide hunk, blame and diff actions |
 | `guess-indent.nvim` | Main `init.lua` | Detect indentation settings from the current file |
 | `mason-lspconfig.nvim` | Main `init.lua` | Connect Mason-installed servers to Neovim's LSP configuration names |
-| `mason-tool-installer.nvim` | Main `init.lua` | Install pinned servers, formatters and linters only when explicitly requested |
+| `mason-tool-installer.nvim` | Main `init.lua` plus `lua/custom/lsp.lua` | Install pinned servers, formatters and linters only when explicitly requested |
 | `mason.nvim` | Main `init.lua` | Provide the external-tool registry, installer and `:Mason` interface |
-| `mini.nvim` | Main `init.lua` | Supply text objects, surroundings, alignment, split/join, visited files, statusline, icons and buffer removal |
-| `neo-tree.nvim` | Kickstart module | Provide the sidebar filesystem browser and file operations |
+| `mini.nvim` | Main `init.lua` plus custom module | Supply text objects, surroundings, alignment, split/join, visited files, statusline, icons and buffer removal |
+| `neo-tree.nvim` | Custom wrapper around Kickstart module | Provide the sidebar filesystem browser and file operations |
 | `nvim-highlight-colors` | Custom module | Preview color values inline on demand; lazy-loaded by `<leader>tc` |
-| `nvim-lint` | Kickstart module | Publish Hadolint, TFLint and yamllint results as diagnostics |
+| `nvim-lint` | Custom module | Publish Hadolint, TFLint and yamllint results as diagnostics |
 | `nvim-lspconfig` | Main `init.lua` | Supply default commands, filetypes and root detection for language servers |
-| `nvim-treesitter` | Main `init.lua` plus custom native-fold module | Install parsers and queries used by Neovim's built-in Treesitter runtime |
+| `nvim-treesitter` | Main `init.lua` plus custom tooling and fold modules | Install parsers and queries used by Neovim's built-in Treesitter runtime |
 | `nui.nvim` | Neo-tree dependency | Supply popup and layout components required by Neo-tree |
 | `plenary.nvim` | Telescope and Neo-tree dependency | Supply shared Lua utilities required by those plugins |
 | `render-markdown.nvim` | Custom module | Render Markdown headings, lists, tables and code blocks inside Neovim |
 | `telescope-ui-select.nvim` | Main `init.lua` | Display `vim.ui.select` choices in a Telescope dropdown |
 | `telescope.nvim` | Main `init.lua` plus custom Git-root module | Search files, text, buffers, commands, symbols and diagnostics |
 | `todo-comments.nvim` | Main `init.lua` | Highlight and search TODO-style comments |
-| `which-key.nvim` | Main `init.lua` | Show available mappings after a key prefix |
+| `which-key.nvim` | Main `init.lua` plus custom group module | Show available mappings after a key prefix |
 
 Neovim itself supplies `vim.pack`, the LSP client, the Treesitter runtime,
 diagnostic APIs, netrw and the default colorscheme. In particular,
 `nvim-lspconfig` and `nvim-treesitter` are external plugins despite their
 names.
 
-User-selected additions are under `lua/custom/plugins/` and are loaded through
-one `require 'custom.plugins'` line. External-plugin modules own their
-`vim.pack.add` declaration and setup. Local feature modules install nothing;
-they keep custom behavior out of Kickstart's numbered sections. Persistence
-remains there with its `require` commented out. Bundled Kickstart modules such
-as Gitsigns, linting and Neo-tree remain under `lua/kickstart/plugins/`.
+Every Lua file under `lua/custom/plugins/` is loaded through the single
+`require 'custom.plugins'` line. External-plugin modules own their
+`vim.pack.add` declaration and setup. Local feature modules install nothing.
+Move or delete a module to disable it; leaving a plugin module in this directory
+enables it on the next start. There is no persistence module or session plugin
+in this profile.
+
+Configuration that must run at a specific point in Kickstart stays directly
+under `lua/custom/` and is called from a small seam in `init.lua`:
+
+| Module | Responsibility |
+|---|---|
+| `core.lua` | Options, filetype detection, register behavior and general autocommands |
+| `hardening.lua` | Disable plugin-controlled `PackChanged` build hooks |
+| `lsp.lua` | Language-server configuration and pinned Mason tool versions |
+| `conform.lua` | Formatter selection and format-on-save controls |
+| `luasnip.lua` | Custom snippet loading and expansion mapping |
+| `treesitter.lua` | Managed parser list and explicit tool-install command |
 
 | Local feature module | Purpose | External plugin added |
 |---|---|---|
@@ -770,27 +782,6 @@ restored. Adding mappings requires no new plugin because
 `<leader>tp` for TODO navigation: `[t`/`]t` and `[T`/`]T` are Neovim's
 built-in tag-list mappings.
 
-### Disabled session persistence
-
-`persistence.nvim` is retained in `lua/custom/plugins/persistence.lua`, but its
-`require` is commented out in `lua/custom/plugins/init.lua`. It is also absent
-from `nvim-pack-lock.json`, so a clean VM does not download it. On a VM where
-it was installed previously, remove its old package and lock entry once with
-`:lua vim.pack.del { 'persistence.nvim' }`.
-
-To restore persistence, uncomment its `require` line and restart Neovim. The
-module's `vim.pack.add` call then installs it and records it in the lockfile. It
-saves sessions automatically on exit and provides:
-
-| Action | Keys |
-|---|---|
-| Save the current session now | `<leader>pw` |
-| Restore session for current directory | `<leader>pr` |
-| Select a saved session | `<leader>ps` |
-
-Sessions are separated by working directory and, for non-default Git branches,
-by branch. They are never restored automatically.
-
 ## Plugin and configuration maintenance
 
 | Action | Command |
@@ -840,16 +831,16 @@ full recovery procedure.
 ### Update Mason tools and Treesitter parsers
 
 Mason tools do not use `nvim-pack-lock.json` and there is no separate Mason
-lockfile. Their exact versions and the Treesitter parser list are the
-`ensure_installed` and `parsers` tables in `init.lua`.
+lockfile. Their exact versions are in `lua/custom/lsp.lua`; the Treesitter
+parser list is in `lua/custom/treesitter.lua`.
 
 1. Run `:MasonUpdate` on a connected trusted machine to refresh Mason's
    registry metadata. This does not update installed tools.
 2. Open `:Mason`. Put the cursor on a package and press `c` to check its
    available update, then verify the proposed release with the upstream
    project.
-3. Change that package's exact `version` in the `ensure_installed` table in
-   `init.lua`. Keep exact versions; do not remove the pin.
+3. Change that package's exact `version` in `lua/custom/lsp.lua`. Keep exact
+   versions; do not remove the pin.
 4. Restart Neovim so the changed table is loaded, then run:
 
    ```vim
@@ -864,12 +855,12 @@ lockfile. Their exact versions and the Treesitter parser list are the
    ```
 
 5. Inspect `:Mason`, run the health checks, and test the relevant LSP,
-   formatter or linter. Commit the changed `init.lua` after it passes.
+   formatter or linter. Commit the changed custom module after it passes.
 
 `Nvim2ToolsInstallSync` already runs `MasonToolsInstallSync` and then
 synchronizes the configured Treesitter parsers. Do not use
 `:MasonToolsUpdateSync` to choose newer versions: it does not change the pins
-in `init.lua` and it does not include the parser synchronization.
+in `lua/custom/lsp.lua` and it does not include the parser synchronization.
 
 ### Supply-chain controls
 
@@ -902,22 +893,22 @@ or parsers directly on those VMs.
 ## Bundled optional modules
 
 Files under `lua/kickstart/plugins/` are configuration examples, not proof
-that their plugins are installed. The bottom of `init.lua` decides which
-modules are enabled.
+that their plugins are installed. Nvim2 activates selected examples through
+small custom wrapper modules so Kickstart's optional section stays unchanged.
 
 | Module | State | What it adds |
 |---|---|---|
-| `gitsigns.lua` | Enabled | Git signs, hunk actions and mappings listed above |
-| `lint.lua` | Enabled | Hadolint, TFLint and yamllint integration after save |
-| `neo-tree.lua` | Enabled | Sidebar file tree and file-management actions |
+| `gitsigns.lua` | Enabled through custom wrapper | Git signs, hunk actions and mappings listed above |
+| `lint.lua` | Disabled; replaced by custom module | Upstream example uses Markdownlint; Nvim2 uses Hadolint, TFLint and yamllint after save |
+| `neo-tree.lua` | Enabled through custom wrapper | Sidebar file tree and file-management actions |
 | `debug.lua` | Disabled | DAP UI and Go debugging |
 | `autopairs.lua` | Disabled | Automatic closing pairs while typing |
 | `indent_line.lua` | Disabled | Indentation guides |
 
 A disabled module's `vim.pack.add` call is not executed. Its plugin must also
 be absent from `nvim-pack-lock.json`, because a clean `vim.pack` setup installs
-every lockfile entry. Debug, autopairs, indentation guides and persistence are
-currently absent from the lockfile.
+every lockfile entry. Debug, autopairs and indentation guides are currently
+absent from the lockfile.
 
 The visible `>` before tab-indented lines and `·` after trailing spaces are
 Neovim's built-in `listchars`, not indentation guides. Hide them temporarily
@@ -925,8 +916,11 @@ with `:set nolist` and restore them with `:set list`. Neo-tree draws separate
 hierarchy lines only inside its sidebar; `guess-indent.nvim` detects indentation
 settings but draws no guides.
 
-To enable a disabled module, uncomment its `require` line near the bottom of
-`init.lua` and restart Neovim. Neo-tree is enabled; its common daily keys are:
+To enable a disabled example without editing Kickstart-owned code, add a file
+under `lua/custom/plugins/` that requires it, then restart Neovim. For example,
+`lua/custom/plugins/autopairs.lua` would contain
+`require 'kickstart.plugins.autopairs'`. Neo-tree is enabled; its common daily
+keys are:
 
 | Action in Neo-tree | Keys |
 |---|---|
@@ -999,7 +993,7 @@ active configurations with `nvim2`.
 | `mfussenegger/nvim-lint` | Kept | Linter set is limited to the selected development languages |
 | `neovim/nvim-lspconfig` | Kept | Uses the Neovim 0.12 API and the selected server list |
 | `mason-org/mason.nvim` | Kept | Mason LSP and tool installers now manage the complete selected tool set |
-| `olimorris/persisted.nvim` | Optional replacement retained but disabled as `folke/persistence.nvim` | If enabled, session picker mappings are `<leader>pr` and `<leader>ps` |
+| `olimorris/persisted.nvim` | Removed | No session persistence; reopen files through Mini Visits, Telescope or Neo-tree |
 | `kylechui/nvim-surround` | Replaced by `mini.surround` | Surrounding keys use Mini's `sa`, `sd` and `sr` grammar |
 | `nvim-telescope/telescope.nvim` | Kept | Search mappings moved from `<leader>f...` to `<leader>s...`; the old override included hidden files and custom ignore patterns while the current profile uses Telescope defaults |
 | `folke/todo-comments.nvim` | Kept | Old TODO navigation/search mappings are not configured and gutter signs are disabled |
