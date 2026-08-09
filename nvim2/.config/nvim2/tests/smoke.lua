@@ -56,7 +56,13 @@ local function run()
 
   local colors_ok = pcall(vim.api.nvim_get_autocmds, { group = 'nvim2-default-colors' })
   if not colors_ok then vim.api.nvim_exec_autocmds('VimEnter', {}) end
-  local groups = { 'Normal', 'Comment', 'Function', 'String' }
+  assert(vim.wo.cursorline, 'current-line highlighting is disabled')
+  local cursor_line = vim.api.nvim_get_hl(0, { name = 'CursorLine', link = false })
+  assert(cursor_line.bg == 0x343842, 'current-line background override is missing')
+  local cursor_line_number = vim.api.nvim_get_hl(0, { name = 'CursorLineNr', link = false })
+  assert(cursor_line_number.fg == 0xff9e64, 'current-line number is not orange')
+  assert(not cursor_line_number.bold, 'current-line number is unexpectedly bold')
+  local groups = { 'Normal', 'Comment', 'Function', 'String', 'CursorLine', 'CursorLineNr' }
   local original = {}
   for _, group in ipairs(groups) do
     original[group] = vim.api.nvim_get_hl(0, { name = group, link = false })

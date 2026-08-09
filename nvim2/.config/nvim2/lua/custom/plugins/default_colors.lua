@@ -1,3 +1,18 @@
+local default_overrides = {
+  CursorLine = { bg = '#343842', ctermbg = 237 },
+  CursorLineNr = { fg = '#ff9e64', ctermfg = 214 },
+}
+
+local function apply_default_overrides()
+  if vim.g.colors_name ~= 'default' then return end
+
+  for name, value in pairs(default_overrides) do
+    vim.api.nvim_set_hl(0, name, value)
+  end
+end
+
+apply_default_overrides()
+
 local function capture_default_colors()
   if vim.g.colors_name ~= 'default' then return end
 
