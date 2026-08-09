@@ -168,6 +168,11 @@ missing tools affect only their related aliases or workflows.
   `infocmp tmux-256color`; install the distro's `ncurses-term` package if it is
   missing. Current Ubuntu, Amazon Linux 2023 and Rocky 9 packages are
   compatible; Amazon Linux 2 and Rocky 8 may need newer tmux/terminfo packages.
+  `tmux-256color` describes tmux to programs running inside it and includes
+  modern capabilities such as italics, extended modified keys and OSC 52.
+  `screen-256color` is an older, more widely installed fallback with fewer
+  capabilities. The terminal outside tmux should keep its own value, such as
+  `xterm-kitty` or `xterm-256color`.
 - TPM is optional for starting tmux, but resurrect and continuum require it.
   Install or transfer TPM and its plugin directories before using those
   features on a restricted machine.
@@ -318,6 +323,19 @@ Quick reference (prefix is `Ctrl+a`):
 | Reload config | `Ctrl+a` then `:source-file ~/.tmux.conf` |
 | Install plugins | `Ctrl+a` then `Shift+I` |
 | Update plugins | `Ctrl+a` then `Shift+U` |
+| New or rename window | `Ctrl+a` then `c` or `,` |
+| Next or previous window | `Ctrl+a` then `n` or `p` |
+| Previously active window | `Ctrl+a` then `a` |
+| Next or previous window using tmux-sensible | `Ctrl+a` then `Ctrl+n` or `Ctrl+p` |
+| Choose a window | `Ctrl+a` then `w` |
+| Rename session | `Ctrl+a` then `$` |
+| Split left/right or top/bottom | `Ctrl+a` then `%` or `"` |
+| Focus pane | `Ctrl+a` then `h`, `j`, `k` or `l` |
+| Resize pane | `Ctrl+a` then `Ctrl+Arrow` |
+| Toggle pane zoom | `Ctrl+a` then `z` |
+| Close pane | `Ctrl+a` then `x` |
+| Detach | `Ctrl+a` then `d` |
+| Reload through tmux-sensible | `Ctrl+a` then `Shift+r` |
 | Scroll through pane history | Mouse wheel |
 | Enter tmux copy mode | `Ctrl+a` then `[` |
 | Start a copy-mode selection | Press `v`, then move the cursor |
