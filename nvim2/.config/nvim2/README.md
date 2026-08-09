@@ -217,6 +217,13 @@ The active colorscheme is Neovim's built-in `default` with its dark
 `NvimDark*` palette. The custom Isekai colorscheme and palette remain under
 `colors/isekai.lua` and `lua/palette.lua` but are not loaded.
 
+The default palette has two local overrides in
+`lua/custom/plugins/default_colors.lua`: `CursorLine` uses a more visible
+`#343842` background and `CursorLineNr` uses orange `#ff9e64`. The
+`vim.o.cursorline` option in `init.lua` enables both. Change those values in
+the custom module to adjust them permanently, or use `:set cursorline!` to
+toggle current-row highlighting for the current window.
+
 ### Switch the colorscheme
 
 To try Isekai for the current Neovim session:
