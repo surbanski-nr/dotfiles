@@ -1,1 +1,0 @@
-require 'kickstart.plugins.gitsigns'

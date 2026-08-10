@@ -51,14 +51,14 @@ keeps old lockfiles and settings available until the clean profile has been
 verified. A broken `init.lua` symlink starts vanilla Neovim without this
 profile or its commands.
 
-When a custom plugin file is removed from the repository, an older `bstow`
-link can remain dangling. The plugin loader skips it so the rest of the profile
-can start, and `:Nvim2Check` reports its exact path. Inspect and remove only the
-reported broken link, then rerun the check:
+When a custom module is removed from the repository, use a forced restow to
+remove package-owned links that no longer have a source. The standard Kickstart
+loader deliberately fails on a broken module link instead of silently starting
+an incomplete profile:
 
 ```bash
-find ~/.config/nvim2/lua/custom/plugins -xtype l -print
-unlink ~/.config/nvim2/lua/custom/plugins/REPORTED_FILE.lua
+cd ~/github.com/surbanski/dotfiles
+./bstow -v -f -t "$HOME" restow nvim2
 bash ~/.config/nvim2/tests/check.sh
 ```
 
@@ -112,14 +112,14 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `blink.cmp` | Main `init.lua` | Provide completion from LSP and filesystem paths, then expand LSP snippets with Neovim's built-in snippet engine |
 | `conform.nvim` | `lua/custom/conform.lua` | Format manually and on save, including Ruff formatting for Python |
 | `fidget.nvim` | Main `init.lua` | Show language-server progress without a permanent UI panel |
-| `gitsigns.nvim` | Main `init.lua` plus custom Kickstart wrapper | Show Git changes and provide hunk, blame and diff actions |
+| `gitsigns.nvim` | Kickstart module enabled by the custom loader | Show Git changes and provide hunk, blame and diff actions |
 | `guess-indent.nvim` | Main `init.lua` | Detect indentation settings from the current file |
 | `indent-blankline.nvim` | Custom module | Draw narrow indentation guides and mark the current Treesitter scope |
 | `mason-lspconfig.nvim` | Main `init.lua` | Connect Mason-installed servers to Neovim's LSP configuration names |
 | `mason-tool-installer.nvim` | Main `init.lua` plus `lua/custom/lsp.lua` | Install pinned servers, formatters and linters only when explicitly requested |
 | `mason.nvim` | Main `init.lua` | Provide the external-tool registry, installer and `:Mason` interface |
 | `mini.nvim` | Main `init.lua` plus custom module | Supply text objects, surroundings, alignment, split/join, visited files, statusline, icons and buffer removal |
-| `neo-tree.nvim` | Custom wrapper around Kickstart module | Provide the sidebar filesystem browser and file operations |
+| `neo-tree.nvim` | Kickstart module enabled by the custom loader | Provide the sidebar filesystem browser and file operations |
 | `nvim-highlight-colors` | Custom module | Preview color values inline on demand; lazy-loaded by `<leader>tc` |
 | `nvim-lint` | Custom module | Publish Hadolint, TFLint and yamllint results as diagnostics |
 | `nvim-lspconfig` | Main `init.lua` | Supply default commands, filetypes and root detection for language servers |
@@ -127,45 +127,40 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `nui.nvim` | Neo-tree dependency | Supply popup and layout components required by Neo-tree |
 | `plenary.nvim` | Telescope and Neo-tree dependency | Supply shared Lua utilities required by those plugins |
 | `render-markdown.nvim` | Custom module | Render Markdown headings, lists, tables and code blocks inside Neovim |
-| `telescope-ui-select.nvim` | Main `init.lua` | Display `vim.ui.select` choices in a Telescope dropdown |
+| `telescope-ui-select.nvim` | `lua/custom/telescope.lua` | Display `vim.ui.select` choices in a Telescope dropdown |
 | `telescope.nvim` | Main `init.lua` plus custom search module | Search files, text, buffers, commands, symbols and diagnostics, including non-ignored dotfiles |
 | `todo-comments.nvim` | Main `init.lua` | Highlight and search TODO-style comments |
-| `which-key.nvim` | Main `init.lua` plus custom group module | Show available mappings after a key prefix |
+| `which-key.nvim` | Main `init.lua` plus the Mini Visits key group | Show available mappings after a key prefix |
 
 Neovim itself supplies `vim.pack`, the LSP client, the Treesitter runtime,
 diagnostic APIs, netrw and the default colorscheme. In particular,
 `nvim-lspconfig` and `nvim-treesitter` are external plugins despite their
 names.
 
-Every Lua file under `lua/custom/plugins/` is loaded through the single
-`require 'custom.plugins'` line. External-plugin modules own their
-`vim.pack.add` declaration and setup. Local feature modules install nothing.
-Move or delete a module to disable it; leaving a plugin module in this directory
-enables it on the next start. There is no persistence module or session plugin
-in this profile.
+Every Lua file under `lua/custom/plugins/` is loaded by Kickstart's standard
+custom-extension loop. External-plugin modules own their `vim.pack.add`
+declaration and setup. Local feature modules install nothing. Move or delete a
+module to disable it; leaving a module in this directory enables it on the next
+start. There is no persistence module or session plugin in this profile.
 
 Configuration that must run at a specific point in Kickstart stays directly
 under `lua/custom/` and is called from a small seam in `init.lua`:
 
 | Module | Responsibility |
 |---|---|
-| `core.lua` | Options, filetype detection, register behavior and general autocommands |
-| `hardening.lua` | Disable plugin-controlled `PackChanged` build hooks |
-| `checks.lua` and `health.lua` | Validate custom behavior through `:Nvim2Check` and headless smoke tests |
-| `plugin_loader.lua` | Load custom modules in a stable order and report dangling stow links |
+| `core.lua` | Options, filetype detection, register behavior, general commands and autocommands |
+| `checks.lua` and `health.lua` | Validate locked dependencies through `:Nvim2Check`; behavior lives in the headless smoke test |
 | `lsp.lua` | Language-server configuration and pinned Mason tool versions |
 | `conform.lua` | Formatter selection and format-on-save controls |
-| `treesitter.lua` | Managed parser list and explicit tool-install command |
+| `telescope.lua` | Hidden-aware workspace searches and nearest-Git-root searches |
+| `treesitter.lua` | Managed parser list, native folds and explicit tool-install command |
 
 | Local feature module | Purpose | External plugin added |
 |---|---|---|
+| `default_colors.lua` | Keep three local visibility overrides when returning to the built-in default colorscheme | No |
 | `enclosing_pairs.lua` | Highlight the nearest enclosing `()`, `[]` or `{}` pair while the cursor is anywhere inside it | No; extends Neovim's built-in `MatchParen` style |
-| `line_numbers.lua` | Toggle the current window between relative and absolute line numbers | No; changes built-in window options |
 | `mermaid_ascii.lua` | Preview the Mermaid fence under the cursor in a scrollable scratch tab | No; invokes the optional `mermaid-ascii` binary |
-| `telescope_search.lua` | Add hidden-aware workspace and nearest-Git-root searches while preserving ignore rules | No; extends the existing Telescope setup |
 | `toggle_values.lua` | Add `<leader>tv` for boolean-like values without `nvim-toggler` | No |
-| `native_folds.lua` | Apply Neovim's native Treesitter fold expression without `nvim-ufo` | No; extends the existing Treesitter setup |
-| `self_check.lua` | Add `:Nvim2Check` without another test plugin | No |
 | `snippets.lua` | Add five global delimiter pairs and six Markdown expansions with Neovim's built-in snippet engine | No |
 
 Plugins with direct actions have workflows in the sections below. Some work
@@ -411,7 +406,8 @@ This profile changes register behavior:
 - Normal `d`, `D`, `dd`, `c`, `C`, `cc`, and visual `c` use the black-hole
   register, so these operations do not overwrite the latest yank. Built-in
   `x` and `X` retain their cut-like behavior and replace the active register.
-- Visual `p` preserves the latest yank instead of replacing it with the
+- Visual `P` uses Neovim's built-in paste-without-overwriting behavior. Visual
+  `p` keeps its standard behavior and replaces the active register with the
   selected text.
 - Successful yanks are copied into registers `1` through `9` as a small yank
   ring.
@@ -988,7 +984,7 @@ unit.
 | Fetch and review one plugin | `:lua vim.pack.update({ 'PLUGIN' })` |
 | Apply proposed plugin updates | `:write` in the update window |
 | Cancel proposed plugin updates | `:quit` in the update window |
-| Check Nvim2 mappings, plugins, tools and parsers | `:Nvim2Check` |
+| Check locked plugins, tools, parsers and hardening | `:Nvim2Check` |
 | Run smoke tests and startup benchmark | `bash ~/.config/nvim2/tests/check.sh` |
 | Check profile health | `:checkhealth kickstart` |
 | Check LSP health | `:checkhealth vim.lsp` |
@@ -997,10 +993,9 @@ unit.
 ### Validate the profile
 
 `:Nvim2Check` opens a normal Neovim health report for the custom profile. It
-checks recorded errors, the Neovim version, plugin revisions against
-`nvim-pack-lock.json`, custom modules, public plugin APIs, daily mappings and
-commands, hardening, pinned Mason packages and configured Treesitter parsers.
-It does not install or update anything.
+checks the Neovim version, plugin revisions against `nvim-pack-lock.json`,
+disabled plugin build hooks, pinned Mason packages and configured Treesitter
+parsers. It does not install or update anything.
 
 Run the stronger headless check after provisioning a VM and after accepting
 plugin, Mason or parser updates:
@@ -1011,9 +1006,9 @@ bash ~/.config/nvim2/tests/check.sh
 
 From this repository's Nvim2 configuration directory, the equivalent command
 is `bash tests/check.sh`. The script exits nonzero when a smoke check fails. It
-also opens `init.lua` to verify Lua filetype detection, Treesitter highlighting
-and folds, Gitsigns attachment, YAML subtype detection, value toggling and the
-`surb`-to-default color restoration flow.
+also exercises daily behavior such as register-preserving edits, snippets,
+hidden-file search, Treesitter folds, Mermaid preview, formatting controls and
+the `surb`-to-default color restoration flow.
 
 The script performs five isolated headless starts and reports the minimum,
 median and maximum startup time. Startup speed depends on the VM, filesystem
@@ -1146,14 +1141,14 @@ or parsers directly on those VMs.
 ## Bundled optional modules
 
 Files under `lua/kickstart/plugins/` are configuration examples, not proof
-that their plugins are installed. Nvim2 activates selected examples through
-small custom wrapper modules so Kickstart's optional section stays unchanged.
+that their plugins are installed. `lua/custom/plugins/init.lua` requires the
+selected examples directly so the Kickstart-owned files stay unchanged.
 
 | Module | State | What it adds |
 |---|---|---|
-| `gitsigns.lua` | Enabled through custom wrapper | Git signs, hunk actions and mappings listed above |
+| `gitsigns.lua` | Enabled from the custom loader | Git signs, hunk actions and mappings listed above |
 | `lint.lua` | Disabled; replaced by custom module | Upstream example uses Markdownlint; Nvim2 uses Hadolint, TFLint and yamllint after save |
-| `neo-tree.lua` | Enabled through custom wrapper | Sidebar file tree and file-management actions |
+| `neo-tree.lua` | Enabled from the custom loader | Sidebar file tree and file-management actions |
 | `debug.lua` | Disabled | DAP UI and Go debugging |
 | `autopairs.lua` | Disabled | Automatic closing pairs while typing |
 | `indent_line.lua` | Disabled; replaced by custom module | The custom setup controls the guide appearance; the lockfile pins the installed revision |
@@ -1254,7 +1249,7 @@ compare those active configurations with `nvim2`.
 | `nvim-treesitter/nvim-treesitter` | Kept | Parsers are deliberately limited to selected languages |
 | `pearofducks/ansible-vim` | Replaced by Ansible filetype detection, parser and LSP | Some legacy Vim-specific Ansible syntax behavior may differ |
 | `towolf/vim-helm` | Replaced by Helm filetype detection, parser and LSP | No separate Vimscript Helm syntax plugin |
-| `gbprod/yanky.nvim` | Partly replaced by registers `1` through `9` and preserved visual paste | No 50-item history, Telescope yank picker, or `[y` and `]y` history cycling |
+| `gbprod/yanky.nvim` | Partly replaced by registers `1` through `9` and built-in visual `P` | No 50-item history, Telescope yank picker, or `[y` and `]y` history cycling |
 
 ### Active old features that are genuinely missing
 

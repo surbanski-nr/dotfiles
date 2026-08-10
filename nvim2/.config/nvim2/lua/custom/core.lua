@@ -66,12 +66,19 @@ vim.filetype.add {
 
 vim.keymap.set('n', 'c', '"_c')
 vim.keymap.set('n', 'C', '"_C')
-vim.keymap.set('n', 'cc', '"_cc')
 vim.keymap.set('n', 'd', '"_d', { desc = 'Delete with motion without replacing yank register' })
 vim.keymap.set('n', 'D', '"_D', { desc = 'Delete to end of line without replacing yank register' })
-vim.keymap.set('n', 'dd', '"_dd', { desc = 'Delete line without replacing yank register' })
 vim.keymap.set('x', 'c', '"_c')
-vim.keymap.set('x', 'p', 'p:let @+=@0<CR>:let @"=@0<CR>', { desc = 'Paste without replacing yank register' })
+
+vim.keymap.set('n', '<leader>tl', function()
+  vim.wo.number = true
+  vim.wo.relativenumber = not vim.wo.relativenumber
+  vim.notify('Line numbers: ' .. (vim.wo.relativenumber and 'relative' or 'absolute'))
+end, { desc = '[T]oggle [L]ine number mode' })
+
+vim.api.nvim_create_user_command('Nvim2Check', function() vim.cmd 'checkhealth custom' end, {
+  desc = 'Check Nvim2 plugins and tools',
+})
 
 vim.api.nvim_create_autocmd('TextYankPost', {
   desc = 'Highlight yanked text and update the yank ring',

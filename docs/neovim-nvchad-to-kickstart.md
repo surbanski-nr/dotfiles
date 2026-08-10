@@ -86,7 +86,7 @@ a bracketed argument list and `Ctrl+x` to remove the current buffer.
   indentation and visible trailing whitespace are enabled. Supported
   filetypes use native Treesitter folds; marker folds remain the fallback.
 - Changes use the black-hole register so they do not replace the latest yank.
-- Visual-mode paste preserves the latest yank.
+- Visual `P` uses Neovim's built-in paste-without-overwriting behavior.
 - Successful yanks are retained in a numbered yank ring.
 - Spell checking is enabled for Markdown, text, and Git commit messages.
 - The last cursor position is restored and splits rebalance after a terminal
@@ -96,9 +96,9 @@ a bracketed argument list and `Ctrl+x` to remove the current buffer.
   clipboard while OSC 52 writes from applications inside tmux are blocked.
 
 The active colorscheme is Neovim's built-in `default` with its dark
-`NvimDark*` palette. The optional `surb` colorscheme builds on that
-default and adds a small set of local syntax colors. LuaSnip provides only five
-automatic delimiter pairs.
+`NvimDark*` palette. The optional `surb` colorscheme builds on that default and
+adds a small set of local syntax colors. Local mappings use Neovim's built-in
+snippet engine for five automatic delimiter pairs and six Markdown expansions.
 
 ## Key commands
 

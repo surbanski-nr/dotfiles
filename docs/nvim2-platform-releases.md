@@ -697,9 +697,10 @@ compatibility can change even when the configuration does not.
 
 ## Hardening during upgrades
 
-`lua/custom/hardening.lua` removes Kickstart's `PackChanged` build hook. It
-does not block `vim.pack.update()`. It prevents plugin-controlled build steps
-and the automatic `TSUpdate` action.
+The profile keeps Kickstart's `PackChanged` block unchanged for easier upstream
+merges, then clears its handler immediately afterward. This does not block
+`vim.pack.update()`. It prevents plugin-controlled build steps and the
+automatic `TSUpdate` action.
 
 That is safe for the current plugin set:
 
@@ -712,9 +713,8 @@ be ready automatically. Add an explicit reviewed build step to this release
 process and test it in every platform image. Do not weaken hardening merely to
 make a plugin install itself silently.
 
-The current hardening clears all `PackChanged` handlers present at that point.
-It should eventually be narrowed to the known Kickstart build handler so a
-future approved handler is not removed accidentally.
+The clear happens immediately after Kickstart creates its handler. Add any
+future approved `PackChanged` handler after that point.
 
 ## Validation scope
 
