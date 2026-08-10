@@ -112,7 +112,13 @@ local function check_mappings()
   for _, mapping in ipairs(mappings) do
     assert(vim.fn.maparg(mapping[2], mapping[1]) ~= '', ('missing %s-mode mapping: %s'):format(mapping[1], mapping[2]))
   end
-  assert(vim.fn.maparg('dd', 'n') == [["_dd]], 'dd no longer uses the black-hole register')
+  for keys, expected in pairs {
+    d = [["_d]],
+    D = [["_D]],
+    dd = [["_dd]],
+  } do
+    assert(vim.fn.maparg(keys, 'n') == expected, keys .. ' no longer uses the black-hole register')
+  end
   return ('%d core mappings available'):format(#mappings)
 end
 

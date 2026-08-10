@@ -364,9 +364,10 @@ mapping is `<leader>ma` for the optional Mermaid ASCII preview.
 | Insert before or after cursor | `i`, `a` |
 | Insert at start or end of line | `I`, `A` |
 | Open line below or above | `o`, `O` |
-| Delete character | `x` |
+| Cut character under or before cursor, replacing active register | `x`, `X` |
 | Delete line without changing registers | `dd` |
-| Delete inside word | `diw` |
+| Delete with a motion without changing registers | `d{motion}`, for example `dw` or `diw` |
+| Delete to end of line without changing registers | `D` |
 | Change inside word | `ciw` |
 | Yank line | `yy` |
 | Yank inside word | `yiw` |
@@ -382,7 +383,6 @@ mapping is `<leader>ma` for the optional Mermaid ASCII preview.
 | Show registers | `:registers` |
 | Paste latest explicit yank | `"0p` |
 | Paste from numbered yank ring | `"1p` through `"9p` |
-| Delete with another motion without changing registers | `"_d{motion}`, for example `"_diw` |
 | Delete a selection without changing any register | Select text, then `"_d` |
 | Yank into and paste from named register `a` | `"ay{motion}`, then `"ap` |
 | Use system clipboard explicitly | `"+y`, `"+p` |
@@ -390,26 +390,27 @@ mapping is `<leader>ma` for the optional Mermaid ASCII preview.
 Registers are small text storage slots. The `"{register}` prefix selects a
 register for the next operation:
 
-- `"` is the unnamed register used by plain `y`, most `d` operations, `p` and
-  `P`. The mapped `dd` is an exception.
+- `"` is the unnamed register used by plain `y`, `x`, `X`, `p` and `P`. This
+  profile sends normal `d`, `D` and `dd` operations to the black-hole register.
 - `0` keeps the latest explicit yank, even after a later normal delete. Use
   `"0p` when plain `p` would paste recently deleted text instead.
 - `1` through `9` form this profile's small yank history: `"1p` pastes the
-  newest saved yank, `"2p` the previous one, and so on. Normal deletes can
-  still alter these numbered registers.
+  newest saved yank, `"2p` the previous one, and so on. Unmapped operations,
+  such as visual `d`, can still alter numbered registers.
 - `a` through `z` are manual named registers. For example, `"ayy` stores a
   line in `a`, `"ap` pastes it, and `"Ayy` appends another line to it.
 - `_` is the black-hole register. Text sent there is discarded. This profile
-  maps `dd` to it automatically; use explicit `"_diw` or visual `"_d` for
-  other deletions that should not replace text waiting to be pasted.
+  maps normal `d`, `D` and `dd` to it automatically. Use visual `"_d` when
+  deleting a selection that should not replace text waiting to be pasted.
 
 Use `:registers 0 1 2 3 4 5 6 7 8 9` to inspect the yank history, or
 `:registers` to inspect every register.
 
 This profile changes register behavior:
 
-- `dd`, `c`, `C`, `cc`, and visual `c` use the black-hole register, so these
-  operations do not overwrite the latest yank.
+- Normal `d`, `D`, `dd`, `c`, `C`, `cc`, and visual `c` use the black-hole
+  register, so these operations do not overwrite the latest yank. Built-in
+  `x` and `X` retain their cut-like behavior and replace the active register.
 - Visual `p` preserves the latest yank instead of replacing it with the
   selected text.
 - Successful yanks are copied into registers `1` through `9` as a small yank
