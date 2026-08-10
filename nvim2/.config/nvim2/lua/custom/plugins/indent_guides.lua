@@ -1,9 +1,4 @@
-vim.pack.add {
-  {
-    src = 'https://github.com/lukas-reineke/indent-blankline.nvim',
-    version = 'v3.9.1',
-  },
-}
+vim.pack.add { 'https://github.com/lukas-reineke/indent-blankline.nvim' }
 
 local indent_highlight = 'Nvim2IndentGuide'
 local scope_highlight = 'Nvim2IndentScope'

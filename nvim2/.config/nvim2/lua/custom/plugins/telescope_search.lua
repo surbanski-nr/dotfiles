@@ -72,6 +72,7 @@ vim.keymap.set(
 
 vim.keymap.set('n', '<leader>sf', M.find_files, { desc = '[S]earch [F]iles' })
 vim.keymap.set('n', '<leader>sg', M.live_grep, { desc = '[S]earch by [G]rep' })
+vim.keymap.set('n', '<leader>sm', builtin.marks, { desc = '[S]earch [M]arks' })
 
 vim.keymap.set('n', '<leader>sF', function()
   local root = M.nearest_git_root()

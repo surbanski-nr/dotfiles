@@ -98,6 +98,7 @@ local function check_mappings()
     { 'n', '<leader>sG' },
     { 'n', '<leader>sf' },
     { 'n', '<leader>sg' },
+    { 'n', '<leader>sm' },
     { 'n', '<leader>tc' },
     { 'n', '<leader>tf' },
     { 'n', '<leader>ti' },
