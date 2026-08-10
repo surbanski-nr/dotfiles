@@ -109,7 +109,7 @@ with the Kickstart template, not that the plugin comes with Neovim.
 
 | Plugin | Configuration source | Purpose in this profile |
 |---|---|---|
-| `LuaSnip` | Main `init.lua` plus `lua/custom/luasnip.lua` | Expand the custom global, Lua and Markdown snippets under `snippets/` |
+| `LuaSnip` | Main `init.lua` plus `lua/custom/luasnip.lua` | Expand five local automatic delimiter pairs and LSP-provided snippets |
 | `blink.cmp` | Main `init.lua` | Provide completion from LSP, filesystem paths and LuaSnip |
 | `conform.nvim` | `lua/custom/conform.lua` | Format manually and on save, including Ruff formatting for Python |
 | `fidget.nvim` | Main `init.lua` | Show language-server progress without a permanent UI panel |
@@ -185,8 +185,9 @@ sequence:
 | `telescope-ui-select.nvim` | Shows `vim.ui.select` prompts, including Mini Visits choices, in a Telescope dropdown |
 
 The active colorscheme is Neovim's built-in `default` with its dark
-`NvimDark*` palette. The custom Isekai colorscheme and palette remain under
-`colors/isekai.lua` and `lua/palette.lua` but are not loaded.
+`NvimDark*` palette. The optional `surb` colorscheme starts from the
+built-in default and adds a small set of local syntax colors without a separate
+palette module.
 
 The default palette has three local overrides in
 `lua/custom/plugins/default_colors.lua`: `CursorLine` uses a more visible
@@ -225,10 +226,10 @@ table's guide.
 
 ### Switch the colorscheme
 
-To try Isekai for the current Neovim session:
+To try the local default-based colorscheme for the current session:
 
 ```vim
-:colorscheme isekai
+:colorscheme surb
 ```
 
 Return to Neovim's default dark palette with:
@@ -238,15 +239,15 @@ Return to Neovim's default dark palette with:
 ```
 
 Nvim2 captures the startup `default` highlights after its plugins are
-configured. Returning from Isekai therefore restores the same white-and-green
-appearance seen at startup, including Telescope and Markdown groups, and
-clears Isekai's terminal palette.
+configured. Returning from `surb` restores the same white-and-green appearance
+seen at startup, including Telescope and Markdown groups, and restores the
+local cursor highlights.
 
 For a persistent change, edit the colorscheme line in `init.lua`. Use this for
-Isekai:
+the local colorscheme:
 
 ```lua
-vim.cmd.colorscheme 'isekai'
+vim.cmd.colorscheme 'surb'
 ```
 
 Use this to switch back to the Neovim default:
@@ -255,9 +256,9 @@ Use this to switch back to the Neovim default:
 vim.cmd.colorscheme 'default'
 ```
 
-Restart Neovim after editing the file, or run `:source $MYVIMRC`. Isekai keeps
-syntax groups such as methods, functions, delimiters, docstrings and return
-keywords unbolded; Markdown strong text and headings remain bold by design.
+Restart Neovim after editing the file, or run `:source $MYVIMRC`. The local
+scheme colors comments, constants, functions, keywords, numbers, strings,
+types and object members. It does not make code groups bold.
 
 ## Discover mappings inside Neovim
 
@@ -713,30 +714,24 @@ The diagnostic float opens automatically after jumping with `[d` or `]d`.
 | Close completion menu | `<C-e>` |
 | Toggle signature help | `<C-k>` |
 | Move forward or backward through snippet fields | `<Tab>`, `<S-Tab>` |
-| Expand custom snippet or choose next option | `<C-c>` |
 
-Blink supplies completion from LSP, paths and LuaSnip. Regular snippets can be
-accepted from Blink with `<C-y>` or expanded with `<C-c>` after typing their
-trigger. Autosnippets expand as soon as their complete trigger is typed.
+Blink supplies completion from LSP, paths and LuaSnip. LSP-provided snippets
+can be accepted from Blink with `<C-y>`. The five local pair snippets expand
+as soon as their opening delimiter is typed.
 
-The custom snippets under `snippets/` are:
+The local automatic pairs are defined in `lua/custom/luasnip.lua`:
 
-| File and type | Triggers | What they produce |
-|---|---|---|
-| `all.lua`, autosnippets in every filetype | `(`, `[`, `{`, `'`, `"` | Matching delimiters or quotes with the cursor between them |
-| `markdown.lua`, regular | `` ` ``, `l`, `ll`, `t`, `tb`, `tb2`, `tb3`, `cn`, `ct`, `ci`, `cw`, `cc` | Inline code, links, images, tasks, one-to-three-column tables and GitHub NOTE/TIP/IMPORTANT/WARNING/CAUTION callouts |
-| `markdown.lua`, autosnippets | `` ``` ``, `**`, `__`, `*_`, `~~`, `<<` | Fenced code, bold, italic, bold italic, strikethrough and angle brackets |
-| `lua.lua`, regular | `l`, `ll`, `lm`, `lf`, `lff`, `lr`, `if`, `eif`, `for`, `forn`, `fori`, `w`, `f`, `fm`, `p`, `pi` | Local declarations, modules, functions, control flow, loops, `require`, `print` and `vim.inspect` templates |
+| Typed | Result |
+|---|---|
+| `(` | `(|)` |
+| `[` | `[|]` |
+| `{` | `{|}` |
+| `'` | `'|'` |
+| `"` | `"|"` |
 
-These snippets are optional conveniences, not part of LSP support. `lua.lua`
-is useful when editing this Neovim configuration, especially `lr`, `lm`, `lf`
-and `pi`. The Markdown tables and callouts are useful when writing GitHub
-documentation. The global delimiter autosnippets and Markdown formatting
-autosnippets are the weakest fit for a minimal setup: they expand broadly,
-have no syntax-aware checks and can be surprising when typing literal quotes
-or Markdown punctuation. Keep them only if that automatic behavior is useful;
-otherwise remove those autosnippet tables while retaining the smaller regular
-Lua and Markdown set.
+`|` represents the cursor. Press `<Tab>` to leave the pair. These snippets are
+not syntax-aware, so they can also expand in comments or other places where a
+literal opening character was intended.
 
 ## Formatting, linting and tools
 
@@ -1001,7 +996,7 @@ From this repository's Nvim2 configuration directory, the equivalent command
 is `bash tests/check.sh`. The script exits nonzero when a smoke check fails. It
 also opens `init.lua` to verify Lua filetype detection, Treesitter highlighting
 and folds, Gitsigns attachment, YAML subtype detection, value toggling and the
-Isekai-to-default color restoration flow.
+`surb`-to-default color restoration flow.
 
 The script performs five isolated headless starts and reports the minimum,
 median and maximum startup time. Startup speed depends on the VM, filesystem
@@ -1283,7 +1278,7 @@ individual files in `lua/plugins/`:
 
 | NvChad component | What is different now |
 |---|---|
-| `nvchad/base46` | Replaced by the local Isekai colorscheme and palette |
+| `nvchad/base46` | Replaced by Neovim's default colorscheme and the optional small `surb` override |
 | `nvchad/ui` | Mini statusline remains, but there is no NvChad dashboard or buffer tabline |
 | `nvzone/volt`, `menu`, `minty` | No NvChad menus or color-picker UI |
 | NvChad's nvim-cmp stack and sources | Replaced by Blink with LSP, path and LuaSnip sources |

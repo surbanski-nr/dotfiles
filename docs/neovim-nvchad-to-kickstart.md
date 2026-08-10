@@ -96,8 +96,9 @@ a bracketed argument list and `Ctrl+x` to remove the current buffer.
   clipboard while OSC 52 writes from applications inside tmux are blocked.
 
 The active colorscheme is Neovim's built-in `default` with its dark
-`NvimDark*` palette. The retained Isekai colorscheme and palette are disabled;
-the custom LuaSnip snippets remain active. See
+`NvimDark*` palette. The optional `surb` colorscheme builds on that
+default and adds a small set of local syntax colors. LuaSnip provides only five
+automatic delimiter pairs.
 
 ## Key commands
 
