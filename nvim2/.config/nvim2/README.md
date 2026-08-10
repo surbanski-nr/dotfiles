@@ -109,8 +109,7 @@ with the Kickstart template, not that the plugin comes with Neovim.
 
 | Plugin | Configuration source | Purpose in this profile |
 |---|---|---|
-| `LuaSnip` | Main `init.lua` plus `lua/custom/luasnip.lua` | Expand five local automatic delimiter pairs and LSP-provided snippets |
-| `blink.cmp` | Main `init.lua` | Provide completion from LSP, filesystem paths and LuaSnip |
+| `blink.cmp` | Main `init.lua` | Provide completion from LSP and filesystem paths, then expand LSP snippets with Neovim's built-in snippet engine |
 | `conform.nvim` | `lua/custom/conform.lua` | Format manually and on save, including Ruff formatting for Python |
 | `fidget.nvim` | Main `init.lua` | Show language-server progress without a permanent UI panel |
 | `gitsigns.nvim` | Main `init.lua` plus custom Kickstart wrapper | Show Git changes and provide hunk, blame and diff actions |
@@ -156,7 +155,6 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 | `plugin_loader.lua` | Load custom modules in a stable order and report dangling stow links |
 | `lsp.lua` | Language-server configuration and pinned Mason tool versions |
 | `conform.lua` | Formatter selection and format-on-save controls |
-| `luasnip.lua` | Custom snippet loading and expansion mapping |
 | `treesitter.lua` | Managed parser list and explicit tool-install command |
 
 | Local feature module | Purpose | External plugin added |
@@ -168,6 +166,7 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 | `toggle_values.lua` | Add `<leader>tv` for boolean-like values without `nvim-toggler` | No |
 | `native_folds.lua` | Apply Neovim's native Treesitter fold expression without `nvim-ufo` | No; extends the existing Treesitter setup |
 | `self_check.lua` | Add `:Nvim2Check` without another test plugin | No |
+| `snippets.lua` | Add five global delimiter pairs and six Markdown expansions with Neovim's built-in snippet engine | No |
 
 Plugins with direct actions have workflows in the sections below. Some work
 automatically or only support another plugin, so they do not need a daily key
@@ -715,11 +714,13 @@ The diagnostic float opens automatically after jumping with `[d` or `]d`.
 | Toggle signature help | `<C-k>` |
 | Move forward or backward through snippet fields | `<Tab>`, `<S-Tab>` |
 
-Blink supplies completion from LSP, paths and LuaSnip. LSP-provided snippets
-can be accepted from Blink with `<C-y>`. The five local pair snippets expand
-as soon as their opening delimiter is typed.
+Blink supplies completion from LSP and paths. LSP-provided snippets can be
+accepted with `<C-y>` and are expanded by Neovim's built-in `vim.snippet`
+engine. LuaSnip is not installed. The local pairs expand as soon as their
+opening delimiter is typed.
 
-The local automatic pairs are defined in `lua/custom/luasnip.lua`:
+The local expansions are defined in `lua/custom/plugins/snippets.lua`. These
+five pairs work in every insert-mode buffer:
 
 | Typed | Result |
 |---|---|
@@ -732,6 +733,21 @@ The local automatic pairs are defined in `lua/custom/luasnip.lua`:
 `|` represents the cursor. Press `<Tab>` to leave the pair. These snippets are
 not syntax-aware, so they can also expand in comments or other places where a
 literal opening character was intended.
+
+These six triggers work only in Markdown buffers:
+
+| Typed | Expansion |
+|---|---|
+| `` ``` `` | A three-line fenced block with `lang` selected, followed by an editable body |
+| `**` | `**text**` |
+| `__` | `_text_` |
+| `*_` | `**_text_**` |
+| `~~` | `~~text~~` |
+| `<<` | `<https://example.com>` |
+
+For a fence, type the language over the selected `lang`, press `<Tab>`, and
+write the body. For an inline expansion, type its content and press `<Tab>` to
+leave it. The expansion does not add surrounding spaces.
 
 ## Formatting, linting and tools
 
@@ -1097,8 +1113,8 @@ in `lua/custom/lsp.lua` and it does not include the parser synchronization.
   update runs automatically.
 - A `version` in `vim.pack.add` is an allowed update channel, not the installed
   revision. Most plugin declarations omit it intentionally and rely on the
-  lockfile for exact reproducibility. LuaSnip stays on major version 2,
-  blink.cmp stays on major version 1, Neo-tree selects released semantic-version
+  lockfile for exact reproducibility. blink.cmp stays on major version 1,
+  Neo-tree selects released semantic-version
   tags, and Treesitter follows its `main` branch because those are deliberate
   update-channel constraints. Do not copy exact tags into every declaration:
   doing so would freeze `vim.pack.update()` at those tags.
@@ -1106,8 +1122,8 @@ in `lua/custom/lsp.lua` and it does not include the parser synchronization.
   `:Nvim2ToolsInstallSync`; opening Neovim or a new file does not download a
   missing tool or parser.
 - The configuration does not execute plugin-controlled build hooks.
-  `telescope-fzf-native.nvim` was removed and LuaSnip's optional `jsregexp`
-  binary is not built because the local snippets do not use regex transforms.
+  `telescope-fzf-native.nvim` was removed, and snippets use Neovim's built-in
+  engine without a separate native extension.
 - Blink uses its Lua fuzzy matcher instead of downloading its optional native
   matcher.
 
@@ -1281,7 +1297,7 @@ individual files in `lua/plugins/`:
 | `nvchad/base46` | Replaced by Neovim's default colorscheme and the optional small `surb` override |
 | `nvchad/ui` | Mini statusline remains, but there is no NvChad dashboard or buffer tabline |
 | `nvzone/volt`, `menu`, `minty` | No NvChad menus or color-picker UI |
-| NvChad's nvim-cmp stack and sources | Replaced by Blink with LSP, path and LuaSnip sources |
+| NvChad's nvim-cmp stack and sources | Replaced by Blink with LSP and path sources plus Neovim's built-in snippet engine |
 | NvChad's NvimTree integration | Replaced by Neo-tree |
 
 Re-adding NvChad's UI stack would work against the goal of keeping this
@@ -1322,7 +1338,7 @@ a plugin dependency. It still adds mappings and behavior that need maintenance.
 | `mini.bracketed` | Provides consistent `[` and `]` navigation for buffers, diagnostics, quickfix, jumps and other targets | Enable only selected targets because its defaults can collide with Gitsigns hunk keys and native diagnostic keys |
 | `mini.jump` and `mini.jump2d` | Extend `f`/`t` movement and add label-based jumps within visible text | Similar benefit to Flash; keep native movement until this becomes a repeated navigation problem |
 | `mini.operators` | Adds exchange, multiply, replace, sort and evaluate operators | Do not enable wholesale because its default `gr` family overlaps Neovim's LSP mappings; configure individual operators if needed |
-| Other MiniMax modules | Add a file browser, picker, completion, snippets, sessions, Git helpers, diff signs, key hints, color highlighting, pairs and UI elements | Avoid the overlapping replacements while Neo-tree, Telescope, Blink, LuaSnip, Gitsigns, which-key and the current color tools remain enabled |
+| Other MiniMax modules | Add a file browser, picker, completion, snippets, sessions, Git helpers, diff signs, key hints, color highlighting, pairs and UI elements | Avoid the overlapping replacements while Neo-tree, Telescope, Blink, the native snippet setup, Gitsigns, which-key and the current color tools remain enabled |
 
 ## Suggested minimal path
 
