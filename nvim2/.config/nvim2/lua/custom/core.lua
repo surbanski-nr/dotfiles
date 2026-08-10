@@ -67,6 +67,8 @@ vim.filetype.add {
 vim.keymap.set('n', 'c', '"_c')
 vim.keymap.set('n', 'C', '"_C')
 vim.keymap.set('n', 'cc', '"_cc')
+vim.keymap.set('n', 'd', '"_d', { desc = 'Delete with motion without replacing yank register' })
+vim.keymap.set('n', 'D', '"_D', { desc = 'Delete to end of line without replacing yank register' })
 vim.keymap.set('n', 'dd', '"_dd', { desc = 'Delete line without replacing yank register' })
 vim.keymap.set('x', 'c', '"_c')
 vim.keymap.set('x', 'p', 'p:let @+=@0<CR>:let @"=@0<CR>', { desc = 'Paste without replacing yank register' })

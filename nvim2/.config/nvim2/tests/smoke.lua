@@ -22,6 +22,33 @@ local function run()
   assert(vim.wait(5000, function() return vim.fn.maparg('<leader>tb', 'n') ~= '' end), 'Gitsigns did not attach within five seconds')
   assert(vim.fn.maparg('<leader>hs', 'n') ~= '', 'Gitsigns hunk mapping is missing')
 
+  local function assert_delete_preserves_yank(keys, text, column, expected)
+    vim.cmd.enew()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { text })
+    vim.api.nvim_win_set_cursor(0, { 1, column })
+    vim.fn.setreg('"', 'saved yank', 'v')
+    vim.api.nvim_feedkeys(keys, 'xt', false)
+    assert(vim.api.nvim_get_current_line() == expected, keys .. ' did not delete the expected text')
+    assert(vim.fn.getreg '"' == 'saved yank', keys .. ' replaced the yank register')
+  end
+
+  assert_delete_preserves_yank('D', 'alpha beta', 6, 'alpha ')
+  assert_delete_preserves_yank('dw', 'alpha beta', 0, 'beta')
+  assert_delete_preserves_yank('diw', 'alpha beta', 0, ' beta')
+
+  for _, cut in ipairs {
+    { keys = 'x', column = 0, expected_line = 'lpha', expected_register = 'a' },
+    { keys = 'X', column = 2, expected_line = 'apha', expected_register = 'l' },
+  } do
+    vim.cmd.enew()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'alpha' })
+    vim.api.nvim_win_set_cursor(0, { 1, cut.column })
+    vim.fn.setreg('"', 'saved yank', 'v')
+    vim.api.nvim_feedkeys(cut.keys, 'xt', false)
+    assert(vim.api.nvim_get_current_line() == cut.expected_line, cut.keys .. ' did not cut the expected character')
+    assert(vim.fn.getreg '"' == cut.expected_register, cut.keys .. ' did not replace the active register')
+  end
+
   for _, pair in ipairs {
     { '(', ')', '(value)' },
     { '[', ']', '[value]' },
