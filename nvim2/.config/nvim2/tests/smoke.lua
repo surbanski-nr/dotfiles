@@ -19,13 +19,27 @@ local function run()
   assert(vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()], 'Treesitter highlighting did not attach to init.lua')
   assert(vim.wo.foldmethod == 'expr', 'native Treesitter folds did not attach to init.lua')
   assert(vim.wo.foldexpr == 'v:lua.vim.treesitter.foldexpr()', 'unexpected fold expression')
-  assert(#require('luasnip').get_snippets 'lua' > 0, 'custom Lua snippets were not loaded')
+  local pair_snippets = require('luasnip').get_snippets('all', { type = 'autosnippets' })
+  assert(#pair_snippets == 5, 'expected exactly five local automatic pair snippets')
+  local pair_triggers = {}
+  for _, snippet in ipairs(pair_snippets) do
+    pair_triggers[snippet.trigger] = snippet.snippetType
+  end
+  for _, trigger in ipairs { '(', '[', '{', "'", '"' } do
+    assert(pair_triggers[trigger] == 'autosnippets', 'missing automatic pair snippet: ' .. trigger)
+  end
+  assert(#require('luasnip').get_snippets 'lua' == 0, 'obsolete Lua snippets are still loaded')
 
   assert(vim.wait(5000, function() return vim.fn.maparg('<leader>tb', 'n') ~= '' end), 'Gitsigns did not attach within five seconds')
   assert(vim.fn.maparg('<leader>hs', 'n') ~= '', 'Gitsigns hunk mapping is missing')
 
+  vim.cmd.enew()
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("i'<Esc>", true, false, true), 'xt', false)
+  assert(vim.wait(1000, function() return vim.api.nvim_get_current_line() == "''" end), 'single quote did not expand to a pair')
+  require('luasnip').unlink_current()
+
   vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'README.md'))
-  assert(#require('luasnip').get_snippets 'markdown' > 0, 'custom Markdown snippets were not loaded')
+  assert(#require('luasnip').get_snippets 'markdown' == 0, 'obsolete Markdown snippets are still loaded')
 
   local mermaid = require 'custom.plugins.mermaid_ascii'
   local block = mermaid.find_block({
@@ -190,7 +204,9 @@ local function run()
   for _, group in ipairs(groups) do
     original[group] = vim.api.nvim_get_hl(0, { name = group, link = false })
   end
-  vim.cmd.colorscheme 'isekai'
+  vim.cmd.colorscheme 'surb'
+  local local_function = vim.api.nvim_get_hl(0, { name = 'Function', link = false })
+  assert(local_function.fg == 0x6fb8d9 and not local_function.bold, 'local function highlight is incorrect')
   vim.cmd.colorscheme 'default'
   for _, group in ipairs(groups) do
     assert(vim.deep_equal(original[group], vim.api.nvim_get_hl(0, { name = group, link = false })), ('default colors were not restored for %s'):format(group))

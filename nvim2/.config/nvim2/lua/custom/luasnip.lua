@@ -7,15 +7,23 @@ function M.setup()
     delete_check_events = 'TextChanged',
     enable_autosnippets = true,
   }
-  require('luasnip.loaders.from_lua').lazy_load { paths = vim.fn.stdpath 'config' .. '/snippets' }
 
-  vim.keymap.set({ 'i', 's' }, '<C-c>', function()
-    if luasnip.expandable() then
-      luasnip.expand()
-    elseif luasnip.choice_active() then
-      luasnip.change_choice(1)
-    end
-  end, { silent = true, desc = 'Expand snippet or select next choice' })
+  local function pair(trigger, closing)
+    return luasnip.snippet({ trig = trigger, name = 'Pair ' .. trigger, snippetType = 'autosnippet', wordTrig = false }, {
+      luasnip.text_node(trigger),
+      luasnip.insert_node(1),
+      luasnip.text_node(closing),
+      luasnip.insert_node(0),
+    })
+  end
+
+  luasnip.add_snippets('all', {
+    pair('(', ')'),
+    pair('[', ']'),
+    pair('{', '}'),
+    pair("'", "'"),
+    pair('"', '"'),
+  }, { key = 'nvim2-pairs' })
 end
 
 return M
