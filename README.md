@@ -4,7 +4,7 @@ My configuration files for bash, neovim, tmux and so forth.
 
 The setup targets WSL Ubuntu, regular Ubuntu, Amazon Linux and Rocky Linux.
 
-Homebrew is still an option, but it is intended as a last resort. Prefer distro package manager (`apt`, `dnf`/`yum`) for most tools. Symlinks are managed by `./bstow` (a bash-based stow replacement included in this repo) -- no need to install GNU `stow`.
+Homebrew is still an option, but it is intended as a last resort. Prefer distro package manager (`apt`, `dnf`/`yum`) for most tools. Symlinks are managed by `./bstow` (a bash-based stow replacement included in this repo). No need to install GNU `stow`.
 
 ## New VM quick start
 
@@ -121,7 +121,7 @@ older Amazon Linux and Rocky releases.
 
 ### Install Neovim 0.12
 
-Nvim2 requires Neovim 0.12 or newer. The version supplied by `apt` or `dnf`
+My neovim config (in nvim2 dir) requires Neovim 0.12 or newer. The version supplied by `apt` or `dnf`
 may be too old; check it before continuing:
 
 ```bash
@@ -302,7 +302,7 @@ Run the isolated shell regression suite after changing `bstow`:
 timeout 60s bash tests/bstow_test.sh
 ```
 
-### Codex and workspace agent instructions
+### Codex agent instructions
 
 The `codex` package manages only `~/.codex/AGENTS.md`. It does not manage
 Codex configuration, authentication, sessions, logs, caches or other runtime
@@ -310,7 +310,8 @@ state. Codex loads this file as personal guidance for every repository, then
 loads more specific `AGENTS.md` files from the active workspace. Back up an
 existing regular `~/.codex/AGENTS.md` before applying the package; `bstow`
 refuses to replace regular files. An existing `~/.codex/AGENTS.override.md`
-takes precedence and remains unmanaged.
+takes precedence and remains unmanaged. Workspace-specific `AGENTS.md` files
+are standalone files owned by their workspaces, not managed by this repository.
 
 Preview and install the global guidance:
 
@@ -319,20 +320,22 @@ Preview and install the global guidance:
 ./bstow -v -t "$HOME" stow codex
 ```
 
-The packages under `agents/` provide workspace-specific guidance. Link only
-the package matching the workspace:
+On a VM where a workspace `AGENTS.md` is still a symlink into an older
+dotfiles checkout, preserve its current contents as a regular file before
+pulling the rewritten history:
 
 ```bash
-./bstow --dry-run -d agents -t "$HOME/work/githubactions" stow work
-./bstow -v -d agents -t "$HOME/work/githubactions" stow work
-
-./bstow --dry-run -d agents -t "$HOME/work/vuln" stow vuln
-./bstow -v -d agents -t "$HOME/work/vuln" stow vuln
+workspace="$HOME/work/githubactions"
+temporary=$(mktemp "$workspace/.AGENTS.md.XXXXXX")
+cp --dereference "$workspace/AGENTS.md" "$temporary"
+chmod 0644 "$temporary"
+mv -Tf "$temporary" "$workspace/AGENTS.md"
+test -f "$workspace/AGENTS.md" && test ! -L "$workspace/AGENTS.md"
 ```
 
-The target workspace directory must already exist. These packages manage only
-the workspace-root `AGENTS.md`; repository-specific behavior remains in each
-repository's authoritative documentation.
+Change `workspace` for each workspace. This must run while the old symlink
+target still exists. A new VM needs the standalone workspace file copied from
+another machine or maintained with that workspace's own files.
 
 ### Tmux
 

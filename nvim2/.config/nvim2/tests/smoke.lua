@@ -19,27 +19,49 @@ local function run()
   assert(vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()], 'Treesitter highlighting did not attach to init.lua')
   assert(vim.wo.foldmethod == 'expr', 'native Treesitter folds did not attach to init.lua')
   assert(vim.wo.foldexpr == 'v:lua.vim.treesitter.foldexpr()', 'unexpected fold expression')
-  local pair_snippets = require('luasnip').get_snippets('all', { type = 'autosnippets' })
-  assert(#pair_snippets == 5, 'expected exactly five local automatic pair snippets')
-  local pair_triggers = {}
-  for _, snippet in ipairs(pair_snippets) do
-    pair_triggers[snippet.trigger] = snippet.snippetType
-  end
-  for _, trigger in ipairs { '(', '[', '{', "'", '"' } do
-    assert(pair_triggers[trigger] == 'autosnippets', 'missing automatic pair snippet: ' .. trigger)
-  end
-  assert(#require('luasnip').get_snippets 'lua' == 0, 'obsolete Lua snippets are still loaded')
-
   assert(vim.wait(5000, function() return vim.fn.maparg('<leader>tb', 'n') ~= '' end), 'Gitsigns did not attach within five seconds')
   assert(vim.fn.maparg('<leader>hs', 'n') ~= '', 'Gitsigns hunk mapping is missing')
 
-  vim.cmd.enew()
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("i'<Esc>", true, false, true), 'xt', false)
-  assert(vim.wait(1000, function() return vim.api.nvim_get_current_line() == "''" end), 'single quote did not expand to a pair')
-  require('luasnip').unlink_current()
+  for _, pair in ipairs {
+    { '(', ')', '(value)' },
+    { '[', ']', '[value]' },
+    { '{', '}', '{value}' },
+    { "'", "'", "'value'" },
+    { '"', '"', '"value"' },
+  } do
+    vim.cmd.enew()
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('i' .. pair[1] .. 'value<Esc>', true, false, true), 'xt', false)
+    assert(vim.api.nvim_get_current_line() == pair[3], 'automatic pair did not expand: ' .. pair[1] .. pair[2])
+  end
 
   vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'README.md'))
-  assert(#require('luasnip').get_snippets 'markdown' == 0, 'obsolete Markdown snippets are still loaded')
+  assert(vim.fn.maparg('`', 'i') ~= '', 'Markdown fenced-block mapping is missing')
+
+  for _, snippet in ipairs {
+    { '**bold', '**bold**' },
+    { '__italic', '_italic_' },
+    { '*_both', '**_both_**' },
+    { '~~gone', '~~gone~~' },
+    { '<<https://example.com', '<https://example.com>' },
+  } do
+    vim.cmd.enew()
+    vim.cmd 'setfiletype markdown'
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('i' .. snippet[1] .. '<Esc>', true, false, true), 'xt', false)
+    assert(vim.api.nvim_get_current_line() == snippet[2], 'Markdown snippet did not expand: ' .. snippet[1])
+  end
+
+  vim.cmd.enew()
+  vim.cmd 'setfiletype markdown'
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('i```', true, false, true), 'xt', false)
+  vim.api.nvim_feedkeys('lua', 'xt', false)
+  assert(vim.snippet.active { direction = 1 }, 'native fenced-block snippet is not active after its language field')
+  local tab_mapping = vim.fn.maparg('<Tab>', 'i', false, true)
+  assert(type(tab_mapping.callback) == 'function', 'Blink did not install its Tab mapping')
+  vim.snippet.jump(1)
+  assert(vim.api.nvim_win_get_cursor(0)[1] == 2, 'the native snippet engine did not reach the fenced-block body')
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('ivalue<Esc>', true, false, true), 'xt', false)
+  local fence_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  assert(vim.deep_equal(fence_lines, { '```lua', 'value', '```' }), 'Markdown fence did not expand: ' .. vim.inspect(fence_lines))
 
   local mermaid = require 'custom.plugins.mermaid_ascii'
   local block = mermaid.find_block({
