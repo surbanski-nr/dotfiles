@@ -34,7 +34,7 @@ assert_link_target() {
 run_bstow() {
     local output
     local status
-    if output=$(timeout 10s "$bstow" "$@" 2>&1); then
+    if output=$(BSTOW_STATE_DIR="$test_root/state" timeout 10s "$bstow" "$@" 2>&1); then
         status=0
     else
         status=$?
@@ -117,5 +117,76 @@ run_bstow --dir "$stow_dir" --target "$target_dir" restow mixed
 [[ $BSTOW_STATUS -ne 0 ]] || fail 'restow accepted a package containing a conflict'
 assert_link_target "$target_dir/.managed" "$stow_dir/mixed/.managed"
 [[ -f $target_dir/.conflict && ! -L $target_dir/.conflict ]] || fail 'restow changed a conflicting file'
+
+mkdir -p "$stow_dir/prune/.config/prune"
+touch "$stow_dir/prune/.config/prune/current" "$stow_dir/prune/.config/prune/obsolete"
+run_bstow --dir "$stow_dir" --target "$target_dir" stow prune
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'initial prune package stow failed'
+obsolete_link=$target_dir/.config/prune/obsolete
+assert_link_target "$obsolete_link" "$stow_dir/prune/.config/prune/obsolete"
+
+# Simulate links created by a bstow version that predates ownership state.
+rm -rf "$test_root/state"
+rm "$stow_dir/prune/.config/prune/obsolete"
+run_bstow --dry-run --dir "$stow_dir" --target "$target_dir" restow prune
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'dry-run rejected a package with an obsolete managed link'
+assert_contains "$BSTOW_OUTPUT" "Would remove: $obsolete_link"
+[[ -L $obsolete_link ]] || fail 'dry-run removed an obsolete managed link'
+
+run_bstow --dir "$stow_dir" --target "$target_dir" restow prune
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'restow failed to prune an obsolete managed link'
+[[ ! -e $obsolete_link && ! -L $obsolete_link ]] || fail 'restow retained an obsolete managed link'
+assert_link_target "$target_dir/.config/prune/current" "$stow_dir/prune/.config/prune/current"
+
+touch "$stow_dir/prune/.config/prune/replaced"
+run_bstow --dir "$stow_dir" --target "$target_dir" restow prune
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'restow failed before foreign stale-link test'
+rm "$stow_dir/prune/.config/prune/replaced"
+unlink "$target_dir/.config/prune/replaced"
+ln -s "$target_dir/other" "$target_dir/.config/prune/replaced"
+run_bstow --dir "$stow_dir" --target "$target_dir" restow prune
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'restow failed while preserving a foreign stale link'
+assert_link_target "$target_dir/.config/prune/replaced" "$target_dir/other"
+
+touch "$stow_dir/prune/.config/prune/regular"
+run_bstow --dir "$stow_dir" --target "$target_dir" restow prune
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'restow failed before stale regular-file test'
+rm "$stow_dir/prune/.config/prune/regular"
+unlink "$target_dir/.config/prune/regular"
+printf 'keep me\n' >"$target_dir/.config/prune/regular"
+run_bstow --dir "$stow_dir" --target "$target_dir" restow prune
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'restow failed while preserving a stale regular file'
+[[ -f $target_dir/.config/prune/regular && ! -L $target_dir/.config/prune/regular ]] || fail 'restow removed a stale regular file'
+[[ $(<"$target_dir/.config/prune/regular") == 'keep me' ]] || fail 'restow changed a stale regular file'
+
+alias_link=$target_dir/.config/prune/alias
+ln -s "$stow_dir/prune/.config/prune/current" "$alias_link"
+run_bstow --dir "$stow_dir" --target "$target_dir" restow prune
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'restow failed while preserving a link at an unmanaged destination'
+assert_link_target "$alias_link" "$stow_dir/prune/.config/prune/current"
+
+mkdir -p "$stow_dir/branch/.config/one" "$stow_dir/branch/.config/two"
+touch "$stow_dir/branch/.config/one/current" "$stow_dir/branch/.config/two/obsolete"
+run_bstow --dir "$stow_dir" --target "$target_dir" stow branch
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'initial multi-branch package stow failed'
+branch_obsolete=$target_dir/.config/two/obsolete
+assert_link_target "$branch_obsolete" "$stow_dir/branch/.config/two/obsolete"
+rm -r "$stow_dir/branch/.config/two"
+run_bstow --dir "$stow_dir" --target "$target_dir" restow branch
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'restow failed after an entire source branch was deleted'
+[[ ! -e $branch_obsolete && ! -L $branch_obsolete ]] || fail 'restow retained a link from a deleted source branch'
+assert_link_target "$target_dir/.config/one/current" "$stow_dir/branch/.config/one/current"
+
+alternate_stow_dir=$test_root/home/alternate-repo
+mkdir -p "$alternate_stow_dir/branch/.config/one"
+touch "$alternate_stow_dir/branch/.config/one/current"
+run_bstow --dir "$alternate_stow_dir" --target "$target_dir" restow branch
+[[ $BSTOW_STATUS -ne 0 ]] || fail 'restow adopted another package source without force'
+assert_contains "$BSTOW_OUTPUT" 'Package state belongs to another source'
+assert_link_target "$target_dir/.config/one/current" "$stow_dir/branch/.config/one/current"
+
+run_bstow --force --dir "$alternate_stow_dir" --target "$target_dir" restow branch
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'forced restow did not adopt another package source'
+assert_link_target "$target_dir/.config/one/current" "$alternate_stow_dir/branch/.config/one/current"
 
 printf 'bstow tests passed\n'

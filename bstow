@@ -10,6 +10,7 @@ TARGET_DIR="${TARGET_DIR:-$HOME}"
 VERBOSE="${VERBOSE:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 FORCE="${FORCE:-0}"
+STATE_DIR="${BSTOW_STATE_DIR:-}"
 
 # Colors
 RED='\033[0;31m'
@@ -63,6 +64,214 @@ link_points_to() {
     current_resolved="$(resolve_link_target "$dest")"
     expected_resolved="$(realpath -m -- "$expected_src")"
     [[ $current_resolved == "$expected_resolved" ]]
+}
+
+common_directory() {
+    local left="$1"
+    local right="$2"
+
+    if [[ $left == . || $right == . ]]; then
+        printf '.\n'
+        return
+    fi
+
+    while [[ $right != "$left" && $right != "$left/"* ]]; do
+        if [[ $left == */* ]]; then
+            left="${left%/*}"
+        else
+            left=.
+        fi
+    done
+    printf '%s\n' "$left"
+}
+
+package_scan_roots() {
+    local package_dir="$1"
+    local file
+    local rel_path
+    local parent
+    local group
+    local current
+    declare -A common_by_group=()
+
+    while IFS= read -r -d '' file; do
+        rel_path="${file#"$package_dir"/}"
+        if [[ $rel_path == */* ]]; then
+            parent="${rel_path%/*}"
+            group="${parent%%/*}"
+        else
+            parent=.
+            group=.
+        fi
+
+        current="${common_by_group[$group]:-}"
+        if [[ -z $current ]]; then
+            common_by_group[$group]="$parent"
+        else
+            common_by_group[$group]="$(common_directory "$current" "$parent")"
+        fi
+    done < <(find "$package_dir" -type f -print0)
+
+    for current in "${common_by_group[@]}"; do
+        if [[ $current == . ]]; then
+            printf '%s\0%s\0' "$TARGET_DIR" 1
+        else
+            printf '%s\0%s\0' "$TARGET_DIR/$current" 0
+        fi
+    done
+}
+
+managed_link_source() {
+    local link="$1"
+    local package_dir="$2"
+    local source
+    local rel_path
+
+    source="$(resolve_link_target "$link")"
+    if [[ $source != "$package_dir/"* ]]; then
+        return 1
+    fi
+
+    rel_path="${source#"$package_dir"/}"
+    if [[ $link != "$TARGET_DIR/$rel_path" ]]; then
+        return 1
+    fi
+
+    printf '%s\n' "$source"
+}
+
+find_managed_links() {
+    local package_dir="$1"
+    local root
+    local shallow
+    local link
+
+    while IFS= read -r -d '' root && IFS= read -r -d '' shallow; do
+        [[ -d $root ]] || continue
+        if [[ $shallow -eq 1 ]]; then
+            while IFS= read -r -d '' link; do
+                if managed_link_source "$link" "$package_dir" >/dev/null; then
+                    printf '%s\0' "$link"
+                fi
+            done < <(find "$root" -xdev -maxdepth 1 -type l -print0)
+        else
+            while IFS= read -r -d '' link; do
+                if managed_link_source "$link" "$package_dir" >/dev/null; then
+                    printf '%s\0' "$link"
+                fi
+            done < <(find "$root" -xdev -type l -print0)
+        fi
+    done < <(package_scan_roots "$package_dir")
+}
+
+package_state_file() {
+    local package="$1"
+    local name="${package##*/}"
+    local checksum
+    name="${name//[^a-zA-Z0-9_.-]/_}"
+    checksum="$(printf '%s' "$package" | cksum)"
+    checksum="${checksum%% *}"
+    printf '%s/%s-%s.links\n' "$STATE_DIR" "${name:-package}" "$checksum"
+}
+
+valid_relative_path() {
+    local path="$1"
+    [[ -n $path && $path != /* && $path != .. && $path != ../* && $path != */../* && $path != */.. ]]
+}
+
+PACKAGE_STATE_SOURCE=''
+PACKAGE_STATE_PATHS=()
+
+load_package_state() {
+    local package="$1"
+    local state_file
+    local path
+    state_file="$(package_state_file "$package")"
+    PACKAGE_STATE_SOURCE=''
+    PACKAGE_STATE_PATHS=()
+
+    if [[ ! -e $state_file && ! -L $state_file ]]; then
+        return 1
+    fi
+    if [[ ! -f $state_file || -L $state_file ]]; then
+        error "Invalid bstow state file: $state_file"
+        return 2
+    fi
+
+    exec 3<"$state_file"
+    if ! IFS= read -r -d '' PACKAGE_STATE_SOURCE <&3 || [[ $PACKAGE_STATE_SOURCE != /* ]]; then
+        exec 3<&-
+        error "Corrupt bstow state file: $state_file"
+        return 2
+    fi
+    while IFS= read -r -d '' path <&3; do
+        if ! valid_relative_path "$path"; then
+            exec 3<&-
+            error "Unsafe path in bstow state file: $state_file"
+            return 2
+        fi
+        PACKAGE_STATE_PATHS+=("$path")
+    done
+    exec 3<&-
+}
+
+validate_package_state() {
+    local package="$1"
+    local package_dir="$2"
+    local status
+
+    if load_package_state "$package"; then
+        if [[ $PACKAGE_STATE_SOURCE != "$package_dir" && $FORCE -ne 1 ]]; then
+            error "Package state belongs to another source: $PACKAGE_STATE_SOURCE"
+            error "Use --force only if $package_dir should take ownership"
+            return 1
+        fi
+        return 0
+    else
+        status=$?
+    fi
+    [[ $status -eq 1 ]]
+}
+
+write_package_state() {
+    local package="$1"
+    local package_dir="$2"
+    local state_file
+    local temporary
+    local file
+    local rel_path
+    declare -A paths=()
+
+    state_file="$(package_state_file "$package")"
+    if load_package_state "$package" && [[ $PACKAGE_STATE_SOURCE == "$package_dir" ]]; then
+        for rel_path in "${PACKAGE_STATE_PATHS[@]}"; do
+            paths[$rel_path]=1
+        done
+    fi
+    while IFS= read -r -d '' file; do
+        rel_path="${file#"$package_dir"/}"
+        paths[$rel_path]=1
+    done < <(find "$package_dir" -type f -print0)
+
+    mkdir -p "$STATE_DIR"
+    temporary="$(mktemp "$STATE_DIR/.bstow-state.XXXXXX")"
+    chmod 0600 "$temporary"
+    {
+        printf '%s\0' "$package_dir"
+        for rel_path in "${!paths[@]}"; do
+            printf '%s\0' "$rel_path"
+        done
+    } >"$temporary"
+    mv -f -- "$temporary" "$state_file"
+}
+
+remove_package_state() {
+    local package="$1"
+    local state_file
+    state_file="$(package_state_file "$package")"
+    [[ -f $state_file && ! -L $state_file ]] || return 0
+    rm -- "$state_file"
+    rmdir "$STATE_DIR" 2>/dev/null || true
 }
 
 validate_destination() {
@@ -202,6 +411,7 @@ stow_package() {
     fi
     
     printf 'Stowing package: %s\n' "$package"
+    validate_package_state "$package" "$package_dir" || return 1
     validate_package "$package_dir" || return 1
 
     while IFS= read -r -d '' file; do
@@ -211,6 +421,10 @@ stow_package() {
 
         create_link "$src" "$dest" || return 1
     done < <(find "$package_dir" -type f -print0)
+
+    if [[ $DRY_RUN -ne 1 ]]; then
+        write_package_state "$package" "$package_dir" || return 1
+    fi
 }
 
 # Unstow a package
@@ -224,14 +438,76 @@ unstow_package() {
     fi
     
     printf 'Unstowing package: %s\n' "$package"
+    validate_package_state "$package" "$package_dir" || return 1
+
+    local managed_links=()
+    local dest
+    local src
+    local rel_path
+    local has_state=0
+    if load_package_state "$package"; then
+        has_state=1
+        src="$PACKAGE_STATE_SOURCE"
+        for rel_path in "${PACKAGE_STATE_PATHS[@]}"; do
+            dest="$TARGET_DIR/$rel_path"
+            remove_link "$dest" "$src/$rel_path"
+        done
+    else
+        while IFS= read -r -d '' dest; do
+            managed_links+=("$dest")
+        done < <(find_managed_links "$package_dir")
+
+        for dest in "${managed_links[@]}"; do
+            src="$(resolve_link_target "$dest")"
+            remove_link "$dest" "$src"
+        done
+    fi
 
     while IFS= read -r -d '' file; do
-        local rel_path="${file#"$package_dir"/}"
-        local src="$package_dir/$rel_path"
-        local dest="$TARGET_DIR/$rel_path"
+        rel_path="${file#"$package_dir"/}"
+        src="$package_dir/$rel_path"
+        dest="$TARGET_DIR/$rel_path"
 
-        remove_link "$dest" "$src"
+        if [[ -L $dest ]]; then
+            remove_link "$dest" "$src"
+        fi
     done < <(find "$package_dir" -type f -print0)
+
+    if [[ $has_state -eq 1 && $DRY_RUN -ne 1 ]]; then
+        remove_package_state "$package"
+    fi
+}
+
+preview_obsolete_links() {
+    local package="$1"
+    local package_dir="$2"
+    local dest
+    local src
+    local rel_path
+    local status
+
+    if load_package_state "$package"; then
+        src="$PACKAGE_STATE_SOURCE"
+        for rel_path in "${PACKAGE_STATE_PATHS[@]}"; do
+            if [[ ! -f $package_dir/$rel_path || -L $package_dir/$rel_path ]]; then
+                dest="$TARGET_DIR/$rel_path"
+                if link_points_to "$dest" "$src/$rel_path"; then
+                    preview "Would remove: $dest"
+                fi
+            fi
+        done
+        return 0
+    else
+        status=$?
+    fi
+    [[ $status -eq 1 ]] || return "$status"
+
+    while IFS= read -r -d '' dest; do
+        src="$(resolve_link_target "$dest")"
+        if [[ ! -f $src || -L $src ]]; then
+            preview "Would remove: $dest"
+        fi
+    done < <(find_managed_links "$package_dir")
 }
 
 preview_restow_link() {
@@ -264,10 +540,12 @@ restow_package() {
         return 1
     fi
 
+    validate_package_state "$package" "$package_dir" || return 1
     validate_package "$package_dir" || return 1
 
     if [[ $DRY_RUN -eq 1 ]]; then
         printf 'Restowing package: %s\n' "$package"
+        preview_obsolete_links "$package" "$package_dir"
         while IFS= read -r -d '' file; do
             local rel_path="${file#"$package_dir"/}"
             preview_restow_link "$package_dir/$rel_path" "$TARGET_DIR/$rel_path"
@@ -275,8 +553,8 @@ restow_package() {
         return 0
     fi
 
-    unstow_package "$package"
-    stow_package "$package"
+    unstow_package "$package" || return 1
+    stow_package "$package" || return 1
 }
 
 # Show help
@@ -295,7 +573,7 @@ OPTIONS:
     -d, --dir DIR       Set stow directory (default: current directory)
     -t, --target DIR    Set target directory (default: \$HOME)
     -n, --dry-run       Preview actions without changing files
-    -f, --force         Replace symlinks that point elsewhere when stowing
+    -f, --force         Replace foreign symlinks or adopt state from another source
     -v, --verbose       Show additional diagnostic details
     -h, --help          Show this help
 
@@ -310,7 +588,9 @@ ENVIRONMENT:
     TARGET_DIR  Target directory (default: \$HOME)
     VERBOSE     Enable verbose output (0 or 1)
     DRY_RUN     Enable dry run mode (0 or 1)
-    FORCE       Replace foreign symlinks when stowing (0 or 1)
+    FORCE       Replace foreign symlinks or adopt package state (0 or 1)
+    BSTOW_STATE_DIR
+                Ownership state directory (default: TARGET_DIR/.local/state/bstow)
 
 PACKAGE STRUCTURE:
     dotfiles/
@@ -403,6 +683,11 @@ main() {
     # Convert to absolute paths
     STOW_DIR="$(cd "$STOW_DIR" && pwd)"
     TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
+    if [[ -z $STATE_DIR ]]; then
+        STATE_DIR="$TARGET_DIR/.local/state/bstow"
+    else
+        STATE_DIR="$(realpath -m -- "$STATE_DIR")"
+    fi
     
     log "Stow directory: $STOW_DIR"
     log "Target directory: $TARGET_DIR"

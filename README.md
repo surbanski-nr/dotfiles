@@ -296,6 +296,32 @@ reported source and destination before using `--force`:
 ./bstow --force -t "$HOME" stow bash
 ```
 
+Use `restow` after pulling file deletions or renames. It removes obsolete
+symlinks previously created for that package, then recreates the current set:
+
+```bash
+./bstow --dry-run -v -t "$HOME" restow nvim2
+./bstow -v -t "$HOME" restow nvim2
+```
+
+`bstow` records package ownership under
+`$TARGET_DIR/.local/state/bstow`. The state contains source paths only and lets
+`restow` remove deleted paths without scanning the whole home directory. The
+first restow after upgrading from an older `bstow` also discovers legacy links
+when their targets still point inside the package. Regular files, foreign
+symlinks and links at destinations the package did not create are preserved.
+
+If the package was deliberately moved to another clone, preview and adopt its
+existing state with `--force`:
+
+```bash
+./bstow --dry-run --force -t "$HOME" restow nvim2
+./bstow --force -t "$HOME" restow nvim2
+```
+
+Override the state location with `BSTOW_STATE_DIR` when the target needs a
+different local-state directory.
+
 Run the isolated shell regression suite after changing `bstow`:
 
 ```bash
