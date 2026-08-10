@@ -176,7 +176,7 @@ sequence:
 | Plugin | Day-to-day behavior |
 |---|---|
 | `guess-indent.nvim` | Detects indentation when a buffer opens; use `:GuessIndent` to run it again and `:setlocal shiftwidth? tabstop? expandtab?` to inspect the result |
-| `indent-blankline.nvim` | Draws narrow `▏` guides and a blue `▎` for the current scope; toggle them with `<leader>ti` or `:IBLToggle` |
+| `indent-blankline.nvim` | Draws narrow grey `▏` guides and a white `▏` for the current scope; toggle them with `<leader>ti` or `:IBLToggle` |
 | `fidget.nvim` | Shows LSP progress in a temporary notification; use `:Fidget history` to inspect earlier messages |
 | `mason-lspconfig.nvim`, `mason-tool-installer.nvim`, `nvim-lspconfig` | Connect configured language servers; inspect them with `:Mason` and install pinned versions with `:Nvim2ToolsInstallSync` |
 | `nvim-treesitter` | Supplies parsing, highlighting, indentation and injections automatically for installed languages |
@@ -201,8 +201,8 @@ grey from the default palette. The current Treesitter scope changes the same
 width `▏` guide to the default white foreground, without horizontal start or
 end markers. Lua table constructors are included explicitly, so the guide
 follows a table such as `local expected = { ... }` as well as normal language
-scopes. The custom module
-pins stable version 3.9.1. Toggle all guides with `<leader>ti` or `:IBLToggle`;
+scopes. The lockfile pins its tested revision. Toggle all guides with
+`<leader>ti` or `:IBLToggle`;
 toggle only the active-scope marker with `:IBLToggleScope`. Change the
 characters or colors in
 `lua/custom/plugins/indent_guides.lua` if they are still too visible.
@@ -331,6 +331,31 @@ Notation used below:
 default relative mode is useful for motions such as `5j`, while absolute mode
 is useful when discussing exact line numbers. Press `<leader>tl` again to
 return to relative numbers.
+
+### Marks and a small Harpoon-like shortlist
+
+Marks are built into Neovim, so they do not use `<leader>m`. Press plain `m`
+followed by a letter to save the current position. Lowercase marks are local to
+one buffer. Uppercase marks work across files and are persisted by ShaDa, which
+makes `A`, `B`, `C` and so on useful as a small project shortlist.
+
+| Action | Keys or command |
+|---|---|
+| Set local mark `a` | `ma` |
+| Set cross-file mark `A` | `mA` |
+| Jump to the exact row and column | `` `a `` or `` `A `` |
+| Jump to the marked line's first nonblank character | `'a` or `'A` |
+| Browse and jump to marks | `<leader>sm` or `:Telescope marks` |
+| List marks without Telescope | `:marks` |
+| Delete marks | `:delmarks a A` |
+
+A Harpoon-like flow is: use `mA`, `mB` and `mC` in three frequently used
+places, jump back with `` `A ``, `` `B `` or `` `C ``, and browse them with
+`<leader>sm`. Setting the same uppercase mark elsewhere moves it. Mini Visits
+labels under `<leader>v` remain better for a larger named set of files.
+
+`<leader>m` by itself has no action. It is a which-key prefix whose active
+mapping is `<leader>ma` for the optional Mermaid ASCII preview.
 
 ### Editing, selection, undo and registers
 
@@ -1031,6 +1056,13 @@ in `lua/custom/lsp.lua` and it does not include the parser synchronization.
 
 - `nvim-pack-lock.json` pins every plugin to an exact Git commit. No plugin
   update runs automatically.
+- A `version` in `vim.pack.add` is an allowed update channel, not the installed
+  revision. Most plugin declarations omit it intentionally and rely on the
+  lockfile for exact reproducibility. LuaSnip stays on major version 2,
+  blink.cmp stays on major version 1, Neo-tree selects released semantic-version
+  tags, and Treesitter follows its `main` branch because those are deliberate
+  update-channel constraints. Do not copy exact tags into every declaration:
+  doing so would freeze `vim.pack.update()` at those tags.
 - Mason tools are version-pinned and are installed only through
   `:Nvim2ToolsInstallSync`; opening Neovim or a new file does not download a
   missing tool or parser.
@@ -1068,7 +1100,7 @@ small custom wrapper modules so Kickstart's optional section stays unchanged.
 | `neo-tree.lua` | Enabled through custom wrapper | Sidebar file tree and file-management actions |
 | `debug.lua` | Disabled | DAP UI and Go debugging |
 | `autopairs.lua` | Disabled | Automatic closing pairs while typing |
-| `indent_line.lua` | Disabled; replaced by custom module | The custom setup pins the plugin and uses a less visible guide |
+| `indent_line.lua` | Disabled; replaced by custom module | The custom setup controls the guide appearance; the lockfile pins the installed revision |
 
 A disabled module's `vim.pack.add` call is not executed. Its plugin must also
 be absent from `nvim-pack-lock.json`, because a clean `vim.pack` setup installs
@@ -1178,7 +1210,7 @@ active configurations with `nvim2`.
 | `folke/flash.nvim` | Label-based jumps and Treesitter-aware selection | Native `/`, `f`, `t`, LSP selection and Telescope are enough for now |
 | `ray-x/go.nvim` and `guihua.lua` | Go commands, test/code helpers and tool installation | Do not add unless Go returns to the supported language list; prefer a small `gopls` setup first |
 | `rmagatti/goto-preview` | Definitions, references and implementations in floating previews | Current Telescope LSP pickers cover navigation; add only if floating previews are missed |
-| `ThePrimeagen/harpoon` | Persistent short list of frequently used files | Replaced for now by Mini Visits frecency and labels under `<leader>v` |
+| `ThePrimeagen/harpoon` | Persistent short list of frequently used files | Replaced by built-in uppercase marks for a fixed shortlist and Mini Visits labels under `<leader>v` for larger sets |
 | `tzachar/highlight-undo.nvim` | Briefly highlighted text affected by undo and redo | Cosmetic; do not add |
 | `kevinhwang91/nvim-hlslens` | Search match counts and search markers integrated with scrollbar | Neovim search count and normal `n`/`N` are sufficient |
 | `iamcco/markdown-preview.nvim` | Browser-based Markdown preview | Add only when browser-accurate rendering is needed; current render-markdown is in-editor |
@@ -1268,8 +1300,8 @@ features. Then add only in response to a repeated workflow problem:
 4. Trial DiffBandit only if full Git review, folder diffs or merge resolution
    are regular in-editor tasks.
 5. Consider Spectre only for frequent interactive project-wide replacements.
-6. Use Mini Visits labels before considering Harpoon for repeated jumps among
-   a small working set.
+6. Use built-in uppercase marks or Mini Visits labels before considering
+   Harpoon for repeated jumps among a small working set.
 7. Avoid re-adding cosmetic UI plugins, alternate completion stacks, NvChad
    platform plugins, or language plugins outside the supported language list.
 
