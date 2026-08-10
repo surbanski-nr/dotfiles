@@ -820,30 +820,64 @@ Examples:
 | Find surrounding to right or left | `sf<char>`, `sF<char>` |
 | Highlight surrounding | `sh<char>` |
 
-### Alignment and buffer removal
+### Alignment
+
+Mini Align uses plain `g` mappings, not leader mappings. In Normal mode it
+acts like an operator, so follow it with a motion or text object. In Visual
+mode it operates on the selected lines.
+
+| Action | Keys or flow |
+|---|---|
+| Align a selected region immediately | Select it, then `ga<delimiter>` |
+| Align a selected region with preview | Select it, then `gA<delimiter><CR>` |
+| Align the current paragraph on `=` | `gaip=` |
+| Preview paragraph alignment on `=` | `gAip=`, then `<CR>` to accept |
+| Cancel a preview | `<Esc>` or `<C-c>` |
+| Use a multi-character or literal delimiter | Start `gA` with a region, press `s`, enter the delimiter and press `<CR>` |
+| Choose left, center, right or no justification | During preview press `j`, then `l`, `c`, `r` or `n` |
+
+For example, line-select these assignments with `V`, press `gA=`, and then
+press `<CR>`:
+
+```text
+name=alice
+long_name=bob
+```
+
+The preview aligns both `=` delimiters. Use `ga=` instead when the preview is
+not needed. See `:help MiniAlign` for filters and other advanced modifiers.
+
+### Split/join
+
+| Action | Keys or flow |
+|---|---|
+| Toggle the nearest argument list between one line and many | Put the cursor anywhere inside it and press `gS` |
+| Toggle a specific region | Select it, then press `gS` |
+| Repeat the previous split/join elsewhere | `.` |
+
+For example, put the cursor anywhere inside this call and press `gS`:
+
+```lua
+deploy(image, namespace, timeout)
+```
+
+It becomes a multiline argument list. Press `gS` again while inside the same
+brackets to join it. The default detection handles comma-separated content in
+`()`, `[]` and `{}` and excludes nested brackets and quoted strings. It is
+pattern-based rather than syntax-aware, so unusual language constructs can
+still need manual formatting. See `:help MiniSplitjoin` for its detection
+rules.
+
+### Buffer removal and visited files
 
 | Action | Keys |
 |---|---|
-| Align selected text interactively | Select text, press `ga`, then follow the prompt |
-| Align with live preview | Select text, press `gA`, then follow the prompt |
 | Remove current buffer | `<C-x>` |
-
-### Split/join and visited files
-
-| Action | Keys |
-|---|---|
-| Split or join arguments inside `()`, `[]` or `{}` | `gS` |
 | Select frecent file from current working directory | `<leader>vv` |
 | Select frecent file from all tracked directories | `<leader>vV` |
 | Add a label to current file | `<leader>va` |
 | Remove a label from current file | `<leader>vr` |
 | Select a label, then one of its files | `<leader>vl` |
-
-For split/join, place the cursor anywhere inside a bracketed argument list and
-press `gS`; press it again to join the list. It is repeatable with `.` and also
-works on a visual selection when automatic bracket detection chooses the wrong
-region. It is pattern-based rather than syntax-aware, so nested or unusual
-language constructs can occasionally need manual formatting.
 
 Mini Visits records a normal file after it remains open for about one second
 and ranks files using both recency and frequency. `<leader>vv` is scoped to
