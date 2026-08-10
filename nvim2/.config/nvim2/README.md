@@ -19,8 +19,8 @@ NVIM_APPNAME=nvim2 nvim
 
 The stowed Bash configuration makes this profile the default for `nvim`,
 `vim`, `vi`, `v`, `$EDITOR`, `$VISUAL` and the FZF-based `ffv` command. Use
-`vn` when the older `~/.config/nvim` profile is explicitly needed. To start
-directly from this repository:
+`vold` only when the archived `~/.config/old-nvim` profile has been stowed
+explicitly and is needed for reference. To start directly from this repository:
 
 ```bash
 cd /home/surbanski/work/githubactions/dotfilesneovim/dotfiles/nvim2/.config/nvim2
@@ -824,7 +824,9 @@ Examples:
 
 Mini Align uses plain `g` mappings, not leader mappings. In Normal mode it
 acts like an operator, so follow it with a motion or text object. In Visual
-mode it operates on the selected lines.
+mode it operates on the selected lines. It splits each selected line around a
+delimiter, pads the resulting fields into columns, and joins them again. It
+does not understand the language or replace a formatter.
 
 | Action | Keys or flow |
 |---|---|
@@ -844,8 +846,16 @@ name=alice
 long_name=bob
 ```
 
-The preview aligns both `=` delimiters. Use `ga=` instead when the preview is
-not needed. See `:help MiniAlign` for filters and other advanced modifiers.
+The result is:
+
+```text
+name      = alice
+long_name = bob
+```
+
+Use `ga=` instead when the preview is not needed. This is useful for small
+assignment tables, Markdown-style text tables, CSV-like text and other local
+column layouts. See `:help MiniAlign` for filters and advanced modifiers.
 
 ### Split/join
 
@@ -1205,12 +1215,12 @@ If the debug module is enabled, it configures:
 The bundled debug example is Go-focused and is not part of the current
 language scope.
 
-## Previous `nvim` plugin comparison
+## Archived `old-nvim` plugin comparison
 
-The previous profile imports `NvChad/NvChad` v2.5 and contains 48 files under
-`nvim/.config/nvim/lua/plugins/`: 44 contain active plugin configuration and
-four are fully commented-out experiments. The tables below compare those
-active configurations with `nvim2`.
+The archived profile imports `NvChad/NvChad` v2.5 and contains 48 files under
+`old-nvim/.config/old-nvim/lua/plugins/`: 44 contain active plugin
+configuration and four are fully commented-out experiments. The tables below
+compare those active configurations with `nvim2`.
 
 ### Kept, replaced or partly covered
 

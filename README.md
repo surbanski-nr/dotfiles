@@ -422,8 +422,10 @@ ssh-add -l
 The `nvim2` profile is the default development editor. Bash exports
 `NVIM_APPNAME=nvim2`, `EDITOR=nvim` and `VISUAL=nvim`; `nvim`, `vim`, `vi`, `v`
 and `ffv` therefore open Nvim2. `ffv` safely opens one or more files selected
-with FZF, including paths containing spaces. Use `vn` to explicitly open the
-older `~/.config/nvim` profile or `vz` for `nvim-lazy`.
+with FZF, including paths containing spaces. The unsupported NvChad profile is
+archived under `old-nvim/` and is not installed by the normal setup. If it is
+stowed explicitly, `vold` opens it from `~/.config/old-nvim`. Use `vz` for
+`nvim-lazy`.
 See [the Neovim profile documentation](docs/neovim-nvchad-to-kickstart.md) for
 language tooling, installation, and key mappings.
 
@@ -569,8 +571,10 @@ ln -sv "$PWD/oh-my-posh/.oh-my-posh.omp.json" ~
 mkdir -p ~/.config
 ln -sv "$PWD/k9s/.config/k9s" ~/.config/k9s
 ln -sv "$PWD/kitty/.config/kitty" ~/.config/kitty
-ln -sv "$PWD/nvim/.config/nvim" ~/.config/nvim
-ln -sv "$PWD/nvim2" ~/.config/nvim2
+ln -sv "$PWD/nvim2/.config/nvim2" ~/.config/nvim2
+
+# Optional archived profile. Nvim2 is the supported default.
+ln -sv "$PWD/old-nvim/.config/old-nvim" ~/.config/old-nvim
 
 mkdir -p ~/.codex
 ln -sv "$PWD/codex/.codex/AGENTS.md" ~/.codex/AGENTS.md
