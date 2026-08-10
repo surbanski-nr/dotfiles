@@ -82,58 +82,24 @@ tooling details are in
 
 ## Transfer to a machine without internet access
 
-An offline copy works when it is prepared on a connected Linux machine that
-matches the target's architecture, Neovim version and home-directory layout.
-First stow this profile on the connected machine, start it, and run:
+Nvim2 is deployed as a versioned platform release containing Neovim, the exact
+dotfiles commit, locked plugins, pinned Mason tools, compiled Treesitter
+parsers, parser revision metadata and queries. Build a separate release for
+each exact target platform and architecture. Use a connected Debian or Ubuntu
+host to run separate Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2 builder
+containers.
 
-```vim
-:Nvim2ToolsInstallSync
-```
+The complete connected-builder, offline-installation, upgrade, activation and
+rollback runbook is in
+[Nvim2 platform releases](../../../docs/nvim2-platform-releases.md). It also
+explains the three-artifact matrix and why releases must be built from an empty
+data directory.
 
-After it finishes, quit Neovim and archive the installed plugins, Treesitter
-parsers and Mason tools:
-
-```bash
-data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
-tar -C "$data_home" -czf "$HOME/nvim2-offline-$(uname -m).tar.gz" \
-  nvim2/site/pack/core \
-  nvim2/site/parser \
-  nvim2/mason
-```
-
-Transfer that archive and this dotfiles repository to the target. Stow the
-`nvim2` profile there, then extract the data archive:
-
-```bash
-data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
-mkdir -p "$data_home"
-tar -C "$data_home" -xzf "nvim2-offline-$(uname -m).tar.gz"
-bash ~/.config/nvim2/tests/check.sh
-```
-
-The archive contains:
-
-- `site/pack/core`: all plugin sources managed by `vim.pack`;
-- `site/parser`: the compiled Treesitter parsers;
-- `mason`: language servers, formatters, linters, registries and their local
-  launcher symlinks.
-
-Do not copy `~/.cache/nvim2`; it is disposable. A leftover
-`~/.local/share/nvim2/lazy` directory belongs to the older package setup and is
-not used by this profile. Copy `~/.local/state/nvim2` only if saved sessions,
-ShaDa history and logs are wanted too.
-
-This is not a universal binary bundle. Mason includes native Linux binaries,
-Node programs and Python virtual environments. Treesitter parsers and some
-plugins are compiled. Use the same OS family, CPU architecture and Neovim
-version on both machines. Neovim itself is not included: install a matching
-0.12 package or transfer its complete release directory. Keep the same
-absolute data path and preferably the same username because Python launchers
-contain the original home path. Install runtime dependencies such as `git`,
-`nodejs`, `python3`, `ripgrep` and `fd-find` from the target's package
-repository. If a configured tool is added later, rebuild the archive on the
-connected matching machine; do not run the installer on the isolated target
-and expect missing packages to download.
+Do not copy a developer's existing `~/.local/share/nvim2`, run update commands
+on the restricted machine, or extract a new archive over the active release.
+The platform runbook keeps releases in versioned directories and switches the
+canonical data and Neovim symlinks, making rollback a symlink and Git commit
+change.
 
 ## Enabled plugin set
 
@@ -149,6 +115,7 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `fidget.nvim` | Main `init.lua` | Show language-server progress without a permanent UI panel |
 | `gitsigns.nvim` | Main `init.lua` plus custom Kickstart wrapper | Show Git changes and provide hunk, blame and diff actions |
 | `guess-indent.nvim` | Main `init.lua` | Detect indentation settings from the current file |
+| `indent-blankline.nvim` | Custom module | Draw narrow indentation guides and mark the current Treesitter scope |
 | `mason-lspconfig.nvim` | Main `init.lua` | Connect Mason-installed servers to Neovim's LSP configuration names |
 | `mason-tool-installer.nvim` | Main `init.lua` plus `lua/custom/lsp.lua` | Install pinned servers, formatters and linters only when explicitly requested |
 | `mason.nvim` | Main `init.lua` | Provide the external-tool registry, installer and `:Mason` interface |
@@ -162,7 +129,7 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `plenary.nvim` | Telescope and Neo-tree dependency | Supply shared Lua utilities required by those plugins |
 | `render-markdown.nvim` | Custom module | Render Markdown headings, lists, tables and code blocks inside Neovim |
 | `telescope-ui-select.nvim` | Main `init.lua` | Display `vim.ui.select` choices in a Telescope dropdown |
-| `telescope.nvim` | Main `init.lua` plus custom Git-root module | Search files, text, buffers, commands, symbols and diagnostics |
+| `telescope.nvim` | Main `init.lua` plus custom search module | Search files, text, buffers, commands, symbols and diagnostics, including non-ignored dotfiles |
 | `todo-comments.nvim` | Main `init.lua` | Highlight and search TODO-style comments |
 | `which-key.nvim` | Main `init.lua` plus custom group module | Show available mappings after a key prefix |
 
@@ -194,7 +161,10 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 
 | Local feature module | Purpose | External plugin added |
 |---|---|---|
-| `telescope_git_root.lua` | Add `<leader>sF` and `<leader>sG` searches scoped to the nearest Git repository | No; extends the existing Telescope setup |
+| `enclosing_pairs.lua` | Highlight the nearest enclosing `()`, `[]` or `{}` pair while the cursor is anywhere inside it | No; extends Neovim's built-in `MatchParen` style |
+| `line_numbers.lua` | Toggle the current window between relative and absolute line numbers | No; changes built-in window options |
+| `mermaid_ascii.lua` | Preview the Mermaid fence under the cursor in a scrollable scratch tab | No; invokes the optional `mermaid-ascii` binary |
+| `telescope_search.lua` | Add hidden-aware workspace and nearest-Git-root searches while preserving ignore rules | No; extends the existing Telescope setup |
 | `toggle_values.lua` | Add `<leader>tv` for boolean-like values without `nvim-toggler` | No |
 | `native_folds.lua` | Apply Neovim's native Treesitter fold expression without `nvim-ufo` | No; extends the existing Treesitter setup |
 | `self_check.lua` | Add `:Nvim2Check` without another test plugin | No |
@@ -206,6 +176,7 @@ sequence:
 | Plugin | Day-to-day behavior |
 |---|---|
 | `guess-indent.nvim` | Detects indentation when a buffer opens; use `:GuessIndent` to run it again and `:setlocal shiftwidth? tabstop? expandtab?` to inspect the result |
+| `indent-blankline.nvim` | Draws narrow `▏` guides and a blue `▎` for the current scope; toggle them with `<leader>ti` or `:IBLToggle` |
 | `fidget.nvim` | Shows LSP progress in a temporary notification; use `:Fidget history` to inspect earlier messages |
 | `mason-lspconfig.nvim`, `mason-tool-installer.nvim`, `nvim-lspconfig` | Connect configured language servers; inspect them with `:Mason` and install pinned versions with `:Nvim2ToolsInstallSync` |
 | `nvim-treesitter` | Supplies parsing, highlighting, indentation and injections automatically for installed languages |
@@ -217,12 +188,40 @@ The active colorscheme is Neovim's built-in `default` with its dark
 `NvimDark*` palette. The custom Isekai colorscheme and palette remain under
 `colors/isekai.lua` and `lua/palette.lua` but are not loaded.
 
-The default palette has two local overrides in
+The default palette has three local overrides in
 `lua/custom/plugins/default_colors.lua`: `CursorLine` uses a more visible
-`#343842` background and `CursorLineNr` uses orange `#ff9e64`. The
-`vim.o.cursorline` option in `init.lua` enables both. Change those values in
-the custom module to adjust them permanently, or use `:set cursorline!` to
-toggle current-row highlighting for the current window.
+`#343842` background, `CursorLineNr` uses orange `#ff9e64`, and `MatchParen`
+uses orange on a dark background. The `vim.o.cursorline` option in `init.lua`
+enables the first two. Change those values in the custom module to adjust them
+permanently, or use `:set cursorline!` to toggle current-row highlighting for
+the current window.
+
+Indent guides use the narrow solid `▏` character and the visible `#4f5358`
+grey from the default palette. The current Treesitter scope changes the same
+width `▏` guide to the default white foreground, without horizontal start or
+end markers. Lua table constructors are included explicitly, so the guide
+follows a table such as `local expected = { ... }` as well as normal language
+scopes. The custom module
+pins stable version 3.9.1. Toggle all guides with `<leader>ti` or `:IBLToggle`;
+toggle only the active-scope marker with `:IBLToggleScope`. Change the
+characters or colors in
+`lua/custom/plugins/indent_guides.lua` if they are still too visible.
+
+Neovim's built-in `matchparen` plugin highlights a matching `()`, `[]` or `{}`
+pair in orange when the cursor is on or immediately after one of the brackets.
+The small local `enclosing_pairs.lua` module keeps the nearest pair orange while
+the cursor is anywhere inside it. It walks upward through the current
+Treesitter node instead of scanning the file, and silently does nothing for a
+filetype without an installed parser. Press `%` on a bracket to jump to its
+match. Use `:NoMatchParen` and `:DoMatchParen` to disable or restore only the
+built-in behavior for the current session. Red is deliberately avoided because
+the palette uses it for errors.
+
+The white indent line marks the innermost Treesitter scope, not the cursor's
+literal indentation column. In the `library = vim.tbl_extend(..., { ... })`
+example it belongs to that innermost `{ ... }` table and is drawn at the
+table's content-indent boundary. This can differ from a function's or outer
+table's guide.
 
 ### Switch the colorscheme
 
@@ -326,6 +325,12 @@ Notation used below:
 | Search word under cursor | `*` forward, `#` backward |
 | Clear search highlighting | `<Esc>` |
 | Jump back or forward in jump list | `<C-o>`, `<C-i>` |
+| Toggle relative or absolute line numbers | `<leader>tl` |
+
+`<leader>tl` changes only the current window. Line numbers stay visible: the
+default relative mode is useful for motions such as `5j`, while absolute mode
+is useful when discussing exact line numbers. Press `<leader>tl` again to
+return to relative numbers.
 
 ### Editing, selection, undo and registers
 
@@ -347,6 +352,7 @@ Notation used below:
 | Indent or unindent selection | `>`, `<` |
 | Join current line with next | `J` |
 | Toggle boolean-like value under cursor | `<leader>tv` |
+| Toggle indentation guides | `<leader>ti` or `:IBLToggle` |
 | Add an empty line below or above | `]<Space>`, `[<Space>` |
 | Show registers | `:registers` |
 | Paste latest explicit yank | `"0p` |
@@ -385,6 +391,32 @@ This profile changes register behavior:
   ring.
 - `clipboard=unnamedplus` is enabled, so normal yanks and pastes also use the
   system clipboard when a clipboard provider is available.
+
+#### Expand or shrink a selection and copy it to another application
+
+For Wildfire-like syntax-aware expansion when the attached language server
+supports selection ranges:
+
+1. From normal mode, type `van`. This is `v`, then `an`, not a leader mapping.
+2. While still in visual mode, repeat `an` to expand to the next surrounding
+   syntax range. Press `in` to shrink back one range.
+3. Type `"+y` while the selection is active to copy it explicitly to the
+   terminal/system clipboard. A plain `y` normally does the same because this
+   profile enables `clipboard=unnamedplus`.
+4. Move to the email or other local application and paste with its normal
+   shortcut, usually `Ctrl+V`.
+
+If `an` does nothing, the current buffer has no attached LSP or its server does
+not support `textDocument/selectionRange`. Use language-independent Neovim text
+objects instead: `vi{` or `va{` for braces, `vi(` or `va(` for parentheses,
+and `vi[` or `va[` for brackets. `i` excludes delimiters and `a` includes
+them. For arbitrary whole lines, press `V`, extend with `j` or `k`, then
+`"+y`.
+
+Over SSH, Nvim2 sends the `+` clipboard through OSC 52. Kitty, a compatible
+local terminal, and tmux must permit OSC 52 for the final paste to work.
+`Ctrl+Shift+C` copies a terminal-emulator selection and is not part of this
+Neovim selection workflow.
 
 `<leader>tv` replaces the complete value under the cursor without changing a
 register. It handles matching case variants of `true`/`false`, `yes`/`no` and
@@ -501,6 +533,12 @@ directory shown by `:pwd`. `<leader>sF` and `<leader>sG` walk upward from the
 current file to the nearest `.git` directory and search only that repository;
 they fall back to `:pwd` outside Git. This is useful when one Neovim workspace
 contains several repositories.
+
+The file and text searches under `<leader>sf`, `<leader>sg`, `<leader>sF` and
+`<leader>sG` include hidden files such as `.bashrc`, `.env`, `.github/` and
+`.config/`. They still respect `.gitignore`, `.ignore` and global ignore files,
+and always exclude `.git/` and `node_modules/`. The command-line
+`:Telescope find_files` and `:Telescope live_grep` pickers use the same rules.
 
 Scope file or text search to any other repository or subdirectory without
 changing the working directory:
@@ -619,15 +657,12 @@ and `ii` for its next-textobject variants. Those are prefixes rather than
 standalone normal-mode mappings; for example, `vaa)` selects around the next
 parenthesized text and `dii)` deletes inside the next parenthesized text.
 
-The complete select-then-operate flow is:
-
-1. From normal mode, type `v`, then `an`. This is the three-key sequence
-   `van`; it enters visual mode and asks the attached LSP for the first range.
-2. While the selection remains in visual mode, repeat `an` to expand it or
-   press `in` to shrink it.
-3. Finish with `y` to yank, `d` to delete into the normal register, `"_d` to
-   delete without changing registers, or `c` to replace the selection without
-   changing the previous yank. Each operator leaves visual mode.
+The complete expansion, fallback text-object and external-clipboard workflow is
+documented under
+[Expand or shrink a selection and copy it to another application](#expand-or-shrink-a-selection-and-copy-it-to-another-application).
+After expanding a selection, `d` deletes it into the normal register, `"_d`
+deletes without changing registers, and `c` replaces it without changing the
+previous yank. Each operator leaves visual mode.
 
 ### Diagnostics
 
@@ -730,6 +765,11 @@ tree.
 | Toggle word-level diff | `<leader>tw` |
 | Select current hunk | `vih` or use `ih` with an operator |
 
+For a quick current-file review, press `]c` to jump to the next changed hunk,
+then `<leader>hp` to preview it. Repeat `]c` and `<leader>hp` through the file;
+use `[c` to return to the previous hunk. Use `<leader>hq` when you want every
+hunk in the current file listed together instead.
+
 ## Mini editing modules
 
 ### Text objects
@@ -795,6 +835,7 @@ are persisted under the Nvim2 data directory when Neovim exits.
 | Toggle Markdown rendering globally | `:RenderMarkdown toggle` |
 | Toggle Markdown rendering for current buffer | `:RenderMarkdown buf_toggle` |
 | Open a side-by-side rendered Markdown preview | `:RenderMarkdown preview` |
+| Preview the Mermaid fence under the cursor as text | `<leader>ma` or `:MermaidAsciiPreview` |
 | Toggle inline color previews | `<leader>tc` |
 | Search TODO comments | `:TodoTelescope` |
 | Put TODO comments in quickfix | `:TodoQuickFix` |
@@ -805,6 +846,45 @@ loads it and immediately highlights the current buffer; later presses disable
 or re-enable it. Its `:HighlightColors` command becomes available after that
 first load.
 
+The Mermaid preview is a local module, not a Neovim plugin or server. Put the
+cursor anywhere inside a fenced `mermaid` block and press `<leader>ma`. A
+successful render opens a read-only scratch tab. Navigate with the normal
+`h`, `j`, `k`, `l`, arrow, `Ctrl-u`, `Ctrl-d`, `gg`, `G`, `zh` and `zl` keys;
+press `q` to close it. Horizontal movement is available because wrapping is
+disabled.
+
+The renderer is optional. If `mermaid-ascii` is absent, the diagram is empty,
+or stable version 1.4.0 does not support that diagram type, Nvim2 shows a
+warning and leaves the current window unchanged. The stable renderer is most
+useful for flowcharts and sequence diagrams and does not cover all Mermaid
+syntax. Render Markdown continues to handle the surrounding Markdown.
+
+Install the pinned x86-64 Linux release in `~/bin` on a connected machine:
+
+```bash
+version=1.4.0
+asset=mermaid-ascii_Linux_x86_64.tar.gz
+expected=a59974c74e3fddfd040f80618a0f7eae535ebe58d91aa1d8d876bc99815dc037
+work_dir=$(mktemp -d)
+curl -fL \
+  "https://github.com/AlexanderGrooff/mermaid-ascii/releases/download/v$version/$asset" \
+  -o "$work_dir/$asset"
+printf '%s  %s\n' "$expected" "$work_dir/$asset" | sha256sum -c -
+tar -xzf "$work_dir/$asset" -C "$work_dir"
+mkdir -p "$HOME/bin"
+install -m 0755 "$work_dir/mermaid-ascii" "$HOME/bin/mermaid-ascii"
+rm -rf "$work_dir"
+export PATH="$HOME/bin:$PATH"
+mermaid-ascii --help
+```
+
+`Nvim2ToolsInstallSync` installs the Mermaid Treesitter parser, but it does not
+manage this binary. For a restricted VM, copy the verified
+`~/bin/mermaid-ascii` from a compatible connected x86-64 Linux builder. The
+binary is statically linked, so no service or runtime package is required.
+Run `source ~/.bashrc` before starting Nvim2 if the current shell was opened
+before `~/bin` existed.
+
 The old TODO mappings (`]t`, `[t`, `<leader>ft`, `<leader>tq`) have not been
 restored. Adding mappings requires no new plugin because
 `todo-comments.nvim` is already installed. Prefer `<leader>tn` and
@@ -812,6 +892,13 @@ restored. Adding mappings requires no new plugin because
 built-in tag-list mappings.
 
 ## Plugin and configuration maintenance
+
+The commands below review individual changes on a connected trusted machine.
+After they pass, deploy them by building a complete
+[Nvim2 platform release](../../../docs/nvim2-platform-releases.md) for every
+target OS and architecture. Plugins, Mason tools, language servers, formatters,
+linters, parsers and Neovim itself are released and rolled back as one tested
+unit.
 
 | Action | Command |
 |---|---|
@@ -878,8 +965,10 @@ the lockfile automatically.
 Perform updates on a connected trusted machine:
 
 1. Make sure the dotfiles repository has no unrelated changes, then start
-   Nvim2 from it.
-2. Run `:lua vim.pack.update()`. To update only one plugin, use
+   Nvim2 from the shell with `NVIM_APPNAME=nvim2 nvim`.
+2. After Nvim2 opens, run `:lua vim.pack.update()`. This command itself fetches
+   updates and opens the built-in confirmation buffer. There is no separate
+   `:PackUpdate` command. To update only one plugin, use
    `:lua vim.pack.update({ 'gitsigns.nvim' })` with its lockfile name.
 3. Review every old and proposed commit in the update window. `[[` and `]]`
    move between plugins; `K` shows details; `gra` offers actions such as
@@ -979,18 +1068,19 @@ small custom wrapper modules so Kickstart's optional section stays unchanged.
 | `neo-tree.lua` | Enabled through custom wrapper | Sidebar file tree and file-management actions |
 | `debug.lua` | Disabled | DAP UI and Go debugging |
 | `autopairs.lua` | Disabled | Automatic closing pairs while typing |
-| `indent_line.lua` | Disabled | Indentation guides |
+| `indent_line.lua` | Disabled; replaced by custom module | The custom setup pins the plugin and uses a less visible guide |
 
 A disabled module's `vim.pack.add` call is not executed. Its plugin must also
 be absent from `nvim-pack-lock.json`, because a clean `vim.pack` setup installs
-every lockfile entry. Debug, autopairs and indentation guides are currently
-absent from the lockfile.
+every lockfile entry. Debug and autopairs remain absent. Indentation guides are
+enabled and locked through `lua/custom/plugins/indent_guides.lua` instead of
+the Kickstart example.
 
-The visible `>` before tab-indented lines and `·` after trailing spaces are
-Neovim's built-in `listchars`, not indentation guides. Hide them temporarily
-with `:set nolist` and restore them with `:set list`. Neo-tree draws separate
-hierarchy lines only inside its sidebar; `guess-indent.nvim` detects indentation
-settings but draws no guides.
+The visible `>` before tab-indented lines and `·` after trailing spaces come
+from Neovim's built-in `listchars`, separately from the `▏` indentation guides.
+Hide the built-in whitespace markers temporarily with `:set nolist` and restore
+them with `:set list`. Neo-tree draws separate hierarchy lines only inside its
+sidebar; `guess-indent.nvim` detects indentation settings but draws no guides.
 
 To enable a disabled example without editing Kickstart-owned code, add a file
 under `lua/custom/plugins/` that requires it, then restart Neovim. For example,
@@ -1071,7 +1161,7 @@ active configurations with `nvim2`.
 | `mason-org/mason.nvim` | Kept | Mason LSP and tool installers now manage the complete selected tool set |
 | `olimorris/persisted.nvim` | Removed | No session persistence; reopen files through Mini Visits, Telescope or Neo-tree |
 | `kylechui/nvim-surround` | Replaced by `mini.surround` | Surrounding keys use Mini's `sa`, `sd` and `sr` grammar |
-| `nvim-telescope/telescope.nvim` | Kept | Search mappings moved from `<leader>f...` to `<leader>s...`; the old override included hidden files and custom ignore patterns while the current profile uses Telescope defaults |
+| `nvim-telescope/telescope.nvim` | Kept | Search mappings moved from `<leader>f...` to `<leader>s...`; workspace and Git-root searches include non-ignored hidden files and exclude `.git` and `node_modules` |
 | `folke/todo-comments.nvim` | Kept | Old TODO navigation/search mappings are not configured and gutter signs are disabled |
 | `nvim-treesitter/nvim-treesitter` | Kept | Parsers are deliberately limited to selected languages |
 | `pearofducks/ansible-vim` | Replaced by Ansible filetype detection, parser and LSP | Some legacy Vim-specific Ansible syntax behavior may differ |
