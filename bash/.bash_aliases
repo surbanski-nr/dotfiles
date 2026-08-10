@@ -39,7 +39,7 @@ ffv() {
 }
 
 alias vz='NVIM_APPNAME=nvim-lazy nvim'
-alias vn='NVIM_APPNAME=nvim nvim'
+alias vold='NVIM_APPNAME=old-nvim nvim'
 alias v='nvim'
 alias vi='nvim'
 alias vim='nvim'

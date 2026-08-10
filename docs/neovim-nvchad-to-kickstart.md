@@ -1,10 +1,12 @@
 # Neovim profiles
 
-The repository keeps two Neovim profiles:
+The repository keeps one supported profile and one archive:
 
-- `nvim/` is the previous NvChad configuration.
 - `nvim2/.config/nvim2/` is the development profile based on
   [kickstart.nvim](https://github.com/nvim-lua/kickstart.nvim).
+- `old-nvim/.config/old-nvim/` is the previous NvChad configuration. It is
+  retained for reference, is not maintained and is not stowed by the normal
+  setup.
 
 The Kickstart profile uses Neovim 0.12's built-in `vim.pack` package manager.
 Its resolved plugin revisions are stored in `nvim-pack-lock.json`.
@@ -23,7 +25,8 @@ NVIM_APPNAME=nvim2 nvim
 
 The Bash configuration exports `NVIM_APPNAME=nvim2`, `EDITOR=nvim` and
 `VISUAL=nvim`, so `nvim`, `vim`, `vi`, `v` and `ffv` use this profile by
-default. Use `vn` to open the previous `~/.config/nvim` profile explicitly.
+default. After explicitly stowing `old-nvim`, use `vold` to open the archived
+`~/.config/old-nvim` profile.
 
 To run directly from the repository without stowing it:
 
