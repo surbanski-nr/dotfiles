@@ -91,6 +91,8 @@ local function check_mappings()
   local mappings = {
     { 'n', '\\' },
     { 'n', 'dd' },
+    { 'n', 'ga' },
+    { 'n', 'gA' },
     { 'n', 'gS' },
     { 'n', '<leader>/' },
     { 'n', '<leader>ma' },
