@@ -10,6 +10,7 @@ M.parsers = {
   'lua',
   'markdown',
   'markdown_inline',
+  'mermaid',
   'python',
   'query',
   'terraform',

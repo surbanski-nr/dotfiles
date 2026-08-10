@@ -1,6 +1,7 @@
 local default_overrides = {
   CursorLine = { bg = '#343842', ctermbg = 237 },
   CursorLineNr = { fg = '#ff9e64', ctermfg = 214 },
+  MatchParen = { fg = '#ff9e64', bg = '#3f342d', ctermfg = 214, ctermbg = 237 },
 }
 
 local function apply_default_overrides()

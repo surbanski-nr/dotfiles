@@ -9,6 +9,7 @@ STOW_DIR="${STOW_DIR:-$PWD}"
 TARGET_DIR="${TARGET_DIR:-$HOME}"
 VERBOSE="${VERBOSE:-0}"
 DRY_RUN="${DRY_RUN:-0}"
+FORCE="${FORCE:-0}"
 
 # Colors
 RED='\033[0;31m'
@@ -19,76 +20,131 @@ NC='\033[0m' # No Color
 
 # Logging functions
 log() {
-    [[ $VERBOSE -eq 1 ]] && echo -e "${BLUE}[INFO]${NC} $*" >&2
+    if [[ $VERBOSE -eq 1 ]]; then
+        printf '%b[INFO]%b %s\n' "$BLUE" "$NC" "$*" >&2
+    fi
 }
 
 success() {
-    echo -e "${GREEN}[OK]${NC} $*" >&2
+    printf '%b[OK]%b %s\n' "$GREEN" "$NC" "$*" >&2
 }
 
 warn() {
-    echo -e "${YELLOW}[!]${NC} $*" >&2
+    printf '%b[!]%b %s\n' "$YELLOW" "$NC" "$*" >&2
 }
 
 error() {
-    echo -e "${RED}[ERROR]${NC} $*" >&2
+    printf '%b[ERROR]%b %s\n' "$RED" "$NC" "$*" >&2
 }
 
-# Get relative path from target to source
-get_relative_path() {
-    local source="$1"
-    local target="$2"
-    
-    # Use Python if available for accurate relative paths
-    if command -v python3 &>/dev/null; then
-        python3 -c "import os; print(os.path.relpath('$source', os.path.dirname('$target')))"
+preview() {
+    printf '[DRY-RUN] %s\n' "$*" >&2
+}
+
+resolve_link_target() {
+    local dest="$1"
+    local target
+    target="$(readlink -- "$dest")"
+
+    if [[ $target == /* ]]; then
+        realpath -m -- "$target"
     else
-        # Fallback: simple relative path
-        echo "$source"
+        realpath -m -- "$(dirname -- "$dest")/$target"
     fi
 }
 
-# Create symlink
+link_points_to() {
+    local dest="$1"
+    local expected_src="$2"
+    local current_resolved
+    local expected_resolved
+
+    [[ -L $dest ]] || return 1
+    current_resolved="$(resolve_link_target "$dest")"
+    expected_resolved="$(realpath -m -- "$expected_src")"
+    [[ $current_resolved == "$expected_resolved" ]]
+}
+
+validate_destination() {
+    local src="$1"
+    local dest="$2"
+
+    if [[ ! -e $dest && ! -L $dest ]]; then
+        return 0
+    fi
+
+    if [[ -L $dest ]]; then
+        if link_points_to "$dest" "$src" || [[ $FORCE -eq 1 ]]; then
+            return 0
+        fi
+
+        error "Symlink exists and points elsewhere: $dest -> $(readlink -- "$dest")"
+        error "Use --force only if bstow should replace that symlink"
+        return 1
+    fi
+
+    error "File exists and is not a symlink: $dest"
+    error "Please remove or back it up manually"
+    return 1
+}
+
+validate_package() {
+    local package_dir="$1"
+    local file
+    local rel_path
+    local src
+    local dest
+
+    while IFS= read -r -d '' file; do
+        rel_path="${file#"$package_dir"/}"
+        src="$package_dir/$rel_path"
+        dest="$TARGET_DIR/$rel_path"
+        validate_destination "$src" "$dest" || return 1
+    done < <(find "$package_dir" -type f -print0)
+}
+
 create_link() {
     local src="$1"
     local dest="$2"
-    
-    log "Creating link: $dest -> $src"
-    
-    if [[ $DRY_RUN -eq 1 ]]; then
-        echo "[DRY-RUN] Would link: $dest -> $src"
-        return 0
-    fi
-    
-    # Create parent directory if needed
     local parent_dir
-    parent_dir="$(dirname "$dest")"
-    if [[ ! -d "$parent_dir" ]]; then
-        log "Creating directory: $parent_dir"
-        mkdir -p "$parent_dir"
-    fi
-    
-    # Check if destination exists
-    if [[ -e "$dest" || -L "$dest" ]]; then
-        if [[ -L "$dest" ]]; then
-            local current_target
-            current_target="$(readlink "$dest")"
-            if [[ "$current_target" == "$src" ]]; then
-                log "Link already exists and is correct: $dest"
-                return 0
+
+    log "Creating link: $dest -> $src"
+    validate_destination "$src" "$dest" || return 1
+
+    if [[ -L $dest ]]; then
+        if link_points_to "$dest" "$src"; then
+            if [[ $DRY_RUN -eq 1 ]]; then
+                preview "No change: $dest already points to $src"
             else
-                warn "Link exists but points elsewhere: $dest -> $current_target"
-                warn "Removing old link"
-                rm "$dest"
+                log "Link already exists and is correct: $dest"
             fi
+            return 0
+        fi
+
+        if [[ $DRY_RUN -eq 1 ]]; then
+            preview "Would replace symlink: $dest -> $(readlink -- "$dest") with $src"
+            return 0
+        fi
+
+        warn "Replacing symlink: $dest -> $(readlink -- "$dest")"
+        unlink "$dest"
+    fi
+
+    parent_dir="$(dirname -- "$dest")"
+    if [[ ! -d $parent_dir ]]; then
+        if [[ $DRY_RUN -eq 1 ]]; then
+            preview "Would create directory: $parent_dir"
         else
-            error "File exists and is not a symlink: $dest"
-            error "Please remove or backup manually"
-            return 1
+            log "Creating directory: $parent_dir"
+            mkdir -p "$parent_dir"
         fi
     fi
-    
-    # Create symlink
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        preview "Would link: $dest -> $src"
+        return 0
+    fi
+
     ln -s "$src" "$dest"
     success "Linked: $dest -> $src"
 }
@@ -98,36 +154,37 @@ remove_link() {
     local dest="$1"
     local expected_src="$2"
     
-    if [[ ! -L "$dest" ]]; then
-        log "Not a symlink, skipping: $dest"
+    if [[ ! -L $dest ]]; then
+        if [[ $DRY_RUN -eq 1 ]]; then
+            preview "No managed link: $dest"
+        else
+            log "Not a symlink, skipping: $dest"
+        fi
         return 0
     fi
-    
-    local current_target
-    current_target="$(readlink "$dest")"
-    
-    if [[ "$current_target" != "$expected_src" ]]; then
-        warn "Link points elsewhere, skipping: $dest -> $current_target (expected: $expected_src)"
+
+    if ! link_points_to "$dest" "$expected_src"; then
+        warn "Link points elsewhere, skipping: $dest -> $(readlink -- "$dest") (expected: $expected_src)"
         return 0
     fi
-    
+
     log "Removing link: $dest"
-    
+
     if [[ $DRY_RUN -eq 1 ]]; then
-        echo "[DRY-RUN] Would remove: $dest"
+        preview "Would remove: $dest"
         return 0
     fi
-    
-    rm "$dest"
+
+    unlink "$dest"
     success "Removed: $dest"
-    
+
     # Remove empty parent directories
     local parent_dir
-    parent_dir="$(dirname "$dest")"
-    while [[ "$parent_dir" != "$TARGET_DIR" && "$parent_dir" != "/" ]]; do
+    parent_dir="$(dirname -- "$dest")"
+    while [[ $parent_dir != "$TARGET_DIR" && $parent_dir != / ]]; do
         if rmdir "$parent_dir" 2>/dev/null; then
             log "Removed empty directory: $parent_dir"
-            parent_dir="$(dirname "$parent_dir")"
+            parent_dir="$(dirname -- "$parent_dir")"
         else
             break
         fi
@@ -144,18 +201,14 @@ stow_package() {
         return 1
     fi
     
-    echo "Stowing package: $package"
-    
-    # Find all files in package
+    printf 'Stowing package: %s\n' "$package"
+    validate_package "$package_dir" || return 1
+
     while IFS= read -r -d '' file; do
-        # Get relative path from package dir
         local rel_path="${file#"$package_dir"/}"
         local src="$package_dir/$rel_path"
         local dest="$TARGET_DIR/$rel_path"
-        
-        # Skip if it's a directory (we only link files)
-        [[ -d "$src" ]] && continue
-        
+
         create_link "$src" "$dest" || return 1
     done < <(find "$package_dir" -type f -print0)
 }
@@ -170,23 +223,58 @@ unstow_package() {
         return 1
     fi
     
-    echo "Unstowing package: $package"
-    
-    # Find all files in package
+    printf 'Unstowing package: %s\n' "$package"
+
     while IFS= read -r -d '' file; do
         local rel_path="${file#"$package_dir"/}"
         local src="$package_dir/$rel_path"
         local dest="$TARGET_DIR/$rel_path"
-        
-        [[ -d "$src" ]] && continue
-        
+
         remove_link "$dest" "$src"
     done < <(find "$package_dir" -type f -print0)
 }
 
-# Restow a package (unstow then stow)
+preview_restow_link() {
+    local src="$1"
+    local dest="$2"
+    local parent_dir
+
+    if [[ -L $dest ]]; then
+        if link_points_to "$dest" "$src"; then
+            preview "Would relink: $dest -> $src"
+        else
+            preview "Would replace symlink: $dest -> $(readlink -- "$dest") with $src"
+        fi
+        return 0
+    fi
+
+    parent_dir="$(dirname -- "$dest")"
+    if [[ ! -d $parent_dir ]]; then
+        preview "Would create directory: $parent_dir"
+    fi
+    preview "Would link: $dest -> $src"
+}
+
 restow_package() {
     local package="$1"
+    local package_dir="$STOW_DIR/$package"
+
+    if [[ ! -d $package_dir ]]; then
+        error "Package not found: $package_dir"
+        return 1
+    fi
+
+    validate_package "$package_dir" || return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        printf 'Restowing package: %s\n' "$package"
+        while IFS= read -r -d '' file; do
+            local rel_path="${file#"$package_dir"/}"
+            preview_restow_link "$package_dir/$rel_path" "$TARGET_DIR/$rel_path"
+        done < <(find "$package_dir" -type f -print0)
+        return 0
+    fi
+
     unstow_package "$package"
     stow_package "$package"
 }
@@ -204,16 +292,17 @@ COMMANDS:
     restow      Unstow and then stow packages
 
 OPTIONS:
-    -d DIR      Set stow directory (default: current directory)
-    -t DIR      Set target directory (default: \$HOME)
-    -n          Dry run, don't make changes
-    -v          Verbose output
-    -h          Show this help
+    -d, --dir DIR       Set stow directory (default: current directory)
+    -t, --target DIR    Set target directory (default: \$HOME)
+    -n, --dry-run       Preview actions without changing files
+    -f, --force         Replace symlinks that point elsewhere when stowing
+    -v, --verbose       Show additional diagnostic details
+    -h, --help          Show this help
 
 EXAMPLES:
     bstow stow vim nvim        # Stow vim and nvim packages
     bstow unstow bash          # Unstow bash package
-    bstow -n -v stow tmux      # Dry run with verbose output
+    bstow --dry-run stow tmux  # Preview without changing files
     bstow restow git           # Restow git package
 
 ENVIRONMENT:
@@ -221,6 +310,7 @@ ENVIRONMENT:
     TARGET_DIR  Target directory (default: \$HOME)
     VERBOSE     Enable verbose output (0 or 1)
     DRY_RUN     Enable dry run mode (0 or 1)
+    FORCE       Replace foreign symlinks when stowing (0 or 1)
 
 PACKAGE STRUCTURE:
     dotfiles/
@@ -238,19 +328,57 @@ EOF
 
 # Main
 main() {
-    # Parse options
-    while getopts "d:t:nvh" opt; do
-        case $opt in
-            d) STOW_DIR="$OPTARG" ;;
-            t) TARGET_DIR="$OPTARG" ;;
-            n) DRY_RUN=1 ;;
-            v) VERBOSE=1 ;;
-            h) show_help; exit 0 ;;
-            *) show_help; exit 1 ;;
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -d|--dir)
+                [[ $# -ge 2 ]] || { error "$1 requires a directory"; exit 1; }
+                STOW_DIR="$2"
+                shift 2
+                ;;
+            --dir=*)
+                STOW_DIR="${1#*=}"
+                shift
+                ;;
+            -t|--target)
+                [[ $# -ge 2 ]] || { error "$1 requires a directory"; exit 1; }
+                TARGET_DIR="$2"
+                shift 2
+                ;;
+            --target=*)
+                TARGET_DIR="${1#*=}"
+                shift
+                ;;
+            -n|--dry-run)
+                DRY_RUN=1
+                shift
+                ;;
+            -f|--force)
+                FORCE=1
+                shift
+                ;;
+            -v|--verbose)
+                VERBOSE=1
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+            *)
+                break
+                ;;
         esac
     done
-    shift $((OPTIND - 1))
-    
+
     # Check arguments
     if [[ $# -lt 2 ]]; then
         error "Missing command or packages"
@@ -278,7 +406,10 @@ main() {
     
     log "Stow directory: $STOW_DIR"
     log "Target directory: $TARGET_DIR"
-    
+    if [[ $DRY_RUN -eq 1 ]]; then
+        preview "Preview only; no filesystem changes will be made"
+    fi
+
     # Execute command for each package
     local exit_code=0
     for package in "$@"; do

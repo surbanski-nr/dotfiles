@@ -22,7 +22,7 @@ Use this order on a machine with internet access:
    mkdir -p "$GH_REPOS"
    git clone https://github.com/surbanski-nr/dotfiles.git "$GH_REPOS/dotfiles"
    cd "$GH_REPOS/dotfiles"
-   ./bstow -n -v -t "$HOME" stow bash git tmux oh-my-posh nvim2 codex
+   ./bstow --dry-run -t "$HOME" stow bash git tmux oh-my-posh nvim2 codex
    ./bstow -v -t "$HOME" stow bash git tmux oh-my-posh nvim2 codex
    source ~/.bashrc
    ```
@@ -191,6 +191,11 @@ mkdir -p ~/bin
 ln -sf "$(command -v batcat)" ~/bin/bat
 ```
 
+Nvim2 can optionally preview Mermaid fences as text. The renderer is not
+installed by Mason or required for the editor to start. Install the pinned
+`mermaid-ascii` binary by following the
+[Nvim2 Mermaid instructions](nvim2/.config/nvim2/README.md#markdown-colors-and-todo-comments).
+
 ### Optional: Homebrew (fallback for missing tools)
 
 Requires internet access. If you're on a restricted network, see [Restricted network](#restricted-network-no-internet-access) below.
@@ -269,11 +274,32 @@ cd $GH_REPOS/dotfiles
 ./bstow -v -t ~ stow k9s
 ./bstow -v -t ~ stow nvim2
 ./bstow -v -t ~ stow gnupg
-./bstow -n -v -t ~ stow codex
+./bstow --dry-run -t ~ stow codex
 ./bstow -v -t ~ stow codex
 
 # On Ubuntu Desktop
 ./bstow -v -t ~ stow kitty
+```
+
+`--dry-run` previews every planned action without changing the filesystem; `-n`
+is its shorter alias. It does not require `-v`, which only adds paths and other
+diagnostic details. A preview returns a failure when a regular file or a
+symlink owned by something else blocks installation.
+
+`bstow` accepts both relative and absolute symlinks when they resolve to the
+expected package file. It never replaces regular files. It also refuses to
+replace a symlink pointing elsewhere unless `--force` is supplied. Inspect the
+reported source and destination before using `--force`:
+
+```bash
+./bstow --dry-run --force -t "$HOME" stow bash
+./bstow --force -t "$HOME" stow bash
+```
+
+Run the isolated shell regression suite after changing `bstow`:
+
+```bash
+timeout 60s bash tests/bstow_test.sh
 ```
 
 ### Codex and workspace agent instructions
@@ -289,7 +315,7 @@ takes precedence and remains unmanaged.
 Preview and install the global guidance:
 
 ```bash
-./bstow -n -v -t "$HOME" stow codex
+./bstow --dry-run -t "$HOME" stow codex
 ./bstow -v -t "$HOME" stow codex
 ```
 
@@ -297,10 +323,10 @@ The packages under `agents/` provide workspace-specific guidance. Link only
 the package matching the workspace:
 
 ```bash
-./bstow -n -v -d agents -t "$HOME/work/githubactions" stow work
+./bstow --dry-run -d agents -t "$HOME/work/githubactions" stow work
 ./bstow -v -d agents -t "$HOME/work/githubactions" stow work
 
-./bstow -n -v -d agents -t "$HOME/work/vuln" stow vuln
+./bstow --dry-run -d agents -t "$HOME/work/vuln" stow vuln
 ./bstow -v -d agents -t "$HOME/work/vuln" stow vuln
 ```
 
@@ -404,10 +430,13 @@ language tooling, installation, and key mappings.
 Updates are intentionally manual. For plugins, run
 `:lua vim.pack.update()` on a trusted connected machine, review the proposed
 commits, and use `:write` to apply them and rewrite `nvim-pack-lock.json`. For
-Mason tools, update the exact version in `nvim2/.config/nvim2/init.lua`, restart
-Neovim, and run `:Nvim2ToolsInstallSync`; there is no separate Mason lockfile.
+Mason tools, update the exact version in
+`nvim2/.config/nvim2/lua/custom/lsp.lua`, restart Neovim, and run
+`:Nvim2ToolsInstallSync`; there is no separate Mason lockfile.
 See [Plugin and configuration maintenance](nvim2/.config/nvim2/README.md#plugin-and-configuration-maintenance)
-for the complete review, verification and restricted-VM workflow.
+for review and verification. Build, transfer and roll back separate Ubuntu
+24.04, Ubuntu 26.04 and Amazon Linux 2 artifacts with the
+[Nvim2 platform release runbook](docs/nvim2-platform-releases.md).
 
 ### asdf
 
