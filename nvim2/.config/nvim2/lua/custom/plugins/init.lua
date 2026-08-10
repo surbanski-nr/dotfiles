@@ -1,11 +1,10 @@
+require 'kickstart.plugins.gitsigns'
+require 'kickstart.plugins.neo-tree'
+
 local plugins_dir = vim.fs.joinpath(vim.fn.stdpath 'config', 'lua', 'custom', 'plugins')
-local modules, broken_links = require('custom.plugin_loader').scan(plugins_dir)
-
-for _, path in ipairs(broken_links) do
-  local broken_path = path
-  vim.schedule(function() vim.notify('Skipped broken custom plugin symlink: ' .. broken_path, vim.log.levels.WARN) end)
-end
-
-for _, module in ipairs(modules) do
-  require('custom.plugins.' .. module)
+for file_name, type in vim.fs.dir(plugins_dir, { follow = true }) do
+  if (type == 'file' or type == 'link') and file_name:match '%.lua$' and file_name ~= 'init.lua' then
+    local module = file_name:gsub('%.lua$', '')
+    require('custom.plugins.' .. module)
+  end
 end

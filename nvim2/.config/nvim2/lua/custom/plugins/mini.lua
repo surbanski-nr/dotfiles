@@ -12,3 +12,7 @@ vim.keymap.set('n', '<leader>vr', function() visits.remove_label() end, { desc =
 vim.keymap.set('n', '<leader>vl', function() visits.select_label('', '', visit_opts) end, { desc = 'Select visited [L]abel' })
 
 vim.keymap.set('n', '<C-x>', function() require('mini.bufremove').delete() end, { desc = 'Delete buffer' })
+
+require('which-key').add {
+  { '<leader>v', group = '[V]isits' },
+}

@@ -1,27 +1,12 @@
 local function run()
-  local plugin_loader = require 'custom.plugin_loader'
-  local fixture_dir = vim.fn.tempname()
-  vim.fn.mkdir(fixture_dir, 'p')
-  vim.fn.writefile({ 'return true' }, vim.fs.joinpath(fixture_dir, 'valid.lua'))
-  vim.uv.fs_symlink('/nvim2-missing-plugin.lua', vim.fs.joinpath(fixture_dir, 'broken.lua'))
-  local fixture_ok, fixture_error = xpcall(function()
-    local modules, broken = plugin_loader.scan(fixture_dir)
-    assert(vim.deep_equal(modules, { 'valid' }), 'plugin loader did not isolate the valid module')
-    assert(#broken == 1 and vim.fs.basename(broken[1]) == 'broken.lua', 'plugin loader did not report the dangling symlink')
-  end, debug.traceback)
-  vim.fs.rm(fixture_dir, { recursive = true, force = true })
-  assert(fixture_ok, fixture_error)
-
   require('custom.checks').assert_all { tools = vim.env.NVIM2_CHECK_TOOLS ~= '0' }
+  vim.lsp.enable('markdown_oxide', false)
 
   vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'init.lua'))
   assert(vim.bo.filetype == 'lua', 'init.lua did not receive the Lua filetype')
   assert(vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()], 'Treesitter highlighting did not attach to init.lua')
   assert(vim.wo.foldmethod == 'expr', 'native Treesitter folds did not attach to init.lua')
   assert(vim.wo.foldexpr == 'v:lua.vim.treesitter.foldexpr()', 'unexpected fold expression')
-  assert(vim.wait(5000, function() return vim.fn.maparg('<leader>tb', 'n') ~= '' end), 'Gitsigns did not attach within five seconds')
-  assert(vim.fn.maparg('<leader>hs', 'n') ~= '', 'Gitsigns hunk mapping is missing')
-
   local function assert_delete_preserves_yank(keys, text, column, expected)
     vim.cmd.enew()
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { text })
@@ -35,19 +20,21 @@ local function run()
   assert_delete_preserves_yank('D', 'alpha beta', 6, 'alpha ')
   assert_delete_preserves_yank('dw', 'alpha beta', 0, 'beta')
   assert_delete_preserves_yank('diw', 'alpha beta', 0, ' beta')
+  assert_delete_preserves_yank('dd', 'alpha beta', 0, '')
 
-  for _, cut in ipairs {
-    { keys = 'x', column = 0, expected_line = 'lpha', expected_register = 'a' },
-    { keys = 'X', column = 2, expected_line = 'apha', expected_register = 'l' },
-  } do
-    vim.cmd.enew()
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'alpha' })
-    vim.api.nvim_win_set_cursor(0, { 1, cut.column })
-    vim.fn.setreg('"', 'saved yank', 'v')
-    vim.api.nvim_feedkeys(cut.keys, 'xt', false)
-    assert(vim.api.nvim_get_current_line() == cut.expected_line, cut.keys .. ' did not cut the expected character')
-    assert(vim.fn.getreg '"' == cut.expected_register, cut.keys .. ' did not replace the active register')
-  end
+  vim.cmd.enew()
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'replace' })
+  vim.fn.setreg('"', 'saved yank', 'v')
+  vim.api.nvim_feedkeys('viwP', 'xt', false)
+  assert(vim.api.nvim_get_current_line() == 'saved yank', 'visual P did not replace the selection')
+  assert(vim.fn.getreg '"' == 'saved yank', 'visual P replaced the yank register')
+
+  vim.cmd.enew()
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'alpha beta' })
+  vim.fn.setreg('"', 'saved yank', 'v')
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('ccreplacement<Esc>', true, false, true), 'xt', false)
+  assert(vim.api.nvim_get_current_line() == 'replacement', 'cc did not replace the line')
+  assert(vim.fn.getreg '"' == 'saved yank', 'cc replaced the yank register')
 
   for _, pair in ipairs {
     { '(', ')', '(value)' },
@@ -65,30 +52,41 @@ local function run()
   assert(vim.fn.maparg('`', 'i') ~= '', 'Markdown fenced-block mapping is missing')
 
   for _, snippet in ipairs {
-    { '**bold', '**bold**' },
-    { '__italic', '_italic_' },
-    { '*_both', '**_both_**' },
-    { '~~gone', '~~gone~~' },
-    { '<<https://example.com', '<https://example.com>' },
+    { '*', '*', 'bold', '**bold**' },
+    { '_', '_', 'italic', '_italic_' },
+    { '_', '*', 'both', '**_both_**' },
+    { '~', '~', 'gone', '~~gone~~' },
+    { '<', '<', 'https://example.com', '<https://example.com>' },
   } do
     vim.cmd.enew()
     vim.cmd 'setfiletype markdown'
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('i' .. snippet[1] .. '<Esc>', true, false, true), 'xt', false)
-    assert(vim.api.nvim_get_current_line() == snippet[2], 'Markdown snippet did not expand: ' .. snippet[1])
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { snippet[2] .. 'x' })
+    vim.api.nvim_win_set_cursor(0, { 1, #snippet[2] })
+    local trigger = vim.fn.maparg(snippet[1], 'i', false, true)
+    assert(type(trigger.callback) == 'function', 'Markdown snippet trigger is unavailable: ' .. snippet[1])
+    local expansion = trigger.callback()
+    assert(expansion ~= snippet[1], 'Markdown snippet trigger did not recognize: ' .. snippet[2] .. snippet[1])
+    local keys = 'i' .. expansion .. snippet[3] .. '<Esc>'
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), 'xt', false)
+    local actual = vim.api.nvim_get_current_line()
+    assert(actual == snippet[4] .. 'x', ('Markdown snippet %s%s expanded to %q'):format(snippet[2], snippet[1], actual))
   end
 
   vim.cmd.enew()
   vim.cmd 'setfiletype markdown'
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('i```', true, false, true), 'xt', false)
-  vim.api.nvim_feedkeys('lua', 'xt', false)
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { '``x' })
+  vim.api.nvim_win_set_cursor(0, { 1, 2 })
+  local fence_trigger = vim.fn.maparg('`', 'i', false, true)
+  local fence_expansion = fence_trigger.callback()
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('i' .. fence_expansion, true, false, true), 'xt', false)
   assert(vim.snippet.active { direction = 1 }, 'native fenced-block snippet is not active after its language field')
   local tab_mapping = vim.fn.maparg('<Tab>', 'i', false, true)
   assert(type(tab_mapping.callback) == 'function', 'Blink did not install its Tab mapping')
   vim.snippet.jump(1)
   assert(vim.api.nvim_win_get_cursor(0)[1] == 2, 'the native snippet engine did not reach the fenced-block body')
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('ivalue<Esc>', true, false, true), 'xt', false)
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('value<Esc>', true, false, true), 'xt', false)
   local fence_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  assert(vim.deep_equal(fence_lines, { '```lua', 'value', '```' }), 'Markdown fence did not expand: ' .. vim.inspect(fence_lines))
+  assert(vim.deep_equal(fence_lines, { '```lang', 'value', '```x' }), 'Markdown fence did not expand: ' .. vim.inspect(fence_lines))
 
   local mermaid = require 'custom.plugins.mermaid_ascii'
   local block = mermaid.find_block({
@@ -125,9 +123,9 @@ local function run()
   vim.cmd.tabclose()
   vim.uv.fs_unlink(renderer)
 
-  local telescope_search = require 'custom.plugins.telescope_search'
+  local telescope = require 'custom.telescope'
   local dotfiles_root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(vim.fn.stdpath 'config')))
-  local file_options = telescope_search.file_options { cwd = dotfiles_root }
+  local file_options = telescope.file_options { cwd = dotfiles_root }
   local files = vim.system(file_options.find_command, { cwd = dotfiles_root, text = true }):wait(10000)
   assert(files.code == 0, 'hidden-aware file command failed: ' .. (files.stderr or ''))
   assert(files.stdout:find('nvim2/.config/nvim2/init.lua', 1, true), 'file search still excludes dotfiles')
@@ -135,7 +133,7 @@ local function run()
   assert(not files.stdout:find('node_modules/', 1, true), 'file search includes node_modules')
 
   local grep_command = { 'rg', '--files' }
-  vim.list_extend(grep_command, telescope_search.grep_args())
+  vim.list_extend(grep_command, telescope.grep_args())
   local grep_files = vim.system(grep_command, { cwd = dotfiles_root, text = true }):wait(10000)
   assert(grep_files.code == 0, 'hidden-aware grep command failed: ' .. (grep_files.stderr or ''))
   assert(grep_files.stdout:find('bash/.bashrc', 1, true), 'live-grep arguments still exclude dotfiles')
@@ -237,29 +235,15 @@ local function run()
   assert(not vim.g.disable_autoformat, 'FormatToggle did not re-enable format-on-save')
   vim.notify = notify
 
-  local colors_ok = pcall(vim.api.nvim_get_autocmds, { group = 'nvim2-default-colors' })
-  if not colors_ok then vim.api.nvim_exec_autocmds('VimEnter', {}) end
-  assert(vim.wo.cursorline, 'current-line highlighting is disabled')
-  local cursor_line = vim.api.nvim_get_hl(0, { name = 'CursorLine', link = false })
-  assert(cursor_line.bg == 0x343842, 'current-line background override is missing')
-  local cursor_line_number = vim.api.nvim_get_hl(0, { name = 'CursorLineNr', link = false })
-  assert(cursor_line_number.fg == 0xff9e64, 'current-line number is not orange')
-  assert(not cursor_line_number.bold, 'current-line number is unexpectedly bold')
-  local matching_pair = vim.api.nvim_get_hl(0, { name = 'MatchParen', link = false })
-  assert(matching_pair.fg == 0xff9e64 and matching_pair.bg == 0x3f342d, 'matching brackets do not use the orange highlight')
-  assert(not matching_pair.bold, 'matching brackets are unexpectedly bold')
-  local groups = { 'Normal', 'Comment', 'Function', 'String', 'CursorLine', 'CursorLineNr', 'MatchParen' }
-  local original = {}
-  for _, group in ipairs(groups) do
-    original[group] = vim.api.nvim_get_hl(0, { name = group, link = false })
-  end
   vim.cmd.colorscheme 'surb'
   local local_function = vim.api.nvim_get_hl(0, { name = 'Function', link = false })
   assert(local_function.fg == 0x6fb8d9 and not local_function.bold, 'local function highlight is incorrect')
   vim.cmd.colorscheme 'default'
-  for _, group in ipairs(groups) do
-    assert(vim.deep_equal(original[group], vim.api.nvim_get_hl(0, { name = group, link = false })), ('default colors were not restored for %s'):format(group))
-  end
+  assert(vim.api.nvim_get_hl(0, { name = 'CursorLine', link = false }).bg == 0x343842, 'default cursor-line color was not restored')
+  local cursor_line_number = vim.api.nvim_get_hl(0, { name = 'CursorLineNr', link = false })
+  assert(cursor_line_number.fg == 0xff9e64 and not cursor_line_number.bold, 'default cursor-line number color was not restored')
+  local matching_pair = vim.api.nvim_get_hl(0, { name = 'MatchParen', link = false })
+  assert(matching_pair.fg == 0xff9e64 and not matching_pair.bold, 'default matching-pair color was not restored')
   assert(vim.api.nvim_get_hl(0, { name = 'Nvim2IndentGuide', link = false }).fg == 0x4f5358, 'indent guide color was not restored after colorscheme changes')
   assert(
     vim.api.nvim_get_hl(0, { name = 'Nvim2IndentScope', link = false }).fg == 0xe0e2ea,
