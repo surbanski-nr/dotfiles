@@ -76,6 +76,16 @@ vim.keymap.set('n', '<leader>tl', function()
   vim.notify('Line numbers: ' .. (vim.wo.relativenumber and 'relative' or 'absolute'))
 end, { desc = '[T]oggle [L]ine number mode' })
 
+vim.keymap.set('n', '<leader>tq', function()
+  if vim.fn.getqflist({ winid = 0 }).winid ~= 0 then
+    vim.cmd.cclose()
+  elseif #vim.fn.getqflist() == 0 then
+    vim.notify('Quickfix list is empty', vim.log.levels.INFO)
+  else
+    vim.cmd.copen()
+  end
+end, { desc = '[T]oggle [Q]uickfix window' })
+
 vim.api.nvim_create_user_command('Nvim2Check', function() vim.cmd 'checkhealth custom' end, {
   desc = 'Check Nvim2 plugins and tools',
 })
