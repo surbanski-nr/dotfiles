@@ -618,7 +618,8 @@ Using the resulting quickfix list:
 
 | Action | Keys or command |
 |---|---|
-| Open or close the quickfix window | `:copen`, `:cclose` |
+| Toggle the quickfix window without clearing its items | `<leader>tq` |
+| Open or close the quickfix window directly | `:copen`, `:cclose` |
 | Browse quickfix through Telescope with a file preview | `<leader>sq` |
 | Browse the current window's location list with a file preview | `<leader>sl` |
 | Open the entry under the cursor | `<CR>` |
@@ -1034,11 +1035,11 @@ binary is statically linked, so no service or runtime package is required.
 Run `source ~/.bashrc` before starting Nvim2 if the current shell was opened
 before `~/bin` existed.
 
-The old TODO mappings (`]t`, `[t`, `<leader>ft`, `<leader>tq`) have not been
-restored. Adding mappings requires no new plugin because
-`todo-comments.nvim` is already installed. Prefer `<leader>tn` and
-`<leader>tp` for TODO navigation: `[t`/`]t` and `[T`/`]T` are Neovim's
-built-in tag-list mappings.
+The old TODO mappings (`]t`, `[t`, `<leader>ft`) have not been restored, and
+`<leader>tq` now toggles the quickfix window. Adding TODO mappings requires no
+new plugin because `todo-comments.nvim` is already installed. Prefer
+`<leader>tn` and `<leader>tp` for TODO navigation: `[t`/`]t` and `[T`/`]T` are
+Neovim's built-in tag-list mappings.
 
 ## Plugin and configuration maintenance
 
