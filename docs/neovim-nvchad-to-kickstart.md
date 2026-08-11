@@ -97,8 +97,8 @@ a bracketed argument list and `Ctrl+x` to remove the current buffer.
 - The last cursor position is restored and splits rebalance after a terminal
   resize.
 - Direct SSH sessions use Neovim's OSC 52 clipboard provider. Tmux uses
-  `set-clipboard external`, so tmux copy-mode selections reach the terminal
-  clipboard while OSC 52 writes from applications inside tmux are blocked.
+  `set-clipboard on`, so both tmux copy-mode selections and OSC 52 writes from
+  trusted applications inside tmux reach the terminal clipboard.
 
 The active colorscheme is Neovim's built-in `default` with its dark
 `NvimDark*` palette. The optional `surb` colorscheme builds on that default and

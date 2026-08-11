@@ -521,10 +521,10 @@ Splits are automatically resized evenly when the terminal size changes.
 
 Mouse handling is disabled in Neovim so terminal selection stays under the
 terminal emulator's control. Direct SSH sessions use OSC 52 for clipboard
-copying. The tmux profile uses `set-clipboard external`: tmux copy-mode
-selections reach the terminal clipboard, while OSC 52 writes from applications
-inside tmux are blocked. Inside tmux, use `Ctrl+a` then `[`, select with `v`,
-and copy with `y`.
+copying. The tmux profile uses `set-clipboard on`, so tmux copy-mode selections
+and OSC 52 writes from applications such as Neovim reach the terminal
+clipboard. Inside tmux, use `Ctrl+a` then `[`, select with `v`, and copy with
+`y`.
 
 ## Search and Telescope
 
