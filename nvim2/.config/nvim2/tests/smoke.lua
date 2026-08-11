@@ -7,6 +7,23 @@ local function run()
   assert(vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()], 'Treesitter highlighting did not attach to init.lua')
   assert(vim.wo.foldmethod == 'expr', 'native Treesitter folds did not attach to init.lua')
   assert(vim.wo.foldexpr == 'v:lua.vim.treesitter.foldexpr()', 'unexpected fold expression')
+
+  local lua_client = { server_capabilities = {}, config = { settings = { Lua = {} } } }
+  require('custom.lsp').servers.lua_ls.on_init(lua_client)
+  local lua_library = lua_client.config.settings.Lua.workspace.library
+  assert(
+    vim.deep_equal(lua_library, { vim.env.VIMRUNTIME, '${3rd}/luv/library', '${3rd}/busted/library' }),
+    'LuaLS library expanded beyond the reviewed low-memory scope'
+  )
+
+  vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'tests', 'nvim2-check.html'))
+  assert(
+    vim.wait(5000, function()
+      return vim.iter(vim.lsp.get_clients { bufnr = 0 }):any(function(client) return client.name == 'html' end)
+    end),
+    'HTML Language Server did not attach to an HTML buffer'
+  )
+
   local function assert_delete_preserves_yank(keys, text, column, expected)
     vim.cmd.enew()
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { text })
@@ -104,9 +121,20 @@ local function run()
   local original_notify = vim.notify
   local optional_warning
   vim.notify = function(message, level) optional_warning = { message = message, level = level } end
+  vim.cmd.enew()
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { '# No diagram here' })
+  mermaid.preview { executable = '' }
+  assert(optional_warning and optional_warning.message:find('fenced mermaid block', 1, true), 'Mermaid preview checked the executable before the buffer')
+
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { '```mermaid', 'flowchart LR', 'A --> B', '```' })
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  optional_warning = nil
   mermaid.preview { executable = '' }
   vim.notify = original_notify
-  assert(optional_warning and optional_warning.level == vim.log.levels.WARN, 'missing Mermaid executable did not warn')
+  assert(
+    optional_warning and optional_warning.level == vim.log.levels.WARN and optional_warning.message:find('mermaid-ascii was not found', 1, true),
+    'missing Mermaid executable did not warn inside a Mermaid block'
+  )
 
   local renderer = vim.fn.tempname()
   vim.fn.writefile({ '#!/bin/sh', 'cat >/dev/null', "printf 'A --> B\\n'" }, renderer)
@@ -122,6 +150,32 @@ local function run()
   assert(vim.fn.maparg('q', 'n') ~= '', 'Mermaid preview close mapping is missing')
   vim.cmd.tabclose()
   vim.uv.fs_unlink(renderer)
+
+  vim.cmd.enew()
+  vim.api.nvim_buf_set_name(0, '/tmp/nvim2-telescope-quickfix.lua')
+  vim.bo.filetype = 'lua'
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'local needle = true', 'local ignored = false', 'return needle' })
+  vim.fn.setqflist({}, 'r')
+  require('telescope.builtin').current_buffer_fuzzy_find { default_text = 'needle', previewer = false }
+  assert(vim.wait(2000, function() return vim.bo.filetype == 'TelescopePrompt' end), 'current-buffer Telescope picker did not open')
+  local fuzzy_prompt = vim.api.nvim_get_current_buf()
+  assert(
+    vim.wait(2000, function() return type(require('telescope.actions.state').get_current_picker(fuzzy_prompt).manager) == 'table' end),
+    'current-buffer Telescope results did not become ready'
+  )
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-q>', true, false, true), 'xt', false)
+  assert(vim.wait(2000, function() return #vim.fn.getqflist() == 2 end), 'Telescope Ctrl-q did not export filtered current-buffer results to quickfix')
+  vim.cmd.cclose()
+
+  local quickfix_picker = vim.fn.maparg('<leader>sq', 'n', false, true)
+  local loclist_picker = vim.fn.maparg('<leader>sl', 'n', false, true)
+  assert(type(quickfix_picker.callback) == 'function', 'Telescope quickfix mapping is unavailable')
+  assert(type(loclist_picker.callback) == 'function', 'Telescope location-list mapping is unavailable')
+  quickfix_picker.callback()
+  assert(vim.wait(2000, function() return vim.bo.filetype == 'TelescopePrompt' end), 'Telescope quickfix picker did not open')
+  local prompt_buffer = vim.api.nvim_get_current_buf()
+  assert(require('telescope.actions.state').get_current_picker(prompt_buffer).previewer, 'Telescope quickfix picker has no preview')
+  require('telescope.actions').close(prompt_buffer)
 
   local telescope = require 'custom.telescope'
   local dotfiles_root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(vim.fn.stdpath 'config')))
@@ -210,6 +264,83 @@ local function run()
 
   assert(vim.filetype.match { filename = '/tmp/docker-compose.yml' } == 'yaml.docker-compose', 'Docker Compose filetype detection failed')
   assert(vim.filetype.match { filename = '/tmp/playbooks/site.yml' } == 'yaml.ansible', 'Ansible filetype detection failed')
+
+  vim.cmd.enew()
+  vim.api.nvim_buf_set_name(0, '/tmp/nvim2-check/.github/workflows/invalid.yml')
+  vim.bo.filetype = 'yaml'
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'name: Test', 'on: [push]', 'jobs:', '  test:', '    steps: []' })
+  vim.api.nvim_exec_autocmds('BufWritePost', { buffer = 0 })
+  local actionlint_namespace = require('lint').get_namespace 'actionlint'
+  assert(
+    vim.wait(5000, function() return #vim.diagnostic.get(0, { namespace = actionlint_namespace }) > 0 end),
+    'Actionlint did not diagnose a GitHub Actions workflow'
+  )
+  vim.cmd.bwipeout { bang = true }
+
+  vim.cmd.enew()
+  vim.api.nvim_buf_set_name(0, '/tmp/nvim2-check/config.yml')
+  vim.bo.filetype = 'yaml'
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'name: Test', 'on: [push]', 'jobs:', '  test:', '    steps: []' })
+  vim.api.nvim_exec_autocmds('BufWritePost', { buffer = 0 })
+  vim.wait(300)
+  assert(#vim.diagnostic.get(0, { namespace = actionlint_namespace }) == 0, 'Actionlint ran outside .github/workflows')
+  vim.cmd.bwipeout { bang = true }
+
+  local eslint_root = vim.fn.tempname()
+  vim.fn.mkdir(eslint_root, 'p')
+  vim.fn.writefile({ "export default [{ files: ['**/*.ts'], rules: { 'no-unused-vars': 'error' } }];" }, vim.fs.joinpath(eslint_root, 'eslint.config.mjs'))
+  vim.fn.writefile({ '{}' }, vim.fs.joinpath(eslint_root, 'package-lock.json'))
+  vim.fn.writefile({ '{ "compilerOptions": { "strict": true } }' }, vim.fs.joinpath(eslint_root, 'tsconfig.json'))
+  vim.cmd.enew()
+  vim.api.nvim_buf_set_name(0, vim.fs.joinpath(eslint_root, 'sample.ts'))
+  vim.bo.filetype = 'typescript'
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'const unused={answer:42};' })
+  assert(
+    vim.wait(5000, function()
+      return vim.iter(vim.lsp.get_clients { bufnr = 0 }):any(function(client) return client.name == 'ts_ls' end)
+    end),
+    'TypeScript Language Server did not attach to a TypeScript project'
+  )
+  assert(vim.api.nvim_buf_get_commands(0, {}).LspTypescriptSourceAction, 'TypeScript source-action command is unavailable')
+  require('conform').format { bufnr = 0, async = false, timeout_ms = 5000 }
+  assert(vim.api.nvim_get_current_line() == 'const unused = { answer: 42 };', 'Prettier did not format TypeScript')
+  vim.api.nvim_exec_autocmds('BufWritePost', { buffer = 0 })
+  local eslint_namespace = require('lint').get_namespace 'eslint_d'
+  assert(
+    vim.wait(5000, function() return #vim.diagnostic.get(0, { namespace = eslint_namespace }) > 0 end),
+    'eslint_d did not diagnose TypeScript in a configured project'
+  )
+  assert(vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()], 'Treesitter highlighting did not attach to TypeScript')
+  vim.cmd.bwipeout { bang = true }
+  vim.fn.delete(eslint_root, 'rf')
+
+  vim.cmd.enew()
+  vim.bo.filetype = 'lua'
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'local result = call(value)' })
+  vim.treesitter.start(0, 'lua')
+  vim.api.nvim_win_set_cursor(0, { 1, 20 })
+  local selection_start = vim.fn.maparg('<C-Space>', 'n', false, true)
+  local selection_expand = vim.fn.maparg('<C-Space>', 'x', false, true)
+  local selection_shrink = vim.fn.maparg('<BS>', 'x', false, true)
+  assert(type(selection_start.callback) == 'function', 'Treesitter selection start callback is unavailable')
+  assert(type(selection_expand.callback) == 'function', 'Treesitter selection expand callback is unavailable')
+  assert(type(selection_shrink.callback) == 'function', 'Treesitter selection shrink callback is unavailable')
+
+  local function selection_range()
+    local anchor = vim.fn.getpos 'v'
+    local cursor = vim.fn.getpos '.'
+    return { anchor[2], anchor[3], cursor[2], cursor[3] }
+  end
+
+  selection_start.callback()
+  assert(vim.fn.mode() == 'v', 'Treesitter selection did not enter visual mode')
+  local first_selection = selection_range()
+  selection_expand.callback()
+  local expanded_selection = selection_range()
+  assert(not vim.deep_equal(expanded_selection, first_selection), 'Treesitter selection did not expand')
+  selection_shrink.callback()
+  assert(vim.deep_equal(selection_range(), first_selection), 'Treesitter selection did not shrink to the previous node')
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'xt', false)
 
   vim.cmd.enew()
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'true' })
