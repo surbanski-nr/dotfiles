@@ -450,9 +450,9 @@ For text that spans more than the visible pane, use tmux copy mode: press
 `Ctrl+a` then `[`, move to the start, press `v`, extend the selection and press
 `y`. Tmux stores the text in its own buffer and sends it to the terminal
 clipboard through OSC 52. Paste with `Ctrl+a` then `]` inside tmux or
-`Ctrl+Shift+V` in another application. `set-clipboard external` permits tmux
-copy commands to set the terminal clipboard but blocks applications inside
-tmux from writing tmux buffers.
+`Ctrl+Shift+V` in another application. `set-clipboard on` also permits trusted
+applications inside tmux, such as Neovim, to copy through OSC 52. It does not
+enable automatic copy-on-selection.
 
 #### Recover an SSH agent socket
 
