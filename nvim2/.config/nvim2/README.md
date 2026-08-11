@@ -9,6 +9,13 @@ repository. It is based on
 The leader key is `Space`. This guide focuses on common daily tasks rather
 than every Neovim command.
 
+For a first session, learn only this flow: press `i` to edit, `Esc` to return
+to Normal mode and `:w` to save; use `\` for the file tree, `<leader>sf` for
+files and `<leader>sg` for text; use `grd` for a definition and `<C-o>` to jump
+back; use `]d` and `[d` for diagnostics; and press `Space`, then wait, whenever
+you need to discover a leader mapping. The sections below add detail as each
+workflow becomes useful.
+
 ## Start the profile
 
 After stowing `nvim2`:
@@ -76,7 +83,7 @@ Then validate the complete profile from the shell:
 bash ~/.config/nvim2/tests/check.sh
 ```
 
-Use current Neovim 0.12 stable or a recent nightly. Language installation and
+Use Neovim 0.12.4 or newer. Language installation and
 tooling details are in
 [`docs/neovim-nvchad-to-kickstart.md`](../../../docs/neovim-nvchad-to-kickstart.md).
 
@@ -121,7 +128,7 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `mini.nvim` | Main `init.lua` plus custom module | Supply text objects, surroundings, alignment, split/join, visited files, statusline, icons and buffer removal |
 | `neo-tree.nvim` | Kickstart module enabled by the custom loader | Provide the sidebar filesystem browser and file operations |
 | `nvim-highlight-colors` | Custom module | Preview color values inline on demand; lazy-loaded by `<leader>tc` |
-| `nvim-lint` | Custom module | Publish Hadolint, TFLint and yamllint results as diagnostics |
+| `nvim-lint` | Custom module | Publish Actionlint, ESLint, Hadolint, TFLint and yamllint results as diagnostics |
 | `nvim-lspconfig` | Main `init.lua` | Supply default commands, filetypes and root detection for language servers |
 | `nvim-treesitter` | Main `init.lua` plus custom tooling and fold modules | Install parsers and queries used by Neovim's built-in Treesitter runtime |
 | `nui.nvim` | Neo-tree dependency | Supply popup and layout components required by Neo-tree |
@@ -160,6 +167,7 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 | `default_colors.lua` | Keep three local visibility overrides when returning to the built-in default colorscheme | No |
 | `enclosing_pairs.lua` | Highlight the nearest enclosing `()`, `[]` or `{}` pair while the cursor is anywhere inside it | No; extends Neovim's built-in `MatchParen` style |
 | `mermaid_ascii.lua` | Preview the Mermaid fence under the cursor in a scrollable scratch tab | No; invokes the optional `mermaid-ascii` binary |
+| `treesitter_selection.lua` | Add simple keys for Neovim's built-in syntax-aware selection expansion | No |
 | `toggle_values.lua` | Add `<leader>tv` for boolean-like values without `nvim-toggler` | No |
 | `snippets.lua` | Add five global delimiter pairs and six Markdown expansions with Neovim's built-in snippet engine | No |
 
@@ -369,6 +377,7 @@ mapping is `<leader>ma` for the optional Mermaid ASCII preview.
 | Paste after or before cursor | `p`, `P` |
 | Undo or redo | `u`, `<C-r>` |
 | Character, line, or block selection | `v`, `V`, `<C-v>` |
+| Start, expand or shrink syntax selection | `<C-Space>`, then `<C-Space>` or `<BS>` |
 | Reselect last visual selection | `gv` |
 | Indent or unindent selection | `>`, `<` |
 | Join current line with next | `J` |
@@ -416,24 +425,25 @@ This profile changes register behavior:
 
 #### Expand or shrink a selection and copy it to another application
 
-For Wildfire-like syntax-aware expansion when the attached language server
-supports selection ranges:
+For Wildfire-like syntax-aware expansion:
 
-1. From normal mode, type `van`. This is `v`, then `an`, not a leader mapping.
-2. While still in visual mode, repeat `an` to expand to the next surrounding
-   syntax range. Press `in` to shrink back one range.
+1. Put the cursor inside the expression and press `<C-Space>` from normal mode.
+2. While still in visual mode, repeat `<C-Space>` to select the next parent
+   syntax node. Press `<BS>` to return to the previous child node.
 3. Type `"+y` while the selection is active to copy it explicitly to the
    terminal/system clipboard. A plain `y` normally does the same because this
    profile enables `clipboard=unnamedplus`.
 4. Move to the email or other local application and paste with its normal
    shortcut, usually `Ctrl+V`.
 
-If `an` does nothing, the current buffer has no attached LSP or its server does
-not support `textDocument/selectionRange`. Use language-independent Neovim text
-objects instead: `vi{` or `va{` for braces, `vi(` or `va(` for parentheses,
-and `vi[` or `va[` for brackets. `i` excludes delimiters and `a` includes
-them. For arbitrary whole lines, press `V`, extend with `j` or `k`, then
-`"+y`.
+The profile maps these keys to Neovim 0.12's built-in Treesitter selector, so
+they do not require an LSP server. The native visual-mode `an` and `in`
+mappings remain available as alternatives. If the current filetype has no
+parser, Neovim can fall back to an attached LSP selection-range provider. For
+delimiter-based selection, use `vi{` or `va{` for braces, `vi(` or `va(` for
+parentheses, and `vi[` or `va[` for brackets. `i` excludes delimiters and `a`
+includes them. For arbitrary whole lines, press `V`, extend with `j` or `k`,
+then `"+y`.
 
 Over SSH, Nvim2 sends the `+` clipboard through OSC 52. Kitty, a compatible
 local terminal, and tmux must permit OSC 52 for the final paste to work.
@@ -492,6 +502,7 @@ it with Mini buffer removal.
 | Horizontal split | `:split` or `<C-w>s` |
 | Vertical split | `:vsplit` or `<C-w>v` |
 | Focus left, down, up, right split | `<C-h>`, `<C-j>`, `<C-k>`, `<C-l>` |
+| Return to the previously focused window | `<C-w>p` |
 | Close current split | `<C-w>c` |
 | Keep only current split | `<C-w>o` |
 | Make splits equal size | `<C-w>=` |
@@ -529,6 +540,8 @@ and copy with `y`.
 | Search open buffers | `<leader><leader>` |
 | Recent files | `<leader>s.` |
 | Search diagnostics | `<leader>sd` |
+| Browse quickfix with preview | `<leader>sq` |
+| Browse current location list with preview | `<leader>sl` |
 | Search help | `<leader>sh` |
 | Search mappings | `<leader>sk` |
 | Search commands | `<leader>sc` |
@@ -594,18 +607,23 @@ Inside any Telescope picker:
 |---|---|
 | Replace quickfix with all currently filtered results and open it | `<C-q>` |
 | Mark or unmark individual results | `<Tab>`, `<S-Tab>` |
-| Replace quickfix with only the marked results and open it | `<M-q>` (Alt-q) |
+| Replace quickfix with only explicitly marked results | `<M-q>` (Alt-q) |
 
 Both Telescope actions replace the current quickfix list; they do not append
-to it. `<M-q>` may depend on the terminal correctly sending Alt-modified keys.
+to it. `<M-q>` exports an empty list when no results have been marked with
+`<Tab>`. Use `<C-q>` when every currently filtered result is wanted. `<M-q>`
+also depends on the terminal correctly sending Alt-modified keys.
 
 Using the resulting quickfix list:
 
 | Action | Keys or command |
 |---|---|
 | Open or close the quickfix window | `:copen`, `:cclose` |
+| Browse quickfix through Telescope with a file preview | `<leader>sq` |
+| Browse the current window's location list with a file preview | `<leader>sl` |
 | Open the entry under the cursor | `<CR>` |
 | Open the entry in a new split | `<C-w><CR>` |
+| Alternate between quickfix and the previous code window | `<C-w>p` |
 | Next or previous entry | `]q`, `[q` or `:cnext`, `:cprevious` |
 | Last or first entry | `]Q`, `[Q` or `:clast`, `:cfirst` |
 | Remove the entry under the cursor from this list | `dd` in the quickfix window |
@@ -616,7 +634,18 @@ does not delete a file, change source code or affect a window-local location
 list. Diagnostic `<leader>q` uses a location list instead; open and close that
 with `:lopen` and `:lclose`, and navigate it with `]l` and `[l`.
 
+The fastest review flow usually stays in the code window: keep quickfix open
+and press `]q` or `[q` to load the next or previous location into that window.
+Use `<C-w>p` only when you need to edit the list itself, such as removing an
+entry with `dd`, then press `<C-w>p` again to return to code. Use `<leader>sq`
+when fuzzy filtering and a preview are more useful than the split list. The
+Telescope picker only reads the existing quickfix list; opening it does not
+replace or clear the list.
+
 ### Find and replace with review
+
+This Telescope plus quickfix workflow is the profile's dependency-free
+alternative to Spectre.
 
 For one buffer, confirm every replacement with:
 
@@ -650,6 +679,11 @@ directory.
 LSP mappings become useful when a configured language server attaches to the
 current buffer.
 
+LuaLS indexes the current workspace, Neovim's own runtime and the explicit
+`luv` and `busted` type libraries. It deliberately does not add every installed
+plugin repository as a global library. This keeps memory use lower while
+preserving completion and navigation for this configuration and Neovim APIs.
+
 ### Code navigation and actions
 
 | Action | Keys |
@@ -667,17 +701,14 @@ current buffer.
 | Return from a jump | `<C-t>` |
 | Toggle inlay hints when supported | `<leader>th` |
 | Signature help in insert mode | `<C-s>` or `<C-k>` |
-| Start and expand an LSP selection | `van` from normal mode, then repeat `an` |
-| Shrink the current LSP selection | `in` while still in visual mode |
 
-Treesitter provides syntax highlighting, indentation, injections and parser
-support automatically. It has no custom daily mapping in this profile. The
-`an` and `in` mappings above are Neovim 0.12 LSP selection ranges. They are not
-normal-mode or leader mappings: normal-mode `a` enters insert mode. The
-language server must support `textDocument/selectionRange`. Mini.ai uses `aa`
-and `ii` for its next-textobject variants. Those are prefixes rather than
-standalone normal-mode mappings; for example, `vaa)` selects around the next
-parenthesized text and `dii)` deletes inside the next parenthesized text.
+Treesitter provides syntax highlighting, indentation, injections, folds and
+the `<C-Space>`/`<BS>` selection flow documented above. Native `an` and `in`
+only act while already in visual mode; typing normal-mode `a` enters insert
+mode. Mini.ai uses `aa` and `ii` for its next-textobject variants. Those are
+prefixes rather than standalone normal-mode mappings; for example, `vaa)`
+selects around the next parenthesized text and `dii)` deletes inside the next
+parenthesized text.
 
 The complete expansion, fallback text-object and external-clipboard workflow is
 documented under
@@ -748,6 +779,14 @@ leave it. The expansion does not add surrounding spaces.
 
 ## Formatting, linting and tools
 
+The main day-to-day language stacks are:
+
+| Language | LSP | Formatter | Additional diagnostics |
+|---|---|---|---|
+| TypeScript, TSX, JavaScript and JSX | TypeScript Language Server | Prettier | ESLint through `eslint_d` |
+| Python | Pyright and Ruff | Ruff import sorting and formatting | Ruff |
+| Bash and POSIX shell | Bash Language Server | shfmt | ShellCheck |
+
 | Action | Keys or command |
 |---|---|
 | Format buffer or visual selection | `<leader>f` |
@@ -765,13 +804,46 @@ Neovim process is opened for a repository that should not be reformatted. The
 toggle lasts for that process and does not change repository files or settings.
 Manual formatting with `<leader>f` remains available while format-on-save is
 disabled. Ruff sorts imports and formats Python. `nvim-lint` runs configured
-CLI linters after saving; it has no manual mapping.
+CLI linters after saving; it has no manual mapping. Actionlint runs only for
+YAML files under `.github/workflows/`, while yamllint continues to check other
+YAML.
 
-Every managed Mason package has an exact version in `init.lua`.
+Every managed Mason package has an exact version in `lua/custom/lsp.lua`.
 `mason-tool-installer.nvim` has both automatic updates and startup installation
 disabled. Change a version intentionally, then run `:Nvim2ToolsInstallSync` on
 a connected trusted machine to synchronize Mason tools and the configured
 Treesitter parsers.
+
+Python uses Pyright for type analysis and Ruff for diagnostics and formatting.
+BasedPyright is not installed alongside Pyright because both would publish the
+same class of diagnostics. Treat BasedPyright as a replacement: change the
+server and pinned Mason package together if its stricter defaults are wanted.
+HTML uses the HTML Language Server for completion, hover, symbols and
+diagnostics, the HTML Treesitter parser for syntax support and Prettier for
+formatting.
+
+TypeScript, TSX, JavaScript and JSX use Prettier for formatting and `eslint_d`
+for diagnostics after save. ESLint runs only when the file belongs to a tree
+containing `eslint.config.*`, a legacy `.eslintrc*`, or an `eslintConfig`
+section in `package.json`. Keep the project's ESLint plugins and parser in its
+own `package.json`; Mason supplies the reusable `eslint_d` runner. The
+TypeScript Language Server provides completion, hover, navigation, references,
+rename, symbols and code actions for TypeScript, TSX, JavaScript and JSX. It
+uses the project's TypeScript version when one is installed locally.
+
+For a new TypeScript repository, install the repository's chosen ESLint and
+Prettier versions locally and commit its configuration and lockfile. For
+example, this records exact current versions rather than ranges:
+
+```bash
+npm install --save-dev --save-exact typescript eslint typescript-eslint prettier
+```
+
+Use `:ConformInfo` to confirm Prettier selection. Save a file and inspect ESLint
+diagnostics with `]d`, `[d` or `<leader>sd`.
+Use the normal LSP mappings such as `grd`, `grr`, `gri`, `grn` and `gra`.
+`:LspTypescriptSourceAction` offers whole-file actions such as organizing
+imports or removing unused code.
 
 ## Git and Gitsigns
 
@@ -993,9 +1065,10 @@ unit.
 ### Validate the profile
 
 `:Nvim2Check` opens a normal Neovim health report for the custom profile. It
-checks the Neovim version, plugin revisions against `nvim-pack-lock.json`,
-disabled plugin build hooks, pinned Mason packages and configured Treesitter
-parsers. It does not install or update anything.
+checks Neovim 0.12.4 or newer, plugin revisions against
+`nvim-pack-lock.json`, disabled plugin build hooks, exact Mason and Treesitter
+inventories, Mason launchers and representative executable version commands.
+It does not install or update anything.
 
 Run the stronger headless check after provisioning a VM and after accepting
 plugin, Mason or parser updates:
@@ -1103,6 +1176,17 @@ synchronizes the configured Treesitter parsers. Do not use
 `:MasonToolsUpdateSync` to choose newer versions: it does not change the pins
 in `lua/custom/lsp.lua` and it does not include the parser synchronization.
 
+The command installs declarations but does not remove old ones. After deleting
+a tool or parser from the configuration, remove the local stale installation
+before running the exact inventory check:
+
+```vim
+:MasonUninstall PACKAGE
+:lua require('nvim-treesitter').uninstall({ 'LANGUAGE' }):wait(120000)
+```
+
+Clean platform builders start without either kind of stale dependency.
+
 ### Supply-chain controls
 
 - `nvim-pack-lock.json` pins every plugin to an exact Git commit. No plugin
@@ -1138,26 +1222,7 @@ After accepting and testing updates, rebuild the offline archive described in
 and move that tested snapshot to restricted VMs. Do not update plugins, tools
 or parsers directly on those VMs.
 
-## Bundled optional modules
-
-Files under `lua/kickstart/plugins/` are configuration examples, not proof
-that their plugins are installed. `lua/custom/plugins/init.lua` requires the
-selected examples directly so the Kickstart-owned files stay unchanged.
-
-| Module | State | What it adds |
-|---|---|---|
-| `gitsigns.lua` | Enabled from the custom loader | Git signs, hunk actions and mappings listed above |
-| `lint.lua` | Disabled; replaced by custom module | Upstream example uses Markdownlint; Nvim2 uses Hadolint, TFLint and yamllint after save |
-| `neo-tree.lua` | Enabled from the custom loader | Sidebar file tree and file-management actions |
-| `debug.lua` | Disabled | DAP UI and Go debugging |
-| `autopairs.lua` | Disabled | Automatic closing pairs while typing |
-| `indent_line.lua` | Disabled; replaced by custom module | The custom setup controls the guide appearance; the lockfile pins the installed revision |
-
-A disabled module's `vim.pack.add` call is not executed. Its plugin must also
-be absent from `nvim-pack-lock.json`, because a clean `vim.pack` setup installs
-every lockfile entry. Debug and autopairs remain absent. Indentation guides are
-enabled and locked through `lua/custom/plugins/indent_guides.lua` instead of
-the Kickstart example.
+## Neo-tree
 
 The visible `>` before tab-indented lines and `·` after trailing spaces come
 from Neovim's built-in `listchars`, separately from the `▏` indentation guides.
@@ -1165,11 +1230,8 @@ Hide the built-in whitespace markers temporarily with `:set nolist` and restore
 them with `:set list`. Neo-tree draws separate hierarchy lines only inside its
 sidebar; `guess-indent.nvim` detects indentation settings but draws no guides.
 
-To enable a disabled example without editing Kickstart-owned code, add a file
-under `lua/custom/plugins/` that requires it, then restart Neovim. For example,
-`lua/custom/plugins/autopairs.lua` would contain
-`require 'kickstart.plugins.autopairs'`. Neo-tree is enabled; its common daily
-keys are:
+Neo-tree is enabled through Kickstart's example module. Its common daily keys
+are:
 
 | Action in Neo-tree | Keys |
 |---|---|
@@ -1209,152 +1271,9 @@ fuzzy jump, or `f` when the tree should stay narrowed until `<C-x>` clears the
 filter. Neo-tree refreshes after file operations. Press `?` inside the tree if
 a less common action or current mapping is needed.
 
-If the debug module is enabled, it configures:
+## Plugin decisions and migration history
 
-| Debug action | Keys |
-|---|---|
-| Start or continue | `<F5>` |
-| Step into, over, or out | `<F1>`, `<F2>`, `<F3>` |
-| Toggle breakpoint | `<leader>b` |
-| Set conditional breakpoint | `<leader>B` |
-| Toggle DAP UI | `<F7>` |
-
-The bundled debug example is Go-focused and is not part of the current
-language scope.
-
-## Archived `old-nvim` plugin comparison
-
-The archived profile imports `NvChad/NvChad` v2.5 and contains 48 files under
-`old-nvim/.config/old-nvim/lua/plugins/`: 44 contain active plugin
-configuration and four are fully commented-out experiments. The tables below
-compare those active configurations with `nvim2`.
-
-### Kept, replaced or partly covered
-
-| Previous plugin | Status in `nvim2` | Difference that remains |
-|---|---|---|
-| `hrsh7th/nvim-cmp` | Replaced by `blink.cmp` | Different completion UI and keys; Blink is enabled by default, but its current sources omit buffer-word and Copilot completion |
-| `numToStr/Comment.nvim` and `nvim-ts-context-commentstring` | Replaced by Neovim's `gc` and Treesitter-aware comment support | No meaningful daily feature is missing |
-| `stevearc/conform.nvim` | Kept | New profile has broader format-on-save rules and uses Ruff for Python |
-| `gbprod/cutlass.nvim` | Partly replaced by black-hole change and `dd` mappings | Other deletes can still alter delete registers; use `"_d` when that matters |
-| `lewis6991/gitsigns.nvim` | Kept | New profile has more hunk, diff and blame mappings |
-| `lukas-reineke/headlines.nvim` | Replaced by `render-markdown.nvim` | Browser rendering is still separate from in-editor rendering |
-| `mfussenegger/nvim-lint` | Kept | Linter set is limited to the selected development languages |
-| `neovim/nvim-lspconfig` | Kept | Uses the Neovim 0.12 API and the selected server list |
-| `mason-org/mason.nvim` | Kept | Mason LSP and tool installers now manage the complete selected tool set |
-| `olimorris/persisted.nvim` | Removed | No session persistence; reopen files through Mini Visits, Telescope or Neo-tree |
-| `kylechui/nvim-surround` | Replaced by `mini.surround` | Surrounding keys use Mini's `sa`, `sd` and `sr` grammar |
-| `nvim-telescope/telescope.nvim` | Kept | Search mappings moved from `<leader>f...` to `<leader>s...`; workspace and Git-root searches include non-ignored hidden files and exclude `.git` and `node_modules` |
-| `folke/todo-comments.nvim` | Kept | Old TODO navigation/search mappings are not configured and gutter signs are disabled |
-| `nvim-treesitter/nvim-treesitter` | Kept | Parsers are deliberately limited to selected languages |
-| `pearofducks/ansible-vim` | Replaced by Ansible filetype detection, parser and LSP | Some legacy Vim-specific Ansible syntax behavior may differ |
-| `towolf/vim-helm` | Replaced by Helm filetype detection, parser and LSP | No separate Vimscript Helm syntax plugin |
-| `gbprod/yanky.nvim` | Partly replaced by registers `1` through `9` and built-in visual `P` | No 50-item history, Telescope yank picker, or `[y` and `]y` history cycling |
-
-### Active old features that are genuinely missing
-
-| Previous plugin | What it provided | Minimal recommendation |
-|---|---|---|
-| `okuuva/auto-save.nvim` | Saved automatically after text changes or leaving insert mode | Do not add initially; explicit saves make format/lint timing predictable |
-| `kevinhwang91/nvim-bqf` | Quickfix previews, filtering and split-opening helpers | Keep built-in quickfix until it becomes painful |
-| `zbirenbaum/copilot.lua`, `copilot-cmp`, `copilot-status.nvim` | Inline AI suggestions, completion integration and status | Add only `copilot.lua` if AI completion is intentionally wanted; skip the integration/status extras |
-| `folke/flash.nvim` | Label-based jumps and Treesitter-aware selection | Native `/`, `f`, `t`, LSP selection and Telescope are enough for now |
-| `ray-x/go.nvim` and `guihua.lua` | Go commands, test/code helpers and tool installation | Do not add unless Go returns to the supported language list; prefer a small `gopls` setup first |
-| `rmagatti/goto-preview` | Definitions, references and implementations in floating previews | Current Telescope LSP pickers cover navigation; add only if floating previews are missed |
-| `ThePrimeagen/harpoon` | Persistent short list of frequently used files | Replaced by built-in uppercase marks for a fixed shortlist and Mini Visits labels under `<leader>v` for larger sets |
-| `tzachar/highlight-undo.nvim` | Briefly highlighted text affected by undo and redo | Cosmetic; do not add |
-| `kevinhwang91/nvim-hlslens` | Search match counts and search markers integrated with scrollbar | Neovim search count and normal `n`/`N` are sufficient |
-| `iamcco/markdown-preview.nvim` | Browser-based Markdown preview | Add only when browser-accurate rendering is needed; current render-markdown is in-editor |
-| `karb94/neoscroll.nvim` | Animated smooth scrolling | Cosmetic; do not add |
-| `shortcuts/no-neck-pain.nvim` | Centered editing column with side padding | Cosmetic; use splits when focus space is needed |
-| `nacro90/numb.nvim` | Previewed a target line while entering `:<line>` | Small convenience; do not add initially |
-| `epwalsh/pomo.nvim` and `nvim-notify` | Pomodoro timers and notifications | Keep time management outside the editor |
-| `tris203/precognition.nvim` | On-screen hints for available Vim motions | Useful while learning, but not part of a stable daily setup |
-| `ahmedkhalf/project.nvim` | Project-root detection and Telescope project switching | `<leader>sF` and `<leader>sG` search the nearest Git root without another plugin |
-| `petertriho/nvim-scrollbar` | Scrollbar with diagnostic and search markers | Cosmetic; signs, diagnostics and Telescope already expose this information |
-| `utilyre/sentiment.nvim` | Enhanced matching-pair highlighting | Built-in match highlighting is enough |
-| `nvim-pack/nvim-spectre` | Interactive project-wide search and replace | Consider only if project-wide replacements are frequent; otherwise use quickfix plus `:cdo` |
-| `cshuaimin/ssr.nvim` | Treesitter structural search and replace | Add only for recurring AST-aware refactors |
-| `nguyenvukhang/nvim-toggler` | Toggled values such as `true`/`false` or `on`/`off` | Replaced by the local `<leader>tv` implementation |
-| `nvim-tree/nvim-tree.lua` | Persistent sidebar file explorer | Replaced by the enabled Neo-tree module |
-| `Wansmer/treesj` | Split or joined syntax nodes with `gj` | Replaced for now by the enabled `mini.splitjoin`; reconsider only if syntax-aware splitting is needed |
-| `folke/trouble.nvim` | Dedicated diagnostics, references and quickfix-style panels | Telescope diagnostics and location lists cover the common workflow |
-| `kevinhwang91/nvim-ufo` and `promise-async` | Treesitter/indent folds and fold previews | Native Treesitter folds are enabled; only fold previews remain missing |
-| `szw/vim-maximizer` | Toggled the current split between normal and maximized size | Use built-in window sizing commands such as `<C-w>_` and `<C-w>=`, or add a small mapping later |
-| `sustech-data/wildfire.nvim` | Repeatedly expanded visual selection to surrounding objects | First try `van` from normal mode, then repeat `an` to expand or use `in` to shrink; this requires an LSP with selection-range support, so Wildfire can still help when language-independent expansion is needed |
-
-### NvChad platform features no longer present
-
-The old profile inherited these through `NvChad/NvChad`, rather than through
-individual files in `lua/plugins/`:
-
-| NvChad component | What is different now |
-|---|---|
-| `nvchad/base46` | Replaced by Neovim's default colorscheme and the optional small `surb` override |
-| `nvchad/ui` | Mini statusline remains, but there is no NvChad dashboard or buffer tabline |
-| `nvzone/volt`, `menu`, `minty` | No NvChad menus or color-picker UI |
-| NvChad's nvim-cmp stack and sources | Replaced by Blink with LSP and path sources plus Neovim's built-in snippet engine |
-| NvChad's NvimTree integration | Replaced by Neo-tree |
-
-Re-adding NvChad's UI stack would work against the goal of keeping this
-profile small and easy to manage.
-
-### Old plugin files that were already disabled
-
-These files contain only commented specs and were not active in the previous
-profile:
-
-| File | Experiment |
-|---|---|
-| `codecompanion.lua` | CodeCompanion chat and inline AI workflows |
-| `kustomize.lua` | Kustomize build, resource and validation commands |
-| `local-highlight.lua` | Local same-word highlighting |
-| `yaml-companion.lua` | Interactive YAML schema selection and Telescope integration |
-
-## Potential additions reviewed
-
-These sources are documented for later decisions. None of them is enabled by
-this section.
-
-| Source | What it does | Overlap with `nvim2` | Recommendation |
-|---|---|---|---|
-| [MiniMax configs](https://nvim-mini.org/MiniMax/configs/) | Generates a Neovim configuration built mostly from `mini.nvim`, with version-specific examples for `vim.pack`, native LSP, Treesitter, formatting and snippets | `nvim2` already uses `vim.pack`, eight Mini modules, native LSP, Treesitter and Conform; MiniMax alternatives for files, picking, completion, snippets, sessions, Git and key hints would replace active plugins | Use it as a reference and borrow individual Mini modules; do not replace the current profile |
-| [diffbandit.nvim](https://github.com/CoreyKaylor/diffbandit.nvim) | Shows two-way diffs without padding either document, using a connector gutter; also provides editable targets, file and folder diffs, Git queues, staging, a commit panel, branch and commit review, binary hex diffs and a three-way merge resolver | Gitsigns already covers signs, hunk navigation, staging, reset, preview and blame, but it does not provide a full review, folder-diff or merge UI | Trial it only if Git review or conflict resolution inside Neovim becomes a regular workflow; otherwise keep Gitsigns |
-| [tunnelvision.nvim](https://github.com/leolaurindo/tunnelvision.nvim) | Dims unrelated lines around a selected symbol and navigates its path; static, dynamic and experimental flow modes use LSP highlights, Treesitter or word matching | The current LSP setup already highlights document references on cursor hold and Telescope searches references; TunnelVision adds a focused presentation and assignment-flow view | Skip initially; add only if symbol-focused reading is useful enough to justify another visual mode |
-| [nvim_native](https://github.com/smnatale/nvim_native) | Demonstrates a zero-plugin setup using native LSP and completion, `findfunc` fuzzy search, ripgrep with quickfix, netrw, a custom statusline and basic format-on-save | Blink, Telescope, Neo-tree, Mini statusline and Conform already provide those workflows | Keep as a dependency-reduction reference, not an addition. The repository currently has no license, so do not copy its code unless that changes |
-
-### MiniMax modules worth considering
-
-`mini.nvim` is already installed, so enabling another Mini module does not add
-a plugin dependency. It still adds mappings and behavior that need maintenance.
-
-| Module | What it adds | Recommendation |
-|---|---|---|
-| `mini.trailspace` | Highlights trailing whitespace and exposes a trim function | Consider it for filetypes not covered by format-on-save; it is unnecessary where Conform already cleans the file |
-| `mini.bracketed` | Provides consistent `[` and `]` navigation for buffers, diagnostics, quickfix, jumps and other targets | Enable only selected targets because its defaults can collide with Gitsigns hunk keys and native diagnostic keys |
-| `mini.jump` and `mini.jump2d` | Extend `f`/`t` movement and add label-based jumps within visible text | Similar benefit to Flash; keep native movement until this becomes a repeated navigation problem |
-| `mini.operators` | Adds exchange, multiply, replace, sort and evaluate operators | Do not enable wholesale because its default `gr` family overlaps Neovim's LSP mappings; configure individual operators if needed |
-| Other MiniMax modules | Add a file browser, picker, completion, snippets, sessions, Git helpers, diff signs, key hints, color highlighting, pairs and UI elements | Avoid the overlapping replacements while Neo-tree, Telescope, Blink, the native snippet setup, Gitsigns, which-key and the current color tools remain enabled |
-
-## Suggested minimal path
-
-Keep the current plugin set unchanged for normal use before restoring old
-features. Then add only in response to a repeated workflow problem:
-
-1. Add TODO mappings if TODO navigation is used regularly. This adds no
-   dependency; prefer `<leader>tn` and `<leader>tp` instead of overriding
-   built-in tag keys.
-2. Keep Neo-tree as the only sidebar browser; do not add a second file-tree
-   plugin.
-3. Use the enabled `mini.splitjoin` first; add Treesj only if its pattern-based
-   behavior is not accurate enough.
-4. Trial DiffBandit only if full Git review, folder diffs or merge resolution
-   are regular in-editor tasks.
-5. Consider Spectre only for frequent interactive project-wide replacements.
-6. Use built-in uppercase marks or Mini Visits labels before considering
-   Harpoon for repeated jumps among a small working set.
-7. Avoid re-adding cosmetic UI plugins, alternate completion stacks, NvChad
-   platform plugins, or language plugins outside the supported language list.
-
-This keeps each addition tied to an observed daily need and avoids rebuilding
-the previous distribution one plugin at a time.
+The archived-profile comparison, disabled Kickstart examples, rejected
+plugins and future candidates are kept in
+[Nvim2 plugin review](../../../docs/nvim2-plugin-review.md). They are not
+part of the daily workflow or the enabled dependency list.

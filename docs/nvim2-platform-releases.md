@@ -174,18 +174,47 @@ The remaining builder steps run as that user.
 
 ## Install Neovim in the builder
 
-Use one reviewed Neovim release for all artifacts in the release set. The
-official x86-64 Neovim 0.12.0 archive runs on Ubuntu 24.04 and 26.04:
+Use one reviewed Neovim release for all artifacts in the release set. Resolve
+the latest stable tag once, or set `NVIM_VERSION=vX.Y.Z` first to reproduce a
+specific reviewed release. Keep the exported value for every builder in the
+release matrix:
 
 ```bash
-version=v0.12.0
+version=${NVIM_VERSION:-$(
+  curl -fsSL https://api.github.com/repos/neovim/neovim/releases/latest |
+    python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])'
+)}
+export NVIM_VERSION=$version
+printf 'Selected Neovim release: %s\n' "$NVIM_VERSION"
+```
+
+The official x86-64 archive runs on Ubuntu 24.04 and 26.04. In an Ubuntu
+builder, derive its published digest from the selected release metadata:
+
+```bash
+version=${NVIM_VERSION:?Set NVIM_VERSION to the reviewed Neovim tag}
 asset=nvim-linux-x86_64.tar.gz
+digest=$(
+  curl -fsSL "https://api.github.com/repos/neovim/neovim/releases/tags/$version" |
+    ASSET="$asset" python3 -c '
+import json, os, sys
+assets = json.load(sys.stdin)["assets"]
+print(next(item["digest"] for item in assets if item["name"] == os.environ["ASSET"]))
+'
+)
+case "$digest" in
+  sha256:*) checksum=${digest#sha256:} ;;
+  *) printf 'Release metadata has no SHA-256 digest for %s\n' "$asset" >&2; exit 1 ;;
+esac
 install_dir="$HOME/.local/opt/nvim-$version"
 
+printf 'Version: %s\nAsset:   %s\nSHA-256: %s\n' "$version" "$asset" "$checksum"
 mkdir -p "$HOME/bin" "$install_dir" "$HOME/release-inputs"
 curl -fL \
   "https://github.com/neovim/neovim/releases/download/$version/$asset" \
   -o "$HOME/release-inputs/$asset"
+printf '%s  %s\n' "$checksum" "$HOME/release-inputs/$asset" | \
+  sha256sum --check --strict
 tar -xzf "$HOME/release-inputs/$asset" \
   -C "$install_dir" \
   --strip-components=1
@@ -194,7 +223,9 @@ export PATH="$HOME/bin:$PATH"
 nvim --version
 ```
 
-Record and review the upstream archive checksum before using it in a release.
+Review the resolved tag, asset and digest against the release page before
+packaging. The digest is read from GitHub's release asset metadata and is not
+duplicated in this runbook.
 
 The official archive does not run on Amazon Linux 2 because it requires glibc
 2.28 or newer and Amazon Linux 2 has glibc 2.26. Build the same Neovim commit
@@ -203,13 +234,17 @@ inside the Amazon Linux 2 builder:
 ```bash
 yum install -y cmake3 ninja-build gettext libtool autoconf automake pkgconfig
 
-version=v0.12.0
-neovim_commit=fc7e5cf6c93fef08effc183087a2c8cc9bf0d75a
+version=${NVIM_VERSION:?Set NVIM_VERSION to the reviewed Neovim tag}
 nvim_archive="nvim-$version-amzn-2-x86_64.tar.gz"
 install_dir="$HOME/.local/opt/nvim-$version"
 source_dir=$(mktemp -d)
 
-git clone --quiet https://github.com/neovim/neovim.git "$source_dir/neovim"
+git clone --quiet --filter=blob:none --no-checkout --no-tags \
+  https://github.com/neovim/neovim.git "$source_dir/neovim"
+git -C "$source_dir/neovim" fetch --quiet --depth=1 origin \
+  "refs/tags/$version:refs/tags/$version"
+neovim_commit=$(git -C "$source_dir/neovim" rev-parse "$version^{commit}")
+printf 'Tag: %s\nCommit: %s\n' "$version" "$neovim_commit"
 git -C "$source_dir/neovim" checkout --detach "$neovim_commit"
 test "$(git -C "$source_dir/neovim" rev-parse HEAD)" = "$neovim_commit"
 
@@ -230,9 +265,9 @@ export PATH="$HOME/bin:$PATH"
 nvim --version
 ```
 
-The commit is the commit behind the reviewed `v0.12.0` tag. Change both values
-together during a Neovim upgrade. Neovim's dependency build downloads source,
-so this step runs only on the connected builder.
+The commit is peeled from the selected release tag rather than copied into the
+runbook. Review the printed commit before building. Neovim's dependency build
+downloads source, so this step runs only on the connected builder.
 
 ## Build a clean Nvim2 data directory
 
@@ -303,8 +338,9 @@ yamllint --version
 lua-language-server --version
 ```
 
-Open representative Python, Lua, Bash, Terraform, Ansible, Helm and YAML files
-and confirm that LSP, formatting, linting, highlighting and folds work.
+Open representative Python, Lua, Bash, TypeScript, TSX, Terraform, Ansible,
+Helm and YAML files and confirm that the configured LSP, formatting, linting,
+highlighting and folds work.
 
 ## Package the platform artifact
 
@@ -327,7 +363,7 @@ commit=$(git rev-parse HEAD)
 short_commit=$(git rev-parse --short=12 HEAD)
 source /etc/os-release
 platform_id="${ID}-${VERSION_ID}-$(uname -m)"
-nvim_version=v0.12.0
+nvim_version=$(nvim --version | awk 'NR == 1 { print $2; exit }')
 case "$ID:$VERSION_ID" in
   ubuntu:24.04|ubuntu:26.04) nvim_archive=nvim-linux-x86_64.tar.gz ;;
   amzn:2) nvim_archive="nvim-$nvim_version-amzn-2-x86_64.tar.gz" ;;
@@ -663,6 +699,9 @@ These are Mason tools rather than plugins. Their exact versions are in
 8. Run `tests/check.sh`.
 9. Commit the exact version change.
 
+When removing a package declaration, also run `:MasonUninstall PACKAGE` on the
+development machine. The exact inventory check rejects undeclared packages.
+
 Do not use `MasonToolsUpdateSync` as a version-selection mechanism. It does
 not change the reviewed pins.
 
@@ -678,8 +717,9 @@ After updating that plugin, run:
 Review changes in the plugin's `lua/nvim-treesitter/parsers.lua`, then test all
 supported languages. Adding or removing a language changes the list in
 `lua/custom/treesitter.lua`. Removing an entry does not remove an already
-installed parser, so the final platform artifact must be built from an empty
-data directory.
+installed parser. Remove it from a development machine with
+`:lua require('nvim-treesitter').uninstall({ 'LANGUAGE' }):wait(120000)`, and
+still build the final platform artifact from an empty data directory.
 
 ### Update Neovim
 
@@ -719,17 +759,19 @@ future approved `PackChanged` handler after that point.
 ## Validation scope
 
 `tests/check.sh` is suitable for release validation and is inexpensive enough
-to run after every accepted update. It checks locked plugins, pinned Mason
-versions, configured parser presence, mappings, commands and several daily
-workflows.
+to run after every accepted update. It rejects undeclared Mason packages and
+parsers, checks every Mason launcher, starts the tools that expose a safe
+version command, and exercises mappings, commands and several daily workflows.
 
 Current limitations are:
 
-- extra Mason packages and parsers are not rejected;
 - parser revisions and query completeness are not verified;
-- most Mason executables are not started;
-- only a subset of LSP, formatter and linter behavior is exercised;
+- CSS, JSON and YAML language-server launchers are checked but not started
+  because their command-line entry points require an LSP transport;
+- HTML attachment is exercised, but only a subset of other attached-LSP and
+  formatter behavior is exercised;
 - a plugin can have local modifications while retaining its locked Git commit.
 
-Clean builders prevent most stale-extra problems. Continue inspecting package
-and parser inventories until those checks are automated.
+Clean builders and the exact inventory checks prevent stale dependencies from
+entering a release. Continue inspecting parser revision metadata and plugin
+worktrees during review.

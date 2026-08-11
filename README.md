@@ -12,8 +12,8 @@ Use this order on a machine with internet access:
 
 1. Install the packages for the VM's distribution from
    [Install dependencies](#install-dependencies-preferred-aptdnfyum).
-2. Check that Neovim is version 0.12 or newer. If the distribution package is
-   older, use [Install Neovim 0.12](#install-neovim-012).
+2. Check that Neovim is version 0.12.4 or newer. If the distribution package is
+   older, use [Install Neovim](#install-neovim).
 3. Back up any existing dotfiles that would conflict with the symlinks.
 4. Clone and stow the main packages:
 
@@ -119,37 +119,70 @@ Mason needs `node`/`npm` for Node-based language servers and Python with
 virtual-environment support for Python-based tools. Package names can vary on
 older Amazon Linux and Rocky releases.
 
-### Install Neovim 0.12
+### Install Neovim
 
-My neovim config (in nvim2 dir) requires Neovim 0.12 or newer. The version supplied by `apt` or `dnf`
+My Neovim config in the `nvim2` directory requires Neovim 0.12.4 or newer. The version supplied by `apt` or `dnf`
 may be too old; check it before continuing:
 
 ```bash
 nvim --version | head -n 1
 ```
 
-If necessary, install the pinned official Neovim 0.12.0 archive under your
-home directory. This supports x86-64 and ARM64 Linux without writing to
-`/usr/local`:
+On Ubuntu 24.04, Ubuntu 26.04 and other systems with glibc 2.28 or newer,
+install an official stable archive under your home directory. This supports
+x86-64 and ARM64 Linux without writing to `/usr/local`.
+
+First resolve the latest stable tag and the SHA-256 digest published in its
+GitHub release metadata. To reproduce a previously reviewed release, export a
+specific tag such as `NVIM_VERSION=vX.Y.Z` before running this block. The tag
+is the only release-specific input:
 
 ```bash
-version=v0.12.0
+version=${NVIM_VERSION:-$(
+  curl -fsSL https://api.github.com/repos/neovim/neovim/releases/latest |
+    python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])'
+)}
 case "$(uname -m)" in
   x86_64) asset=nvim-linux-x86_64.tar.gz ;;
   aarch64) asset=nvim-linux-arm64.tar.gz ;;
   *) printf 'Unsupported architecture: %s\n' "$(uname -m)" >&2; exit 1 ;;
 esac
 
+digest=$(
+  curl -fsSL "https://api.github.com/repos/neovim/neovim/releases/tags/$version" |
+    ASSET="$asset" python3 -c '
+import json, os, sys
+assets = json.load(sys.stdin)["assets"]
+print(next(item["digest"] for item in assets if item["name"] == os.environ["ASSET"]))
+'
+)
+case "$digest" in
+  sha256:*) checksum=${digest#sha256:} ;;
+  *) printf 'Release metadata has no SHA-256 digest for %s\n' "$asset" >&2; exit 1 ;;
+esac
+
+printf 'Version: %s\nAsset:   %s\nSHA-256: %s\n' "$version" "$asset" "$checksum"
+```
+
+Review those three values and the
+[Neovim release notes](https://github.com/neovim/neovim/releases). Then, in
+the same shell, download, verify and install that exact asset:
+
+```bash
 install_dir="$HOME/.local/opt/nvim-$version"
 mkdir -p "$install_dir" "$HOME/bin"
 curl -fL "https://github.com/neovim/neovim/releases/download/$version/$asset" \
   -o "/tmp/$asset"
+printf '%s  %s\n' "$checksum" "/tmp/$asset" | sha256sum --check --strict
 tar -xzf "/tmp/$asset" -C "$install_dir" --strip-components=1
 ln -sfn "$install_dir/bin/nvim" "$HOME/bin/nvim"
 "$HOME/bin/nvim" --version | head -n 1
 ```
 
-The stowed Bash configuration puts `~/bin` on `PATH`.
+The stowed Bash configuration puts `~/bin` on `PATH`. Amazon Linux 2 has
+glibc 2.26, so the official archive does not run there. Build the same tagged
+commit inside an Amazon Linux 2 container by following
+[Nvim2 platform releases](docs/nvim2-platform-releases.md#install-neovim-in-the-builder).
 
 ### Portability notes
 
@@ -406,6 +439,12 @@ Or reload from the shell: `tmux source-file ~/.tmux.conf`
 Tmux mouse handling is enabled for pane focus and scrollback. Automatic
 copy-on-select remains disabled. Hold `Shift` while selecting text to let the
 terminal handle selection, then use `Ctrl+Shift+C` or `Ctrl+Shift+V`.
+
+The right side of the status bar adapts to terminal width. At 160 columns or
+more it shows primary route-selected IPv4, full hostname, time and date. At
+120-159 it keeps the IP first and shortens the hostname; below 120 it removes
+the hostname but keeps IP, time and date. The remaining middle area stays
+available for the window list.
 
 For text that spans more than the visible pane, use tmux copy mode: press
 `Ctrl+a` then `[`, move to the start, press `v`, extend the selection and press

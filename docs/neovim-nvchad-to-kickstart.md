@@ -11,9 +11,8 @@ The repository keeps one supported profile and one archive:
 The Kickstart profile uses Neovim 0.12's built-in `vim.pack` package manager.
 Its resolved plugin revisions are stored in `nvim-pack-lock.json`.
 
-Use the current Neovim 0.12 stable release or a recent nightly. The installed
-`0.12.0-dev` build predates parts of the final 0.12 API, so Kickstart's health
-check correctly recommends upgrading it.
+Use Neovim 0.12.4 or newer. The repository README installs the reviewed
+official release under `~/.local/opt` and exposes it through `~/bin/nvim`.
 
 ## Start the development profile
 
@@ -47,6 +46,9 @@ XDG_CONFIG_HOME="$(dirname "$PWD")" NVIM_APPNAME=nvim2 nvim
 | Ansible | Ansible Language Server | yamlfmt | ansible-lint and yamllint |
 | Helm | Helm Language Server | No automatic template formatter | `helm lint` |
 | YAML | YAML Language Server | yamlfmt | yamllint |
+| GitHub Actions YAML | YAML Language Server | yamlfmt | Actionlint and yamllint |
+| HTML | HTML Language Server | Prettier | Language server diagnostics |
+| TypeScript, TSX, JavaScript and JSX | TypeScript Language Server | Prettier | ESLint through `eslint_d` |
 | CSS | CSS Language Server | Prettier | Language server diagnostics |
 | JSON | JSON Language Server | Prettier | Language server diagnostics |
 | Markdown | Markdown Oxide | Prettier | Markdown Oxide diagnostics |
@@ -54,6 +56,9 @@ XDG_CONFIG_HOME="$(dirname "$PWD")" NVIM_APPNAME=nvim2 nvim
 
 Ruff replaces Black, isort, and Flake8. Conform runs
 `ruff_organize_imports` followed by `ruff_format` for Python.
+Pyright remains the single Python type checker. BasedPyright is an alternative
+replacement, not an additional server, because running both duplicates type
+diagnostics.
 
 Format-on-save is enabled for the configured languages and common web file
 types. Helm templates are excluded because generic YAML formatters can damage
@@ -66,11 +71,11 @@ not run on every insert-mode change.
 
 ## Plugins added to Kickstart
 
-- `persistence.nvim` is retained as a disabled optional module.
 - `render-markdown.nvim` renders Markdown headings, tables, checkboxes, and
   code blocks in the editor.
 - `nvim-highlight-colors` previews color values inline.
-- `nvim-lint` publishes Hadolint, TFLint, and yamllint results as diagnostics.
+- `nvim-lint` publishes Actionlint, ESLint, Hadolint, TFLint, and yamllint
+  results as diagnostics.
 
 Kickstart's Telescope, which-key, and Mini statusline remain in place. The
 profile does not add FzfLua, Lualine, Mini Clue, inc-rename, navic, Copilot,
@@ -112,6 +117,7 @@ key reference, bundled optional modules, and previous-plugin comparison.
 | Split or join bracketed arguments | `gS` |
 | Select visited files in current workspace | `<leader>vv` |
 | Toggle a boolean-like value | `<leader>tv` |
+| Start, expand or shrink a syntax selection | `<C-Space>`, then `<C-Space>` or `<BS>` |
 | Next or previous Git hunk | `]c` / `[c` |
 | Stage or reset Git hunk | `<leader>hs` / `<leader>hr` |
 | Preview Git hunk | `<leader>hp` |
@@ -154,6 +160,6 @@ Verify the setup inside Neovim:
 
 Update plugins with `:lua vim.pack.update()`, review the changes, and use
 `:write` to apply them and refresh `nvim-pack-lock.json`. Mason versions are
-pinned separately in `init.lua`; change a pin before running
+pinned separately in `lua/custom/lsp.lua`; change a pin before running
 `:Nvim2ToolsInstallSync`. The complete workflow is in
 [`Plugin and configuration maintenance`](../nvim2/.config/nvim2/README.md#plugin-and-configuration-maintenance).

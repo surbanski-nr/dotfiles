@@ -7,6 +7,7 @@ M.servers = {
   cssls = {},
   docker_language_server = {},
   helm_ls = {},
+  html = {},
   jsonls = {},
   markdown_oxide = {},
   pyright = {},
@@ -14,6 +15,7 @@ M.servers = {
     on_attach = function(client) client.server_capabilities.hoverProvider = false end,
   },
   taplo = {},
+  ts_ls = {},
   terraformls = {
     -- Older 0.12 development builds lack the API used by lspconfig's default callback.
     on_attach = function(_, bufnr)
@@ -43,10 +45,11 @@ M.servers = {
         },
         workspace = {
           checkThirdParty = false,
-          library = vim.tbl_extend('force', vim.api.nvim_get_runtime_file('', true), {
+          library = {
+            vim.env.VIMRUNTIME,
             '${3rd}/luv/library',
             '${3rd}/busted/library',
-          }),
+          },
         },
       })
     end,
@@ -59,13 +62,16 @@ M.servers = {
 }
 
 M.tools = {
+  { 'actionlint', version = 'v1.7.10' },
   { 'ansible-language-server', version = '1.2.3' },
   { 'ansible-lint', version = '26.1.1' },
   { 'bash-language-server', version = '5.6.0' },
   { 'css-lsp', version = '4.10.0' },
   { 'docker-language-server', version = 'v0.20.1' },
+  { 'eslint_d', version = '15.0.3' },
   { 'hadolint', version = 'v2.15.1' },
   { 'helm-ls', version = 'v0.5.4' },
+  { 'html-lsp', version = '4.10.0' },
   { 'json-lsp', version = '4.10.0' },
   { 'lua-language-server', version = '3.17.1' },
   { 'markdown-oxide', version = 'v0.25.12' },
@@ -79,9 +85,36 @@ M.tools = {
   { 'terraform-ls', version = 'v0.38.3' },
   { 'tflint', version = 'v0.64.0' },
   { 'tree-sitter-cli', version = 'v0.26.11' },
+  { 'typescript-language-server', version = '5.3.0' },
   { 'yaml-language-server', version = '1.19.2' },
   { 'yamlfmt', version = 'v0.21.0' },
   { 'yamllint', version = '1.38.0' },
+}
+
+M.tool_probes = {
+  { 'actionlint', '-version' },
+  { 'ansible-language-server', '--version' },
+  { 'ansible-lint', '--version' },
+  { 'bash-language-server', '--version' },
+  { 'docker-language-server', '--version' },
+  { 'eslint_d', '--version' },
+  { 'hadolint', '--version' },
+  { 'helm_ls', 'version' },
+  { 'lua-language-server', '--version' },
+  { 'markdown-oxide', '--version' },
+  { 'prettier', '--version' },
+  { 'pyright', '--version' },
+  { 'ruff', '--version' },
+  { 'shellcheck', '--version' },
+  { 'shfmt', '--version' },
+  { 'stylua', '--version' },
+  { 'taplo', '--version' },
+  { 'terraform-ls', 'version' },
+  { 'tflint', '--version' },
+  { 'tree-sitter', '--version' },
+  { 'typescript-language-server', '--version' },
+  { 'yamlfmt', '-version' },
+  { 'yamllint', '--version' },
 }
 
 function M.setup_tools()

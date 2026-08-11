@@ -145,13 +145,6 @@ end
 ---@param opts? MermaidAsciiPreviewOptions
 function M.preview(opts)
   opts = opts or {}
-  local executable = opts.executable
-  if executable == nil then executable = vim.fn.exepath 'mermaid-ascii' end
-  if executable == '' then
-    warn 'Optional preview unavailable: mermaid-ascii was not found in PATH'
-    return
-  end
-
   local buffer = opts.bufnr or vim.api.nvim_get_current_buf()
   local cursor_line = opts.cursor_line or vim.api.nvim_win_get_cursor(0)[1]
   local block = M.find_block(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), cursor_line)
@@ -161,6 +154,13 @@ function M.preview(opts)
   end
   if block.source:match '^%s*$' then
     warn 'The Mermaid block is empty'
+    return
+  end
+
+  local executable = opts.executable
+  if executable == nil then executable = vim.fn.exepath 'mermaid-ascii' end
+  if executable == '' then
+    warn 'Optional preview unavailable: mermaid-ascii was not found in PATH'
     return
   end
 
