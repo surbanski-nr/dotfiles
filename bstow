@@ -66,6 +66,68 @@ link_points_to() {
     [[ $current_resolved == "$expected_resolved" ]]
 }
 
+find_parent_symlink() {
+    local dest="$1"
+    local current="$TARGET_DIR"
+    local relative
+    local component
+
+    [[ $dest == "$TARGET_DIR/"* ]] || return 1
+    relative="${dest#"$TARGET_DIR"/}"
+    while [[ $relative == */* ]]; do
+        component="${relative%%/*}"
+        current="$current/$component"
+        if [[ -L $current ]]; then
+            printf '%s\n' "$current"
+            return 0
+        fi
+        relative="${relative#*/}"
+    done
+    return 1
+}
+
+parent_symlink_matches_package() {
+    local src="$1"
+    local dest="$2"
+    local parent_link="$3"
+    local rel_path="${dest#"$TARGET_DIR"/}"
+    local rel_parent="${parent_link#"$TARGET_DIR"/}"
+    local package_dir="${src%/"$rel_path"}"
+    local package_name="${package_dir##*/}"
+    local resolved_parent
+
+    resolved_parent="$(resolve_link_target "$parent_link")"
+    [[ $resolved_parent == */"$package_name"/"$rel_parent" ]]
+}
+
+unfold_parent_symlink() {
+    local src="$1"
+    local dest="$2"
+    local parent_link
+
+    if ! parent_link="$(find_parent_symlink "$dest")"; then
+        return 0
+    fi
+    if [[ $(realpath -m -- "$dest") != "$(realpath -m -- "$src")" && $FORCE -ne 1 ]]; then
+        error "Parent directory is a foreign symlink: $parent_link -> $(readlink -- "$parent_link")"
+        error "Use --force only if bstow should replace that symlink"
+        return 1
+    fi
+    if [[ $(realpath -m -- "$dest") != "$(realpath -m -- "$src")" ]] && ! parent_symlink_matches_package "$src" "$dest" "$parent_link"; then
+        error "Refusing to replace parent symlink outside a matching package tree: $parent_link"
+        return 1
+    fi
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        preview "Would replace directory symlink: $parent_link -> $(readlink -- "$parent_link") with a real directory"
+        return 0
+    fi
+
+    warn "Replacing directory symlink: $parent_link -> $(readlink -- "$parent_link")"
+    unlink "$parent_link"
+    mkdir -p "$parent_link"
+}
+
 common_directory() {
     local left="$1"
     local right="$2"
@@ -277,6 +339,24 @@ remove_package_state() {
 validate_destination() {
     local src="$1"
     local dest="$2"
+    local parent_link
+
+    if parent_link="$(find_parent_symlink "$dest")"; then
+        if [[ $(realpath -m -- "$dest") == "$(realpath -m -- "$src")" ]]; then
+            return 0
+        fi
+        if [[ $FORCE -eq 1 ]] && parent_symlink_matches_package "$src" "$dest" "$parent_link"; then
+            return 0
+        fi
+        if [[ $FORCE -eq 1 ]]; then
+            error "Refusing to replace parent symlink outside a matching package tree: $parent_link"
+            return 1
+        fi
+
+        error "Parent directory is a foreign symlink: $parent_link -> $(readlink -- "$parent_link")"
+        error "Use --force only if bstow should replace that symlink"
+        return 1
+    fi
 
     if [[ ! -e $dest && ! -L $dest ]]; then
         return 0
@@ -319,6 +399,7 @@ create_link() {
 
     log "Creating link: $dest -> $src"
     validate_destination "$src" "$dest" || return 1
+    unfold_parent_symlink "$src" "$dest" || return 1
 
     if [[ -L $dest ]]; then
         if link_points_to "$dest" "$src"; then
@@ -514,6 +595,8 @@ preview_restow_link() {
     local src="$1"
     local dest="$2"
     local parent_dir
+
+    unfold_parent_symlink "$src" "$dest" || return 1
 
     if [[ -L $dest ]]; then
         if link_points_to "$dest" "$src"; then
