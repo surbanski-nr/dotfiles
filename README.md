@@ -1,7 +1,8 @@
 # Dotfiles
 
-Configuration for Bash, Git, tmux, Nvim2, Oh My Posh, k9s and Codex. The
-supported targets are WSL Ubuntu, regular Ubuntu, Amazon Linux and Rocky Linux.
+Configuration for my Bash, Git, tmux, Nvim2, Oh My Posh, k9s and Codex. The
+supported targets are WSL Ubuntu, regular Ubuntu, Amazon Linux 2023 and Rocky
+Linux.
 
 Prefer the distribution package manager for system tools. Use asdf on
 connected machines when a project needs an exact Python, Node.js, Kubernetes
@@ -40,10 +41,10 @@ Ubuntu or Debian:
 ```bash
 sudo apt update
 sudo apt install -y \
-  git curl unzip xz-utils coreutils \
+  git curl wget ca-certificates openssh-client tar gzip unzip xz-utils coreutils \
   gcc g++ make \
   python3 python3-venv python3-pip nodejs npm \
-  ripgrep fd-find xclip \
+  ripgrep fd-find iproute2 xclip \
   tmux dos2unix fzf bat zoxide htop tree mc \
   gnupg
 ```
@@ -53,10 +54,10 @@ Rocky, RHEL or Fedora:
 ```bash
 sudo dnf install -y epel-release
 sudo dnf install -y \
-  git curl unzip xz coreutils \
+  git curl wget ca-certificates openssh-clients tar gzip unzip xz coreutils \
   gcc gcc-c++ make \
   python3 python3-pip nodejs npm \
-  ripgrep fd-find xclip \
+  ripgrep fd-find iproute xclip \
   tmux dos2unix fzf bat zoxide htop tree mc \
   gnupg2
 ```
@@ -65,28 +66,26 @@ Amazon Linux 2023:
 
 ```bash
 sudo dnf install -y \
-  git curl unzip xz coreutils \
+  git wget ca-certificates openssh-clients \
+  tar gzip unzip xz \
   gcc gcc-c++ make \
-  python3 python3-pip nodejs npm \
-  tmux dos2unix htop tree mc
+  python3.12 python3.12-pip \
+  cargo clang-devel \
+  iproute tmux dos2unix htop tree mc \
+  findutils which patch
 ```
 
-Amazon Linux 2 uses `yum`, and its public repositories do not provide the
-runtime versions required by the current Nvim2 tool set:
+Amazon Linux 2023 already supplies `curl`, coreutils and GnuPG through either
+its minimal or full packages. Do not request the other variant because DNF
+would report a conflict. Its packaged Node.js 18 is
+also too old for the pinned TypeScript language server, and ripgrep is absent.
+Install a current Node.js with asdf in step 5. Follow the
+[platform release runbook](docs/nvim2-platform-releases.md#install-nodejs-and-ripgrep-in-the-builder)
+to install a checksum-verified ripgrep release in `~/bin`, or follow the whole
+runbook to build a complete offline Nvim2 release.
 
-```bash
-sudo yum install -y \
-  git curl unzip xz coreutils \
-  gcc gcc-c++ make \
-  python3 python3-pip \
-  tmux dos2unix htop tree
-```
-
-Package names and availability vary on older Amazon Linux and Rocky releases.
-Amazon Linux 2 in particular needs company-approved sources for a sufficiently
-new Python, Node.js, npm and ripgrep. Follow the
-[platform release runbook](docs/nvim2-platform-releases.md) instead of mixing
-packages from a different distribution.
+Amazon Linux 2 reached its public support end date on 2026-06-30 and is not a
+supported Nvim2 release target.
 
 Python and Node.js are Nvim2 runtime dependencies, not only installation
 dependencies:
@@ -157,8 +156,48 @@ the previous NvChad profile.
 
 This step is optional when approved operating-system packages already provide
 the required versions. It is useful when projects require different versions.
-Install asdf using its official release instructions or, when Homebrew is the
-chosen fallback package manager:
+Install the latest reviewed asdf release in `~/bin`. Set
+`ASDF_VERSION=vX.Y.Z` first to reproduce an older reviewed release:
+
+```bash
+asdf_version=${ASDF_VERSION:-$(
+  curl -fsSL https://api.github.com/repos/asdf-vm/asdf/releases/latest |
+    python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])'
+)}
+case "$(uname -m)" in
+  x86_64) asdf_arch=amd64 ;;
+  aarch64) asdf_arch=arm64 ;;
+  *) printf 'Unsupported architecture: %s\n' "$(uname -m)" >&2; exit 1 ;;
+esac
+asdf_asset="asdf-$asdf_version-linux-$asdf_arch.tar.gz"
+asdf_digest=$(
+  curl -fsSL \
+    "https://api.github.com/repos/asdf-vm/asdf/releases/tags/$asdf_version" |
+    ASSET="$asdf_asset" python3 -c '
+import json, os, sys
+assets = json.load(sys.stdin)["assets"]
+print(next(item["digest"] for item in assets if item["name"] == os.environ["ASSET"]))
+'
+)
+case "$asdf_digest" in
+  sha256:*) asdf_checksum=${asdf_digest#sha256:} ;;
+  *) printf 'Release metadata has no SHA-256 digest for %s\n' "$asdf_asset" >&2; exit 1 ;;
+esac
+
+printf 'Version: %s\nAsset:   %s\nSHA-256: %s\n' \
+  "$asdf_version" "$asdf_asset" "$asdf_checksum"
+mkdir -p "$HOME/bin"
+curl -fL \
+  "https://github.com/asdf-vm/asdf/releases/download/$asdf_version/$asdf_asset" \
+  -o "/tmp/$asdf_asset"
+printf '%s  %s\n' "$asdf_checksum" "/tmp/$asdf_asset" |
+  sha256sum --check --strict
+tar -xzf "/tmp/$asdf_asset" -C "$HOME/bin" asdf
+hash -r
+asdf --version
+```
+
+Alternatively, when Homebrew is already the chosen fallback package manager:
 
 ```bash
 brew install asdf
@@ -219,6 +258,13 @@ asdf list all nodejs
 asdf install nodejs VERSION
 asdf set -u nodejs VERSION
 
+# Keep npm on a reviewed current release instead of the older version bundled
+# with some Node archives.
+npm view npm version
+npm install --global npm@NPM_VERSION
+asdf reshim nodejs
+npm --version
+
 asdf list all kubectl
 asdf install kubectl VERSION
 asdf set -u kubectl VERSION
@@ -241,6 +287,11 @@ asdf current
 
 `asdf set -u` writes the user-wide default to `~/.tool-versions`. A repository
 can override it with its own `.tool-versions` file.
+
+Replace `NPM_VERSION` with the reviewed exact release reported by
+`npm view npm version`. The Ubuntu 26.04 validation found that npm 11.4.2 could
+idle until its five-minute network timeout after Mason downloads, while npm
+11.19.0 completed the same concurrent installs.
 
 Do not manage Neovim with asdf. Keeping it outside the asdf shim layer makes
 the editor version, checksum, offline artifact and rollback path explicit. It
@@ -307,24 +358,32 @@ nvim --version | head -n 1
 `hash -r` matters in a shell that cached `/usr/bin/nvim` before
 `~/bin/nvim` existed.
 
-The official archive requires glibc 2.28 or newer. It does not run on Amazon
-Linux 2 with glibc 2.26. Build the same tagged commit inside the target builder
-by following
-[Install Neovim in the builder](docs/nvim2-platform-releases.md#install-neovim-in-the-builder).
-
 ### 7. Install and verify Nvim2
 
-On a connected VM, install the locked plugins, pinned Mason tools and configured
-Treesitter parsers:
+On Ubuntu or Rocky, install the locked plugins, pinned Mason tools and
+configured Treesitter parsers:
 
 ```bash
 cd "$GH_REPOS/dotfiles"
-timeout 600s env NVIM_APPNAME=nvim2 \
+timeout 1200s env NVIM_APPNAME=nvim2 \
   nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
 ```
 
+On Amazon Linux 2023, first replace Mason's glibc-2.39 Tree-sitter CLI with the
+same pinned version built on AL2023. Follow the AL2023 commands under
+[Build a clean Nvim2 data directory](docs/nvim2-platform-releases.md#build-a-clean-nvim2-data-directory).
+
 `Nvim2ToolsInstallSync` already runs `MasonToolsInstallSync`. Do not run the
-latter separately. The command needs GitHub and the registries used by Mason.
+latter separately outside the documented AL2023 builder step. The command
+needs GitHub and the registries used by Mason.
+Mason installs one package at a time because its CSS, HTML and JSON entries
+otherwise launch concurrent npm installs of the same underlying package.
+The command disables npm's audit request only during this pinned Mason install
+because the request can idle until npm's five-minute network timeout. Normal
+project installs and tool-version review still use npm audit.
+If a registry or package download fails, inspect
+`~/.local/state/nvim2/mason.log` and rerun the same idempotent command. Do not
+accept an installation until the checks below pass.
 
 Run the profile checks:
 
@@ -451,25 +510,19 @@ Do not run online installers, asdf plugin commands, `vim.pack.update()` or
 Mason installation commands on a restricted target.
 
 Build and test one complete platform artifact on a connected builder matching
-the target distribution, architecture, username, home path, Python version and
-Node.js major version. Transfer and activate it using the
+the target distribution, architecture, username, home path and Python version.
+Transfer and activate it using the
 [Nvim2 platform release runbook](docs/nvim2-platform-releases.md).
 
-The transferred release contains Neovim, plugins, Mason packages and
-Treesitter parsers, but the target still needs compatible runtime packages:
+The transferred release contains Neovim, Node.js, ripgrep, plugins, Mason
+packages and Treesitter parsers. The target still needs:
 
-- Node.js for JavaScript-based language servers, Pyright, Prettier and
-  Eslint_d;
-- Python for Yamllint and Ansible-lint virtual environments;
+- Python 3.12 for Yamllint and Ansible-lint virtual environments;
 - project CLIs such as Terraform, Helm, Docker and Ansible when their features
   are used.
 
-Prefer approved operating-system or company package repositories for Python
-and Node.js on both builder and target. asdf is designed for connected version
-management and is not the default offline deployment mechanism. If company
-policy requires asdf offline, treat its plugins, downloads and installed
-runtimes as platform-specific release inputs and test them under the same
-absolute paths.
+Install Python from the approved operating-system repository. asdf remains a
+connected-machine version manager and is not part of the offline release.
 
 Standalone reviewed binaries such as kubectl, Helm, k9s, yq, Trivy,
 Oh My Posh and Mermaid ASCII can be downloaded on a connected machine and
@@ -481,7 +534,7 @@ export PATH="$HOME/bin:$PATH"
 ```
 
 TPM and tmux plugin directories must also be transferred if Resurrect or
-Continuum is required. Plain tmux remains usable without them.
+Continuum is required. Amazon Linux 2023 supplies a compatible tmux package.
 
 ## Maintenance and recovery
 

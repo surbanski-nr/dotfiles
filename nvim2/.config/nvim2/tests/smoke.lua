@@ -1,5 +1,6 @@
 local function run()
   require('custom.checks').assert_all { tools = vim.env.NVIM2_CHECK_TOOLS ~= '0' }
+  assert(require('mason.settings').current.max_concurrent_installers == 1, 'Mason installers are not serialized')
   vim.lsp.enable('markdown_oxide', false)
 
   vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'init.lua'))

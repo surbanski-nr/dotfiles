@@ -1,5 +1,10 @@
 local M = {}
 
+M.mason = {
+  -- CSS, HTML and JSON otherwise install the same npm package concurrently.
+  max_concurrent_installers = 1,
+}
+
 ---@type table<string, vim.lsp.Config>
 M.servers = {
   ansiblels = {},

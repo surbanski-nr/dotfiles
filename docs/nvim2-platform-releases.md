@@ -7,6 +7,7 @@ restricted machines.
 The release contains:
 
 - one exact Neovim version;
+- one exact Node.js runtime and ripgrep version;
 - one exact dotfiles Git commit and `nvim-pack-lock.json`;
 - all plugin repositories at their locked commits;
 - all pinned Mason language servers, formatters and linters;
@@ -29,15 +30,13 @@ Examples:
 | --- | --- | --- |
 | Ubuntu 24.04 x86-64 | `ubuntu:24.04` | `ubuntu-24.04-x86_64` |
 | Ubuntu 26.04 x86-64 | `ubuntu:26.04` | `ubuntu-26.04-x86_64` |
-| Amazon Linux 2 x86-64 | `amazonlinux:2` | `amzn-2-x86_64` |
+| Amazon Linux 2023 x86-64 | `amazonlinux:2023` | `amzn-2023-x86_64` |
 
 The outer builder host can be Debian or Ubuntu because each artifact is built
-inside its target image. Do not use an Ubuntu container for Amazon Linux 2.
-Amazon Linux 2 uses an older glibc and different Python and Node versions.
-
-The public Amazon Linux 2 image reports a support end date of 2026-06-30. Keep
-this target only while the company provides an approved extended-support
-package source. Plan its replacement with a supported platform.
+inside its target image. Do not use an Ubuntu container for Amazon Linux 2023.
+Its glibc, Python packages and native tool compatibility differ from Ubuntu.
+Amazon Linux 2 is not a release target because its public support ended on
+2026-06-30.
 
 Match these target properties:
 
@@ -46,7 +45,7 @@ Match these target properties:
 - username and absolute home path;
 - Neovim version;
 - Python major and minor version;
-- Node major version.
+- reviewed Node.js release included in the artifact.
 
 Mason Python environments and some launchers contain absolute interpreter and
 home paths. Treesitter parsers and some Mason tools are native binaries. A
@@ -62,12 +61,14 @@ uname -m
 getconf GNU_LIBC_VERSION
 id -u
 printf 'user=%s\nhome=%s\n' "$USER" "$HOME"
-python3 --version
-node --version
+python3.12 --version 2>/dev/null || python3 --version
+node --version 2>/dev/null || true
 ```
 
 Save the output with the release request. The connected builder must use the
 same values or compatible versions supplied by the same OS package sources.
+Node.js does not need to exist before deployment because its reviewed archive
+is part of the release.
 
 ## Create a connected builder on Debian or Ubuntu
 
@@ -83,13 +84,13 @@ sudo apt-get install -y podman
 mkdir -p "$HOME/nvim2-builder-output"
 ```
 
-Amazon Linux 2 builder:
+Amazon Linux 2023 builder:
 
 ```bash
-podman pull public.ecr.aws/amazonlinux/amazonlinux:2
-podman run --name nvim2-amzn2-builder -it \
+podman pull public.ecr.aws/amazonlinux/amazonlinux:2023
+podman run --name nvim2-amzn2023-builder -it \
   -v "$HOME/nvim2-builder-output:/out:Z" \
-  public.ecr.aws/amazonlinux/amazonlinux:2 bash
+  public.ecr.aws/amazonlinux/amazonlinux:2023 bash
 ```
 
 Ubuntu 24.04 builder:
@@ -114,63 +115,162 @@ Do not remove the builder until its release has passed the disconnected test.
 
 ### Install builder dependencies
 
-Amazon Linux 2:
+Amazon Linux 2023:
 
 ```bash
-yum install -y \
-  git curl tar gzip unzip xz \
+dnf install -y \
+  git wget ca-certificates openssh-clients \
+  tar gzip unzip xz \
   gcc gcc-c++ make \
-  python3 python3-pip \
-  findutils
+  python3.12 python3.12-pip \
+  cargo clang-devel \
+  tmux findutils which patch
 ```
 
-The public Amazon Linux 2 repositories install Python 3.7 and do not provide
-Node.js, npm or ripgrep. The current Nvim2 tools need Python 3.12 or newer,
-Node.js 18 or newer, npm and ripgrep. Install approved RPMs for those commands
-from the same company package source used by the restricted target, then run:
+The image already supplies `curl`, coreutils and GnuPG through minimal
+packages. Do not request their full variants because DNF reports a conflict.
+The default `python3` remains Python 3.9 after Python 3.12 is
+installed, so expose the required interpreter through the target home:
 
 ```bash
+mkdir -p "$HOME/bin"
+ln -sfn /usr/bin/python3.12 "$HOME/bin/python3"
+ln -sfn /usr/bin/python3.12 "$HOME/bin/python"
+export PATH="$HOME/bin:$PATH"
 python3 -c 'import sys; assert sys.version_info >= (3, 12), sys.version'
-node -e 'process.exit(Number(process.versions.node.split(".")[0]) < 18)'
-command -v npm rg
 ```
 
-Do not continue until this preflight passes. A public Amazon Linux 2 container
-alone cannot build the current complete Nvim2 tool set.
+The repository's Node.js 18 package is too old for the pinned TypeScript
+Language Server, which requires Node.js 20 or newer. The repository also lacks
+ripgrep. Install both from the reviewed archives in the next section.
 
 Ubuntu 24.04 and 26.04:
 
 ```bash
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  git curl tar gzip unzip xz-utils \
+  git curl wget ca-certificates tar gzip unzip xz-utils \
   gcc g++ make \
   python3 python3-venv python3-pip \
-  nodejs npm \
   ripgrep fd-find
 ```
 
 Package names can differ in company repositories. The builder and target must
-obtain Python and Node from equivalent package sources. If the current
-`ansible-lint` dependency set changes its Python requirement, update the
-preflight and rebuild all artifacts. Do not build the Python tools with
-Homebrew when Homebrew is absent from the target.
+obtain Python from equivalent package sources. If the current `ansible-lint`
+dependency set changes its Python requirement, update the preflight and rebuild
+all artifacts. Do not build the Python tools with Homebrew when Homebrew is
+absent from the target. Node.js comes from the reviewed archive below.
 
 Create a user whose name, UID and home match the target. Set these values from
-the target inventory rather than copying the examples:
+the target inventory rather than copying the examples. The Ubuntu 26.04 image
+already owns UID 1000 with an `ubuntu` user, so reuse and rename an existing UID
+owner instead of assuming the UID is free:
 
 ```bash
 target_user=surbanski
 target_uid=1000
 target_home=/home/surbanski
 
-groupadd --gid "$target_uid" "$target_user"
-useradd --create-home --uid "$target_uid" --gid "$target_uid" \
-  --home-dir "$target_home" --shell /bin/bash "$target_user"
+existing_user=$(getent passwd "$target_uid" | cut -d: -f1)
+if [[ -n $existing_user && $existing_user != "$target_user" ]]; then
+  existing_group=$(id -gn "$existing_user")
+  usermod --login "$target_user" --home "$target_home" --move-home \
+    --shell /bin/bash "$existing_user"
+  if [[ $existing_group != "$target_user" ]]; then
+    groupmod --new-name "$target_user" "$existing_group"
+  fi
+elif ! id "$target_user" >/dev/null 2>&1; then
+  groupadd --gid "$target_uid" "$target_user"
+  useradd --create-home --uid "$target_uid" --gid "$target_uid" \
+    --home-dir "$target_home" --shell /bin/bash "$target_user"
+fi
 su - "$target_user"
 ```
 
 The remaining builder steps run as that user.
+
+## Install Node.js and ripgrep in the builder
+
+Use one reviewed Node.js release for every artifact in the release set. The
+official archive runs on Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2023.
+Select an exact Node.js 22 release and verify it against the checksum published
+with that release:
+
+```bash
+node_version=${NODE_VERSION:?Set NODE_VERSION to a reviewed Node.js 22 release without v}
+node_asset="node-v${node_version}-linux-x64.tar.xz"
+node_base="https://nodejs.org/download/release/v${node_version}"
+node_dir="$HOME/.local/opt/node-v${node_version}"
+
+mkdir -p "$HOME/bin" "$node_dir" "$HOME/release-inputs"
+curl -fL "$node_base/SHASUMS256.txt" \
+  -o "$HOME/release-inputs/node-v${node_version}-SHASUMS256.txt"
+node_checksum=$(
+  awk -v asset="$node_asset" '$2 == asset { print $1 }' \
+    "$HOME/release-inputs/node-v${node_version}-SHASUMS256.txt"
+)
+test -n "$node_checksum"
+curl -fL "$node_base/$node_asset" \
+  -o "$HOME/release-inputs/$node_asset"
+printf '%s  %s\n' "$node_checksum" "$HOME/release-inputs/$node_asset" |
+  sha256sum --check --strict
+tar -xJf "$HOME/release-inputs/$node_asset" \
+  -C "$node_dir" --strip-components=1
+for command in node npm npx corepack; do
+  ln -sfn "$node_dir/bin/$command" "$HOME/bin/$command"
+done
+export PATH="$HOME/bin:$PATH"
+node --version
+npm --version
+```
+
+Mason's npm installs can pause after downloads with older npm releases. Use a
+reviewed current npm only on the connected builder. The offline target receives
+the unchanged official Node archive and does not run npm or Mason installation:
+
+```bash
+npm view npm version
+npm_version=${NPM_VERSION:?Set NPM_VERSION to the reviewed exact release}
+env NPM_CONFIG_AUDIT=false npm install --global "npm@$npm_version"
+npm --version
+```
+
+Amazon Linux 2023 does not package ripgrep. Resolve a reviewed release, verify
+the GitHub release-asset digest and keep its archive for the offline target:
+
+```bash
+rg_tag=${RG_VERSION:-$(
+  curl -fsSL https://api.github.com/repos/BurntSushi/ripgrep/releases/latest |
+    python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])'
+)}
+rg_version=${rg_tag#v}
+rg_asset="ripgrep-${rg_version}-x86_64-unknown-linux-musl.tar.gz"
+rg_digest=$(
+  curl -fsSL \
+    "https://api.github.com/repos/BurntSushi/ripgrep/releases/tags/$rg_tag" |
+    ASSET="$rg_asset" python3 -c '
+import json, os, sys
+assets = json.load(sys.stdin)["assets"]
+print(next(item["digest"] for item in assets if item["name"] == os.environ["ASSET"]))
+'
+)
+case "$rg_digest" in
+  sha256:*) rg_checksum=${rg_digest#sha256:} ;;
+  *) printf 'Release metadata has no SHA-256 digest for %s\n' "$rg_asset" >&2; exit 1 ;;
+esac
+
+rg_stage=$(mktemp -d)
+curl -fL \
+  "https://github.com/BurntSushi/ripgrep/releases/download/$rg_tag/$rg_asset" \
+  -o "$HOME/release-inputs/$rg_asset"
+printf '%s  %s\n' "$rg_checksum" "$HOME/release-inputs/$rg_asset" |
+  sha256sum --check --strict
+tar -xzf "$HOME/release-inputs/$rg_asset" -C "$rg_stage"
+install -m 0755 \
+  "$rg_stage/ripgrep-${rg_version}-x86_64-unknown-linux-musl/rg" \
+  "$HOME/bin/rg"
+rg --version
+```
 
 ## Install Neovim in the builder
 
@@ -188,8 +288,8 @@ export NVIM_VERSION=$version
 printf 'Selected Neovim release: %s\n' "$NVIM_VERSION"
 ```
 
-The official x86-64 archive runs on Ubuntu 24.04 and 26.04. In an Ubuntu
-builder, derive its published digest from the selected release metadata:
+The official x86-64 archive runs on Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux
+2023. Derive its published digest from the selected release metadata:
 
 ```bash
 version=${NVIM_VERSION:?Set NVIM_VERSION to the reviewed Neovim tag}
@@ -227,48 +327,6 @@ Review the resolved tag, asset and digest against the release page before
 packaging. The digest is read from GitHub's release asset metadata and is not
 duplicated in this runbook.
 
-The official archive does not run on Amazon Linux 2 because it requires glibc
-2.28 or newer and Amazon Linux 2 has glibc 2.26. Build the same Neovim commit
-inside the Amazon Linux 2 builder:
-
-```bash
-yum install -y cmake3 ninja-build gettext libtool autoconf automake pkgconfig
-
-version=${NVIM_VERSION:?Set NVIM_VERSION to the reviewed Neovim tag}
-nvim_archive="nvim-$version-amzn-2-x86_64.tar.gz"
-install_dir="$HOME/.local/opt/nvim-$version"
-source_dir=$(mktemp -d)
-
-git clone --quiet --filter=blob:none --no-checkout --no-tags \
-  https://github.com/neovim/neovim.git "$source_dir/neovim"
-git -C "$source_dir/neovim" fetch --quiet --depth=1 origin \
-  "refs/tags/$version:refs/tags/$version"
-neovim_commit=$(git -C "$source_dir/neovim" rev-parse "$version^{commit}")
-printf 'Tag: %s\nCommit: %s\n' "$version" "$neovim_commit"
-git -C "$source_dir/neovim" checkout --detach "$neovim_commit"
-test "$(git -C "$source_dir/neovim" rev-parse HEAD)" = "$neovim_commit"
-
-make -C "$source_dir/neovim" \
-  CMAKE=cmake3 \
-  CMAKE_BUILD_TYPE=Release \
-  CMAKE_INSTALL_PREFIX="$install_dir"
-make -C "$source_dir/neovim" install \
-  CMAKE=cmake3 \
-  CMAKE_BUILD_TYPE=Release \
-  CMAKE_INSTALL_PREFIX="$install_dir"
-
-mkdir -p "$HOME/bin" "$HOME/release-inputs"
-ln -sfn "$install_dir/bin/nvim" "$HOME/bin/nvim"
-tar -C "$(dirname "$install_dir")" -czf \
-  "$HOME/release-inputs/$nvim_archive" "$(basename "$install_dir")"
-export PATH="$HOME/bin:$PATH"
-nvim --version
-```
-
-The commit is peeled from the selected release tag rather than copied into the
-runbook. Review the printed commit before building. Neovim's dependency build
-downloads source, so this step runs only on the connected builder.
-
 ## Build a clean Nvim2 data directory
 
 Every release starts from an empty Nvim2 data directory. Reusing a developer's
@@ -289,12 +347,51 @@ git rev-parse HEAD
 test ! -e "$HOME/.local/share/nvim2"
 ```
 
-Install plugins, pinned Mason tools and configured Treesitter parsers:
+On Ubuntu, install plugins, pinned Mason tools and configured Treesitter
+parsers in one operation:
 
 ```bash
 timeout 1200s env NVIM_APPNAME=nvim2 \
   nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
 ```
+
+On Amazon Linux 2023, Mason's upstream Tree-sitter CLI binary currently needs
+glibc 2.39, while the platform provides glibc 2.34. Install the Mason tools
+first, compile the same pinned CLI version from its official Rust crate, and
+then build the parsers:
+
+```bash
+timeout 1200s env NPM_CONFIG_AUDIT=false NVIM_APPNAME=nvim2 \
+  nvim --headless '+MasonToolsInstallSync' '+qa!'
+
+tree_sitter_version=$(
+  NVIM_APPNAME=nvim2 nvim --headless \
+    "+lua for _, tool in ipairs(require('custom.lsp').tools) do if tool[1] == 'tree-sitter-cli' then io.write(tool.version:gsub('^v', '')) end end" \
+    '+qa!'
+)
+test -n "$tree_sitter_version"
+tree_sitter_root="$HOME/.local/opt/tree-sitter-cli-$tree_sitter_version"
+tree_sitter_binary=$(
+  readlink -f "$HOME/.local/share/nvim2/mason/bin/tree-sitter"
+)
+
+timeout 1200s cargo install tree-sitter-cli \
+  --version "$tree_sitter_version" \
+  --locked \
+  --root "$tree_sitter_root"
+install -m 0755 \
+  "$tree_sitter_root/bin/tree-sitter" \
+  "$tree_sitter_binary"
+"$HOME/.local/share/nvim2/mason/bin/tree-sitter" --version
+
+timeout 1200s env NVIM_APPNAME=nvim2 \
+  nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
+```
+
+This direct `MasonToolsInstallSync` call is an AL2023 builder step, not an
+alternative update workflow. The final `Nvim2ToolsInstallSync` still verifies
+the pinned Mason inventory and installs every configured parser. Cargo and
+Clang are builder-only packages and are not required on the offline target.
 
 `Nvim2ToolsInstallSync` runs `MasonToolsInstallSync` and then installs or
 updates the configured parsers. Mason startup installation and automatic
@@ -364,14 +461,18 @@ short_commit=$(git rev-parse --short=12 HEAD)
 source /etc/os-release
 platform_id="${ID}-${VERSION_ID}-$(uname -m)"
 nvim_version=$(nvim --version | awk 'NR == 1 { print $2; exit }')
+node_version=$(node --version | sed 's/^v//')
+rg_version=$(rg --version | awk 'NR == 1 { print $2; exit }')
 case "$ID:$VERSION_ID" in
-  ubuntu:24.04|ubuntu:26.04) nvim_archive=nvim-linux-x86_64.tar.gz ;;
-  amzn:2) nvim_archive="nvim-$nvim_version-amzn-2-x86_64.tar.gz" ;;
+  ubuntu:24.04|ubuntu:26.04|amzn:2023) ;;
   *)
     printf 'unsupported release target: %s:%s\n' "$ID" "$VERSION_ID" >&2
     exit 1
     ;;
 esac
+nvim_archive=nvim-linux-x86_64.tar.gz
+node_archive="node-v${node_version}-linux-x64.tar.xz"
+rg_archive="ripgrep-${rg_version}-x86_64-unknown-linux-musl.tar.gz"
 release_id="$(date -u +%Y%m%d)-${short_commit}-nvim-${nvim_version#v}"
 out="/out/${release_id}/${platform_id}"
 data_root="${XDG_DATA_HOME:-$HOME/.local/share}/nvim2"
@@ -385,8 +486,10 @@ cp -aL "$data_root/site/queries" "$stage/nvim2/site/"
 cp -a "$data_root/mason" "$stage/nvim2/"
 
 tar -C "$stage/nvim2" -czf "$out/nvim2-data.tar.gz" .
-git bundle create "$out/dotfiles.bundle" main
+git bundle create "$out/dotfiles.bundle" HEAD main
 cp "$HOME/release-inputs/$nvim_archive" "$out/"
+cp "$HOME/release-inputs/$node_archive" "$out/"
+cp "$HOME/release-inputs/$rg_archive" "$out/"
 ```
 
 Write the activation values and builder details:
@@ -398,6 +501,10 @@ PLATFORM_ID=$platform_id
 DOTFILES_COMMIT=$commit
 NVIM_VERSION=$nvim_version
 NVIM_ARCHIVE=$nvim_archive
+NODE_VERSION=$node_version
+NODE_ARCHIVE=$node_archive
+RG_VERSION=$rg_version
+RG_ARCHIVE=$rg_archive
 TARGET_HOME=$HOME
 EOF
 
@@ -406,8 +513,16 @@ EOF
   uname -a
   getconf GNU_LIBC_VERSION
   nvim --version
-  python3 --version
   node --version
+  npm --version
+  python3 --version
+  rg --version | head -n 1
+  tmux -V
+  "$data_root/mason/bin/tree-sitter" --version
+  printf 'tree_sitter_cli_sha256='
+  sha256sum \
+    "$data_root/mason/packages/tree-sitter-cli/tree-sitter-linux-x64" |
+    awk '{ print $1 }'
   git --version
   printf 'dotfiles_commit=%s\n' "$commit"
   sha256sum nvim2/.config/nvim2/nvim-pack-lock.json
@@ -426,6 +541,8 @@ sha256sum \
   dotfiles.bundle \
   nvim2-data.tar.gz \
   "$nvim_archive" \
+  "$node_archive" \
+  "$rg_archive" \
   release.env \
   build-manifest.txt \
   os-packages.txt \
@@ -433,13 +550,29 @@ sha256sum \
 ```
 
 The artifact directory is the release for one platform. Build the remaining
-platforms from the same dotfiles commit and Neovim version.
+platforms from the same dotfiles commit and Neovim, Node.js and ripgrep
+versions.
 
 ## Test without external network access
 
 Before transfer, install the artifact into a clean VM or container matching
 the target. Install only the approved OS packages, disable external network
 access, and follow the target installation procedure below.
+
+For Podman, prepare a clean runtime container while connected, install only
+the target OS packages, and commit that base. Launch the actual release test
+with no network instead of relying on a live network disconnect:
+
+```bash
+podman commit nvim2-amzn2023-runtime \
+  localhost/nvim2-amzn2023-runtime:validation
+podman run --name nvim2-amzn2023-airgap --network none -it \
+  -v /path/to/platform-artifact:/artifact:ro,Z \
+  localhost/nvim2-amzn2023-runtime:validation bash
+
+curl --max-time 3 -fsS https://github.com
+# Expected: name resolution or connection failure.
+```
 
 The disconnected test must pass:
 
@@ -462,6 +595,21 @@ under a versioned directory and make the canonical data path a symlink:
 Mason's absolute paths continue to use `~/.local/share/nvim2`, so they resolve
 through the active symlink. Stop all Nvim2 processes before activation.
 
+### Install target operating-system packages
+
+Install packages from the approved operating-system repository before
+disconnecting the machine. Amazon Linux 2023 needs:
+
+```bash
+sudo dnf install -y \
+  git ca-certificates \
+  tar gzip xz \
+  python3.12 tmux findutils which
+```
+
+Neovim, Node.js and ripgrep come from the checked release artifact. Compilers,
+Cargo, Clang and npm installation are builder-only concerns.
+
 ### Verify and read the artifact
 
 ```bash
@@ -473,9 +621,10 @@ source ./release.env
 [[ $(uname -m) == "${PLATFORM_ID##*-}" ]]
 ```
 
-Compare `/etc/os-release`, glibc, Python and Node with `build-manifest.txt`.
-Use `os-packages.txt` to reproduce the relevant runtime packages from approved
-repositories before continuing.
+Compare `/etc/os-release`, glibc and Python 3.12 with `build-manifest.txt`. Use
+`os-packages.txt` to reproduce the relevant runtime packages from approved
+repositories before continuing. Node.js is checked after extracting its
+release archive.
 
 ### Prepare versioned storage and rollback state
 
@@ -505,19 +654,38 @@ rollback_file="$HOME/.local/state/nvim2-release-rollback.env"
 previous_commit=$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)
 previous_data=$(readlink -f "$HOME/.local/share/nvim2" 2>/dev/null || true)
 previous_nvim=$(readlink -f "$HOME/bin/nvim" 2>/dev/null || true)
+previous_node=$(readlink -f "$HOME/bin/node" 2>/dev/null || true)
+previous_rg=$(readlink -f "$HOME/bin/rg" 2>/dev/null || true)
 
-printf 'PREVIOUS_COMMIT=%q\nPREVIOUS_DATA=%q\nPREVIOUS_NVIM=%q\n' \
+printf 'PREVIOUS_COMMIT=%q\nPREVIOUS_DATA=%q\nPREVIOUS_NVIM=%q\nPREVIOUS_NODE=%q\nPREVIOUS_RG=%q\n' \
   "$previous_commit" "$previous_data" "$previous_nvim" \
+  "$previous_node" "$previous_rg" \
   > "$rollback_file"
 ```
 
-### Install the versioned Neovim runtime
+### Install the versioned runtimes
 
 ```bash
 nvim_dir="$HOME/.local/opt/nvim-$NVIM_VERSION"
-mkdir -p "$HOME/bin" "$nvim_dir"
+node_dir="$HOME/.local/opt/node-v$NODE_VERSION"
+rg_dir="$HOME/.local/opt/ripgrep-$RG_VERSION"
+mkdir -p "$HOME/bin" "$nvim_dir" "$node_dir" "$rg_dir"
+
 tar -xzf "$NVIM_ARCHIVE" -C "$nvim_dir" --strip-components=1
+tar -xJf "$NODE_ARCHIVE" -C "$node_dir" --strip-components=1
+
+rg_stage=$(mktemp -d)
+tar -xzf "$RG_ARCHIVE" -C "$rg_stage"
+install -m 0755 \
+  "$rg_stage/ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl/rg" \
+  "$rg_dir/rg"
+
 "$nvim_dir/bin/nvim" --version
+"$node_dir/bin/node" --version
+"$rg_dir/rg" --version
+
+ln -sfn /usr/bin/python3.12 "$HOME/bin/python3"
+ln -sfn /usr/bin/python3.12 "$HOME/bin/python"
 ```
 
 ### Install the matching dotfiles commit
@@ -561,24 +729,40 @@ tar -C "$release_dir" -xzf /path/to/platform-artifact/nvim2-data.tar.gz
 
 ### Activate the release
 
-Switch both symlinks:
+Switch the data and runtime symlinks:
 
 ```bash
 data_link="$HOME/.local/share/nvim2"
 data_next="$HOME/.local/share/.nvim2-next.$$"
 nvim_next="$HOME/bin/.nvim-next.$$"
+node_next="$HOME/bin/.node-next.$$"
+rg_next="$HOME/bin/.rg-next.$$"
 
 ln -s "$release_dir" "$data_next"
 mv -Tf "$data_next" "$data_link"
 
 ln -s "$nvim_dir/bin/nvim" "$nvim_next"
 mv -Tf "$nvim_next" "$HOME/bin/nvim"
+
+ln -s "$node_dir/bin/node" "$node_next"
+mv -Tf "$node_next" "$HOME/bin/node"
+for command in npm npx corepack; do
+  command_next="$HOME/bin/.${command}-next.$$"
+  ln -s "$node_dir/bin/$command" "$command_next"
+  mv -Tf "$command_next" "$HOME/bin/$command"
+done
+
+ln -s "$rg_dir/rg" "$rg_next"
+mv -Tf "$rg_next" "$HOME/bin/rg"
 ```
 
 Validate immediately:
 
 ```bash
 export PATH="$HOME/bin:$PATH"
+python3 -c 'import sys; assert sys.version_info >= (3, 12), sys.version'
+node -e 'process.exit(Number(process.versions.node.split(".")[0]) < 20)'
+rg --version
 bash "$HOME/.config/nvim2/tests/check.sh"
 NVIM_APPNAME=nvim2 nvim
 ```
@@ -588,7 +772,8 @@ Do not run `Nvim2ToolsInstallSync`, `MasonUpdate`, `TSUpdate` or
 
 ## Roll back
 
-Stop Nvim2, restore the previous dotfiles commit and repoint both symlinks:
+Stop Nvim2, restore the previous dotfiles commit and repoint the data and
+runtime symlinks:
 
 ```bash
 rollback_file="$HOME/.local/state/nvim2-release-rollback.env"
@@ -601,6 +786,8 @@ fi
 
 data_next="$HOME/.local/share/.nvim2-rollback.$$"
 nvim_next="$HOME/bin/.nvim-rollback.$$"
+node_next="$HOME/bin/.node-rollback.$$"
+rg_next="$HOME/bin/.rg-rollback.$$"
 
 if [[ -n $PREVIOUS_DATA ]]; then
   ln -s "$PREVIOUS_DATA" "$data_next"
@@ -610,6 +797,22 @@ fi
 if [[ -n $PREVIOUS_NVIM ]]; then
   ln -s "$PREVIOUS_NVIM" "$nvim_next"
   mv -Tf "$nvim_next" "$HOME/bin/nvim"
+fi
+
+if [[ -n $PREVIOUS_NODE ]]; then
+  previous_node_bin=$(dirname "$PREVIOUS_NODE")
+  ln -s "$PREVIOUS_NODE" "$node_next"
+  mv -Tf "$node_next" "$HOME/bin/node"
+  for command in npm npx corepack; do
+    command_next="$HOME/bin/.${command}-rollback.$$"
+    ln -s "$previous_node_bin/$command" "$command_next"
+    mv -Tf "$command_next" "$HOME/bin/$command"
+  done
+fi
+
+if [[ -n $PREVIOUS_RG ]]; then
+  ln -s "$PREVIOUS_RG" "$rg_next"
+  mv -Tf "$rg_next" "$HOME/bin/rg"
 fi
 
 bash "$HOME/.config/nvim2/tests/check.sh"
@@ -762,6 +965,16 @@ future approved `PackChanged` handler after that point.
 to run after every accepted update. It rejects undeclared Mason packages and
 parsers, checks every Mason launcher, starts the tools that expose a safe
 version command, and exercises mappings, commands and several daily workflows.
+
+The Amazon Linux 2023 path was tested end to end on 2026-08-12 with the public
+`amazonlinux:2023` image, glibc 2.34, Python 3.12.13, Neovim 0.12.4, Node.js
+22.23.2 and ripgrep 15.2.0. The connected builder produced 22 locked plugins,
+27 pinned Mason packages and 21 parsers. A fresh `--network none` container
+verified the artifact checksums, activated the release, passed `check.sh`, and
+attached Pyright, Ruff, Bash, Terraform, YAML, Ansible, Helm and Docker
+language servers. Treat these versions as a validation record, not hardcoded
+upgrade values; the reviewed variables and configuration pins remain the
+sources of truth.
 
 Current limitations are:
 
