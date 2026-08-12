@@ -189,4 +189,36 @@ run_bstow --force --dir "$alternate_stow_dir" --target "$target_dir" restow bran
 [[ $BSTOW_STATUS -eq 0 ]] || fail 'forced restow did not adopt another package source'
 assert_link_target "$target_dir/.config/one/current" "$alternate_stow_dir/branch/.config/one/current"
 
+mkdir -p "$stow_dir/folded/.config/folded/skins" "$alternate_stow_dir/folded/.config/folded/skins" "$target_dir/.config/folded"
+printf 'old\n' > "$stow_dir/folded/.config/folded/skins/theme.yaml"
+printf 'new\n' > "$alternate_stow_dir/folded/.config/folded/skins/theme.yaml"
+printf 'added\n' > "$alternate_stow_dir/folded/.config/folded/skins/added.yaml"
+folded_dir=$target_dir/.config/folded/skins
+ln -s "$stow_dir/folded/.config/folded/skins" "$folded_dir"
+
+run_bstow --dir "$alternate_stow_dir" --target "$target_dir" restow folded
+[[ $BSTOW_STATUS -ne 0 ]] || fail 'restow adopted a foreign parent-directory symlink without force'
+assert_link_target "$folded_dir" "$stow_dir/folded/.config/folded/skins"
+
+run_bstow --dry-run --force --dir "$alternate_stow_dir" --target "$target_dir" restow folded
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'forced dry-run rejected a foreign parent-directory symlink'
+assert_contains "$BSTOW_OUTPUT" "Would replace directory symlink: $folded_dir"
+assert_link_target "$folded_dir" "$stow_dir/folded/.config/folded/skins"
+
+run_bstow --force --dir "$alternate_stow_dir" --target "$target_dir" restow folded
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'forced restow did not unfold a foreign parent-directory symlink'
+[[ -d $folded_dir && ! -L $folded_dir ]] || fail 'forced restow did not replace the directory symlink with a real directory'
+assert_link_target "$folded_dir/theme.yaml" "$alternate_stow_dir/folded/.config/folded/skins/theme.yaml"
+assert_link_target "$folded_dir/added.yaml" "$alternate_stow_dir/folded/.config/folded/skins/added.yaml"
+[[ $(<"$stow_dir/folded/.config/folded/skins/theme.yaml") == 'old' ]] || fail 'forced restow modified the previous package source'
+
+mkdir -p "$alternate_stow_dir/unsafe/.config/unsafe" "$test_root/shared-config"
+touch "$alternate_stow_dir/unsafe/.config/unsafe/settings.yaml" "$test_root/shared-config/settings.yaml"
+unsafe_dir=$target_dir/.config/unsafe
+ln -s "$test_root/shared-config" "$unsafe_dir"
+run_bstow --force --dir "$alternate_stow_dir" --target "$target_dir" restow unsafe
+[[ $BSTOW_STATUS -ne 0 ]] || fail 'forced restow replaced an arbitrary parent-directory symlink'
+assert_contains "$BSTOW_OUTPUT" 'Refusing to replace parent symlink outside a matching package tree'
+assert_link_target "$unsafe_dir" "$test_root/shared-config"
+
 printf 'bstow tests passed\n'

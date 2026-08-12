@@ -562,6 +562,11 @@ foreign symlink is explicitly adopted with `--force`. Inspect both paths first:
 ./bstow --force -t "$HOME" stow bash
 ```
 
+When a parent directory is a link to the same package in another clone, a
+forced stow replaces that directory link with a real directory containing
+per-file links to the selected clone. Files in the previous clone are not
+modified. Preview the operation first as shown above.
+
 After pulling deletions or renames, use `restow` to remove obsolete links and
 create the current set:
 
