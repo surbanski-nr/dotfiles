@@ -27,14 +27,14 @@ k9s:
     numKeyColor: *orange
   frame:
     title:
-      fgColor: *green
+      fgColor: *cyan
       bgColor: *background
       highlightColor: *orange
       counterColor: *cyan
       filterColor: *green
     border:
       fgColor: *muted
-      focusColor: *green
+      focusColor: *cyan
     menu:
       fgColor: *foreground
       keyColor: *green
@@ -63,7 +63,7 @@ k9s:
       cursorBgColor: *currentLine
       markColor: *green
       header:
-        fgColor: *green
+        fgColor: *cyan
         bgColor: *background
         sorterColor: *orange
     xray:
