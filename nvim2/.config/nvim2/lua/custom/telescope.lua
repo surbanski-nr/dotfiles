@@ -35,6 +35,54 @@ function M.find_files(opts) builtin.find_files(M.file_options(opts)) end
 
 function M.live_grep(opts) builtin.live_grep(M.grep_options(opts)) end
 
+function M.promote_yank(register)
+  local index = tonumber(register)
+  if not index or index < 1 or index > 9 then error 'yank history register must be between 1 and 9' end
+
+  local selected = vim.fn.getreginfo(tostring(index))
+  for destination = index, 2, -1 do
+    vim.fn.setreg(tostring(destination), vim.fn.getreginfo(tostring(destination - 1)))
+  end
+  vim.fn.setreg('1', selected)
+  vim.fn.setreg('"', selected)
+end
+
+function M.yank_history(opts)
+  opts = opts or {}
+  local registers = {}
+  for index = 1, 9 do
+    local register = tostring(index)
+    if vim.fn.getreg(register, 1) ~= '' then registers[#registers + 1] = register end
+  end
+  if #registers == 0 then
+    vim.notify('Yank history is empty', vim.log.levels.INFO)
+    return
+  end
+
+  local actions = require 'telescope.actions'
+  local action_state = require 'telescope.actions.state'
+  local conf = require('telescope.config').values
+  require('telescope.pickers')
+    .new(opts, {
+      prompt_title = 'Yank history',
+      finder = require('telescope.finders').new_table {
+        results = registers,
+        entry_maker = require('telescope.make_entry').gen_from_registers(opts),
+      },
+      sorter = conf.generic_sorter(opts),
+      attach_mappings = function(prompt_bufnr)
+        actions.select_default:replace(function()
+          local selection = action_state.get_selected_entry()
+          if not selection then return end
+          actions.close(prompt_bufnr)
+          M.promote_yank(selection.value)
+        end)
+        return true
+      end,
+    })
+    :find()
+end
+
 function M.nearest_git_root()
   local path = vim.api.nvim_buf_get_name(0)
   local start = path ~= '' and vim.fs.dirname(path) or vim.uv.cwd()
@@ -69,6 +117,7 @@ function M.setup()
   vim.keymap.set('n', '<leader>sq', builtin.quickfix, { desc = '[S]earch [Q]uickfix list' })
   vim.keymap.set('n', '<leader>sl', builtin.loclist, { desc = '[S]earch [L]ocation list' })
   vim.keymap.set('n', '<leader>sm', builtin.marks, { desc = '[S]earch [M]arks' })
+  vim.keymap.set('n', '<leader>sy', M.yank_history, { desc = '[S]earch [Y]ank history' })
   vim.keymap.set('n', '<leader>sF', function()
     local root = M.nearest_git_root()
     M.find_files { cwd = root, prompt_title = 'Find Files: ' .. root }

@@ -97,7 +97,7 @@ vim.api.nvim_create_autocmd('TextYankPost', {
     vim.hl.on_yank { higroup = 'IncSearch', timeout = 300 }
     if vim.v.event.operator == 'y' then
       for index = 9, 1, -1 do
-        vim.fn.setreg(tostring(index), vim.fn.getreg(tostring(index - 1)))
+        vim.fn.setreg(tostring(index), vim.fn.getreginfo(tostring(index - 1)))
       end
     end
   end,
