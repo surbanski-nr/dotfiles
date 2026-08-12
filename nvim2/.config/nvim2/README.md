@@ -167,6 +167,7 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 | `default_colors.lua` | Keep three local visibility overrides when returning to the built-in default colorscheme | No |
 | `enclosing_pairs.lua` | Highlight the nearest enclosing `()`, `[]` or `{}` pair while the cursor is anywhere inside it | No; extends Neovim's built-in `MatchParen` style |
 | `mermaid_ascii.lua` | Preview the Mermaid fence under the cursor in a scrollable scratch tab | No; invokes the optional `mermaid-ascii` binary |
+| `scroll_marker.lua` | Show an experimental one-cell marker for the current position at the right edge | No |
 | `treesitter_selection.lua` | Add simple keys for Neovim's built-in syntax-aware selection expansion | No |
 | `toggle_values.lua` | Add `<leader>tv` for boolean-like values without `nvim-toggler` | No |
 | `snippets.lua` | Add five global delimiter pairs and six Markdown expansions with Neovim's built-in snippet engine | No |
@@ -329,11 +330,19 @@ Notation used below:
 | Clear search highlighting | `<Esc>` |
 | Jump back or forward in jump list | `<C-o>`, `<C-i>` |
 | Toggle relative or absolute line numbers | `<leader>tl` |
+| Toggle the right-edge position marker | `<leader>ts` or `:ScrollMarkerToggle` |
 
 `<leader>tl` changes only the current window. Line numbers stay visible: the
 default relative mode is useful for motions such as `5j`, while absolute mode
 is useful when discussing exact line numbers. Press `<leader>tl` again to
 return to relative numbers.
+
+The statusline location uses `current/total:column position`, for example
+`47/862:1 5%`. The experimental orange dot at the right edge shows the same
+approximate file position visually. It does not represent the visible viewport
+and hides in Neo-tree, Telescope, quickfix and other non-file buffers. Toggle
+it with `<leader>ts`. To remove the experiment entirely, delete
+`lua/custom/plugins/scroll_marker.lua`.
 
 ### Marks and a small Harpoon-like shortlist
 
