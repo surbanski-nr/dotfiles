@@ -1,6 +1,9 @@
 require('mini.align').setup()
 require('mini.splitjoin').setup()
 
+---@diagnostic disable-next-line: duplicate-set-field
+require('mini.statusline').section_location = function() return '%2l/%L:%-2v %p%%' end
+
 local visits = require 'mini.visits'
 visits.setup()
 local visit_opts = { sort = visits.gen_sort.default { recency_weight = 0.5 } }

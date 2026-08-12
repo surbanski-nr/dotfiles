@@ -300,6 +300,29 @@ local function run()
   assert(vim.wo.number and vim.wo.relativenumber, 'line numbers did not switch back to relative mode')
   vim.notify = notify
 
+  vim.cmd.enew()
+  local marker_lines = vim.iter(vim.fn.range(1, 101)):map(tostring):totable()
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, marker_lines)
+  vim.api.nvim_win_set_cursor(0, { 51, 0 })
+  local source_window = vim.api.nvim_get_current_win()
+  local scroll_marker = require 'custom.plugins.scroll_marker'
+  scroll_marker.update()
+  local marker_window = vim.iter(vim.api.nvim_list_wins()):find(function(window)
+    local config = vim.api.nvim_win_get_config(window)
+    if config.relative ~= 'win' or config.win ~= source_window then return false end
+    return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(window), 0, -1, false)[1] == '●'
+  end)
+  assert(marker_window, 'right-edge scroll marker was not shown in a source buffer')
+  local marker_config = vim.api.nvim_win_get_config(marker_window)
+  assert(marker_config.row == scroll_marker.screen_row(51, 101, vim.api.nvim_win_get_height(source_window)), 'scroll marker row is incorrect')
+  assert(marker_config.col == vim.api.nvim_win_get_width(source_window) - 1, 'scroll marker is not at the right edge')
+  local statusline = vim.api.nvim_eval_statusline(vim.wo[source_window].statusline, { winid = source_window }).str
+  assert(statusline:find('51/101:', 1, true), 'statusline does not show current and total lines')
+  assert(statusline:find('50%', 1, true), 'statusline does not show percentage position: ' .. statusline)
+  vim.bo.buftype = 'nofile'
+  scroll_marker.update()
+  assert(not vim.api.nvim_win_is_valid(marker_window), 'scroll marker remained visible in a non-file buffer')
+
   assert(vim.filetype.match { filename = '/tmp/docker-compose.yml' } == 'yaml.docker-compose', 'Docker Compose filetype detection failed')
   assert(vim.filetype.match { filename = '/tmp/playbooks/site.yml' } == 'yaml.ansible', 'Ansible filetype detection failed')
 
