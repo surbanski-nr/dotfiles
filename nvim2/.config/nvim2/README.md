@@ -346,10 +346,19 @@ it with `<leader>ts`. To remove the experiment entirely, delete
 
 ### Marks and a small Harpoon-like shortlist
 
-Marks are built into Neovim, so they do not use `<leader>m`. Press plain `m`
-followed by a letter to save the current position. Lowercase marks are local to
-one buffer. Uppercase marks work across files and are persisted by ShaDa, which
-makes `A`, `B`, `C` and so on useful as a small project shortlist.
+Marks are named positions built into Neovim. A buffer is an in-memory copy of a
+file; a window is a pane that displays a buffer. Multiple split windows can
+show the same buffer, and a window can switch between buffers. Marks belong to
+buffers or files, not to windows.
+
+Press plain `m` followed by a letter to save the current position. Any
+lowercase letter creates a mark valid only within the current file/buffer: `ma`,
+`mb`, `ms` and so on. It remains available from every window showing that
+buffer, but it cannot jump from another file. Any uppercase letter creates a
+file mark that also remembers the filename: `mA`, `mB`, `mS` and so on. An
+uppercase jump can load another file, and uppercase marks persist through
+ShaDa. For example, set `ma` for a temporary position inside the current file;
+set `mA` when `A` should return to that file from anywhere.
 
 | Action | Keys or command |
 |---|---|
@@ -359,12 +368,39 @@ makes `A`, `B`, `C` and so on useful as a small project shortlist.
 | Jump to the marked line's first nonblank character | `'a` or `'A` |
 | Browse and jump to marks | `<leader>sm` or `:Telescope marks` |
 | List marks without Telescope | `:marks` |
-| Delete marks | `:delmarks a A` |
+| Delete named marks `a` and `A` | `:delmarks a A` |
+| Delete lowercase marks `a` through `z` | `:delmarks a-z` |
+| Delete uppercase and numbered marks | `:delmarks A-Z 0-9` |
+| Delete current-buffer marks except uppercase/numbered marks | `:delmarks!` |
 
 A Harpoon-like flow is: use `mA`, `mB` and `mC` in three frequently used
 places, jump back with `` `A ``, `` `B `` or `` `C ``, and browse them with
 `<leader>sm`. Setting the same uppercase mark elsewhere moves it. Mini Visits
 labels under `<leader>v` remain better for a larger named set of files.
+
+The character after a backtick or single quote is the mark name. A backtick
+jumps to its exact row and column; a single quote jumps to the first nonblank
+character on its line. Thus `` `a `` is exact while `'a` is linewise. For the
+automatic mark named `"`, the exact jump is a backtick followed by a double
+quote: `` `" ``.
+
+Neovim also maintains automatic marks, which is why `<leader>sm` shows entries
+you did not create:
+
+| Mark | Meaning | Exact jump or related action |
+|---|---|---|
+| `"` | Cursor position when the current buffer was last exited | `` `" ``; delete with `:delmarks \"` |
+| `'` | Position before the latest jump | Backtick then `'` for exact position, or `''` for its line; it cannot be deleted |
+| `0` through `9` | Files exited in recent Neovim sessions, loaded from ShaDa | `` `0 `` through `` `9 ``; delete with `:delmarks 0-9` |
+| `.` | Last change | `` `. `` |
+| `^` | Last position where Insert mode stopped | `` `^ `` |
+| `[` and `]` | Start and end of the last changed or yanked text | `` `[ `` and `` `] `` |
+| `<` and `>` | Start and end of the last visual selection | `` `< `` and `` `> `` |
+
+`<leader>sm` browses and jumps but does not delete. Note the mark name, close
+Telescope, then use `:delmarks {name}`. `:delmarks!` also clears the current
+buffer's changelist. Automatic `"` and numbered marks may reappear as Neovim
+records later exits; the previous-jump mark `'` is maintained continuously.
 
 `<leader>m` by itself has no action. It is a which-key prefix whose active
 mapping is `<leader>ma` for the optional Mermaid ASCII preview.
