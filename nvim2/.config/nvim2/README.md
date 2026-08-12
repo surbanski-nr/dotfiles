@@ -358,7 +358,9 @@ buffer, but it cannot jump from another file. Any uppercase letter creates a
 file mark that also remembers the filename: `mA`, `mB`, `mS` and so on. An
 uppercase jump can load another file, and uppercase marks persist through
 ShaDa. For example, set `ma` for a temporary position inside the current file;
-set `mA` when `A` should return to that file from anywhere.
+set `mA` when `A` should return to that file from anywhere. Each buffer can
+have its own lowercase `a`; there is only one global uppercase `A`, and setting
+`mA` elsewhere moves it.
 
 | Action | Keys or command |
 |---|---|
@@ -390,7 +392,7 @@ you did not create:
 | Mark | Meaning | Exact jump or related action |
 |---|---|---|
 | `"` | Cursor position when the current buffer was last exited | `` `" ``; delete with `:delmarks \"` |
-| `'` | Position before the latest jump | Backtick then `'` for exact position, or `''` for its line; it cannot be deleted |
+| `'` | Position before the latest jump | `` `' `` for exact position, or `''` for its line; it cannot be deleted |
 | `0` through `9` | Files exited in recent Neovim sessions, loaded from ShaDa | `` `0 `` through `` `9 ``; delete with `:delmarks 0-9` |
 | `.` | Last change | `` `. `` |
 | `^` | Last position where Insert mode stopped | `` `^ `` |
