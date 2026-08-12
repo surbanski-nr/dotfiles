@@ -152,7 +152,9 @@ hash -r
 Midnight Commander starts with `mc`. Its managed INI contains the daily key
 reference. The Bash profile loads the distribution wrapper when available, so
 F10 returns the shell to MC's final directory; Shift+F10 keeps the directory
-where MC started.
+where MC started. The package manages only `~/.config/mc/ini` and the `surb`
+skin. MC owns mutable `panels.ini` and history files locally; keep them as
+regular files rather than stowing them.
 
 K9s uses the managed `surb` skin under `~/.config/k9s/skins/`, matching Nvim2's
 dark background, white text and green primary accents.

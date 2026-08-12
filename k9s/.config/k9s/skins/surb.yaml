@@ -44,7 +44,7 @@ k9s:
       bgColor: *green
       activeColor: *orange
     status:
-      newColor: *cyan
+      newColor: *foreground
       modifyColor: *purple
       addColor: *green
       pendingColor: *orange
