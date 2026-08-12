@@ -50,6 +50,7 @@ function M.update()
     width = 1,
     height = 1,
     style = 'minimal',
+    border = 'none',
     focusable = false,
     noautocmd = true,
     zindex = 40,

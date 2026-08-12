@@ -339,9 +339,10 @@ return to relative numbers.
 
 The statusline location uses `current/total:column position`, for example
 `47/862:1 5%`. The experimental orange dot at the right edge shows the same
-approximate file position visually. It does not represent the visible viewport
-and hides in Neo-tree, Telescope, quickfix and other non-file buffers. Toggle
-it with `<leader>ts`. To remove the experiment entirely, delete
+approximate file position visually. It has no border and remains within the
+text area above the statusline. It does not represent the visible viewport and
+hides in Neo-tree, Telescope, quickfix and other non-file buffers. Toggle it
+with `<leader>ts`. To remove the experiment entirely, delete
 `lua/custom/plugins/scroll_marker.lua`.
 
 ### Marks and a small Harpoon-like shortlist
