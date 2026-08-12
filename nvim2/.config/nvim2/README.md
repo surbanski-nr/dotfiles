@@ -89,12 +89,12 @@ tooling details are in
 
 ## Transfer to a machine without internet access
 
-Nvim2 is deployed as a versioned platform release containing Neovim, the exact
-dotfiles commit, locked plugins, pinned Mason tools, compiled Treesitter
-parsers, parser revision metadata and queries. Build a separate release for
-each exact target platform and architecture. Use a connected Debian or Ubuntu
-host to run separate Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2 builder
-containers.
+Nvim2 is deployed as a versioned platform release containing Neovim, Node.js,
+ripgrep, the exact dotfiles commit, locked plugins, pinned Mason tools,
+compiled Treesitter parsers, parser revision metadata and queries. Build a
+separate release for each exact target platform and architecture. Use a
+connected Debian or Ubuntu host to run separate Ubuntu 24.04, Ubuntu 26.04 and
+Amazon Linux 2023 builder containers.
 
 The complete connected-builder, offline-installation, upgrade, activation and
 rollback runbook is in
@@ -1176,6 +1176,12 @@ parser list is in `lua/custom/treesitter.lua`.
 synchronizes the configured Treesitter parsers. Do not use
 `:MasonToolsUpdateSync` to choose newer versions: it does not change the pins
 in `lua/custom/lsp.lua` and it does not include the parser synchronization.
+
+Mason runs one installer at a time because the CSS, HTML and JSON entries
+otherwise launch concurrent npm installs of the same underlying package.
+It disables npm's audit request only during this pinned Mason install because
+the request can idle until npm's five-minute network timeout. Normal project
+installs and tool-version review still use npm audit.
 
 The command installs declarations but does not remove old ones. After deleting
 a tool or parser from the configuration, remove the local stale installation

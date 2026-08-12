@@ -61,7 +61,13 @@ end
 
 function M.setup_tools_command()
   vim.api.nvim_create_user_command('Nvim2ToolsInstallSync', function()
-    vim.cmd 'MasonToolsInstallSync'
+    local npm_audit = vim.env.NPM_CONFIG_AUDIT
+    -- npm can idle until its network timeout after Mason finishes downloads.
+    vim.env.NPM_CONFIG_AUDIT = 'false'
+    local ok, err = pcall(vim.cmd, 'MasonToolsInstallSync')
+    vim.env.NPM_CONFIG_AUDIT = npm_audit
+    if not ok then error(err) end
+
     if vim.fn.executable 'tree-sitter' ~= 1 then error 'Mason did not install tree-sitter-cli' end
     maintain_parsers()
   end, { desc = 'Install Mason tools and Treesitter parsers synchronously' })
