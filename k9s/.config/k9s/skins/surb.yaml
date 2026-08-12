@@ -1,0 +1,112 @@
+# Dark skin matching the Nvim2 surb palette.
+foreground: &foreground '#e0e2ea'
+background: &background '#282c34'
+currentLine: &currentLine '#343842'
+muted: &muted '#7b8496'
+green: &green '#8fcf84'
+cyan: &cyan '#6fb8d9'
+orange: &orange '#ff9e64'
+yellow: &yellow '#d3b66f'
+purple: &purple '#c993c9'
+red: &red '#e06c75'
+
+k9s:
+  body:
+    fgColor: *foreground
+    bgColor: *background
+    logoColor: *green
+  prompt:
+    fgColor: *foreground
+    bgColor: *currentLine
+    suggestColor: *green
+  help:
+    fgColor: *foreground
+    bgColor: *background
+    sectionColor: *green
+    keyColor: *cyan
+    numKeyColor: *orange
+  frame:
+    title:
+      fgColor: *green
+      bgColor: *background
+      highlightColor: *orange
+      counterColor: *cyan
+      filterColor: *green
+    border:
+      fgColor: *muted
+      focusColor: *green
+    menu:
+      fgColor: *foreground
+      keyColor: *green
+      numKeyColor: *orange
+    crumbs:
+      fgColor: *background
+      bgColor: *green
+      activeColor: *orange
+    status:
+      newColor: *cyan
+      modifyColor: *purple
+      addColor: *green
+      pendingColor: *orange
+      errorColor: *red
+      highlightColor: *yellow
+      killColor: *red
+      completedColor: *muted
+  info:
+    fgColor: *cyan
+    sectionColor: *foreground
+  views:
+    table:
+      fgColor: *foreground
+      bgColor: *background
+      cursorFgColor: *foreground
+      cursorBgColor: *currentLine
+      markColor: *green
+      header:
+        fgColor: *green
+        bgColor: *background
+        sorterColor: *orange
+    xray:
+      fgColor: *foreground
+      bgColor: *background
+      cursorColor: *currentLine
+      cursorTextColor: *foreground
+      graphicColor: *green
+    charts:
+      bgColor: *background
+      chartBgColor: *background
+      dialBgColor: *background
+      defaultDialColors:
+        - *green
+        - *red
+      defaultChartColors:
+        - *green
+        - *cyan
+      resourceColors:
+        cpu:
+          - *green
+          - *orange
+        mem:
+          - *cyan
+          - *purple
+    yaml:
+      keyColor: *cyan
+      valueColor: *foreground
+      colonColor: *muted
+    logs:
+      fgColor: *foreground
+      bgColor: *background
+      indicator:
+        fgColor: *foreground
+        bgColor: *currentLine
+        toggleOnColor: *green
+        toggleOffColor: *muted
+  dialog:
+    fgColor: *foreground
+    bgColor: *currentLine
+    buttonFgColor: *background
+    buttonBgColor: *green
+    buttonFocusFgColor: *background
+    buttonFocusBgColor: *orange
+    labelFgColor: *green
+    fieldFgColor: *foreground

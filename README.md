@@ -154,6 +154,9 @@ reference. The Bash profile loads the distribution wrapper when available, so
 F10 returns the shell to MC's final directory; Shift+F10 keeps the directory
 where MC started.
 
+K9s uses the managed `surb` skin under `~/.config/k9s/skins/`, matching Nvim2's
+dark background, white text and green primary accents.
+
 The normal setup does not install `old-nvim`. It is an unsupported archive of
 the previous NvChad profile.
 
