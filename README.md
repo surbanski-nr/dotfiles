@@ -1,8 +1,8 @@
 # Dotfiles
 
-Configuration for my Bash, Git, tmux, Nvim2, Oh My Posh, k9s and Codex. The
-supported targets are WSL Ubuntu, regular Ubuntu, Amazon Linux 2023 and Rocky
-Linux.
+Configuration for my Bash, Git, tmux, Nvim2, Midnight Commander, Oh My Posh,
+k9s and Codex. The supported targets are WSL Ubuntu, regular Ubuntu, Amazon
+Linux 2023 and Rocky Linux.
 
 Prefer the distribution package manager for system tools. Use asdf on
 connected machines when a project needs an exact Python, Node.js, Kubernetes
@@ -30,9 +30,9 @@ for file in .bashrc .bash_profile .bash_aliases .gitconfig .tmux.conf; do
 done
 ```
 
-Also back up existing `~/.config/nvim2`, `~/.config/k9s`,
-`~/.oh-my-posh.omp.json` and `~/.codex/AGENTS.md` when they are regular files
-or belong to another dotfiles repository.
+Also back up existing `~/.config/nvim2`, `~/.config/k9s`, `~/.config/mc/ini`,
+`~/.oh-my-posh.omp.json` and `~/.codex/AGENTS.md` when they are regular files or
+belong to another dotfiles repository.
 
 ### 2. Install operating-system packages
 
@@ -137,9 +137,9 @@ git clone git@github.com:surbanski-nr/dotfiles.git "$GH_REPOS/dotfiles"
 
 cd "$GH_REPOS/dotfiles"
 ./bstow --dry-run -v -t "$HOME" stow \
-  git tmux bash oh-my-posh k9s nvim2 gnupg codex
+  git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
 ./bstow -v -t "$HOME" stow \
-  git tmux bash oh-my-posh k9s nvim2 gnupg codex
+  git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
 
 # Ubuntu desktop only:
 ./bstow --dry-run -v -t "$HOME" stow kitty
@@ -148,6 +148,11 @@ cd "$GH_REPOS/dotfiles"
 source "$HOME/.bashrc"
 hash -r
 ```
+
+Midnight Commander starts with `mc`. Its managed INI contains the daily key
+reference. The Bash profile loads the distribution wrapper when available, so
+F10 returns the shell to MC's final directory; Shift+F10 keeps the directory
+where MC started.
 
 The normal setup does not install `old-nvim`. It is an unsupported archive of
 the previous NvChad profile.

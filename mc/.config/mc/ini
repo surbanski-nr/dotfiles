@@ -1,0 +1,93 @@
+# Midnight Commander quick reference:
+# Tab: switch panels; arrows: move; Enter/Right: open; Left: parent directory.
+# F3: view; F4: edit with $EDITOR (Nvim2); F5: copy; F6: move/rename.
+# F7: create directory; F8: delete; F9: menus; F10: quit in current directory.
+# Shift+F10: quit but keep the shell's original directory when using the wrapper.
+# If function keys do not work, press Esc then 1..9 or 0 for F1..F10.
+# Insert or Ctrl+t: tag one item; +: tag by glob; \: untag by glob.
+# Operations act on all tagged items; otherwise they act on the highlighted item.
+# Ctrl+s or Alt+s: quick filename search; repeat Ctrl+s for the next match.
+# Alt+?: find files recursively, optionally by content; Panelize keeps the results.
+# Ctrl+\: directory hotlist; Ctrl+x then h: add the current directory to it.
+# Alt+c: quick cd; Alt+i: copy this panel's directory to the other panel.
+# Alt+o: open the highlighted directory in the other panel; Alt+,: change split.
+# Ctrl+u: swap panels; Ctrl+x then q: preview in the other panel.
+# Alt+.: toggle dotfiles; Alt+Shift+h: directory history; Ctrl+r: refresh.
+# Alt+t: cycle listing formats; Ctrl+o: toggle panels and shell output.
+# Type a shell command directly; Alt+Enter inserts the highlighted filename.
+# Ctrl+Shift+Enter inserts its full path; Alt+Tab completes commands and paths.
+# Enter opens archives as directories. F3 views files without launching an editor.
+# F1 opens full help. The bottom keybar always shows the current F-key actions.
+
+[Midnight-Commander]
+# Keep comments and reviewed settings stable. Use this file for permanent changes.
+auto_save_setup=false
+skin=surb
+
+# View quickly inside MC, but edit through $EDITOR, which Bash sets to Nvim2.
+use_internal_view=true
+use_internal_edit=false
+
+# Confirm destructive or replacing operations, but do not prompt merely to exit.
+confirm_delete=true
+confirm_overwrite=true
+confirm_exit=false
+
+# Accurate progress for directory operations is worth the small initial scan.
+verbose=true
+file_op_compute_totals=true
+
+# Scroll the internal viewer by lines and remember where each file was left.
+mouse_move_pages_viewer=false
+mcview_remember_file_position=true
+
+# A single Escape cancels after the standard one-second Meta-key timeout.
+old_esc_mode=true
+old_esc_mode_timeout=1000000
+
+# Preserve permissions and timestamps when the destination supports them.
+copymove_persistent_attr=true
+shell_patterns=true
+use_file_to_guess_type=true
+clear_before_exec=true
+pause_after_run=1
+
+[Layout]
+# Keep the UI self-explanatory while learning MC.
+menubar_visible=true
+keybar_visible=true
+message_visible=true
+command_prompt=true
+free_space=true
+xterm_title=true
+horizontal_split=false
+vertical_equal=true
+
+[Panels]
+# Dotfiles matter in development; editor backup files ending in ~ usually do not.
+show_dot_files=true
+show_backups=false
+show_mini_info=true
+mix_all_files=false
+filetype_mode=true
+permission_mode=false
+
+# Match Nvim2's calmer navigation instead of jumping half a panel at a time.
+navigate_with_arrows=true
+panel_scroll_pages=false
+panel_scroll_center=true
+mouse_move_pages=false
+mark_moves_down=true
+reverse_files_only=true
+auto_save_setup_panels=false
+
+[Misc]
+display_codepage=UTF-8
+source_codepage=Other_8_bit
+timeformat_recent=%b %e %H:%M
+timeformat_old=%b %e  %Y
+
+[Panelize]
+# F9, Command, External panelize turns command output into an actionable panel.
+Modified Git files=git ls-files --modified
+Untracked Git files=git ls-files --others --exclude-standard
