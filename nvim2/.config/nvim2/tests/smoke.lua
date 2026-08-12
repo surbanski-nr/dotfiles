@@ -41,6 +41,34 @@ local function run()
   assert_delete_preserves_yank('dd', 'alpha beta', 0, '')
 
   vim.cmd.enew()
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'linewise yank' })
+  vim.api.nvim_feedkeys('yy', 'xt', false)
+  assert(vim.fn.getreg '1' == 'linewise yank\n', 'linewise yank was not added to yank history')
+  assert(vim.fn.getregtype '1' == 'V', 'yank history did not preserve linewise register type')
+
+  vim.fn.setreg('1', 'first', 'v')
+  vim.fn.setreg('2', { 'second' }, 'V')
+  vim.fn.setreg('3', 'third', 'v')
+  vim.cmd.enew()
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'anchor' })
+  local yank_target = vim.api.nvim_get_current_buf()
+  require('custom.telescope').yank_history { default_text = 'second' }
+  assert(vim.wait(2000, function() return vim.bo.filetype == 'TelescopePrompt' end), 'yank-history Telescope picker did not open')
+  local yank_prompt = vim.api.nvim_get_current_buf()
+  assert(
+    vim.wait(2000, function() return type(require('telescope.actions.state').get_current_picker(yank_prompt).manager) == 'table' end),
+    'yank-history Telescope results did not become ready'
+  )
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'xt', false)
+  assert(vim.wait(2000, function() return vim.api.nvim_get_current_buf() == yank_target end), 'yank-history Telescope picker did not close')
+  assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), { 'anchor' }), 'selecting yank history changed the buffer')
+  assert(vim.fn.getreg '1' == 'second\n' and vim.fn.getregtype '1' == 'V', 'selected yank was not promoted with its register type')
+  assert(vim.fn.getreg '2' == 'first' and vim.fn.getreg '3' == 'third', 'promoting a yank did not preserve history order')
+  vim.api.nvim_feedkeys('p', 'xt', false)
+  assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), { 'anchor', 'second' }), 'plain p did not paste the promoted yank')
+  assert(type(vim.fn.maparg('<leader>sy', 'n', false, true).callback) == 'function', 'yank-history mapping is unavailable')
+
+  vim.cmd.enew()
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'replace' })
   vim.fn.setreg('"', 'saved yank', 'v')
   vim.api.nvim_feedkeys('viwP', 'xt', false)

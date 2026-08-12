@@ -385,6 +385,7 @@ mapping is `<leader>ma` for the optional Mermaid ASCII preview.
 | Toggle indentation guides | `<leader>ti` or `:IBLToggle` |
 | Add an empty line below or above | `]<Space>`, `[<Space>` |
 | Show registers | `:registers` |
+| Browse and promote yank history | `<leader>sy`, select, then `p` or `P` |
 | Paste latest explicit yank | `"0p` |
 | Paste from numbered yank ring | `"1p` through `"9p` |
 | Delete a selection without changing any register | Select text, then `"_d` |
@@ -407,8 +408,12 @@ register for the next operation:
   maps normal `d`, `D` and `dd` to it automatically. Use visual `"_d` when
   deleting a selection that should not replace text waiting to be pasted.
 
-Use `:registers 0 1 2 3 4 5 6 7 8 9` to inspect the yank history, or
-`:registers` to inspect every register.
+Use `<leader>sy` to browse the yank history in Telescope. Select an entry and
+press `<Enter>` to move it to register `1` and make it the active value for
+`p` or `P`. Selection does not paste or otherwise change the buffer. The other
+entries retain their relative order. Use `:registers 0 1 2 3 4 5 6 7 8 9` to
+inspect the history without changing its order, or `:registers` to inspect
+every register.
 
 This profile changes register behavior:
 
@@ -545,6 +550,7 @@ clipboard. Inside tmux, use `Ctrl+a` then `[`, select with `v`, and copy with
 | Search help | `<leader>sh` |
 | Search mappings | `<leader>sk` |
 | Search commands | `<leader>sc` |
+| Browse and promote yank history | `<leader>sy`, select, then `p` or `P` |
 | List Telescope pickers | `<leader>ss` |
 | Resume last picker | `<leader>sr` |
 | Search this Neovim configuration | `<leader>sn` |
