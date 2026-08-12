@@ -119,6 +119,15 @@ if [ -f ~/.bash_aliases ]; then
   . ~/.bash_aliases
 fi
 
+# Use MC's shell wrapper when packaged so F10 returns to its final directory.
+for mc_profile in /usr/lib/mc/mc.sh /usr/libexec/mc/mc.sh; do
+  if [ -r "$mc_profile" ]; then
+    . "$mc_profile"
+    break
+  fi
+done
+unset mc_profile
+
 # enable programmable completion features (you don't need to enable
 # this, if it's already enabled in /etc/bash.bashrc and /etc/profile
 # sources /etc/bash.bashrc).
