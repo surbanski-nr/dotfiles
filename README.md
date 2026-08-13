@@ -44,7 +44,7 @@ sudo apt install -y \
   git curl wget ca-certificates openssh-client tar gzip unzip xz-utils coreutils \
   gcc g++ make \
   python3 python3-venv python3-pip nodejs npm \
-  ripgrep fd-find iproute2 xclip \
+  ripgrep fd-find iproute2 xclip less \
   tmux dos2unix fzf bat zoxide htop tree mc \
   gnupg
 ```
@@ -57,7 +57,7 @@ sudo dnf install -y \
   git curl wget ca-certificates openssh-clients tar gzip unzip xz coreutils \
   gcc gcc-c++ make \
   python3 python3-pip nodejs npm \
-  ripgrep fd-find iproute xclip \
+  ripgrep fd-find iproute xclip less \
   tmux dos2unix fzf bat zoxide htop tree mc \
   gnupg2
 ```
@@ -71,7 +71,7 @@ sudo dnf install -y \
   gcc gcc-c++ make \
   python3.12 python3.12-pip \
   cargo clang-devel \
-  iproute tmux dos2unix htop tree mc \
+  iproute tmux dos2unix htop tree mc less \
   findutils which patch
 ```
 
@@ -157,7 +157,10 @@ skin. MC owns mutable `panels.ini` and history files locally; keep them as
 regular files rather than stowing them.
 
 K9s uses the managed `surb` skin under `~/.config/k9s/skins/`, matching Nvim2's
-dark background, white text and green primary accents.
+dark background, white text and green primary accents. In the pod view,
+`Ctrl+l` follows all containers with prefixed lines and `Shift+l` opens their
+complete retained logs in `less`. `Shift+e` watches events for the selected
+resource. The log plugins intentionally do not set `--tail`.
 
 The normal setup does not install `old-nvim`. It is an unsupported archive of
 the previous NvChad profile.

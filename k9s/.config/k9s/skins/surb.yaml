@@ -14,7 +14,7 @@ k9s:
   body:
     fgColor: *foreground
     bgColor: *background
-    logoColor: *green
+    logoColor: *cyan
   prompt:
     fgColor: *foreground
     bgColor: *currentLine
