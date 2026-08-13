@@ -553,19 +553,25 @@ Continuum is required. Amazon Linux 2023 supplies a compatible tmux package.
 `--dry-run` previews planned actions without changing the filesystem. `-n` is
 the short form; `-v` only adds diagnostic detail.
 
-`bstow` accepts relative and absolute links when they resolve to the expected
-package file. It never replaces regular files or foreign symlinks unless a
-foreign symlink is explicitly adopted with `--force`. Inspect both paths first:
+`bstow` accepts relative and absolute target links when they resolve to the
+expected package file. It never replaces regular target files or foreign target
+links unless a foreign link is explicitly adopted with `--force`. Inspect both
+paths first:
 
 ```bash
 ./bstow --dry-run --force -t "$HOME" stow bash
 ./bstow --force -t "$HOME" stow bash
 ```
 
-When a parent directory is a link to the same package in another clone, a
-forced stow replaces that directory link with a real directory containing
-per-file links to the selected clone. Files in the previous clone are not
-modified. Preview the operation first as shown above.
+`bstow` intentionally manages regular package files as individual links. It
+ignores symlinks and empty directories stored inside packages, so it implements
+a smaller interface than GNU Stow.
+
+When a parent directory links to the selected package, stow normalizes it to a
+real directory containing per-file links. A link to the same package in another
+clone requires `--force`. Paths found only in the previous clone disappear from
+the target view, but files in that clone are not modified. Preview the operation
+first as shown above.
 
 After pulling deletions or renames, use `restow` to remove obsolete links and
 create the current set:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bstow - GNU Stow clone in pure Bash
+# bstow - per-file dotfiles linker in pure Bash
 # Usage: bstow [stow|unstow|restow] package1 package2 ...
 
 set -euo pipefail
@@ -11,6 +11,7 @@ VERBOSE="${VERBOSE:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 FORCE="${FORCE:-0}"
 STATE_DIR="${BSTOW_STATE_DIR:-}"
+declare -A PREVIEWED_PARENT_SYMLINKS=()
 
 # Colors
 RED='\033[0;31m'
@@ -100,32 +101,53 @@ parent_symlink_matches_package() {
     [[ $resolved_parent == */"$package_name"/"$rel_parent" ]]
 }
 
-unfold_parent_symlink() {
+validate_parent_symlink() {
     local src="$1"
     local dest="$2"
-    local parent_link
+    local parent_symlink
+    local resolved_dest
+    local resolved_src
 
-    if ! parent_link="$(find_parent_symlink "$dest")"; then
+    if ! parent_symlink="$(find_parent_symlink "$dest")"; then
         return 0
     fi
-    if [[ $(realpath -m -- "$dest") != "$(realpath -m -- "$src")" && $FORCE -ne 1 ]]; then
-        error "Parent directory is a foreign symlink: $parent_link -> $(readlink -- "$parent_link")"
+    resolved_dest="$(realpath -m -- "$dest")"
+    resolved_src="$(realpath -m -- "$src")"
+    if [[ $resolved_dest == "$resolved_src" ]]; then
+        printf '%s\n' "$parent_symlink"
+        return 0
+    fi
+    if [[ $FORCE -ne 1 ]]; then
+        error "Parent directory is a foreign symlink: $parent_symlink -> $(readlink -- "$parent_symlink")"
         error "Use --force only if bstow should replace that symlink"
         return 1
     fi
-    if [[ $(realpath -m -- "$dest") != "$(realpath -m -- "$src")" ]] && ! parent_symlink_matches_package "$src" "$dest" "$parent_link"; then
-        error "Refusing to replace parent symlink outside a matching package tree: $parent_link"
+    if ! parent_symlink_matches_package "$src" "$dest" "$parent_symlink"; then
+        error "Refusing to replace parent symlink outside a matching package tree: $parent_symlink"
         return 1
     fi
+    printf '%s\n' "$parent_symlink"
+}
+
+unfold_parent_symlink() {
+    local src="$1"
+    local dest="$2"
+    local parent_symlink
+
+    parent_symlink="$(validate_parent_symlink "$src" "$dest")" || return 1
+    [[ -n $parent_symlink ]] || return 0
 
     if [[ $DRY_RUN -eq 1 ]]; then
-        preview "Would replace directory symlink: $parent_link -> $(readlink -- "$parent_link") with a real directory"
+        if [[ ! -v PREVIEWED_PARENT_SYMLINKS[$parent_symlink] ]]; then
+            preview "Would replace directory symlink: $parent_symlink -> $(readlink -- "$parent_symlink") with a real directory"
+            PREVIEWED_PARENT_SYMLINKS[$parent_symlink]=1
+        fi
         return 0
     fi
 
-    warn "Replacing directory symlink: $parent_link -> $(readlink -- "$parent_link")"
-    unlink "$parent_link"
-    mkdir -p "$parent_link"
+    warn "Replacing directory symlink: $parent_symlink -> $(readlink -- "$parent_symlink")"
+    unlink "$parent_symlink"
+    mkdir -p "$parent_symlink"
 }
 
 common_directory() {
@@ -339,24 +361,10 @@ remove_package_state() {
 validate_destination() {
     local src="$1"
     local dest="$2"
-    local parent_link
+    local parent_symlink
 
-    if parent_link="$(find_parent_symlink "$dest")"; then
-        if [[ $(realpath -m -- "$dest") == "$(realpath -m -- "$src")" ]]; then
-            return 0
-        fi
-        if [[ $FORCE -eq 1 ]] && parent_symlink_matches_package "$src" "$dest" "$parent_link"; then
-            return 0
-        fi
-        if [[ $FORCE -eq 1 ]]; then
-            error "Refusing to replace parent symlink outside a matching package tree: $parent_link"
-            return 1
-        fi
-
-        error "Parent directory is a foreign symlink: $parent_link -> $(readlink -- "$parent_link")"
-        error "Use --force only if bstow should replace that symlink"
-        return 1
-    fi
+    parent_symlink="$(validate_parent_symlink "$src" "$dest")" || return 1
+    [[ -z $parent_symlink ]] || return 0
 
     if [[ ! -e $dest && ! -L $dest ]]; then
         return 0
@@ -645,7 +653,8 @@ show_help() {
     cat <<EOF
 Usage: bstow [OPTIONS] COMMAND PACKAGES...
 
-A simple GNU Stow clone in pure Bash.
+A per-file dotfiles linker in pure Bash. Package symlinks and empty directories
+are ignored.
 
 COMMANDS:
     stow        Create symlinks for packages
