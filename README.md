@@ -147,7 +147,13 @@ cd "$GH_REPOS/dotfiles"
 
 source "$HOME/.bashrc"
 hash -r
+dotfiles-check
 ```
+
+`dotfiles-check` returns nonzero when a required command is missing and reports
+optional integrations without making them shell-startup errors. A configured
+integration that is installed but fails to initialize produces one concise
+`dotfiles:` warning when the shell starts.
 
 Midnight Commander starts with `mc`. Its managed INI contains the daily key
 reference. The Bash profile loads the distribution wrapper when available, so
@@ -159,8 +165,9 @@ regular files rather than stowing them.
 K9s uses the managed `surb` skin under `~/.config/k9s/skins/`, matching Nvim2's
 dark background, white text and green primary accents. In the pod view,
 `Ctrl+l` follows all containers with prefixed lines and `Shift+l` opens their
-complete retained logs in `less`. `Shift+e` watches events for the selected
-resource. The log plugins intentionally do not set `--tail`.
+complete retained logs in `less`. `Shift+e` follows events for the selected
+resource in `less`; press `Ctrl+c` to pause and browse, then `q` to return to
+K9s. The log plugins intentionally do not set `--tail`.
 
 The normal setup does not install `old-nvim`. It is an unsupported archive of
 the previous NvChad profile.
@@ -464,10 +471,12 @@ reviewed installation in step 6.
 ```bash
 mkdir -p "$HOME/bin"
 curl -s https://ohmyposh.dev/install.sh | bash -s -- -d "$HOME/bin"
+oh-my-posh disable notice
 ```
 
 The installer needs `curl`, `unzip`, `realpath` and `dirname`. The last two are
-usually supplied by `coreutils`.
+usually supplied by `coreutils`. The final command disables automatic upgrade
+notices; upgrades remain an explicit maintenance action.
 
 ### zoxide
 
@@ -598,6 +607,31 @@ Run the regression suite after changing `bstow`:
 ```bash
 timeout 60s bash tests/bstow_test.sh
 ```
+
+### Bash checks
+
+Normal startup is quiet when optional tools are absent. Run the explicit check
+after provisioning a VM or changing `PATH`:
+
+```bash
+dotfiles-check
+```
+
+Run the Bash regression test and static checks after changing the startup
+files or aliases:
+
+```bash
+timeout 60s bash tests/bash_test.sh
+bash -n bash/.bashrc bash/.bash_profile bash/.bash_aliases
+shellcheck --shell=bash --external-sources \
+  -e SC1090,SC1091 bash/.bashrc bash/.bash_profile bash/.bash_aliases
+```
+
+The interactive shell keeps a bounded 100,000-entry shared history. It appends
+the current command and reads only commands newly written by other shells.
+`set -o pipefail` preserves failures in pipelines, `histverify` makes expanded
+history editable before execution, and `checkjobs` warns before exiting with
+active jobs. Three consecutive `Ctrl+d` presses are required to exit.
 
 ### Codex agent instructions
 

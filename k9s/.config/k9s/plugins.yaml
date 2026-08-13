@@ -44,7 +44,7 @@ plugins:
       - $KUBECONFIG
   watch-events:
     shortCut: Shift-E
-    description: watch events
+    description: "events|less +F"
     scopes:
       - all
     command: bash
@@ -69,7 +69,7 @@ plugins:
           '' | - | '*' | all) command+=(--all-namespaces) ;;
           *) command+=(--namespace "$namespace") ;;
         esac
-        exec "${command[@]}" --for "$resource/$name" --watch
+        "${command[@]}" --for "$resource/$name" --watch | less +F
       - dummy-arg
       - $NAMESPACE
       - $RESOURCE_NAME
