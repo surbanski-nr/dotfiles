@@ -191,6 +191,7 @@ assert_link_target "$target_dir/.config/one/current" "$alternate_stow_dir/branch
 
 mkdir -p "$stow_dir/folded/.config/folded/skins" "$alternate_stow_dir/folded/.config/folded/skins" "$target_dir/.config/folded"
 printf 'old\n' > "$stow_dir/folded/.config/folded/skins/theme.yaml"
+printf 'old only\n' > "$stow_dir/folded/.config/folded/skins/old-only.yaml"
 printf 'new\n' > "$alternate_stow_dir/folded/.config/folded/skins/theme.yaml"
 printf 'added\n' > "$alternate_stow_dir/folded/.config/folded/skins/added.yaml"
 folded_dir=$target_dir/.config/folded/skins
@@ -203,6 +204,8 @@ assert_link_target "$folded_dir" "$stow_dir/folded/.config/folded/skins"
 run_bstow --dry-run --force --dir "$alternate_stow_dir" --target "$target_dir" restow folded
 [[ $BSTOW_STATUS -eq 0 ]] || fail 'forced dry-run rejected a foreign parent-directory symlink'
 assert_contains "$BSTOW_OUTPUT" "Would replace directory symlink: $folded_dir"
+replacement_count=$(grep -Fc "Would replace directory symlink: $folded_dir" <<< "$BSTOW_OUTPUT")
+[[ $replacement_count -eq 1 ]] || fail "forced dry-run reported the same directory replacement $replacement_count times"
 assert_link_target "$folded_dir" "$stow_dir/folded/.config/folded/skins"
 
 run_bstow --force --dir "$alternate_stow_dir" --target "$target_dir" restow folded
@@ -211,6 +214,17 @@ run_bstow --force --dir "$alternate_stow_dir" --target "$target_dir" restow fold
 assert_link_target "$folded_dir/theme.yaml" "$alternate_stow_dir/folded/.config/folded/skins/theme.yaml"
 assert_link_target "$folded_dir/added.yaml" "$alternate_stow_dir/folded/.config/folded/skins/added.yaml"
 [[ $(<"$stow_dir/folded/.config/folded/skins/theme.yaml") == 'old' ]] || fail 'forced restow modified the previous package source'
+[[ ! -e $folded_dir/old-only.yaml && ! -L $folded_dir/old-only.yaml ]] || fail 'forced restow retained a path that exists only in the previous package source'
+[[ $(<"$stow_dir/folded/.config/folded/skins/old-only.yaml") == 'old only' ]] || fail 'forced restow modified an old-only source file'
+
+mkdir -p "$alternate_stow_dir/same/.config/same/skins" "$target_dir/.config/same"
+printf 'current\n' > "$alternate_stow_dir/same/.config/same/skins/theme.yaml"
+same_dir=$target_dir/.config/same/skins
+ln -s "$alternate_stow_dir/same/.config/same/skins" "$same_dir"
+run_bstow --dir "$alternate_stow_dir" --target "$target_dir" stow same
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'stow rejected a parent-directory symlink to the current package source'
+[[ -d $same_dir && ! -L $same_dir ]] || fail 'stow did not unfold a current-source directory symlink'
+assert_link_target "$same_dir/theme.yaml" "$alternate_stow_dir/same/.config/same/skins/theme.yaml"
 
 mkdir -p "$alternate_stow_dir/unsafe/.config/unsafe" "$test_root/shared-config"
 touch "$alternate_stow_dir/unsafe/.config/unsafe/settings.yaml" "$test_root/shared-config/settings.yaml"
