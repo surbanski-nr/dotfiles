@@ -9,35 +9,96 @@ case $- in
 *) return ;;
 esac
 
-PROMPT_COMMAND='history -a; history -r'
+_dotfiles_warn() {
+  printf 'dotfiles: %s\n' "$*" >&2
+}
 
-# for setting history length
-HISTSIZE=-1
-HISTFILESIZE=-1
-HISTFILE=~/.histfile
+_dotfiles_eval_init() {
+  local integration=$1
+  local init
+  shift
+
+  if ! init=$("$@" 2>/dev/null); then
+    _dotfiles_warn "$integration initialization failed"
+    return 1
+  fi
+  if ! eval "$init" 2>/dev/null; then
+    _dotfiles_warn "$integration returned invalid shell initialization"
+    return 1
+  fi
+}
+
+_dotfiles_history_sync() {
+  history -a
+  history -n
+}
+
+_dotfiles_install_prompt_command() {
+  local duplicate entry existing
+  local -a current=() normalized=()
+
+  if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a'* ]]; then
+    current=("${PROMPT_COMMAND[@]}")
+  elif [[ -n ${PROMPT_COMMAND:-} ]]; then
+    current=("$PROMPT_COMMAND")
+  fi
+
+  for entry in "${current[@]}"; do
+    case $entry in
+    'history -a; history -r' | 'history -a; history -n' | '_dotfiles_history_sync')
+      continue
+      ;;
+    *';history -a; history -r') entry=${entry%';history -a; history -r'} ;;
+    *'; history -a; history -r') entry=${entry%'; history -a; history -r'} ;;
+    *';history -a; history -n') entry=${entry%';history -a; history -n'} ;;
+    *'; history -a; history -n') entry=${entry%'; history -a; history -n'} ;;
+    esac
+    entry=${entry%;}
+    [[ -n $entry ]] || continue
+
+    duplicate=false
+    for existing in "${normalized[@]}"; do
+      if [[ $existing == "$entry" ]]; then
+        duplicate=true
+        break
+      fi
+    done
+    $duplicate || normalized+=("$entry")
+  done
+
+  normalized+=('_dotfiles_history_sync')
+  PROMPT_COMMAND=("${normalized[@]}")
+}
+
+# Keep a large bounded history and share new commands between open shells.
+HISTSIZE=100000
+HISTFILESIZE=100000
+HISTFILE="$HOME/.histfile"
+HISTTIMEFORMAT='%F %T '
 
 # don't put duplicate lines or lines starting with space in the history.
 # See bash(1) for more options
 HISTCONTROL=ignoreboth:erasedups
 
-# append to the history file, don't overwrite it
-shopt -s histappend
+# Append history, verify history expansion, warn about active jobs on exit, and
+# keep terminal dimensions current.
+shopt -s histappend histverify checkjobs checkwinsize
 
-# check the window size after each command and, if necessary,
-# update the values of LINES and COLUMNS.
-shopt -s checkwinsize
+# Preserve failures from the left side of pipelines used by shell helpers.
+set -o pipefail
 
-# prevent sending end-of-file (EOF) on Ctrl-D
-# This is useful to prevent accidentally exiting the shell
+# Require three consecutive Ctrl-D presses before exiting the shell.
 set -o ignoreeof
-export IGNOREEOF=10000
+export IGNOREEOF=3
 
 # If set, the pattern "**" used in a pathname expansion context will
 # match all files and zero or more directories and subdirectories.
 #shopt -s globstar
 
-# make less more friendly for non-text input files, see lesspipe(1)
-[ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
+# Make less more friendly for non-text input files when the integration works.
+if [ -x /usr/bin/lesspipe ]; then
+  _dotfiles_eval_init lesspipe env SHELL=/bin/sh /usr/bin/lesspipe || true
+fi
 
 # set variable identifying the chroot you work in (used in the prompt below)
 if [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then
@@ -84,9 +145,9 @@ esac
 # enable color support of ls and also add handy aliases
 if [ -x /usr/bin/dircolors ]; then
   if [ -r ~/.dircolors ]; then
-    eval "$(dircolors -b ~/.dircolors)"
+    _dotfiles_eval_init dircolors dircolors -b ~/.dircolors || true
   else
-    eval "$(dircolors -b)"
+    _dotfiles_eval_init dircolors dircolors -b || true
   fi
   alias ls='ls --color=auto'
   #alias dir='dir --color=auto'
@@ -116,13 +177,17 @@ fi
 # See /usr/share/doc/bash-doc/examples in the bash-doc package.
 
 if [ -f ~/.bash_aliases ]; then
-  . ~/.bash_aliases
+  if ! . ~/.bash_aliases 2>/dev/null; then
+    _dotfiles_warn 'failed to load ~/.bash_aliases'
+  fi
 fi
 
 # Use MC's shell wrapper when packaged so F10 returns to its final directory.
 for mc_profile in /usr/lib/mc/mc.sh /usr/libexec/mc/mc.sh; do
   if [ -r "$mc_profile" ]; then
-    . "$mc_profile"
+    if ! . "$mc_profile" 2>/dev/null; then
+      _dotfiles_warn "failed to load Midnight Commander wrapper: $mc_profile"
+    fi
     break
   fi
 done
@@ -133,9 +198,13 @@ unset mc_profile
 # sources /etc/bash.bashrc).
 if ! shopt -oq posix; then
   if [ -f /usr/share/bash-completion/bash_completion ]; then
-    . /usr/share/bash-completion/bash_completion
+    if ! . /usr/share/bash-completion/bash_completion 2>/dev/null; then
+      _dotfiles_warn 'failed to load bash completion'
+    fi
   elif [ -f /etc/bash_completion ]; then
-    . /etc/bash_completion
+    if ! . /etc/bash_completion 2>/dev/null; then
+      _dotfiles_warn 'failed to load bash completion'
+    fi
   fi
 fi
 
@@ -160,15 +229,22 @@ add_to_path "$HOME/homebrew/sbin"
 add_to_path "/home/linuxbrew/.linuxbrew/bin"
 add_to_path "/home/linuxbrew/.linuxbrew/sbin"
 
-if type brew &>/dev/null; then
-  HOMEBREW_PREFIX="$(brew --prefix)"
-  eval "$("${HOMEBREW_PREFIX}"/bin/brew shellenv)"
-  if [[ -r "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh" ]]; then
-    source "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh"
+if command -v brew >/dev/null 2>&1; then
+  if HOMEBREW_PREFIX=$(brew --prefix 2>/dev/null); then
+    _dotfiles_eval_init Homebrew "${HOMEBREW_PREFIX}/bin/brew" shellenv || true
+    if [[ -r "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh" ]]; then
+      if ! source "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh" 2>/dev/null; then
+        _dotfiles_warn 'failed to load Homebrew completion'
+      fi
+    else
+      for COMPLETION in "${HOMEBREW_PREFIX}/etc/bash_completion.d/"*; do
+        if [[ -r ${COMPLETION} ]] && ! source "${COMPLETION}" 2>/dev/null; then
+          _dotfiles_warn "failed to load Homebrew completion: $COMPLETION"
+        fi
+      done
+    fi
   else
-    for COMPLETION in "${HOMEBREW_PREFIX}/etc/bash_completion.d/"*; do
-      [[ -r "${COMPLETION}" ]] && source "${COMPLETION}"
-    done
+    _dotfiles_warn 'Homebrew is installed but brew --prefix failed'
   fi
 fi
 
@@ -205,31 +281,52 @@ fi
 # fzf key bindings (prefer distro packages, fallback to user install if compatible)
 if command -v fzf >/dev/null 2>&1; then
   if [ -r /usr/share/doc/fzf/examples/key-bindings.bash ]; then
-    source /usr/share/doc/fzf/examples/key-bindings.bash
+    if ! source /usr/share/doc/fzf/examples/key-bindings.bash 2>/dev/null; then
+      _dotfiles_warn 'failed to load fzf key bindings'
+    fi
   elif [ -r /usr/share/fzf/shell/key-bindings.bash ]; then
-    source /usr/share/fzf/shell/key-bindings.bash
+    if ! source /usr/share/fzf/shell/key-bindings.bash 2>/dev/null; then
+      _dotfiles_warn 'failed to load fzf key bindings'
+    fi
   elif [ -r ~/.fzf.bash ]; then
     if fzf --bash >/dev/null 2>&1; then
-      source ~/.fzf.bash
+      if ! source ~/.fzf.bash 2>/dev/null; then
+        _dotfiles_warn 'failed to load ~/.fzf.bash'
+      fi
     elif ! grep -q "fzf --bash" ~/.fzf.bash 2>/dev/null; then
-      source ~/.fzf.bash
+      if ! source ~/.fzf.bash 2>/dev/null; then
+        _dotfiles_warn 'failed to load ~/.fzf.bash'
+      fi
     fi
   fi
 fi
 
-if command -v zoxide >/dev/null 2>&1; then
-  eval "$(zoxide init bash)"
+if command -v zoxide >/dev/null 2>&1 && ! declare -F __zoxide_hook >/dev/null; then
+  _dotfiles_eval_init zoxide zoxide init bash || true
 fi
 
 if command -v kubectl >/dev/null 2>&1; then
   if ! declare -F __start_kubectl >/dev/null; then
-    source <(kubectl completion bash)
+    if kubectl_completion=$(kubectl completion bash 2>/dev/null); then
+      if ! eval "$kubectl_completion" 2>/dev/null; then
+        _dotfiles_warn 'kubectl returned invalid Bash completion'
+      fi
+    else
+      _dotfiles_warn 'kubectl completion generation failed'
+    fi
   fi
-  complete -F __start_kubectl k
+  if declare -F __start_kubectl >/dev/null && ! complete -F __start_kubectl k; then
+    _dotfiles_warn 'failed to register kubectl completion for k'
+  fi
+  unset kubectl_completion
 fi
 
-if command -v oh-my-posh >/dev/null 2>&1; then
-  eval "$(oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json")"
+if command -v oh-my-posh >/dev/null 2>&1 && ! declare -F _omp_hook >/dev/null; then
+  if [[ -r $HOME/.oh-my-posh.omp.json ]]; then
+    _dotfiles_eval_init 'Oh My Posh' oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json" || true
+  else
+    _dotfiles_warn 'Oh My Posh is installed but ~/.oh-my-posh.omp.json is missing'
+  fi
 fi
 
 export NVIM_APPNAME="${NVIM_APPNAME:-nvim2}"
@@ -237,5 +334,9 @@ export VISUAL=nvim
 export EDITOR=nvim
 
 if [ -f ~/.extras ]; then
-  source ~/.extras
+  if ! source ~/.extras 2>/dev/null; then
+    _dotfiles_warn 'failed to load ~/.extras'
+  fi
 fi
+
+_dotfiles_install_prompt_command

@@ -3,6 +3,7 @@ foreground: &foreground '#e0e2ea'
 background: &background '#282c34'
 currentLine: &currentLine '#343842'
 muted: &muted '#7b8496'
+completed: &completed '#9aa2b3'
 green: &green '#8fcf84'
 cyan: &cyan '#6fb8d9'
 orange: &orange '#ff9e64'
@@ -45,13 +46,13 @@ k9s:
       activeColor: *orange
     status:
       newColor: *foreground
-      modifyColor: *purple
+      modifyColor: *orange
       addColor: *green
-      pendingColor: *orange
+      pendingColor: *yellow
       errorColor: *red
       highlightColor: *yellow
       killColor: *red
-      completedColor: *muted
+      completedColor: *completed
   info:
     fgColor: *cyan
     sectionColor: *foreground
