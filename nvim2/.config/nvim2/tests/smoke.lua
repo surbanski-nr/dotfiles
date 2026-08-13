@@ -246,6 +246,89 @@ local function run()
   assert(indent_highlight.fg == 0x4f5358, 'indent guide does not use the visible NonText grey')
   local scope_highlight = vim.api.nvim_get_hl(0, { name = 'Nvim2IndentScope', link = false })
   assert(scope_highlight.fg == 0xe0e2ea, 'current-scope guide does not use the default white foreground')
+
+  local function assert_indent_scope(language, lines, cursor, expected_node, expected_column)
+    vim.cmd.enew { bang = true }
+    local buffer = vim.api.nvim_get_current_buf()
+    vim.bo.buftype = 'nofile'
+    vim.bo.bufhidden = 'wipe'
+    vim.bo.swapfile = false
+    vim.bo.filetype = language
+    vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
+    vim.treesitter.start(buffer, language)
+    vim.treesitter.get_parser(buffer, language):parse(true)
+    vim.api.nvim_win_set_cursor(0, cursor)
+
+    local node = require('ibl.scope').get(buffer, require('ibl.config').get_config(buffer))
+    assert(
+      node and node:type() == expected_node,
+      ('%s active indent scope is %s, expected %s'):format(language, node and node:type() or 'missing', expected_node)
+    )
+
+    vim.bo.buftype = ''
+    require('ibl').refresh(buffer)
+    local scope_column
+    local namespace = vim.api.nvim_get_namespaces().indent_blankline
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buffer, namespace, { cursor[1] - 1, 0 }, { cursor[1] - 1, -1 }, { details = true })) do
+      local column = 0
+      for _, chunk in ipairs(mark[4].virt_text or {}) do
+        local highlights = type(chunk[2]) == 'table' and chunk[2] or { chunk[2] }
+        if vim.tbl_contains(highlights, '@ibl.scope.char.1') then
+          scope_column = column
+          break
+        end
+        column = column + vim.fn.strdisplaywidth(chunk[1])
+      end
+    end
+    assert(
+      scope_column == expected_column,
+      ('%s active indent guide is at column %s, expected %d'):format(language, scope_column or 'missing', expected_column)
+    )
+    vim.bo.modified = false
+    vim.bo.buftype = 'nofile'
+  end
+
+  assert_indent_scope('bash', {
+    'run() {',
+    '  if true; then',
+    '    while true; do',
+    '      echo value',
+    '    done',
+    '  fi',
+    '}',
+  }, { 4, 8 }, 'while_statement', 4)
+  assert_indent_scope('lua', {
+    'local function run()',
+    '  if true then',
+    '    while true do',
+    '      print("value")',
+    '    end',
+    '  end',
+    'end',
+  }, { 4, 8 }, 'while_statement', 4)
+  assert_indent_scope('python', {
+    'def run():',
+    '    if True:',
+    '        while True:',
+    '            print("value")',
+  }, { 4, 12 }, 'while_statement', 8)
+  assert_indent_scope('typescript', {
+    'function run() {',
+    '  if (true) {',
+    '    while (true) {',
+    '      console.log("value")',
+    '    }',
+    '  }',
+    '}',
+  }, { 4, 8 }, 'statement_block', 4)
+  assert_indent_scope('yaml', {
+    'plugins:',
+    '  watch-events:',
+    '    scopes:',
+    '      - all',
+    '    command: bash',
+  }, { 4, 8 }, 'block_node', 4)
+
   vim.cmd.enew()
   vim.bo.filetype = 'lua'
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'local expected = {', '  {', '    value = true,', '  },', '}' })

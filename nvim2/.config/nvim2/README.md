@@ -203,9 +203,13 @@ the current window.
 Indent guides use the narrow solid `▏` character and the visible `#4f5358`
 grey from the default palette. The current Treesitter scope changes the same
 width `▏` guide to the default white foreground, without horizontal start or
-end markers. Lua table constructors are included explicitly, so the guide
-follows a table such as `local expected = { ... }` as well as normal language
-scopes. The lockfile pins its tested revision. Toggle all guides with
+end markers. The active scope follows nested blocks in Bash, Lua, Python,
+TypeScript and YAML. Bash control flow and Python compound statements are
+included explicitly because the plugin defaults otherwise stop at their
+enclosing function. Lua table constructors are also included. YAML scope ends
+are adjusted to their last content line because Treesitter otherwise reports
+the following dedent and moves the active guide to column zero. The lockfile
+pins its tested revision. Toggle all guides with
 `<leader>ti` or `:IBLToggle`;
 toggle only the active-scope marker with `:IBLToggleScope`. Change the
 characters or colors in
