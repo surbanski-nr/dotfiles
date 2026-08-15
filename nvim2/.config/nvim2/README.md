@@ -114,30 +114,29 @@ None of these plugins is bundled with Neovim. `vim.pack` downloads every one
 from its own repository. “Kickstart module” means the configuration file came
 with the Kickstart template, not that the plugin comes with Neovim.
 
-| Plugin | Configuration source | Purpose in this profile |
-|---|---|---|
-| `blink.cmp` | Main `init.lua` | Provide completion from LSP and filesystem paths, then expand LSP snippets with Neovim's built-in snippet engine |
-| `conform.nvim` | `lua/custom/conform.lua` | Format manually and on save, including Ruff formatting for Python |
-| `fidget.nvim` | Main `init.lua` | Show language-server progress without a permanent UI panel |
-| `gitsigns.nvim` | Kickstart module enabled by the custom loader | Show Git changes and provide hunk, blame and diff actions |
-| `guess-indent.nvim` | Main `init.lua` | Detect indentation settings from the current file |
-| `indent-blankline.nvim` | Custom module | Draw narrow indentation guides and mark the current Treesitter scope |
-| `mason-lspconfig.nvim` | Main `init.lua` | Connect Mason-installed servers to Neovim's LSP configuration names |
-| `mason-tool-installer.nvim` | Main `init.lua` plus `lua/custom/lsp.lua` | Install pinned servers, formatters and linters only when explicitly requested |
-| `mason.nvim` | Main `init.lua` | Provide the external-tool registry, installer and `:Mason` interface |
-| `mini.nvim` | Main `init.lua` plus custom module | Supply text objects, surroundings, alignment, split/join, visited files, statusline, icons and buffer removal |
-| `neo-tree.nvim` | Kickstart module enabled by the custom loader | Provide the sidebar filesystem browser and file operations |
-| `nvim-highlight-colors` | Custom module | Preview color values inline on demand; lazy-loaded by `<leader>tc` |
-| `nvim-lint` | Custom module | Publish Actionlint, ESLint, Hadolint, TFLint and yamllint results as diagnostics |
-| `nvim-lspconfig` | Main `init.lua` | Supply default commands, filetypes and root detection for language servers |
-| `nvim-treesitter` | Main `init.lua` plus custom tooling and fold modules | Install parsers and queries used by Neovim's built-in Treesitter runtime |
-| `nui.nvim` | Neo-tree dependency | Supply popup and layout components required by Neo-tree |
-| `plenary.nvim` | Telescope and Neo-tree dependency | Supply shared Lua utilities required by those plugins |
-| `render-markdown.nvim` | Custom module | Render Markdown headings, lists, tables and code blocks inside Neovim |
-| `telescope-ui-select.nvim` | `lua/custom/telescope.lua` | Display `vim.ui.select` choices in a Telescope dropdown |
-| `telescope.nvim` | Main `init.lua` plus custom search module | Search files, text, buffers, commands, symbols and diagnostics, including non-ignored dotfiles |
-| `todo-comments.nvim` | Main `init.lua` | Highlight and search TODO-style comments |
-| `which-key.nvim` | Main `init.lua` plus the Mini Visits key group | Show available mappings after a key prefix |
+| Plugin                      | Configuration source                                 | Purpose in this profile                                                                                          |
+| --------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `blink.cmp`                 | Main `init.lua`                                      | Provide completion from LSP and filesystem paths, then expand LSP snippets with Neovim's built-in snippet engine |
+| `conform.nvim`              | `lua/custom/conform.lua`                             | Format manually and on save, including Ruff formatting for Python                                                |
+| `fidget.nvim`               | Main `init.lua`                                      | Show language-server progress without a permanent UI panel                                                       |
+| `gitsigns.nvim`             | Kickstart module enabled by the custom loader        | Show Git changes and provide hunk, blame and diff actions                                                        |
+| `guess-indent.nvim`         | Main `init.lua`                                      | Detect indentation settings from the current file                                                                |
+| `indent-blankline.nvim`     | Custom module                                        | Draw narrow indentation guides and mark the current Treesitter scope                                             |
+| `mason-lspconfig.nvim`      | Main `init.lua`                                      | Connect Mason-installed servers to Neovim's LSP configuration names                                              |
+| `mason-tool-installer.nvim` | Main `init.lua` plus `lua/custom/lsp.lua`            | Install pinned servers, formatters and linters only when explicitly requested                                    |
+| `mason.nvim`                | Main `init.lua`                                      | Provide the external-tool registry, installer and `:Mason` interface                                             |
+| `mini.nvim`                 | Main `init.lua` plus custom module                   | Supply text objects, surroundings, alignment, split/join, visited files, statusline, icons and buffer removal    |
+| `neo-tree.nvim`             | Kickstart module enabled by the custom loader        | Provide the sidebar filesystem browser and file operations                                                       |
+| `nvim-lint`                 | Custom module                                        | Publish Actionlint, ESLint, Hadolint, TFLint and yamllint results as diagnostics                                 |
+| `nvim-lspconfig`            | Main `init.lua`                                      | Supply default commands, filetypes and root detection for language servers                                       |
+| `nvim-treesitter`           | Main `init.lua` plus custom tooling and fold modules | Install parsers and queries used by Neovim's built-in Treesitter runtime                                         |
+| `nui.nvim`                  | Neo-tree dependency                                  | Supply popup and layout components required by Neo-tree                                                          |
+| `plenary.nvim`              | Telescope and Neo-tree dependency                    | Supply shared Lua utilities required by those plugins                                                            |
+| `render-markdown.nvim`      | Custom module                                        | Render Markdown headings, lists, tables and code blocks inside Neovim                                            |
+| `telescope-ui-select.nvim`  | `lua/custom/telescope.lua`                           | Display `vim.ui.select` choices in a Telescope dropdown                                                          |
+| `telescope.nvim`            | Main `init.lua` plus custom search module            | Search files, text, buffers, commands, symbols and diagnostics, including non-ignored dotfiles                   |
+| `todo-comments.nvim`        | Main `init.lua`                                      | Highlight and search TODO-style comments                                                                         |
+| `which-key.nvim`            | Main `init.lua` plus the Mini Visits key group       | Show available mappings after a key prefix                                                                       |
 
 Neovim itself supplies `vim.pack`, the LSP client, the Treesitter runtime,
 diagnostic APIs, netrw and the default colorscheme. In particular,
@@ -153,52 +152,42 @@ start. There is no persistence module or session plugin in this profile.
 Configuration that must run at a specific point in Kickstart stays directly
 under `lua/custom/` and is called from a small seam in `init.lua`:
 
-| Module | Responsibility |
-|---|---|
-| `core.lua` | Options, filetype detection, register behavior, general commands and autocommands |
+| Module                        | Responsibility                                                                                |
+| ----------------------------- | --------------------------------------------------------------------------------------------- |
+| `core.lua`                    | Options, filetype detection, register behavior, general commands and autocommands             |
 | `checks.lua` and `health.lua` | Validate locked dependencies through `:Nvim2Check`; behavior lives in the headless smoke test |
-| `lsp.lua` | Language-server configuration and pinned Mason tool versions |
-| `conform.lua` | Formatter selection and format-on-save controls |
-| `telescope.lua` | Hidden-aware workspace searches and nearest-Git-root searches |
-| `treesitter.lua` | Managed parser list, native folds and explicit tool-install command |
+| `lsp.lua`                     | Language-server configuration and pinned Mason tool versions                                  |
+| `conform.lua`                 | Formatter selection and format-on-save controls                                               |
+| `telescope.lua`               | Hidden-aware workspace searches and nearest-Git-root searches                                 |
+| `treesitter.lua`              | Managed parser list, native folds and explicit tool-install command                           |
 
-| Local feature module | Purpose | External plugin added |
-|---|---|---|
-| `default_colors.lua` | Keep three local visibility overrides when returning to the built-in default colorscheme | No |
-| `enclosing_pairs.lua` | Highlight the nearest enclosing `()`, `[]` or `{}` pair while the cursor is anywhere inside it | No; extends Neovim's built-in `MatchParen` style |
-| `mermaid_ascii.lua` | Preview the Mermaid fence under the cursor in a scrollable scratch tab | No; invokes the optional `mermaid-ascii` binary |
-| `scroll_marker.lua` | Show an experimental one-cell marker for the current position at the right edge | No |
-| `treesitter_selection.lua` | Add simple keys for Neovim's built-in syntax-aware selection expansion | No |
-| `toggle_values.lua` | Add `<leader>tv` for boolean-like values without `nvim-toggler` | No |
-| `snippets.lua` | Add five global delimiter pairs and six Markdown expansions with Neovim's built-in snippet engine | No |
+| Local feature module       | Purpose                                                                                           | External plugin added                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `default_colors.lua`       | Apply local syntax and navigation colors to the built-in default colorscheme                      | No                                               |
+| `enclosing_pairs.lua`      | Highlight the nearest enclosing `()`, `[]` or `{}` pair while the cursor is anywhere inside it    | No; extends Neovim's built-in `MatchParen` style |
+| `mermaid_ascii.lua`        | Preview the Mermaid fence under the cursor in a scrollable scratch tab                            | No; invokes the optional `mermaid-ascii` binary  |
+| `scroll_marker.lua`        | Show an experimental one-cell marker for the current position at the right edge                   | No                                               |
+| `treesitter_selection.lua` | Add simple keys for Neovim's built-in syntax-aware selection expansion                            | No                                               |
+| `toggle_values.lua`        | Add `<leader>tv` for boolean-like values without `nvim-toggler`                                   | No                                               |
+| `snippets.lua`             | Add five global delimiter pairs and six Markdown expansions with Neovim's built-in snippet engine | No                                               |
 
 Plugins with direct actions have workflows in the sections below. Some work
 automatically or only support another plugin, so they do not need a daily key
 sequence:
 
-| Plugin | Day-to-day behavior |
-|---|---|
-| `guess-indent.nvim` | Detects indentation when a buffer opens; use `:GuessIndent` to run it again and `:setlocal shiftwidth? tabstop? expandtab?` to inspect the result |
-| `indent-blankline.nvim` | Draws narrow grey `▏` guides and a white `▏` for the current scope; toggle them with `<leader>ti` or `:IBLToggle` |
-| `fidget.nvim` | Shows LSP progress in a temporary notification; use `:Fidget history` to inspect earlier messages |
-| `mason-lspconfig.nvim`, `mason-tool-installer.nvim`, `nvim-lspconfig` | Connect configured language servers; inspect them with `:Mason` and install pinned versions with `:Nvim2ToolsInstallSync` |
-| `nvim-treesitter` | Supplies parsing, highlighting, indentation and injections automatically for installed languages |
-| `nvim-lint` | Runs configured linters after save and publishes their results through the diagnostic workflow below |
-| `nui.nvim`, `plenary.nvim` | Runtime libraries for Neo-tree and Telescope; there is nothing to invoke directly |
-| `telescope-ui-select.nvim` | Shows `vim.ui.select` prompts, including Mini Visits choices, in a Telescope dropdown |
+| Plugin                                                                | Day-to-day behavior                                                                                                                               |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `guess-indent.nvim`                                                   | Detects indentation when a buffer opens; use `:GuessIndent` to run it again and `:setlocal shiftwidth? tabstop? expandtab?` to inspect the result |
+| `indent-blankline.nvim`                                               | Draws narrow grey `▏` guides and a white `▏` for the current scope; toggle them with `<leader>ti` or `:IBLToggle`                                 |
+| `fidget.nvim`                                                         | Shows LSP progress in a temporary notification; use `:Fidget history` to inspect earlier messages                                                 |
+| `mason-lspconfig.nvim`, `mason-tool-installer.nvim`, `nvim-lspconfig` | Connect configured language servers; inspect them with `:Mason` and install pinned versions with `:Nvim2ToolsInstallSync`                         |
+| `nvim-treesitter`                                                     | Supplies parsing, highlighting, indentation and injections automatically for installed languages                                                  |
+| `nvim-lint`                                                           | Runs configured linters after save and publishes their results through the diagnostic workflow below                                              |
+| `nui.nvim`, `plenary.nvim`                                            | Runtime libraries for Neo-tree and Telescope; there is nothing to invoke directly                                                                 |
+| `telescope-ui-select.nvim`                                            | Shows `vim.ui.select` prompts, including Mini Visits choices, in a Telescope dropdown                                                             |
 
 The active colorscheme is Neovim's built-in `default` with its dark
-`NvimDark*` palette. The optional `surb` colorscheme starts from the
-built-in default and adds a small set of local syntax colors without a separate
-palette module.
-
-The default palette has three local overrides in
-`lua/custom/plugins/default_colors.lua`: `CursorLine` uses a more visible
-`#343842` background, `CursorLineNr` uses orange `#ff9e64`, and `MatchParen`
-uses orange on a dark background. The `vim.o.cursorline` option in `init.lua`
-enables the first two. Change those values in the custom module to adjust them
-permanently, or use `:set cursorline!` to toggle current-row highlighting for
-the current window.
+`NvimDark*` palette and a small set of local overrides in `lua/custom/plugins/default_colors.lua`.
 
 Indent guides use the narrow solid `▏` character and the visible `#4f5358`
 grey from the default palette. The current Treesitter scope changes the same
@@ -231,55 +220,26 @@ example it belongs to that innermost `{ ... }` table and is drawn at the
 table's content-indent boundary. This can differ from a function's or outer
 table's guide.
 
-### Switch the colorscheme
+### Adjust the colorscheme
 
-To try the local default-based colorscheme for the current session:
-
-```vim
-:colorscheme surb
-```
-
-Return to Neovim's default dark palette with:
-
-```vim
-:colorscheme default
-```
-
-Nvim2 captures the startup `default` highlights after its plugins are
-configured. Returning from `surb` restores the same white-and-green appearance
-seen at startup, including Telescope and Markdown groups, and restores the
-local cursor highlights.
-
-For a persistent change, edit the colorscheme line in `init.lua`. Use this for
-the local colorscheme:
-
-```lua
-vim.cmd.colorscheme 'surb'
-```
-
-Use this to switch back to the Neovim default:
-
-```lua
-vim.cmd.colorscheme 'default'
-```
-
-Restart Neovim after editing the file, or run `:source $MYVIMRC`. The local
-scheme colors comments, constants, functions, keywords, numbers, strings,
-types and object members. It does not make code groups bold.
+Edit `lua/custom/plugins/default_colors.lua` to experiment with the local
+overrides. Restart Neovim after editing it, or run `:source $MYVIMRC`. Running
+`:colorscheme default` later in a session clears the overrides until the next
+restart or source.
 
 ## Discover mappings inside Neovim
 
 These are the fastest ways to find a mapping when this README is outdated or
 incomplete:
 
-| Action | Command |
-|---|---|
+| Action                              | Command                              |
+| ----------------------------------- | ------------------------------------ |
 | Show the next available leader keys | Press `Space` and wait for which-key |
-| Search configured mappings | `<leader>sk` |
-| Inspect a normal-mode mapping | `:verbose nmap <keys>` |
-| Inspect an insert-mode mapping | `:verbose imap <keys>` |
-| Read help for a key | `:help <keys>` |
-| List commands | `<leader>sc` |
+| Search configured mappings          | `<leader>sk`                         |
+| Inspect a normal-mode mapping       | `:verbose nmap <keys>`               |
+| Inspect an insert-mode mapping      | `:verbose imap <keys>`               |
+| Read help for a key                 | `:help <keys>`                       |
+| List commands                       | `<leader>sc`                         |
 
 Notation used below:
 
@@ -293,48 +253,48 @@ Notation used below:
 
 ### Files and commands
 
-| Action | Keys or command |
-|---|---|
-| Open a file | `:edit path/to/file` |
-| Save current file | `:write` or `:w` |
-| Save all changed files | `:wall` or `:wa` |
-| Save and quit | `:wq` |
-| Quit current window | `:quit` or `:q` |
-| Quit without saving | `:q!` |
-| Quit Neovim | `:qa` |
-| Repeat the last command-line command | `@:` |
-| Repeat the last normal-mode change | `.` |
-| Open path or URL under cursor | `gx` |
-| Open built-in directory browser | `:Explore` |
-| Open directory browser on the left | `:Lexplore` |
+| Action                               | Keys or command      |
+| ------------------------------------ | -------------------- |
+| Open a file                          | `:edit path/to/file` |
+| Save current file                    | `:write` or `:w`     |
+| Save all changed files               | `:wall` or `:wa`     |
+| Save and quit                        | `:wq`                |
+| Quit current window                  | `:quit` or `:q`      |
+| Quit without saving                  | `:q!`                |
+| Quit Neovim                          | `:qa`                |
+| Repeat the last command-line command | `@:`                 |
+| Repeat the last normal-mode change   | `.`                  |
+| Open path or URL under cursor        | `gx`                 |
+| Open built-in directory browser      | `:Explore`           |
+| Open directory browser on the left   | `:Lexplore`          |
 
 `netrw` supplies `:Explore`. Neo-tree is the enabled sidebar browser; press
 `\` to reveal the current file or focus the tree.
 
 ### Movement and search
 
-| Action | Keys |
-|---|---|
-| Move left, down, up, right | `h`, `j`, `k`, `l` |
-| Next or previous word | `w`, `b` |
-| End of word | `e` |
-| Start, first text, or end of line | `0`, `^`, `$` |
-| First or last line | `gg`, `G` |
-| Jump to a line | `<line>G`, for example `42G` |
-| Previous or next paragraph/block | `{`, `}` |
-| Matching bracket | `%` |
-| Half-page down or up | `<C-d>`, `<C-u>` |
-| Center current line | `zz` |
-| Find character forward | `f<char>` |
-| Move before character forward | `t<char>` |
-| Repeat or reverse character search | `;`, `,` |
-| Search forward or backward | `/text`, `?text` |
-| Next or previous search match | `n`, `N` |
-| Search word under cursor | `*` forward, `#` backward |
-| Clear search highlighting | `<Esc>` |
-| Jump back or forward in jump list | `<C-o>`, `<C-i>` |
-| Toggle relative or absolute line numbers | `<leader>tl` |
-| Toggle the right-edge position marker | `<leader>ts` or `:ScrollMarkerToggle` |
+| Action                                   | Keys                                  |
+| ---------------------------------------- | ------------------------------------- |
+| Move left, down, up, right               | `h`, `j`, `k`, `l`                    |
+| Next or previous word                    | `w`, `b`                              |
+| End of word                              | `e`                                   |
+| Start, first text, or end of line        | `0`, `^`, `$`                         |
+| First or last line                       | `gg`, `G`                             |
+| Jump to a line                           | `<line>G`, for example `42G`          |
+| Previous or next paragraph/block         | `{`, `}`                              |
+| Matching bracket                         | `%`                                   |
+| Half-page down or up                     | `<C-d>`, `<C-u>`                      |
+| Center current line                      | `zz`                                  |
+| Find character forward                   | `f<char>`                             |
+| Move before character forward            | `t<char>`                             |
+| Repeat or reverse character search       | `;`, `,`                              |
+| Search forward or backward               | `/text`, `?text`                      |
+| Next or previous search match            | `n`, `N`                              |
+| Search word under cursor                 | `*` forward, `#` backward             |
+| Clear search highlighting                | `<Esc>`                               |
+| Jump back or forward in jump list        | `<C-o>`, `<C-i>`                      |
+| Toggle relative or absolute line numbers | `<leader>tl`                          |
+| Toggle the right-edge position marker    | `<leader>ts` or `:ScrollMarkerToggle` |
 
 `<leader>tl` changes only the current window. Line numbers stay visible: the
 default relative mode is useful for motions such as `5j`, while absolute mode
@@ -367,18 +327,18 @@ set `mA` when `A` should return to that file from anywhere. Each buffer can
 have its own lowercase `a`; there is only one global uppercase `A`, and setting
 `mA` elsewhere moves it.
 
-| Action | Keys or command |
-|---|---|
-| Set local mark `a` | `ma` |
-| Set cross-file mark `A` | `mA` |
-| Jump to the exact row and column | `` `a `` or `` `A `` |
-| Jump to the marked line's first nonblank character | `'a` or `'A` |
-| Browse and jump to marks | `<leader>sm` or `:Telescope marks` |
-| List marks without Telescope | `:marks` |
-| Delete named marks `a` and `A` | `:delmarks a A` |
-| Delete lowercase marks `a` through `z` | `:delmarks a-z` |
-| Delete uppercase and numbered marks | `:delmarks A-Z 0-9` |
-| Delete current-buffer marks except uppercase/numbered marks | `:delmarks!` |
+| Action                                                      | Keys or command                    |
+| ----------------------------------------------------------- | ---------------------------------- |
+| Set local mark `a`                                          | `ma`                               |
+| Set cross-file mark `A`                                     | `mA`                               |
+| Jump to the exact row and column                            | `` `a `` or `` `A ``               |
+| Jump to the marked line's first nonblank character          | `'a` or `'A`                       |
+| Browse and jump to marks                                    | `<leader>sm` or `:Telescope marks` |
+| List marks without Telescope                                | `:marks`                           |
+| Delete named marks `a` and `A`                              | `:delmarks a A`                    |
+| Delete lowercase marks `a` through `z`                      | `:delmarks a-z`                    |
+| Delete uppercase and numbered marks                         | `:delmarks A-Z 0-9`                |
+| Delete current-buffer marks except uppercase/numbered marks | `:delmarks!`                       |
 
 A Harpoon-like flow is: use `mA`, `mB` and `mC` in three frequently used
 places, jump back with `` `A ``, `` `B `` or `` `C ``, and browse them with
@@ -394,15 +354,15 @@ quote: `` `" ``.
 Neovim also maintains automatic marks, which is why `<leader>sm` shows entries
 you did not create:
 
-| Mark | Meaning | Exact jump or related action |
-|---|---|---|
-| `"` | Cursor position when the current buffer was last exited | `` `" ``; delete with `:delmarks \"` |
-| `'` | Position before the latest jump | `` `' `` for exact position, or `''` for its line; it cannot be deleted |
-| `0` through `9` | Files exited in recent Neovim sessions, loaded from ShaDa | `` `0 `` through `` `9 ``; delete with `:delmarks 0-9` |
-| `.` | Last change | `` `. `` |
-| `^` | Last position where Insert mode stopped | `` `^ `` |
-| `[` and `]` | Start and end of the last changed or yanked text | `` `[ `` and `` `] `` |
-| `<` and `>` | Start and end of the last visual selection | `` `< `` and `` `> `` |
+| Mark            | Meaning                                                   | Exact jump or related action                                            |
+| --------------- | --------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `"`             | Cursor position when the current buffer was last exited   | `` `" ``; delete with `:delmarks \"`                                    |
+| `'`             | Position before the latest jump                           | `` `' `` for exact position, or `''` for its line; it cannot be deleted |
+| `0` through `9` | Files exited in recent Neovim sessions, loaded from ShaDa | `` `0 `` through `` `9 ``; delete with `:delmarks 0-9`                  |
+| `.`             | Last change                                               | `` `. ``                                                                |
+| `^`             | Last position where Insert mode stopped                   | `` `^ ``                                                                |
+| `[` and `]`     | Start and end of the last changed or yanked text          | `` `[ `` and `` `] ``                                                   |
+| `<` and `>`     | Start and end of the last visual selection                | `` `< `` and `` `> ``                                                   |
 
 `<leader>sm` browses and jumps but does not delete. Note the mark name, close
 Telescope, then use `:delmarks {name}`. `:delmarks!` also clears the current
@@ -414,35 +374,35 @@ mapping is `<leader>ma` for the optional Mermaid ASCII preview.
 
 ### Editing, selection, undo and registers
 
-| Action | Keys |
-|---|---|
-| Insert before or after cursor | `i`, `a` |
-| Insert at start or end of line | `I`, `A` |
-| Open line below or above | `o`, `O` |
-| Cut character under or before cursor, replacing active register | `x`, `X` |
-| Delete line without changing registers | `dd` |
-| Delete with a motion without changing registers | `d{motion}`, for example `dw` or `diw` |
-| Delete to end of line without changing registers | `D` |
-| Change inside word | `ciw` |
-| Yank line | `yy` |
-| Yank inside word | `yiw` |
-| Paste after or before cursor | `p`, `P` |
-| Undo or redo | `u`, `<C-r>` |
-| Character, line, or block selection | `v`, `V`, `<C-v>` |
-| Start, expand or shrink syntax selection | `<C-Space>`, then `<C-Space>` or `<BS>` |
-| Reselect last visual selection | `gv` |
-| Indent or unindent selection | `>`, `<` |
-| Join current line with next | `J` |
-| Toggle boolean-like value under cursor | `<leader>tv` |
-| Toggle indentation guides | `<leader>ti` or `:IBLToggle` |
-| Add an empty line below or above | `]<Space>`, `[<Space>` |
-| Show registers | `:registers` |
-| Browse and promote yank history | `<leader>sy`, select, then `p` or `P` |
-| Paste latest explicit yank | `"0p` |
-| Paste from numbered yank ring | `"1p` through `"9p` |
-| Delete a selection without changing any register | Select text, then `"_d` |
-| Yank into and paste from named register `a` | `"ay{motion}`, then `"ap` |
-| Use system clipboard explicitly | `"+y`, `"+p` |
+| Action                                                          | Keys                                    |
+| --------------------------------------------------------------- | --------------------------------------- |
+| Insert before or after cursor                                   | `i`, `a`                                |
+| Insert at start or end of line                                  | `I`, `A`                                |
+| Open line below or above                                        | `o`, `O`                                |
+| Cut character under or before cursor, replacing active register | `x`, `X`                                |
+| Delete line without changing registers                          | `dd`                                    |
+| Delete with a motion without changing registers                 | `d{motion}`, for example `dw` or `diw`  |
+| Delete to end of line without changing registers                | `D`                                     |
+| Change inside word                                              | `ciw`                                   |
+| Yank line                                                       | `yy`                                    |
+| Yank inside word                                                | `yiw`                                   |
+| Paste after or before cursor                                    | `p`, `P`                                |
+| Undo or redo                                                    | `u`, `<C-r>`                            |
+| Character, line, or block selection                             | `v`, `V`, `<C-v>`                       |
+| Start, expand or shrink syntax selection                        | `<C-Space>`, then `<C-Space>` or `<BS>` |
+| Reselect last visual selection                                  | `gv`                                    |
+| Indent or unindent selection                                    | `>`, `<`                                |
+| Join current line with next                                     | `J`                                     |
+| Toggle boolean-like value under cursor                          | `<leader>tv`                            |
+| Toggle indentation guides                                       | `<leader>ti` or `:IBLToggle`            |
+| Add an empty line below or above                                | `]<Space>`, `[<Space>`                  |
+| Show registers                                                  | `:registers`                            |
+| Browse and promote yank history                                 | `<leader>sy`, select, then `p` or `P`   |
+| Paste latest explicit yank                                      | `"0p`                                   |
+| Paste from numbered yank ring                                   | `"1p` through `"9p`                     |
+| Delete a selection without changing any register                | Select text, then `"_d`                 |
+| Yank into and paste from named register `a`                     | `"ay{motion}`, then `"ap`               |
+| Use system clipboard explicitly                                 | `"+y`, `"+p`                            |
 
 Registers are small text storage slots. The `"{register}` prefix selects a
 register for the next operation:
@@ -516,19 +476,19 @@ words are left unchanged.
 
 These are Neovim mappings, not separate plugins.
 
-| Action | Keys |
-|---|---|
-| Toggle comment on current line | `gcc` |
-| Toggle comment over a motion | `gc<motion>`, for example `gcap` |
-| Toggle comment on selection | Select text, then `gc` |
-| Next or previous misspelling | `]s`, `[s` |
-| Suggest spelling corrections | `z=` |
-| Add word to dictionary | `zg` |
-| Mark word as incorrect | `zw` |
-| Toggle fold | `za` |
-| Open or close fold | `zo`, `zc` |
-| Open or close all folds | `zR`, `zM` |
-| Move to next or previous fold | `zj`, `zk` |
+| Action                         | Keys                             |
+| ------------------------------ | -------------------------------- |
+| Toggle comment on current line | `gcc`                            |
+| Toggle comment over a motion   | `gc<motion>`, for example `gcap` |
+| Toggle comment on selection    | Select text, then `gc`           |
+| Next or previous misspelling   | `]s`, `[s`                       |
+| Suggest spelling corrections   | `z=`                             |
+| Add word to dictionary         | `zg`                             |
+| Mark word as incorrect         | `zw`                             |
+| Toggle fold                    | `za`                             |
+| Open or close fold             | `zo`, `zc`                       |
+| Open or close all folds        | `zR`, `zM`                       |
+| Move to next or previous fold  | `zj`, `zk`                       |
 
 Spell checking is enabled automatically for Markdown, text, and Git commit
 buffers. Supported filetypes use Neovim's native Treesitter fold expression;
@@ -540,41 +500,41 @@ installed only by `:Nvim2ToolsInstallSync`, never while opening a file.
 
 ### Buffers
 
-| Action | Keys or command |
-|---|---|
-| Pick an open buffer | `<leader><leader>` |
-| Remove current buffer without breaking the layout | `<C-x>` |
-| List buffers | `:ls` |
-| Next or previous buffer | `]b`, `[b` or `:bnext`, `:bprevious` |
-| Switch by buffer number or name | `:buffer <number-or-name>` |
-| Delete current buffer | `:bdelete` |
+| Action                                            | Keys or command                      |
+| ------------------------------------------------- | ------------------------------------ |
+| Pick an open buffer                               | `<leader><leader>`                   |
+| Remove current buffer without breaking the layout | `<C-x>`                              |
+| List buffers                                      | `:ls`                                |
+| Next or previous buffer                           | `]b`, `[b` or `:bnext`, `:bprevious` |
+| Switch by buffer number or name                   | `:buffer <number-or-name>`           |
+| Delete current buffer                             | `:bdelete`                           |
 
 `<C-x>` normally decrements a number in stock Neovim. This profile replaces
 it with Mini buffer removal.
 
 ### Windows and splits
 
-| Action | Keys or command |
-|---|---|
-| Horizontal split | `:split` or `<C-w>s` |
-| Vertical split | `:vsplit` or `<C-w>v` |
-| Focus left, down, up, right split | `<C-h>`, `<C-j>`, `<C-k>`, `<C-l>` |
-| Return to the previously focused window | `<C-w>p` |
-| Close current split | `<C-w>c` |
-| Keep only current split | `<C-w>o` |
-| Make splits equal size | `<C-w>=` |
+| Action                                     | Keys or command                        |
+| ------------------------------------------ | -------------------------------------- |
+| Horizontal split                           | `:split` or `<C-w>s`                   |
+| Vertical split                             | `:vsplit` or `<C-w>v`                  |
+| Focus left, down, up, right split          | `<C-h>`, `<C-j>`, `<C-k>`, `<C-l>`     |
+| Return to the previously focused window    | `<C-w>p`                               |
+| Close current split                        | `<C-w>c`                               |
+| Keep only current split                    | `<C-w>o`                               |
+| Make splits equal size                     | `<C-w>=`                               |
 | Move split to far left, bottom, top, right | `<C-w>H`, `<C-w>J`, `<C-w>K`, `<C-w>L` |
 
 Splits are automatically resized evenly when the terminal size changes.
 
 ### Terminal mode and terminal clipboard
 
-| Action | Keys |
-|---|---|
-| Open a terminal buffer | `:terminal` |
-| Leave terminal input mode | `<Esc><Esc>` |
-| Copy terminal selection | `Ctrl+Shift+C` |
-| Paste in terminal | `Ctrl+Shift+V` |
+| Action                    | Keys           |
+| ------------------------- | -------------- |
+| Open a terminal buffer    | `:terminal`    |
+| Leave terminal input mode | `<Esc><Esc>`   |
+| Copy terminal selection   | `Ctrl+Shift+C` |
+| Paste in terminal         | `Ctrl+Shift+V` |
 
 Mouse handling is disabled in Neovim so terminal selection stays under the
 terminal emulator's control. Direct SSH sessions use OSC 52 for clipboard
@@ -585,40 +545,40 @@ clipboard. Inside tmux, use `Ctrl+a` then `[`, select with `v`, and copy with
 
 ## Search and Telescope
 
-| Action | Keys |
-|---|---|
-| Find files | `<leader>sf` |
-| Live grep project text | `<leader>sg` |
-| Find files in nearest Git repository | `<leader>sF` |
-| Live grep nearest Git repository | `<leader>sG` |
-| Search word under cursor or visual selection | `<leader>sw` |
-| Search current buffer | `<leader>/` |
-| Search text only in open files | `<leader>s/` |
-| Search open buffers | `<leader><leader>` |
-| Recent files | `<leader>s.` |
-| Search diagnostics | `<leader>sd` |
-| Browse quickfix with preview | `<leader>sq` |
-| Browse current location list with preview | `<leader>sl` |
-| Search help | `<leader>sh` |
-| Search mappings | `<leader>sk` |
-| Search commands | `<leader>sc` |
-| Browse and promote yank history | `<leader>sy`, select, then `p` or `P` |
-| List Telescope pickers | `<leader>ss` |
-| Resume last picker | `<leader>sr` |
-| Search this Neovim configuration | `<leader>sn` |
+| Action                                       | Keys                                  |
+| -------------------------------------------- | ------------------------------------- |
+| Find files                                   | `<leader>sf`                          |
+| Live grep project text                       | `<leader>sg`                          |
+| Find files in nearest Git repository         | `<leader>sF`                          |
+| Live grep nearest Git repository             | `<leader>sG`                          |
+| Search word under cursor or visual selection | `<leader>sw`                          |
+| Search current buffer                        | `<leader>/`                           |
+| Search text only in open files               | `<leader>s/`                          |
+| Search open buffers                          | `<leader><leader>`                    |
+| Recent files                                 | `<leader>s.`                          |
+| Search diagnostics                           | `<leader>sd`                          |
+| Browse quickfix with preview                 | `<leader>sq`                          |
+| Browse current location list with preview    | `<leader>sl`                          |
+| Search help                                  | `<leader>sh`                          |
+| Search mappings                              | `<leader>sk`                          |
+| Search commands                              | `<leader>sc`                          |
+| Browse and promote yank history              | `<leader>sy`, select, then `p` or `P` |
+| List Telescope pickers                       | `<leader>ss`                          |
+| Resume last picker                           | `<leader>sr`                          |
+| Search this Neovim configuration             | `<leader>sn`                          |
 
 Common keys inside a Telescope picker:
 
-| Action | Insert mode | Normal mode |
-|---|---|---|
-| Move to next or previous result | `<C-n>`, `<C-p>` | `j`, `k` |
-| Open result | `<CR>` | `<CR>` |
-| Open in horizontal split | `<C-x>` | `<C-x>` |
-| Open in vertical split | `<C-v>` | `<C-v>` |
-| Open in a tab | `<C-t>` | `<C-t>` |
-| Scroll preview | `<C-d>`, `<C-u>` | `<C-d>`, `<C-u>` |
-| Close picker | `<Esc>` | `q` |
-| Show picker mappings | `<C-/>` | `?` |
+| Action                          | Insert mode      | Normal mode      |
+| ------------------------------- | ---------------- | ---------------- |
+| Move to next or previous result | `<C-n>`, `<C-p>` | `j`, `k`         |
+| Open result                     | `<CR>`           | `<CR>`           |
+| Open in horizontal split        | `<C-x>`          | `<C-x>`          |
+| Open in vertical split          | `<C-v>`          | `<C-v>`          |
+| Open in a tab                   | `<C-t>`          | `<C-t>`          |
+| Scroll preview                  | `<C-d>`, `<C-u>` | `<C-d>`, `<C-u>` |
+| Close picker                    | `<Esc>`          | `q`              |
+| Show picker mappings            | `<C-/>`          | `?`              |
 
 `<leader>/` searches only the current buffer, so it never searches an entire
 workspace. `<leader>sf`, `<leader>sg` and `<leader>sw` use the current working
@@ -661,11 +621,11 @@ in this profile are Telescope searches, Gitsigns (`<leader>hq` or
 
 Inside any Telescope picker:
 
-| Action | Keys |
-|---|---|
-| Replace quickfix with all currently filtered results and open it | `<C-q>` |
-| Mark or unmark individual results | `<Tab>`, `<S-Tab>` |
-| Replace quickfix with only explicitly marked results | `<M-q>` (Alt-q) |
+| Action                                                           | Keys               |
+| ---------------------------------------------------------------- | ------------------ |
+| Replace quickfix with all currently filtered results and open it | `<C-q>`            |
+| Mark or unmark individual results                                | `<Tab>`, `<S-Tab>` |
+| Replace quickfix with only explicitly marked results             | `<M-q>` (Alt-q)    |
 
 Both Telescope actions replace the current quickfix list; they do not append
 to it. `<M-q>` exports an empty list when no results have been marked with
@@ -674,19 +634,19 @@ also depends on the terminal correctly sending Alt-modified keys.
 
 Using the resulting quickfix list:
 
-| Action | Keys or command |
-|---|---|
-| Toggle the quickfix window without clearing its items | `<leader>tq` |
-| Open or close the quickfix window directly | `:copen`, `:cclose` |
-| Browse quickfix through Telescope with a file preview | `<leader>sq` |
-| Browse the current window's location list with a file preview | `<leader>sl` |
-| Open the entry under the cursor | `<CR>` |
-| Open the entry in a new split | `<C-w><CR>` |
-| Alternate between quickfix and the previous code window | `<C-w>p` |
-| Next or previous entry | `]q`, `[q` or `:cnext`, `:cprevious` |
-| Last or first entry | `]Q`, `[Q` or `:clast`, `:cfirst` |
-| Remove the entry under the cursor from this list | `dd` in the quickfix window |
-| Run an Ex command for every entry | `:cdo {command}` |
+| Action                                                        | Keys or command                      |
+| ------------------------------------------------------------- | ------------------------------------ |
+| Toggle the quickfix window without clearing its items         | `<leader>tq`                         |
+| Open or close the quickfix window directly                    | `:copen`, `:cclose`                  |
+| Browse quickfix through Telescope with a file preview         | `<leader>sq`                         |
+| Browse the current window's location list with a file preview | `<leader>sl`                         |
+| Open the entry under the cursor                               | `<CR>`                               |
+| Open the entry in a new split                                 | `<C-w><CR>`                          |
+| Alternate between quickfix and the previous code window       | `<C-w>p`                             |
+| Next or previous entry                                        | `]q`, `[q` or `:cnext`, `:cprevious` |
+| Last or first entry                                           | `]Q`, `[Q` or `:clast`, `:cfirst`    |
+| Remove the entry under the cursor from this list              | `dd` in the quickfix window          |
+| Run an Ex command for every entry                             | `:cdo {command}`                     |
 
 `dd` only removes the selected location from the current quickfix list. It
 does not delete a file, change source code or affect a window-local location
@@ -745,21 +705,21 @@ preserving completion and navigation for this configuration and Neovim APIs.
 
 ### Code navigation and actions
 
-| Action | Keys |
-|---|---|
-| Hover documentation | `K` |
-| Go to definition with Telescope | `grd` |
-| Go to declaration | `grD` |
-| Find references | `grr` |
-| Find implementations | `gri` |
-| Go to type definition | `grt` |
-| Rename symbol | `grn` |
-| Code action | `gra` in normal or visual mode |
-| Document symbols | `gO` |
-| Workspace symbols | `gW` |
-| Return from a jump | `<C-t>` |
-| Toggle inlay hints when supported | `<leader>th` |
-| Signature help in insert mode | `<C-s>` or `<C-k>` |
+| Action                            | Keys                           |
+| --------------------------------- | ------------------------------ |
+| Hover documentation               | `K`                            |
+| Go to definition with Telescope   | `grd`                          |
+| Go to declaration                 | `grD`                          |
+| Find references                   | `grr`                          |
+| Find implementations              | `gri`                          |
+| Go to type definition             | `grt`                          |
+| Rename symbol                     | `grn`                          |
+| Code action                       | `gra` in normal or visual mode |
+| Document symbols                  | `gO`                           |
+| Workspace symbols                 | `gW`                           |
+| Return from a jump                | `<C-t>`                        |
+| Toggle inlay hints when supported | `<leader>th`                   |
+| Signature help in insert mode     | `<C-s>` or `<C-k>`             |
 
 Treesitter provides syntax highlighting, indentation, injections, folds and
 the `<C-Space>`/`<BS>` selection flow documented above. Native `an` and `in`
@@ -778,28 +738,28 @@ previous yank. Each operator leaves visual mode.
 
 ### Diagnostics
 
-| Action | Keys |
-|---|---|
-| Next or previous diagnostic | `]d`, `[d` |
-| Last or first diagnostic in buffer | `]D`, `[D` |
-| Show diagnostic at cursor | `<C-w>d` |
-| Put diagnostics in location list | `<leader>q` |
-| Search diagnostics with Telescope | `<leader>sd` |
+| Action                              | Keys                                 |
+| ----------------------------------- | ------------------------------------ |
+| Next or previous diagnostic         | `]d`, `[d`                           |
+| Last or first diagnostic in buffer  | `]D`, `[D`                           |
+| Show diagnostic at cursor           | `<C-w>d`                             |
+| Put diagnostics in location list    | `<leader>q`                          |
+| Search diagnostics with Telescope   | `<leader>sd`                         |
 | Next or previous location-list item | `]l`, `[l` or `:lnext`, `:lprevious` |
-| Next or previous quickfix item | `]q`, `[q` or `:cnext`, `:cprevious` |
+| Next or previous quickfix item      | `]q`, `[q` or `:cnext`, `:cprevious` |
 
 The diagnostic float opens automatically after jumping with `[d` or `]d`.
 
 ### Completion and snippets
 
-| Action | Keys |
-|---|---|
-| Open completion or documentation | `<C-Space>` |
-| Next or previous completion item | `<C-n>`, `<C-p>` or arrows |
-| Accept selected completion | `<C-y>` |
-| Close completion menu | `<C-e>` |
-| Toggle signature help | `<C-k>` |
-| Move forward or backward through snippet fields | `<Tab>`, `<S-Tab>` |
+| Action                                          | Keys                       |
+| ----------------------------------------------- | -------------------------- |
+| Open completion or documentation                | `<C-Space>`                |
+| Next or previous completion item                | `<C-n>`, `<C-p>` or arrows |
+| Accept selected completion                      | `<C-y>`                    |
+| Close completion menu                           | `<C-e>`                    |
+| Toggle signature help                           | `<C-k>`                    |
+| Move forward or backward through snippet fields | `<Tab>`, `<S-Tab>`         |
 
 Blink supplies completion from LSP and paths. LSP-provided snippets can be
 accepted with `<C-y>` and are expanded by Neovim's built-in `vim.snippet`
@@ -810,12 +770,12 @@ The local expansions are defined in `lua/custom/plugins/snippets.lua`. These
 five pairs work in every insert-mode buffer:
 
 | Typed | Result |
-|---|---|
-| `(` | `(|)` |
-| `[` | `[|]` |
-| `{` | `{|}` |
-| `'` | `'|'` |
-| `"` | `"|"` |
+| ----- | ------ |
+| `(`   | `(     | )`  |
+| `[`   | `[     | ]`  |
+| `{`   | `{     | }`  |
+| `'`   | `'     | '`  |
+| `"`   | `"     | "`  |
 
 `|` represents the cursor. Press `<Tab>` to leave the pair. These snippets are
 not syntax-aware, so they can also expand in comments or other places where a
@@ -823,14 +783,14 @@ literal opening character was intended.
 
 These six triggers work only in Markdown buffers:
 
-| Typed | Expansion |
-|---|---|
-| `` ``` `` | A three-line fenced block with `lang` selected, followed by an editable body |
-| `**` | `**text**` |
-| `__` | `_text_` |
-| `*_` | `**_text_**` |
-| `~~` | `~~text~~` |
-| `<<` | `<https://example.com>` |
+| Typed   | Expansion                                                                    |
+| ------- | ---------------------------------------------------------------------------- |
+| ` ``` ` | A three-line fenced block with `lang` selected, followed by an editable body |
+| `**`    | `**text**`                                                                   |
+| `__`    | `_text_`                                                                     |
+| `*_`    | `**_text_**`                                                                 |
+| `~~`    | `~~text~~`                                                                   |
+| `<<`    | `<https://example.com>`                                                      |
 
 For a fence, type the language over the selected `lang`, press `<Tab>`, and
 write the body. For an inline expansion, type its content and press `<Tab>` to
@@ -840,23 +800,23 @@ leave it. The expansion does not add surrounding spaces.
 
 The main day-to-day language stacks are:
 
-| Language | LSP | Formatter | Additional diagnostics |
-|---|---|---|---|
-| TypeScript, TSX, JavaScript and JSX | TypeScript Language Server | Prettier | ESLint through `eslint_d` |
-| Python | Pyright and Ruff | Ruff import sorting and formatting | Ruff |
-| Bash and POSIX shell | Bash Language Server | shfmt | ShellCheck |
+| Language                            | LSP                        | Formatter                          | Additional diagnostics    |
+| ----------------------------------- | -------------------------- | ---------------------------------- | ------------------------- |
+| TypeScript, TSX, JavaScript and JSX | TypeScript Language Server | Prettier                           | ESLint through `eslint_d` |
+| Python                              | Pyright and Ruff           | Ruff import sorting and formatting | Ruff                      |
+| Bash and POSIX shell                | Bash Language Server       | shfmt                              | ShellCheck                |
 
-| Action | Keys or command |
-|---|---|
-| Format buffer or visual selection | `<leader>f` |
-| Toggle format-on-save for this Neovim session | `<leader>tf` or `:FormatToggle` |
-| Disable format-on-save globally | `:FormatDisable` |
-| Disable format-on-save for current buffer | `:FormatDisable!` |
-| Enable format-on-save globally | `:FormatEnable` |
-| Enable format-on-save for current buffer | `:FormatEnable!` |
-| Inspect formatter selection | `:ConformInfo` |
-| Inspect external tools | `:Mason` |
-| Install all managed tools and parsers synchronously | `:Nvim2ToolsInstallSync` |
+| Action                                              | Keys or command                 |
+| --------------------------------------------------- | ------------------------------- |
+| Format buffer or visual selection                   | `<leader>f`                     |
+| Toggle format-on-save for this Neovim session       | `<leader>tf` or `:FormatToggle` |
+| Disable format-on-save globally                     | `:FormatDisable`                |
+| Disable format-on-save for current buffer           | `:FormatDisable!`               |
+| Enable format-on-save globally                      | `:FormatEnable`                 |
+| Enable format-on-save for current buffer            | `:FormatEnable!`                |
+| Inspect formatter selection                         | `:ConformInfo`                  |
+| Inspect external tools                              | `:Mason`                        |
+| Install all managed tools and parsers synchronously | `:Nvim2ToolsInstallSync`        |
 
 Conform formats configured filetypes on save. `<leader>tf` is useful when one
 Neovim process is opened for a repository that should not be reformatted. The
@@ -909,25 +869,25 @@ imports or removing unused code.
 Gitsigns mappings are buffer-local and appear in files inside a Git working
 tree.
 
-| Action | Keys |
-|---|---|
-| Next or previous hunk | `]c`, `[c` |
-| Stage hunk | `<leader>hs` |
-| Reset hunk | `<leader>hr` |
-| Stage selected lines | Select lines, then `<leader>hs` |
-| Reset selected lines | Select lines, then `<leader>hr` |
-| Stage whole buffer | `<leader>hS` |
-| Reset whole buffer | `<leader>hR` |
-| Preview hunk | `<leader>hp` |
-| Preview hunk inline | `<leader>hi` |
-| Blame current line | `<leader>hb` |
-| Diff against index | `<leader>hd` |
-| Diff against last commit | `<leader>hD` |
-| Current-file hunks in quickfix | `<leader>hq` |
-| Repository hunks in quickfix | `<leader>hQ` |
-| Toggle current-line blame | `<leader>tb` |
-| Toggle word-level diff | `<leader>tw` |
-| Select current hunk | `vih` or use `ih` with an operator |
+| Action                         | Keys                               |
+| ------------------------------ | ---------------------------------- |
+| Next or previous hunk          | `]c`, `[c`                         |
+| Stage hunk                     | `<leader>hs`                       |
+| Reset hunk                     | `<leader>hr`                       |
+| Stage selected lines           | Select lines, then `<leader>hs`    |
+| Reset selected lines           | Select lines, then `<leader>hr`    |
+| Stage whole buffer             | `<leader>hS`                       |
+| Reset whole buffer             | `<leader>hR`                       |
+| Preview hunk                   | `<leader>hp`                       |
+| Preview hunk inline            | `<leader>hi`                       |
+| Blame current line             | `<leader>hb`                       |
+| Diff against index             | `<leader>hd`                       |
+| Diff against last commit       | `<leader>hD`                       |
+| Current-file hunks in quickfix | `<leader>hq`                       |
+| Repository hunks in quickfix   | `<leader>hQ`                       |
+| Toggle current-line blame      | `<leader>tb`                       |
+| Toggle word-level diff         | `<leader>tw`                       |
+| Select current hunk            | `vih` or use `ih` with an operator |
 
 For a quick current-file review, press `]c` to jump to the next changed hunk,
 then `<leader>hp` to preview it. Repeat `]c` and `<leader>hp` through the file;
@@ -941,23 +901,23 @@ hunk in the current file listed together instead.
 Mini.ai extends normal `a` and `i` text objects and searches up to 500 lines.
 Examples:
 
-| Action | Keys |
-|---|---|
-| Select around parentheses | `va)` |
-| Change inside quotes | `ci'` |
-| Yank inside the next quote | `yiiq` |
+| Action                                       | Keys                       |
+| -------------------------------------------- | -------------------------- |
+| Select around parentheses                    | `va)`                      |
+| Change inside quotes                         | `ci'`                      |
+| Yank inside the next quote                   | `yiiq`                     |
 | Go to left or right edge of an around-object | `g[<object>`, `g]<object>` |
 
 ### Surroundings
 
-| Action | Keys |
-|---|---|
-| Add surroundings | `sa<motion><char>`, for example `saiw)` |
-| Add surroundings to selection | Select text, then `sa<char>` |
-| Delete surroundings | `sd<char>`, for example `sd'` |
-| Replace surroundings | `sr<old><new>`, for example `sr)'` |
-| Find surrounding to right or left | `sf<char>`, `sF<char>` |
-| Highlight surrounding | `sh<char>` |
+| Action                            | Keys                                    |
+| --------------------------------- | --------------------------------------- |
+| Add surroundings                  | `sa<motion><char>`, for example `saiw)` |
+| Add surroundings to selection     | Select text, then `sa<char>`            |
+| Delete surroundings               | `sd<char>`, for example `sd'`           |
+| Replace surroundings              | `sr<old><new>`, for example `sr)'`      |
+| Find surrounding to right or left | `sf<char>`, `sF<char>`                  |
+| Highlight surrounding             | `sh<char>`                              |
 
 ### Alignment
 
@@ -967,15 +927,15 @@ mode it operates on the selected lines. It splits each selected line around a
 delimiter, pads the resulting fields into columns, and joins them again. It
 does not understand the language or replace a formatter.
 
-| Action | Keys or flow |
-|---|---|
-| Align a selected region immediately | Select it, then `ga<delimiter>` |
-| Align a selected region with preview | Select it, then `gA<delimiter><CR>` |
-| Align the current paragraph on `=` | `gaip=` |
-| Preview paragraph alignment on `=` | `gAip=`, then `<CR>` to accept |
-| Cancel a preview | `<Esc>` or `<C-c>` |
-| Use a multi-character or literal delimiter | Start `gA` with a region, press `s`, enter the delimiter and press `<CR>` |
-| Choose left, center, right or no justification | During preview press `j`, then `l`, `c`, `r` or `n` |
+| Action                                         | Keys or flow                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------------- |
+| Align a selected region immediately            | Select it, then `ga<delimiter>`                                           |
+| Align a selected region with preview           | Select it, then `gA<delimiter><CR>`                                       |
+| Align the current paragraph on `=`             | `gaip=`                                                                   |
+| Preview paragraph alignment on `=`             | `gAip=`, then `<CR>` to accept                                            |
+| Cancel a preview                               | `<Esc>` or `<C-c>`                                                        |
+| Use a multi-character or literal delimiter     | Start `gA` with a region, press `s`, enter the delimiter and press `<CR>` |
+| Choose left, center, right or no justification | During preview press `j`, then `l`, `c`, `r` or `n`                       |
 
 For example, line-select these assignments with `V`, press `gA=`, and then
 press `<CR>`:
@@ -998,11 +958,11 @@ column layouts. See `:help MiniAlign` for filters and advanced modifiers.
 
 ### Split/join
 
-| Action | Keys or flow |
-|---|---|
+| Action                                                     | Keys or flow                                     |
+| ---------------------------------------------------------- | ------------------------------------------------ |
 | Toggle the nearest argument list between one line and many | Put the cursor anywhere inside it and press `gS` |
-| Toggle a specific region | Select it, then press `gS` |
-| Repeat the previous split/join elsewhere | `.` |
+| Toggle a specific region                                   | Select it, then press `gS`                       |
+| Repeat the previous split/join elsewhere                   | `.`                                              |
 
 For example, put the cursor anywhere inside this call and press `gS`:
 
@@ -1019,14 +979,14 @@ rules.
 
 ### Buffer removal and visited files
 
-| Action | Keys |
-|---|---|
-| Remove current buffer | `<C-x>` |
+| Action                                             | Keys         |
+| -------------------------------------------------- | ------------ |
+| Remove current buffer                              | `<C-x>`      |
 | Select frecent file from current working directory | `<leader>vv` |
-| Select frecent file from all tracked directories | `<leader>vV` |
-| Add a label to current file | `<leader>va` |
-| Remove a label from current file | `<leader>vr` |
-| Select a label, then one of its files | `<leader>vl` |
+| Select frecent file from all tracked directories   | `<leader>vV` |
+| Add a label to current file                        | `<leader>va` |
+| Remove a label from current file                   | `<leader>vr` |
+| Select a label, then one of its files              | `<leader>vl` |
 
 Mini Visits records a normal file after it remains open for about one second
 and ranks files using both recency and frequency. `<leader>vv` is scoped to
@@ -1038,21 +998,18 @@ are persisted under the Nvim2 data directory when Neovim exits.
 
 ## Markdown, colors and TODO comments
 
-| Action | Keys or command |
-|---|---|
-| Toggle Markdown rendering globally | `:RenderMarkdown toggle` |
-| Toggle Markdown rendering for current buffer | `:RenderMarkdown buf_toggle` |
-| Open a side-by-side rendered Markdown preview | `:RenderMarkdown preview` |
+| Action                                             | Keys or command                        |
+| -------------------------------------------------- | -------------------------------------- |
+| Toggle Markdown rendering globally                 | `:RenderMarkdown toggle`               |
+| Toggle Markdown rendering for current buffer       | `:RenderMarkdown buf_toggle`           |
+| Open a side-by-side rendered Markdown preview      | `:RenderMarkdown preview`              |
 | Preview the Mermaid fence under the cursor as text | `<leader>ma` or `:MermaidAsciiPreview` |
-| Toggle inline color previews | `<leader>tc` |
-| Search TODO comments | `:TodoTelescope` |
-| Put TODO comments in quickfix | `:TodoQuickFix` |
+| Search TODO comments                               | `:TodoTelescope`                       |
+| Put TODO comments in quickfix                      | `:TodoQuickFix`                        |
 
-`nvim-highlight-colors` is not loaded at startup because its scroll refreshes
-can make large highlighted buffers less responsive. The first `<leader>tc`
-loads it and immediately highlights the current buffer; later presses disable
-or re-enable it. Its `:HighlightColors` command becomes available after that
-first load.
+Neovim 0.12 automatically previews color values when an attached language
+server supports LSP document colors. The configured Lua, CSS and HTML servers
+support them; the TypeScript and Python servers do not.
 
 The Mermaid preview is a local module, not a Neovim plugin or server. Put the
 cursor anywhere inside a fenced `mermaid` block and press `<leader>ma`. A
@@ -1108,18 +1065,18 @@ target OS and architecture. Plugins, Mason tools, language servers, formatters,
 linters, parsers and Neovim itself are released and rolled back as one tested
 unit.
 
-| Action | Command |
-|---|---|
+| Action                                                | Command                                               |
+| ----------------------------------------------------- | ----------------------------------------------------- |
 | Inspect installed plugin state without network access | `:lua vim.print(vim.pack.get(nil, { info = false }))` |
-| Fetch and review plugin updates | `:lua vim.pack.update()` |
-| Fetch and review one plugin | `:lua vim.pack.update({ 'PLUGIN' })` |
-| Apply proposed plugin updates | `:write` in the update window |
-| Cancel proposed plugin updates | `:quit` in the update window |
-| Check locked plugins, tools, parsers and hardening | `:Nvim2Check` |
-| Run smoke tests and startup benchmark | `bash ~/.config/nvim2/tests/check.sh` |
-| Check profile health | `:checkhealth kickstart` |
-| Check LSP health | `:checkhealth vim.lsp` |
-| Check Treesitter health | `:checkhealth nvim-treesitter` |
+| Fetch and review plugin updates                       | `:lua vim.pack.update()`                              |
+| Fetch and review one plugin                           | `:lua vim.pack.update({ 'PLUGIN' })`                  |
+| Apply proposed plugin updates                         | `:write` in the update window                         |
+| Cancel proposed plugin updates                        | `:quit` in the update window                          |
+| Check locked plugins, tools, parsers and hardening    | `:Nvim2Check`                                         |
+| Run smoke tests and startup benchmark                 | `bash ~/.config/nvim2/tests/check.sh`                 |
+| Check profile health                                  | `:checkhealth kickstart`                              |
+| Check LSP health                                      | `:checkhealth vim.lsp`                                |
+| Check Treesitter health                               | `:checkhealth nvim-treesitter`                        |
 
 ### Validate the profile
 
@@ -1139,8 +1096,7 @@ bash ~/.config/nvim2/tests/check.sh
 From this repository's Nvim2 configuration directory, the equivalent command
 is `bash tests/check.sh`. The script exits nonzero when a smoke check fails. It
 also exercises daily behavior such as register-preserving edits, snippets,
-hidden-file search, Treesitter folds, Mermaid preview, formatting controls and
-the `surb`-to-default color restoration flow.
+hidden-file search, Treesitter folds, Mermaid preview and formatting controls.
 
 The script performs five isolated headless starts and reports the minimum,
 median and maximum startup time. Startup speed depends on the VM, filesystem
@@ -1298,26 +1254,26 @@ sidebar; `guess-indent.nvim` detects indentation settings but draws no guides.
 Neo-tree is enabled through Kickstart's example module. Its common daily keys
 are:
 
-| Action in Neo-tree | Keys |
-|---|---|
-| Reveal current file or focus tree | `\` |
-| Open file or expand directory | `<CR>` or `<Space>` |
-| Preview file | `P` |
-| Open in horizontal split, vertical split or tab | `S`, `s`, `t` |
-| Close directory or all directories | `C`, `z` |
-| Toggle hidden, dot and Git-ignored items | `H` |
-| Fuzzy-find an item or directory | `/`, `D` |
-| Apply a persistent name filter | `f`, type the filter, then `<CR>` |
-| Clear the active filter | `<C-x>` |
-| Use selected directory as root or go to its parent | `.`, `<BS>` |
-| Add file or directory | `a`, `A` |
-| Rename, move, copy or delete | `r`, `m`, `c`, `d` |
-| Mark for copy or move | `y`, `x` |
-| Paste marked items into selected directory | `p` |
-| Clear marked items | `<C-r>` |
-| Refresh | `R` |
-| Close tree | `\` or `q` |
-| Show Neo-tree's authoritative mapping help | `?` |
+| Action in Neo-tree                                 | Keys                              |
+| -------------------------------------------------- | --------------------------------- |
+| Reveal current file or focus tree                  | `\`                               |
+| Open file or expand directory                      | `<CR>` or `<Space>`               |
+| Preview file                                       | `P`                               |
+| Open in horizontal split, vertical split or tab    | `S`, `s`, `t`                     |
+| Close directory or all directories                 | `C`, `z`                          |
+| Toggle hidden, dot and Git-ignored items           | `H`                               |
+| Fuzzy-find an item or directory                    | `/`, `D`                          |
+| Apply a persistent name filter                     | `f`, type the filter, then `<CR>` |
+| Clear the active filter                            | `<C-x>`                           |
+| Use selected directory as root or go to its parent | `.`, `<BS>`                       |
+| Add file or directory                              | `a`, `A`                          |
+| Rename, move, copy or delete                       | `r`, `m`, `c`, `d`                |
+| Mark for copy or move                              | `y`, `x`                          |
+| Paste marked items into selected directory         | `p`                               |
+| Clear marked items                                 | `<C-r>`                           |
+| Refresh                                            | `R`                               |
+| Close tree                                         | `\` or `q`                        |
+| Show Neo-tree's authoritative mapping help         | `?`                               |
 
 Usual file-management flow:
 
