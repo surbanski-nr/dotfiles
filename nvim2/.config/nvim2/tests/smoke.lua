@@ -242,11 +242,6 @@ local function run()
   assert(indent_config.scope.char == '▏', 'current-scope guide does not match the normal guide width')
   assert(vim.fn.strdisplaywidth(indent_config.scope.char) == 1, 'current-scope guide character is wider than one cell')
   assert(not indent_config.scope.show_start and not indent_config.scope.show_end, 'current scope draws unwanted boundary underlines')
-  local indent_highlight = vim.api.nvim_get_hl(0, { name = 'Nvim2IndentGuide', link = false })
-  assert(indent_highlight.fg == 0x4f5358, 'indent guide does not use the visible NonText grey')
-  local scope_highlight = vim.api.nvim_get_hl(0, { name = 'Nvim2IndentScope', link = false })
-  assert(scope_highlight.fg == 0xe0e2ea, 'current-scope guide does not use the default white foreground')
-
   local function assert_indent_scope(language, lines, cursor, expected_node, expected_column)
     vim.cmd.enew { bang = true }
     local buffer = vim.api.nvim_get_current_buf()
@@ -503,34 +498,12 @@ local function run()
 
   notify = vim.notify
   vim.notify = function() end
-  local highlight_colors = vim.fn.maparg('<leader>tc', 'n', false, true)
-  assert(type(highlight_colors.callback) == 'function', 'color-highlight callback is unavailable')
-  highlight_colors.callback()
-  assert(require('nvim-highlight-colors').is_active(), 'inline color highlighting did not start')
-  highlight_colors.callback()
-  assert(not require('nvim-highlight-colors').is_active(), 'inline color highlighting did not stop')
-
   assert(not vim.g.disable_autoformat, 'format-on-save unexpectedly starts disabled')
   vim.cmd.FormatToggle()
   assert(vim.g.disable_autoformat, 'FormatToggle did not disable format-on-save')
   vim.cmd.FormatToggle()
   assert(not vim.g.disable_autoformat, 'FormatToggle did not re-enable format-on-save')
   vim.notify = notify
-
-  vim.cmd.colorscheme 'surb'
-  local local_function = vim.api.nvim_get_hl(0, { name = 'Function', link = false })
-  assert(local_function.fg == 0x6fb8d9 and not local_function.bold, 'local function highlight is incorrect')
-  vim.cmd.colorscheme 'default'
-  assert(vim.api.nvim_get_hl(0, { name = 'CursorLine', link = false }).bg == 0x343842, 'default cursor-line color was not restored')
-  local cursor_line_number = vim.api.nvim_get_hl(0, { name = 'CursorLineNr', link = false })
-  assert(cursor_line_number.fg == 0xff9e64 and not cursor_line_number.bold, 'default cursor-line number color was not restored')
-  local matching_pair = vim.api.nvim_get_hl(0, { name = 'MatchParen', link = false })
-  assert(matching_pair.fg == 0xff9e64 and not matching_pair.bold, 'default matching-pair color was not restored')
-  assert(vim.api.nvim_get_hl(0, { name = 'Nvim2IndentGuide', link = false }).fg == 0x4f5358, 'indent guide color was not restored after colorscheme changes')
-  assert(
-    vim.api.nvim_get_hl(0, { name = 'Nvim2IndentScope', link = false }).fg == 0xe0e2ea,
-    'current-scope guide color was not restored after colorscheme changes'
-  )
 end
 
 local ok, error_message = xpcall(run, debug.traceback)

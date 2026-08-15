@@ -73,7 +73,8 @@ not run on every insert-mode change.
 
 - `render-markdown.nvim` renders Markdown headings, tables, checkboxes, and
   code blocks in the editor.
-- `nvim-highlight-colors` previews color values inline.
+- Neovim's native LSP document-color support previews values when the attached
+  language server provides them.
 - `nvim-lint` publishes Actionlint, ESLint, Hadolint, TFLint, and yamllint
   results as diagnostics.
 
