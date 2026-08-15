@@ -293,6 +293,7 @@ Notation used below:
 | Search word under cursor                 | `*` forward, `#` backward             |
 | Clear search highlighting                | `<Esc>`                               |
 | Jump back or forward in jump list        | `<C-o>`, `<C-i>`                      |
+| Browse and open a jump-list location     | `<leader>sj`, select, then `<Enter>`  |
 | Toggle relative or absolute line numbers | `<leader>tl`                          |
 | Toggle the right-edge position marker    | `<leader>ts` or `:ScrollMarkerToggle` |
 
@@ -559,6 +560,7 @@ clipboard. Inside tmux, use `Ctrl+a` then `[`, select with `v`, and copy with
 | Search diagnostics                           | `<leader>sd`                          |
 | Browse quickfix with preview                 | `<leader>sq`                          |
 | Browse current location list with preview    | `<leader>sl`                          |
+| Browse jump list with preview                | `<leader>sj`, select, then `<Enter>`  |
 | Search help                                  | `<leader>sh`                          |
 | Search mappings                              | `<leader>sk`                          |
 | Search commands                              | `<leader>sc`                          |
