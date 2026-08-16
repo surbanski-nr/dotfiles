@@ -1,9 +1,11 @@
 local overrides = {
+  Boolean = { fg = '#ffcaff', ctermfg = 13 },
   CursorLine = { bg = '#343842', ctermbg = 237 },
   CursorLineNr = { fg = '#ff9e64', ctermfg = 214 },
   MatchParen = { fg = '#ff9e64', bg = '#3f342d', ctermfg = 214, ctermbg = 237 },
-  GitSignsCurrentLineBlame = { fg = '#c099ff', ctermfg = 13 },
-  Type = { fg = '#e69a8d', ctermfg = 174 },
+  Number = { fg = '#ffcaff', ctermfg = 13 },
+  GitSignsCurrentLineBlame = { link = 'Comment' },
+  Type = { fg = '#c099ff', ctermfg = 13 },
   ['@variable.member'] = { link = 'Identifier' },
 
   -- Comment = { fg = '#9b9ea4', italic = true },
