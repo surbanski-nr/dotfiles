@@ -3,6 +3,8 @@ local overrides = {
   CursorLineNr = { fg = '#ff9e64', ctermfg = 214 },
   MatchParen = { fg = '#ff9e64', bg = '#3f342d', ctermfg = 214, ctermbg = 237 },
   GitSignsCurrentLineBlame = { fg = '#c099ff', ctermfg = 13 },
+  Type = { fg = '#e69a8d', ctermfg = 174 },
+  ['@variable.member'] = { link = 'Identifier' },
 
   -- Comment = { fg = '#9b9ea4', italic = true },
   -- Conditional = { fg = '#c099ff', ctermfg = 13 },
@@ -24,9 +26,8 @@ local overrides = {
   -- ['@keyword.return'] = { link = 'Conditional' },
   -- ['@property'] = { link = 'Nvim2Property' },
   -- ['@type'] = { link = 'Type' },
-  -- ['@variable.member'] = { link = 'Nvim2Property' },
-
   -- Type = { fg = '#a6dbff', ctermfg = 12 },
+  -- ['@variable.member'] = { link = 'Nvim2Property' },
   -- Statement = { fg = '#c099ff', ctermfg = 13 },
 }
 
