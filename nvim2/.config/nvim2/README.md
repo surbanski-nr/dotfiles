@@ -87,6 +87,73 @@ Use Neovim 0.12.4 or newer. Language installation and
 tooling details are in
 [`docs/neovim-nvchad-to-kickstart.md`](../../../docs/neovim-nvchad-to-kickstart.md).
 
+## Clean rebuild on a connected machine
+
+`bstow restow nvim2` updates the configuration symlinks, but it does not remove
+downloaded plugins, Mason packages, language servers, formatters, linters,
+Treesitter parsers or caches. A routine update does not need to remove them.
+Use this clean rebuild after a large configuration or plugin-manager change,
+or when `:Nvim2Check` reports undeclared installed tools or parsers.
+
+Close every Nvim2 process first. The following procedure moves the generated
+profile aside instead of deleting it. It restores Mini Visits, Telescope
+history, ShaDa marks and registers, and persistent undo files:
+
+```bash
+(
+  set -euo pipefail
+
+  data="$HOME/.local/share/nvim2"
+  state="$HOME/.local/state/nvim2"
+  cache="$HOME/.cache/nvim2"
+  backup="$HOME/dotfiles-backup/nvim2-$(date -u +%Y%m%d-%H%M%S)"
+
+  if [[ -L "$data" ]]; then
+    printf 'Nvim2 data is a platform-release symlink; use the offline release runbook.\n' >&2
+    exit 1
+  fi
+
+  mkdir -p "$backup"
+  [[ ! -e "$data" ]] || mv "$data" "$backup/data"
+  [[ ! -e "$state" ]] || mv "$state" "$backup/state"
+  [[ ! -e "$cache" ]] || mv "$cache" "$backup/cache"
+
+  mkdir -p "$data" "$state"
+  for file in mini-visits-index telescope_history; do
+    [[ ! -f "$backup/data/$file" ]] || cp -a "$backup/data/$file" "$data/"
+  done
+  for directory in shada undo; do
+    [[ ! -d "$backup/state/$directory" ]] || cp -a "$backup/state/$directory" "$state/"
+  done
+
+  printf 'Previous generated profile: %s\n' "$backup"
+)
+
+cd "$HOME/github.com/surbanski/dotfiles"
+timeout 1200s env NVIM_APPNAME=nvim2 \
+  nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
+timeout 120s bash "$HOME/.config/nvim2/tests/check.sh"
+```
+
+The first Nvim2 startup restores only plugins declared in the current config at
+revisions from `nvim-pack-lock.json`. `Nvim2ToolsInstallSync` then installs the
+pinned Mason tools and declared Treesitter parsers. Keep the backup until the
+checks and normal editing work. Do not use this procedure for an offline
+platform release, where `~/.local/share/nvim2` is an activation symlink; use the
+[platform release runbook](../../../docs/nvim2-platform-releases.md) instead.
+
+Legacy profiles use separate application directories and do not affect Nvim2.
+If neither plain `nvim` nor `vold` is needed anymore, inspect and archive their
+old downloads and caches separately:
+
+```bash
+find "$HOME/.local/share" "$HOME/.local/state" "$HOME/.cache" \
+  -maxdepth 1 \( -name nvim -o -name old-nvim \) -print
+```
+
+Do not remove a listed directory until its corresponding profile is no longer
+needed.
+
 ## Transfer to a machine without internet access
 
 Nvim2 is deployed as a versioned platform release containing Neovim, Node.js,
@@ -292,7 +359,7 @@ Notation used below:
 | Next or previous search match            | `n`, `N`                              |
 | Search word under cursor                 | `*` forward, `#` backward             |
 | Clear search highlighting                | `<Esc>`                               |
-| Jump back or forward in jump list        | `<C-o>`, `<C-i>`                      |
+| Jump backward or forward in jump list    | `<C-o>`, `<C-i>`                      |
 | Browse and open a jump-list location     | `<leader>sj`, select, then `<Enter>`  |
 | Toggle relative or absolute line numbers | `<leader>tl`                          |
 | Toggle the right-edge position marker    | `<leader>ts` or `:ScrollMarkerToggle` |
@@ -477,19 +544,19 @@ words are left unchanged.
 
 These are Neovim mappings, not separate plugins.
 
-| Action                         | Keys                             |
-| ------------------------------ | -------------------------------- |
-| Toggle comment on current line | `gcc`                            |
-| Toggle comment over a motion   | `gc<motion>`, for example `gcap` |
-| Toggle comment on selection    | Select text, then `gc`           |
-| Next or previous misspelling   | `]s`, `[s`                       |
-| Suggest spelling corrections   | `z=`                             |
-| Add word to dictionary         | `zg`                             |
-| Mark word as incorrect         | `zw`                             |
-| Toggle fold                    | `za`                             |
-| Open or close fold             | `zo`, `zc`                       |
-| Open or close all folds        | `zR`, `zM`                       |
-| Move to next or previous fold  | `zj`, `zk`                       |
+| Action                           | Keys                                    |
+| -------------------------------- | --------------------------------------- |
+| Toggle comment on current line   | `gcc`                                   |
+| Toggle comment over a motion     | `gc<motion>`, for example `gcap`        |
+| Toggle comment on selected lines | `V`, extend the selection, then `gc`    |
+| Next or previous misspelling     | `]s`, `[s`                              |
+| Suggest spelling corrections     | `z=`                                    |
+| Add word to dictionary           | `zg`                                    |
+| Mark word as incorrect           | `zw`                                    |
+| Toggle fold                      | `za`                                    |
+| Open or close fold               | `zo`, `zc`                              |
+| Open or close all folds          | `zR`, `zM`                              |
+| Move to next or previous fold    | `zj`, `zk`                              |
 
 Spell checking is enabled automatically for Markdown, text, and Git commit
 buffers. Supported filetypes use Neovim's native Treesitter fold expression;
@@ -719,7 +786,9 @@ preserving completion and navigation for this configuration and Neovim APIs.
 | Code action                       | `gra` in normal or visual mode |
 | Document symbols                  | `gO`                           |
 | Workspace symbols                 | `gW`                           |
-| Return from a jump                | `<C-t>`                        |
+| Jump backward after navigation    | `<C-o>`                        |
+| Jump forward again                | `<C-i>`                        |
+| Return through the tag stack      | `<C-t>`                        |
 | Toggle inlay hints when supported | `<leader>th`                   |
 | Signature help in insert mode     | `<C-s>` or `<C-k>`             |
 

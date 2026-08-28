@@ -560,6 +560,71 @@ Continuum is required. Amazon Linux 2023 supplies a compatible tmux package.
 
 ## Maintenance and recovery
 
+### Refresh an existing connected VM
+
+Pull before cleaning so the new repository state defines which links and
+plugins should remain. Close Neovim, save any important tmux work, then update
+and preview all link changes:
+
+```bash
+cd "$HOME/github.com/surbanski/dotfiles"
+git status --short
+git pull --ff-only
+
+./bstow --dry-run -v -t "$HOME" restow \
+  git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
+./bstow -v -t "$HOME" restow \
+  git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
+
+source "$HOME/.bashrc"
+hash -r
+dotfiles-check
+```
+
+Use `--force` only after inspecting the dry run when links belong to an older
+clone of this repository. `restow` removes obsolete package-owned links and
+creates the current ones. It deliberately leaves downloaded plugins, caches
+and application-owned files alone.
+
+After changing the tmux plugin list, remove unused TPM checkouts and install
+anything newly declared:
+
+```bash
+"$HOME/.tmux/plugins/tpm/bin/clean_plugins"
+"$HOME/.tmux/plugins/tpm/bin/install_plugins"
+tmux source-file "$HOME/.tmux.conf"
+```
+
+Reloading cannot unset every option or binding removed from the old file. To
+guarantee a clean tmux server, first finish or save all work because the next
+command terminates every tmux session:
+
+```bash
+tmux kill-server
+tmux new-session -s work
+```
+
+For Nvim2, a normal pull and restart is usually sufficient. After a major
+plugin or tool rewrite, follow the
+[clean Nvim2 rebuild](nvim2/.config/nvim2/README.md#clean-rebuild-on-a-connected-machine)
+to remove obsolete plugin checkouts, Mason packages, language servers,
+formatters, linters, parsers and caches.
+
+For MC, keep its mutable `panels.ini`, history and file-position data; `restow`
+updates the managed `ini` and `surb` skin. For k9s, unused files under
+`~/.config/k9s` are inert when `config.yaml` selects the managed `surb` skin.
+If an exact k9s reset is wanted, preserve the old directory and stow a fresh
+one:
+
+```bash
+backup_dir="$HOME/dotfiles-backup/$(date -u +%Y%m%d-%H%M%S)"
+mkdir -p "$backup_dir"
+if [[ -e "$HOME/.config/k9s" || -L "$HOME/.config/k9s" ]]; then
+  mv "$HOME/.config/k9s" "$backup_dir/k9s-config"
+fi
+./bstow -v -t "$HOME" stow k9s
+```
+
 ### bstow behavior
 
 `--dry-run` previews planned actions without changing the filesystem. `-n` is
