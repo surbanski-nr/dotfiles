@@ -18,6 +18,19 @@ local function run()
     'LuaLS library expanded beyond the reviewed low-memory scope'
   )
 
+  local visits = require 'mini.visits'
+  local original_select_label = visits.select_label
+  local label_scopes = {}
+  visits.select_label = function(_, cwd) label_scopes[#label_scopes + 1] = cwd end
+  local cwd_label_map = vim.fn.maparg('<leader>vl', 'n', false, true)
+  local all_label_map = vim.fn.maparg('<leader>vL', 'n', false, true)
+  assert(type(cwd_label_map.callback) == 'function', 'cwd visit-label mapping is unavailable')
+  assert(type(all_label_map.callback) == 'function', 'global visit-label mapping is unavailable')
+  cwd_label_map.callback()
+  all_label_map.callback()
+  visits.select_label = original_select_label
+  assert(vim.deep_equal(label_scopes, { vim.fn.getcwd(), '' }), 'visit-label mappings use incorrect cwd scopes')
+
   vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'tests', 'nvim2-check.html'))
   assert(
     vim.wait(5000, function()

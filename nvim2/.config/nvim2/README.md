@@ -988,15 +988,23 @@ rules.
 | Select frecent file from all tracked directories   | `<leader>vV` |
 | Add a label to current file                        | `<leader>va` |
 | Remove a label from current file                   | `<leader>vr` |
-| Select a label, then one of its files              | `<leader>vl` |
+| Select a label and file from current working directory | `<leader>vl` |
+| Select a label and file from all tracked directories   | `<leader>vL` |
 
 Mini Visits records a normal file after it remains open for about one second
-and ranks files using both recency and frequency. `<leader>vv` is scoped to
-`:pwd`, which can include all repositories in a shared workspace;
-`<leader>vV` searches the complete history. To create a small named working
-set, open each important file, press `<leader>va` and give each the same label.
-Later, `<leader>vl` selects that label and then a file. Visit history and labels
-are persisted under the Nvim2 data directory when Neovim exits.
+and ranks files using both recency and frequency. `<leader>vv` and
+`<leader>vl` are scoped to `:pwd`, which initially is the directory where
+Neovim was started and can include several repositories in a shared workspace.
+They do not replace that scope with the nearest Git root. `<leader>vV` and
+`<leader>vL` search the complete history.
+
+To create a persistent project bookmark list, start Neovim from the project or
+workspace directory, open each important file, press `<leader>va` and give each
+the same label, such as `core`. After restarting Neovim from that directory,
+press `<leader>vl`, select `core`, then select a file. `<leader>vr` removes a
+label from the current file. Visit history and labels are written to
+`~/.local/share/nvim2/mini-visits-index` when Neovim exits. Changing `:pwd`
+with `:cd` also changes the scope used by the lowercase pickers.
 
 ## Markdown, colors and TODO comments
 
