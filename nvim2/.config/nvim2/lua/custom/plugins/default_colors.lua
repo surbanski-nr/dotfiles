@@ -1,3 +1,8 @@
+local class_module_color = { fg = '#c58fa3', ctermfg = 175 } -- Muted rose.
+-- local class_module_color = { fg = '#aa8fa8', ctermfg = 139 } -- Muted plum.
+-- local class_module_color = { fg = '#9994b8', ctermfg = 103 } -- Cool violet-gray.
+-- local class_module_color = { fg = '#9da6b2', ctermfg = 145 } -- Neutral steel gray.
+
 local overrides = {
   Boolean = { fg = '#ffcaff', ctermfg = 13 },
   CursorLine = { bg = '#343842', ctermbg = 237 },
@@ -6,6 +11,11 @@ local overrides = {
   Number = { fg = '#ffcaff', ctermfg = 13 },
   GitSignsCurrentLineBlame = { link = 'Comment' },
   Type = { fg = '#c099ff', ctermfg = 13 },
+  ['@type'] = class_module_color,
+  ['@type.definition'] = class_module_color,
+  ['@module'] = class_module_color,
+  ['@lsp.type.class'] = class_module_color,
+  ['@lsp.type.namespace'] = class_module_color,
   ['@variable.member'] = { link = 'Identifier' },
 
   -- Comment = { fg = '#9b9ea4', italic = true },
