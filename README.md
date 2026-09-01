@@ -535,6 +535,8 @@ Build and test one complete platform artifact on a connected builder matching
 the target distribution, architecture, username, home path and Python version.
 Transfer and activate it using the
 [Nvim2 platform release runbook](docs/nvim2-platform-releases.md).
+The runbook also documents the GitHub Actions workflow that attaches tested
+platform archives to an existing commit-based draft release.
 
 The transferred release contains Neovim, Node.js, ripgrep, plugins, Mason
 packages and Treesitter parsers. The target still needs:

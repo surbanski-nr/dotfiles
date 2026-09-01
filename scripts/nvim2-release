@@ -1,0 +1,541 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+die() {
+  printf 'nvim2-release: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  nvim2-release build PLATFORM SOURCE_DIR OUTPUT_ROOT
+  nvim2-release prepare-runtime PLATFORM
+  nvim2-release verify PLATFORM ARTIFACT_DIR
+EOF
+  exit 2
+}
+
+require_root() {
+  [[ $(id -u) -eq 0 ]] || die "$1 must run as root"
+}
+
+require_value() {
+  local name=$1
+  [[ -n ${!name:-} ]] || die "$name is not configured"
+}
+
+load_release_config() {
+  local source_dir=$1
+  local config_file="$source_dir/.github/nvim2-release.env"
+
+  [[ -f $config_file ]] || die "missing release config: $config_file"
+  # shellcheck source=/dev/null
+  source "$config_file"
+  for name in NVIM_VERSION NODE_VERSION NPM_VERSION RG_VERSION TARGET_USER \
+    TARGET_UID TARGET_HOME UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE AMZN_2023_IMAGE; do
+    require_value "$name"
+  done
+}
+
+validate_platform() {
+  local platform=$1
+  local expected_id
+  local expected_version
+  local expected_arch
+
+  case "$platform" in
+    ubuntu-24.04-x86_64)
+      expected_id=ubuntu
+      expected_version=24.04
+      expected_arch=x86_64
+      ;;
+    ubuntu-26.04-x86_64)
+      expected_id=ubuntu
+      expected_version=26.04
+      expected_arch=x86_64
+      ;;
+    amzn-2023-x86_64)
+      expected_id=amzn
+      expected_version=2023
+      expected_arch=x86_64
+      ;;
+    *) die "unsupported platform: $platform" ;;
+  esac
+
+  # shellcheck disable=SC1091
+  source /etc/os-release
+  [[ $ID == "$expected_id" ]] || die "$platform requires OS ID $expected_id, found $ID"
+  [[ $VERSION_ID == "$expected_version" ]] ||
+    die "$platform requires OS version $expected_version, found $VERSION_ID"
+  [[ $(uname -m) == "$expected_arch" ]] ||
+    die "$platform requires architecture $expected_arch, found $(uname -m)"
+}
+
+configured_image() {
+  case "$1" in
+    ubuntu-24.04-x86_64) printf '%s\n' "$UBUNTU_2404_IMAGE" ;;
+    ubuntu-26.04-x86_64) printf '%s\n' "$UBUNTU_2604_IMAGE" ;;
+    amzn-2023-x86_64) printf '%s\n' "$AMZN_2023_IMAGE" ;;
+    *) die "unsupported platform: $1" ;;
+  esac
+}
+
+install_packages() {
+  local platform=$1
+  local role=$2
+
+  case "$platform" in
+    ubuntu-*)
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      if [[ $role == build ]]; then
+        apt-get install -y --no-install-recommends \
+          ca-certificates curl file g++ gcc git make patch python3 python3-pip \
+          python3-venv tar tmux unzip wget xz-utils
+      else
+        apt-get install -y --no-install-recommends \
+          ca-certificates git gzip python3 tar tmux xz-utils
+      fi
+      ;;
+    amzn-2023-x86_64)
+      if [[ $role == build ]]; then
+        dnf install -y \
+          ca-certificates cargo clang-devel file findutils gcc gcc-c++ git \
+          gzip make openssh-clients patch python3.12 python3.12-pip \
+          shadow-utils tar tmux unzip wget which xz
+      else
+        dnf install -y \
+          ca-certificates findutils git gzip python3.12 shadow-utils tar tmux \
+          which xz
+      fi
+      ;;
+    *) die "unsupported platform: $platform" ;;
+  esac
+}
+
+ensure_target_user() {
+  local existing_user
+  local existing_group
+
+  if id "$TARGET_USER" >/dev/null 2>&1; then
+    [[ $(id -u "$TARGET_USER") -eq $TARGET_UID ]] ||
+      die "$TARGET_USER exists with UID $(id -u "$TARGET_USER"), expected $TARGET_UID"
+    return
+  fi
+
+  existing_user=$(getent passwd "$TARGET_UID" | cut -d: -f1)
+  if [[ -n $existing_user ]]; then
+    existing_group=$(id -gn "$existing_user")
+    usermod --login "$TARGET_USER" --home "$TARGET_HOME" --move-home \
+      --shell /bin/bash "$existing_user"
+    if [[ $existing_group != "$TARGET_USER" ]]; then
+      groupmod --new-name "$TARGET_USER" "$existing_group"
+    fi
+    return
+  fi
+
+  if ! getent group "$TARGET_USER" >/dev/null; then
+    groupadd --gid "$TARGET_UID" "$TARGET_USER"
+  fi
+  useradd --create-home --uid "$TARGET_UID" --gid "$TARGET_USER" \
+    --home-dir "$TARGET_HOME" --shell /bin/bash "$TARGET_USER"
+}
+
+link_python() {
+  local python_path
+
+  if [[ -x /usr/bin/python3.12 ]]; then
+    python_path=/usr/bin/python3.12
+  else
+    python_path=$(command -v python3)
+  fi
+  mkdir -p "$TARGET_HOME/bin"
+  ln -sfn "$python_path" "$TARGET_HOME/bin/python3"
+  ln -sfn "$python_path" "$TARGET_HOME/bin/python"
+}
+
+github_asset_digest() {
+  local repository=$1
+  local tag=$2
+  local asset=$3
+
+  curl --connect-timeout 30 --max-time 120 \
+    --retry 3 --retry-all-errors -fsSL \
+    "https://api.github.com/repos/$repository/releases/tags/$tag" |
+    ASSET="$asset" python3 -c '
+import json, os, sys
+assets = json.load(sys.stdin)["assets"]
+print(next(item["digest"] for item in assets if item["name"] == os.environ["ASSET"]))
+'
+}
+
+download_github_asset() {
+  local repository=$1
+  local tag=$2
+  local asset=$3
+  local destination=$4
+  local digest
+  local checksum
+
+  digest=$(github_asset_digest "$repository" "$tag" "$asset")
+  case "$digest" in
+    sha256:*) checksum=${digest#sha256:} ;;
+    *) die "GitHub release metadata has no SHA-256 digest for $asset" ;;
+  esac
+  curl --connect-timeout 30 --max-time 600 \
+    --retry 3 --retry-all-errors -fL \
+    "https://github.com/$repository/releases/download/$tag/$asset" \
+    -o "$destination"
+  printf '%s  %s\n' "$checksum" "$destination" | sha256sum --check --strict
+}
+
+install_node() {
+  local asset="node-v${NODE_VERSION}-linux-x64.tar.xz"
+  local base="https://nodejs.org/download/release/v${NODE_VERSION}"
+  local checksum_file="$HOME/release-inputs/node-v${NODE_VERSION}-SHASUMS256.txt"
+  local archive="$HOME/release-inputs/$asset"
+  local checksum
+  local install_dir="$HOME/.local/opt/node-v${NODE_VERSION}"
+
+  mkdir -p "$HOME/bin" "$HOME/release-inputs" "$install_dir"
+  curl --connect-timeout 30 --max-time 120 \
+    --retry 3 --retry-all-errors -fL \
+    "$base/SHASUMS256.txt" -o "$checksum_file"
+  checksum=$(awk -v asset="$asset" '$2 == asset { print $1 }' "$checksum_file")
+  [[ $checksum =~ ^[0-9a-f]{64}$ ]] || die "missing Node.js checksum for $asset"
+  curl --connect-timeout 30 --max-time 600 \
+    --retry 3 --retry-all-errors -fL "$base/$asset" -o "$archive"
+  printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --strict
+  tar -xJf "$archive" -C "$install_dir" --strip-components=1
+  for command_name in node npm npx corepack; do
+    ln -sfn "$install_dir/bin/$command_name" "$HOME/bin/$command_name"
+  done
+  timeout 600s env NPM_CONFIG_AUDIT=false npm install --global "npm@$NPM_VERSION"
+}
+
+install_ripgrep() {
+  local tag=$RG_VERSION
+  local asset="ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+  local archive="$HOME/release-inputs/$asset"
+  local stage
+
+  stage=$(mktemp -d)
+  download_github_asset BurntSushi/ripgrep "$tag" "$asset" "$archive"
+  tar -xzf "$archive" -C "$stage"
+  install -m 0755 "$stage/ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl/rg" "$HOME/bin/rg"
+  find "$stage" -depth -delete
+}
+
+install_neovim() {
+  local asset=nvim-linux-x86_64.tar.gz
+  local archive="$HOME/release-inputs/$asset"
+  local install_dir="$HOME/.local/opt/nvim-$NVIM_VERSION"
+
+  mkdir -p "$install_dir"
+  download_github_asset neovim/neovim "$NVIM_VERSION" "$asset" "$archive"
+  tar -xzf "$archive" -C "$install_dir" --strip-components=1
+  ln -sfn "$install_dir/bin/nvim" "$HOME/bin/nvim"
+}
+
+install_nvim2_data() {
+  local platform=$1
+  local tree_sitter_version
+  local tree_sitter_root
+  local tree_sitter_binary
+
+  [[ ! -e $HOME/.local/share/nvim2 ]] || die "$HOME/.local/share/nvim2 must not exist"
+  if [[ $platform == amzn-2023-x86_64 ]]; then
+    timeout 2400s env NPM_CONFIG_AUDIT=false NVIM_APPNAME=nvim2 \
+      nvim --headless '+MasonToolsInstallSync' '+qa!'
+    tree_sitter_version=$(
+      NVIM_APPNAME=nvim2 nvim --headless \
+        "+lua for _, tool in ipairs(require('custom.lsp').tools) do if tool[1] == 'tree-sitter-cli' then io.write(tool.version:gsub('^v', '')) end end" \
+        '+qa!'
+    )
+    [[ -n $tree_sitter_version ]] || die 'tree-sitter-cli version is empty'
+    tree_sitter_root="$HOME/.local/opt/tree-sitter-cli-$tree_sitter_version"
+    tree_sitter_binary=$(readlink -f "$HOME/.local/share/nvim2/mason/bin/tree-sitter")
+    timeout 2400s cargo install tree-sitter-cli \
+      --version "$tree_sitter_version" \
+      --locked \
+      --root "$tree_sitter_root"
+    install -m 0755 "$tree_sitter_root/bin/tree-sitter" "$tree_sitter_binary"
+  fi
+
+  timeout 2400s env NPM_CONFIG_AUDIT=false NVIM_APPNAME=nvim2 \
+    nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
+}
+
+package_release() {
+  local platform=$1
+  local output_root=$2
+  local repo=$3
+  local commit
+  local data_root="$HOME/.local/share/nvim2"
+  local out="$output_root/$platform"
+  local stage
+  local nvim_archive=nvim-linux-x86_64.tar.gz
+  local node_archive="node-v${NODE_VERSION}-linux-x64.tar.xz"
+  local rg_archive="ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+
+  commit=$(git -C "$repo" rev-parse HEAD)
+  [[ $commit == "$SOURCE_COMMIT" ]] || die "source commit changed: $commit"
+  stage=$(mktemp -d)
+  mkdir -p "$out" "$stage/nvim2/site/pack"
+  cp -a "$data_root/site/pack/core" "$stage/nvim2/site/pack/"
+  cp -a "$data_root/site/parser" "$stage/nvim2/site/"
+  cp -a "$data_root/site/parser-info" "$stage/nvim2/site/"
+  cp -aL "$data_root/site/queries" "$stage/nvim2/site/"
+  cp -a "$data_root/mason" "$stage/nvim2/"
+  tar -C "$stage/nvim2" -czf "$out/nvim2-data.tar.gz" .
+  find "$stage" -depth -delete
+
+  git -C "$repo" bundle create "$out/dotfiles.bundle" HEAD
+  git -C "$repo" bundle verify "$out/dotfiles.bundle"
+  cp "$HOME/release-inputs/$nvim_archive" "$out/"
+  cp "$HOME/release-inputs/$node_archive" "$out/"
+  cp "$HOME/release-inputs/$rg_archive" "$out/"
+
+  cat >"$out/release.env" <<EOF
+RELEASE_ID=$RELEASE_TAG
+RELEASE_TAG=$RELEASE_TAG
+PLATFORM_ID=$platform
+DOTFILES_COMMIT=$commit
+NVIM_VERSION=$NVIM_VERSION
+NVIM_ARCHIVE=$nvim_archive
+NODE_VERSION=$NODE_VERSION
+NODE_ARCHIVE=$node_archive
+RG_VERSION=$RG_VERSION
+RG_ARCHIVE=$rg_archive
+BUILDER_IMAGE=$BUILDER_IMAGE
+TARGET_USER=$TARGET_USER
+TARGET_UID=$TARGET_UID
+TARGET_HOME=$TARGET_HOME
+EOF
+
+  {
+    cat /etc/os-release
+    uname -a
+    getconf GNU_LIBC_VERSION
+    nvim --version
+    node --version
+    npm --version
+    python3 --version
+    rg --version | head -n 1
+    tmux -V
+    "$data_root/mason/bin/tree-sitter" --version
+    printf 'tree_sitter_cli_sha256='
+    sha256sum "$data_root/mason/packages/tree-sitter-cli/tree-sitter-linux-x64" | awk '{ print $1 }'
+    git --version
+    printf 'builder_image=%s\n' "$BUILDER_IMAGE"
+    printf 'dotfiles_commit=%s\n' "$commit"
+    sha256sum "$repo/nvim2/.config/nvim2/nvim-pack-lock.json"
+  } >"$out/build-manifest.txt"
+
+  if command -v rpm >/dev/null 2>&1; then
+    rpm -qa --qf '%{NAME} %{VERSION}-%{RELEASE} %{ARCH}\n' | sort >"$out/os-packages.txt"
+  else
+    dpkg-query -W -f='${Package} ${Version} ${Architecture}\n' | sort >"$out/os-packages.txt"
+  fi
+
+  (
+    cd "$out"
+    sha256sum \
+      dotfiles.bundle \
+      nvim2-data.tar.gz \
+      "$nvim_archive" \
+      "$node_archive" \
+      "$rg_archive" \
+      release.env \
+      build-manifest.txt \
+      os-packages.txt \
+      >SHA256SUMS
+    sha256sum --check --strict SHA256SUMS
+  )
+}
+
+build_user() {
+  local platform=$1
+  local output_root=$2
+  local repo="$TARGET_HOME/github.com/surbanski/dotfiles"
+  local data_root="$HOME/.local/share/nvim2"
+
+  export PATH="$HOME/bin:/usr/local/bin:/usr/bin:/bin"
+  [[ $HOME == "$TARGET_HOME" ]] || die "HOME is $HOME, expected $TARGET_HOME"
+  [[ $(git -C "$repo" rev-parse HEAD) == "$SOURCE_COMMIT" ]] || die 'checked-out source does not match release tag'
+
+  install_node
+  install_ripgrep
+  install_neovim
+  node --version
+  npm --version
+  rg --version
+  nvim --version
+
+  cd "$repo"
+  ./bstow --dry-run -t "$HOME" stow nvim2
+  ./bstow -t "$HOME" stow nvim2
+  [[ ! -e $data_root ]] || die "$data_root existed before clean installation"
+  install_nvim2_data "$platform"
+  NVIM2_BENCHMARK_RUNS=3 bash "$HOME/.config/nvim2/tests/check.sh"
+
+  if find -L "$data_root/mason/bin" -type l -print -quit | grep -q .; then
+    die 'Mason contains broken executable links'
+  fi
+  package_release "$platform" "$output_root" "$repo"
+}
+
+build_release() {
+  local platform=$1
+  local source_dir=$2
+  local output_root=$3
+  local expected_image
+  local repo
+  local target_group
+
+  require_root build
+  [[ -d $source_dir/.git ]] || die "source is not a Git checkout: $source_dir"
+  load_release_config "$source_dir"
+  require_value SOURCE_COMMIT
+  require_value RELEASE_TAG
+  expected_image=$(configured_image "$platform")
+  BUILDER_IMAGE=${BUILDER_IMAGE:-$expected_image}
+  [[ $BUILDER_IMAGE == "$expected_image" ]] ||
+    die "builder image does not match pinned image for $platform"
+  validate_platform "$platform"
+  install_packages "$platform" build
+  ensure_target_user
+  link_python
+
+  repo="$TARGET_HOME/github.com/surbanski/dotfiles"
+  target_group=$(id -gn "$TARGET_USER")
+  mkdir -p "$(dirname "$repo")" "$repo" "$output_root"
+  cp -a "$source_dir/." "$repo/"
+  chown -R "$TARGET_USER:$target_group" "$TARGET_HOME" "$output_root"
+
+  runuser -u "$TARGET_USER" -- env \
+    HOME="$TARGET_HOME" \
+    USER="$TARGET_USER" \
+    LOGNAME="$TARGET_USER" \
+    PATH="$TARGET_HOME/bin:/usr/local/bin:/usr/bin:/bin" \
+    NVIM_VERSION="$NVIM_VERSION" \
+    NODE_VERSION="$NODE_VERSION" \
+    NPM_VERSION="$NPM_VERSION" \
+    RG_VERSION="$RG_VERSION" \
+    TARGET_USER="$TARGET_USER" \
+    TARGET_UID="$TARGET_UID" \
+    TARGET_HOME="$TARGET_HOME" \
+    SOURCE_COMMIT="$SOURCE_COMMIT" \
+    RELEASE_TAG="$RELEASE_TAG" \
+    BUILDER_IMAGE="$BUILDER_IMAGE" \
+    bash "$repo/scripts/nvim2-release" build-user "$platform" "$output_root"
+}
+
+prepare_runtime() {
+  local platform=$1
+
+  require_root prepare-runtime
+  TARGET_USER=${TARGET_USER:-surbanski}
+  TARGET_UID=${TARGET_UID:-1000}
+  TARGET_HOME=${TARGET_HOME:-/home/surbanski}
+  validate_platform "$platform"
+  install_packages "$platform" runtime
+  ensure_target_user
+  link_python
+  chown -R "$TARGET_USER:$(id -gn "$TARGET_USER")" "$TARGET_HOME"
+}
+
+verify_release() {
+  local platform=$1
+  local artifact_dir=$2
+  local repo
+  local release_dir
+  local nvim_dir
+  local node_dir
+  local rg_dir
+  local rg_stage
+  local target_group
+  local NVIM_ARCHIVE
+  local NODE_ARCHIVE
+  local RG_ARCHIVE
+
+  require_root verify
+  [[ -f $artifact_dir/release.env ]] || die "missing $artifact_dir/release.env"
+  (cd "$artifact_dir" && sha256sum --check --strict SHA256SUMS)
+  # shellcheck disable=SC1091
+  source "$artifact_dir/release.env"
+  for name in RELEASE_ID PLATFORM_ID DOTFILES_COMMIT NVIM_VERSION NVIM_ARCHIVE \
+    NODE_VERSION NODE_ARCHIVE RG_VERSION RG_ARCHIVE TARGET_USER TARGET_UID \
+    TARGET_HOME; do
+    require_value "$name"
+  done
+  validate_platform "$platform"
+  [[ $PLATFORM_ID == "$platform" ]] || die "artifact is for $PLATFORM_ID, not $platform"
+  [[ $TARGET_HOME == "/home/$TARGET_USER" ]] || die 'target home and user do not match'
+  [[ $(id -u "$TARGET_USER") -eq $TARGET_UID ]] || die 'target UID does not match artifact'
+  timeout 5s getent hosts github.com >/dev/null 2>&1 && die 'offline validation container has external DNS'
+
+  target_group=$(id -gn "$TARGET_USER")
+  nvim_dir="$TARGET_HOME/.local/opt/nvim-$NVIM_VERSION"
+  node_dir="$TARGET_HOME/.local/opt/node-v$NODE_VERSION"
+  rg_dir="$TARGET_HOME/.local/opt/ripgrep-$RG_VERSION"
+  mkdir -p "$TARGET_HOME/bin" "$nvim_dir" "$node_dir" "$rg_dir"
+  tar -xzf "$artifact_dir/$NVIM_ARCHIVE" -C "$nvim_dir" --strip-components=1
+  tar -xJf "$artifact_dir/$NODE_ARCHIVE" -C "$node_dir" --strip-components=1
+  rg_stage=$(mktemp -d)
+  tar -xzf "$artifact_dir/$RG_ARCHIVE" -C "$rg_stage"
+  install -m 0755 "$rg_stage/ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl/rg" "$rg_dir/rg"
+  find "$rg_stage" -depth -delete
+
+  repo="$TARGET_HOME/github.com/surbanski/dotfiles"
+  mkdir -p "$(dirname "$repo")"
+  git clone "$artifact_dir/dotfiles.bundle" "$repo"
+  git -C "$repo" checkout --detach "$DOTFILES_COMMIT"
+  (
+    cd "$repo"
+    ./bstow --dry-run -t "$TARGET_HOME" stow nvim2
+    ./bstow -t "$TARGET_HOME" stow nvim2
+  )
+
+  release_dir="$TARGET_HOME/.local/share/nvim2-releases/$RELEASE_ID"
+  mkdir -p "$release_dir"
+  tar -C "$release_dir" -xzf "$artifact_dir/nvim2-data.tar.gz"
+  ln -s "$release_dir" "$TARGET_HOME/.local/share/nvim2"
+  ln -s "$nvim_dir/bin/nvim" "$TARGET_HOME/bin/nvim"
+  for command_name in node npm npx corepack; do
+    ln -s "$node_dir/bin/$command_name" "$TARGET_HOME/bin/$command_name"
+  done
+  ln -s "$rg_dir/rg" "$TARGET_HOME/bin/rg"
+  chown -R "$TARGET_USER:$target_group" "$TARGET_HOME"
+
+  runuser -u "$TARGET_USER" -- env \
+    HOME="$TARGET_HOME" \
+    USER="$TARGET_USER" \
+    LOGNAME="$TARGET_USER" \
+    PATH="$TARGET_HOME/bin:/usr/local/bin:/usr/bin:/bin" \
+    NVIM_APPNAME=nvim2 \
+    NVIM2_BENCHMARK_RUNS=3 \
+    timeout 300s bash "$TARGET_HOME/.config/nvim2/tests/check.sh"
+}
+
+case ${1:-} in
+  build)
+    [[ $# -eq 4 ]] || usage
+    build_release "$2" "$3" "$4"
+    ;;
+  build-user)
+    [[ $# -eq 3 ]] || usage
+    build_user "$2" "$3"
+    ;;
+  prepare-runtime)
+    [[ $# -eq 2 ]] || usage
+    prepare_runtime "$2"
+    ;;
+  verify)
+    [[ $# -eq 3 ]] || usage
+    verify_release "$2" "$3"
+    ;;
+  *) usage ;;
+esac
