@@ -163,7 +163,7 @@ validate_workflows() {
       die 'GitHub token unavailable; run gh auth login'
   fi
   GH_TOKEN=$token zizmor --persona=pedantic \
-    --config .github/zizmor.yml .
+    --config zizmor.yml .
 }
 
 validate_repo() {
