@@ -33,10 +33,31 @@ load_release_config() {
   [[ -f $config_file ]] || die "missing release config: $config_file"
   # shellcheck source=/dev/null
   source "$config_file"
-  for name in NVIM_VERSION NODE_VERSION NPM_VERSION RG_VERSION TARGET_USER \
-    TARGET_UID TARGET_HOME UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE AMZN_2023_IMAGE; do
+  for name in NVIM_VERSION NODE_VERSION NPM_VERSION RG_VERSION \
+    UBUNTU_TARGET_USER UBUNTU_TARGET_UID UBUNTU_TARGET_HOME \
+    AMZN_TARGET_USER AMZN_TARGET_UID AMZN_TARGET_HOME \
+    UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE AMZN_2023_IMAGE; do
     require_value "$name"
   done
+}
+
+configure_target() {
+  case "$1" in
+    ubuntu-*)
+      TARGET_USER=$UBUNTU_TARGET_USER
+      TARGET_UID=$UBUNTU_TARGET_UID
+      TARGET_HOME=$UBUNTU_TARGET_HOME
+      ;;
+    amzn-2023-x86_64)
+      TARGET_USER=$AMZN_TARGET_USER
+      TARGET_UID=$AMZN_TARGET_UID
+      TARGET_HOME=$AMZN_TARGET_HOME
+      ;;
+    *) die "unsupported platform: $1" ;;
+  esac
+  [[ $TARGET_UID =~ ^[0-9]+$ ]] || die "invalid target UID: $TARGET_UID"
+  [[ $TARGET_HOME == "/home/$TARGET_USER" ]] ||
+    die "target home $TARGET_HOME does not match user $TARGET_USER"
 }
 
 validate_platform() {
@@ -400,6 +421,7 @@ build_release() {
   load_release_config "$source_dir"
   require_value SOURCE_COMMIT
   require_value RELEASE_TAG
+  configure_target "$platform"
   expected_image=$(configured_image "$platform")
   BUILDER_IMAGE=${BUILDER_IMAGE:-$expected_image}
   [[ $BUILDER_IMAGE == "$expected_image" ]] ||
@@ -437,9 +459,9 @@ prepare_runtime() {
   local platform=$1
 
   require_root prepare-runtime
-  TARGET_USER=${TARGET_USER:-surbanski}
-  TARGET_UID=${TARGET_UID:-1000}
-  TARGET_HOME=${TARGET_HOME:-/home/surbanski}
+  require_value TARGET_USER
+  require_value TARGET_UID
+  require_value TARGET_HOME
   validate_platform "$platform"
   install_packages "$platform" runtime
   ensure_target_user

@@ -162,7 +162,14 @@ validate_workflows() {
 
 validate_repo() {
   local base=${VALIDATE_BASE_SHA:-}
+  local home
+  local home_variable
   local image
+  local prefix
+  local uid
+  local uid_variable
+  local user
+  local user_variable
   local variable
 
   bash -n nvim2-release.env validation.env
@@ -172,6 +179,18 @@ validate_repo() {
     image=${!variable}
     [[ $image =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
       die "$variable is not pinned to a SHA-256 digest"
+  done
+  for prefix in UBUNTU AMZN; do
+    user_variable="${prefix}_TARGET_USER"
+    uid_variable="${prefix}_TARGET_UID"
+    home_variable="${prefix}_TARGET_HOME"
+    user=${!user_variable:-}
+    uid=${!uid_variable:-}
+    home=${!home_variable:-}
+    [[ -n $user ]] || die "$user_variable is empty"
+    [[ $uid =~ ^[0-9]+$ ]] || die "$uid_variable is not a UID"
+    [[ $home == "/home/$user" ]] ||
+      die "$home_variable does not match $user_variable"
   done
 
   for file in scripts/* bstow vim/setup nvim2/.config/nvim2/tests/check.sh; do

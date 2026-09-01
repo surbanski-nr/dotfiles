@@ -178,12 +178,32 @@ jobs:
           set -euo pipefail
           source nvim2-release.env
           case "$PLATFORM" in
-            ubuntu-24.04-x86_64) image=$UBUNTU_2404_IMAGE ;;
-            ubuntu-26.04-x86_64) image=$UBUNTU_2604_IMAGE ;;
-            amzn-2023-x86_64) image=$AMZN_2023_IMAGE ;;
+            ubuntu-24.04-x86_64)
+              image=$UBUNTU_2404_IMAGE
+              target_user=$UBUNTU_TARGET_USER
+              target_uid=$UBUNTU_TARGET_UID
+              target_home=$UBUNTU_TARGET_HOME
+              ;;
+            ubuntu-26.04-x86_64)
+              image=$UBUNTU_2604_IMAGE
+              target_user=$UBUNTU_TARGET_USER
+              target_uid=$UBUNTU_TARGET_UID
+              target_home=$UBUNTU_TARGET_HOME
+              ;;
+            amzn-2023-x86_64)
+              image=$AMZN_2023_IMAGE
+              target_user=$AMZN_TARGET_USER
+              target_uid=$AMZN_TARGET_UID
+              target_home=$AMZN_TARGET_HOME
+              ;;
             *) printf 'Unsupported platform: %s\n' "$PLATFORM" >&2; exit 1 ;;
           esac
-          printf 'image=%s\n' "$image" >>"$GITHUB_OUTPUT"
+          printf '%s\n' \
+            "image=$image" \
+            "target_user=$target_user" \
+            "target_uid=$target_uid" \
+            "target_home=$target_home" \
+            >>"$GITHUB_OUTPUT"
 
       - name: Build platform release
         env:
@@ -210,9 +230,11 @@ jobs:
         env:
           BUILDER_IMAGE: ${{ steps.image.outputs.image }}
           PLATFORM: ${{ matrix.platform }}
+          TARGET_HOME: ${{ steps.image.outputs.target_home }}
+          TARGET_UID: ${{ steps.image.outputs.target_uid }}
+          TARGET_USER: ${{ steps.image.outputs.target_user }}
         run: |
           set -euo pipefail
-          source nvim2-release.env
           runtime_container="nvim2-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM"
           runtime_image="nvim2-runtime:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM"
           cleanup() {
