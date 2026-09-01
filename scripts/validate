@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+die() {
+  printf 'validate: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  printf '%s\n' \
+    'usage: validate {bash|configs|nvim2|old-nvim|repo|scripts|workflows}' \
+    >&2
+  exit 2
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "required command is missing: $1"
+}
+
+repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/.cache/validation-tools}
+export PATH="$tools_dir/bin:$PATH"
+cd "$repo_dir"
+
+validate_bash() {
+  need bash
+  need shellcheck
+  need timeout
+  local files=(
+    bash/.bashrc
+    bash/.bash_profile
+    bash/.bash_aliases
+    tests/bash_test.sh
+  )
+
+  bash -n "${files[@]}"
+  shellcheck --shell=bash --external-sources \
+    -e SC1090,SC1091 "${files[@]}"
+  timeout 120s bash tests/bash_test.sh
+}
+
+validate_scripts() {
+  need bash
+  need sh
+  need shellcheck
+  need timeout
+  local bash_files=()
+  local files=(bstow vim/setup tests/bstow_test.sh)
+  local first_line
+  local posix_files=()
+
+  while IFS= read -r -d '' file; do
+    files+=("$file")
+  done < <(find scripts -maxdepth 1 -type f -print0 | sort -z)
+
+  for file in "${files[@]}"; do
+    IFS= read -r first_line <"$file" || true
+    case "$first_line" in
+      *bash*) bash_files+=("$file") ;;
+      '#!/bin/sh') posix_files+=("$file") ;;
+      *) die "unsupported or missing shell shebang: $file" ;;
+    esac
+  done
+
+  bash -n "${bash_files[@]}"
+  for file in "${posix_files[@]}"; do
+    sh -n "$file"
+  done
+  shellcheck --external-sources -e SC1090,SC1091 "${files[@]}"
+  timeout 120s bash tests/bstow_test.sh
+}
+
+validate_nvim2() {
+  need bash
+  need jq
+  need shellcheck
+  need stylua
+  local check_script=nvim2/.config/nvim2/tests/check.sh
+  local lock_file=nvim2/.config/nvim2/nvim-pack-lock.json
+
+  stylua --check \
+    --config-path nvim2/.config/nvim2/.stylua.toml \
+    nvim2/.config/nvim2
+  bash -n "$check_script"
+  shellcheck "$check_script"
+  jq -e '
+    type == "object" and
+    (keys == ["plugins"]) and
+    (.plugins | type == "object" and length > 0) and
+    ([.plugins | to_entries[] | . as $plugin |
+      ($plugin.key | type == "string" and length > 0) and
+      ($plugin.value | type == "object") and
+      ($plugin.value.src | type == "string" and
+        test("^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")) and
+      ($plugin.value.rev | type == "string" and test("^[0-9a-f]{40}$"))
+    ] | all)
+  ' "$lock_file" >/dev/null
+}
+
+validate_old_nvim() {
+  need stylua
+  stylua --check \
+    --config-path old-nvim/.config/old-nvim/stylua.toml \
+    old-nvim/.config/old-nvim
+}
+
+validate_configs() {
+  need git
+  need jq
+  need tmux
+  need yamllint
+  local json_files=()
+  local socket="dotfiles-validate-$$"
+  local temporary_home
+  local yaml_files=()
+
+  while IFS= read -r -d '' file; do
+    [[ $file == .github/workflows/* ]] || yaml_files+=("$file")
+  done < <(rg --files --hidden -0 -g '!.git/**' -g '*.yml' -g '*.yaml' | sort -z)
+  yamllint --strict --config-file .yamllint.yml "${yaml_files[@]}"
+
+  while IFS= read -r -d '' file; do
+    json_files+=("$file")
+  done < <(rg --files --hidden -0 -g '!.git/**' -g '*.json' | sort -z)
+  for file in "${json_files[@]}"; do
+    jq empty "$file"
+  done
+
+  git config --file git/.gitconfig --null --list >/dev/null
+  temporary_home=$(mktemp -d)
+  cleanup_tmux() {
+    HOME="$temporary_home" tmux -L "$socket" kill-server >/dev/null 2>&1 || true
+    find "$temporary_home" -depth -delete
+  }
+  trap cleanup_tmux RETURN
+  HOME="$temporary_home" timeout 10s tmux -L "$socket" \
+    -f "$repo_dir/tmux/.tmux.conf" new-session -d
+  HOME="$temporary_home" tmux -L "$socket" show-options -gv prefix >/dev/null
+  HOME="$temporary_home" tmux -L "$socket" show-options -gv status-right >/dev/null
+  cleanup_tmux
+  trap - RETURN
+}
+
+validate_workflows() {
+  need actionlint
+  need shellcheck
+  need yamllint
+  need zizmor
+  local token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
+
+  actionlint -color
+  yamllint --strict --config-file .yamllint.yml .github/workflows
+  if [[ -z $token ]]; then
+    need gh
+    token=$(gh auth token 2>/dev/null) ||
+      die 'GitHub token unavailable; run gh auth login'
+  fi
+  GH_TOKEN=$token zizmor --persona=pedantic \
+    --config .github/zizmor.yml .
+}
+
+validate_repo() {
+  local base=${VALIDATE_BASE_SHA:-}
+  local image
+  local variable
+
+  bash -n .github/nvim2-release.env .github/validation.env
+  # shellcheck source=/dev/null
+  source .github/nvim2-release.env
+  for variable in UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE AMZN_2023_IMAGE; do
+    image=${!variable}
+    [[ $image =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
+      die "$variable is not pinned to a SHA-256 digest"
+  done
+
+  for file in scripts/* bstow vim/setup nvim2/.config/nvim2/tests/check.sh; do
+    [[ -x $file ]] || die "executable bit is missing: $file"
+  done
+
+  if [[ $base =~ ^[0-9a-f]{40}$ ]] &&
+    [[ $base != 0000000000000000000000000000000000000000 ]] &&
+    git cat-file -e "$base^{commit}" 2>/dev/null; then
+    git diff --check "$base" HEAD --
+  else
+    git diff --check HEAD --
+  fi
+}
+
+case ${1:-} in
+  bash) validate_bash ;;
+  configs) validate_configs ;;
+  nvim2) validate_nvim2 ;;
+  old-nvim) validate_old_nvim ;;
+  repo) validate_repo ;;
+  scripts) validate_scripts ;;
+  workflows) validate_workflows ;;
+  *) usage ;;
+esac

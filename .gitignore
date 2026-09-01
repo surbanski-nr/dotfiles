@@ -1,4 +1,5 @@
 lazy-lock.json
 .DS_Store
+.cache/
 /mc/.config/mc/panels.ini
 /mc/.local/share/mc/history

@@ -1,0 +1,7 @@
+---
+rules:
+  forbidden-uses:
+    config:
+      allow:
+        - actions/checkout
+        - go-task/setup-task

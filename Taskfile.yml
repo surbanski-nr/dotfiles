@@ -1,0 +1,97 @@
+---
+version: '3'
+
+env:
+  VALIDATION_TOOLS_DIR: '{{.ROOT_DIR}}/.cache/validation-tools'
+
+tasks:
+  default:
+    desc: Run every validation task
+    cmds:
+      - task: validate
+
+  validate:
+    desc: Validate the complete repository
+    deps:
+      - validate:bash
+      - validate:configs
+      - validate:nvim2
+      - validate:old-nvim
+      - validate:repo
+      - validate:scripts
+      - validate:workflows
+
+  validate:bash:
+    desc: Validate Bash startup files and their tests
+    deps: [tools:shellcheck]
+    cmds:
+      - bash scripts/validate bash
+
+  validate:configs:
+    desc: Validate YAML, JSON, Git and tmux configuration
+    deps: [tools:yamllint]
+    cmds:
+      - bash scripts/validate configs
+
+  validate:nvim2:
+    desc: Validate active Nvim2 configuration and lockfile
+    deps: [tools:shellcheck, tools:stylua]
+    cmds:
+      - bash scripts/validate nvim2
+
+  validate:old-nvim:
+    desc: Validate legacy Nvim configuration
+    deps: [tools:stylua]
+    cmds:
+      - bash scripts/validate old-nvim
+
+  validate:repo:
+    desc: Validate repository invariants and changed whitespace
+    cmds:
+      - bash scripts/validate repo
+
+  validate:scripts:
+    desc: Validate standalone shell scripts and bstow tests
+    deps: [tools:shellcheck]
+    cmds:
+      - bash scripts/validate scripts
+
+  validate:workflows:
+    desc: Validate GitHub Actions syntax and security
+    deps:
+      - tools:actionlint
+      - tools:shellcheck
+      - tools:yamllint
+      - tools:zizmor
+    cmds:
+      - bash scripts/validate workflows
+
+  tools:actionlint:
+    internal: true
+    run: once
+    cmds:
+      - bash scripts/install-validation-tool actionlint
+
+  tools:shellcheck:
+    internal: true
+    run: once
+    cmds:
+      - bash scripts/install-validation-tool shellcheck
+
+  tools:stylua:
+    internal: true
+    run: once
+    cmds:
+      - bash scripts/install-validation-tool stylua
+
+  tools:yamllint:
+    internal: true
+    run: once
+    cmds:
+      - bash scripts/install-validation-tool yamllint
+
+  tools:zizmor:
+    internal: true
+    run: once
+    cmds:
+      - bash scripts/install-validation-tool zizmor

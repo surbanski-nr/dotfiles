@@ -562,6 +562,33 @@ Continuum is required. Amazon Linux 2023 supplies a compatible tmux package.
 
 ## Maintenance and recovery
 
+### Validate changes
+
+Run every repository check before pushing:
+
+```bash
+task validate
+```
+
+The first run downloads checksum-pinned validator binaries into the ignored
+`.cache/validation-tools` directory. Workflow security validation uses the
+GitHub token from `GH_TOKEN` or `gh auth token` to confirm that pinned action
+commits belong to their declared repositories.
+
+Run one validation area when working on a specific component:
+
+```bash
+task validate:nvim2
+task validate:bash
+task validate:scripts
+task validate:workflows
+task validate:configs
+task validate:repo
+```
+
+The `Validate` GitHub Actions workflow runs the complete task after every push
+to `main` and can also be started manually.
+
 ### Refresh an existing connected VM
 
 Pull before cleaning so the new repository state defines which links and

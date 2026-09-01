@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+die() {
+  printf 'install-validation-tool: %s\n' "$*" >&2
+  exit 1
+}
+
+[[ $# -eq 1 ]] || die 'usage: install-validation-tool TOOL'
+
+repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/.cache/validation-tools}
+bin_dir=$tools_dir/bin
+tool=$1
+
+# shellcheck source=/dev/null
+source "$repo_dir/.github/validation.env"
+
+mkdir -p "$bin_dir"
+export PATH="$bin_dir:$PATH"
+
+installed_version() {
+  case "$1" in
+    actionlint) actionlint -version 2>/dev/null | head -n 1 ;;
+    shellcheck) shellcheck --version 2>/dev/null | awk '/^version:/ { print $2 }' ;;
+    stylua) stylua --version 2>/dev/null | awk '{ print $2 }' ;;
+    yamllint) yamllint --version 2>/dev/null | awk '{ print $2 }' ;;
+    zizmor) zizmor --version 2>/dev/null | awk '{ print $2 }' ;;
+    *) die "unsupported tool: $1" ;;
+  esac
+}
+
+expected_version() {
+  case "$1" in
+    actionlint) printf '%s\n' "$ACTIONLINT_VERSION" ;;
+    shellcheck) printf '%s\n' "$SHELLCHECK_VERSION" ;;
+    stylua) printf '%s\n' "$STYLUA_VERSION" ;;
+    yamllint) printf '%s\n' "$YAMLLINT_VERSION" ;;
+    zizmor) printf '%s\n' "$ZIZMOR_VERSION" ;;
+    *) die "unsupported tool: $1" ;;
+  esac
+}
+
+version=$(expected_version "$tool")
+if command -v "$tool" >/dev/null 2>&1 &&
+  [[ $(installed_version "$tool") == "$version" ]]; then
+  exit 0
+fi
+
+[[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] ||
+  die 'automatic tool installation supports Linux x86_64 only'
+
+stage=$(mktemp -d "$tools_dir/install-$tool.XXXXXX")
+cleanup() {
+  find "$stage" -depth -delete
+}
+trap cleanup EXIT
+
+download() {
+  local url=$1
+  local checksum=$2
+  local destination=$3
+
+  curl --connect-timeout 30 --max-time 300 \
+    --retry 3 --retry-all-errors -fL "$url" -o "$destination"
+  printf '%s  %s\n' "$checksum" "$destination" |
+    sha256sum --check --strict
+}
+
+case "$tool" in
+  actionlint)
+    archive="$stage/actionlint.tar.gz"
+    download \
+      "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+      "$ACTIONLINT_SHA256" "$archive"
+    tar -xzf "$archive" -C "$stage"
+    install -m 0755 "$stage/actionlint" "$bin_dir/actionlint"
+    ;;
+  shellcheck)
+    archive="$stage/shellcheck.tar.xz"
+    download \
+      "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/shellcheck-v$SHELLCHECK_VERSION.linux.x86_64.tar.xz" \
+      "$SHELLCHECK_SHA256" "$archive"
+    tar -xJf "$archive" -C "$stage"
+    install -m 0755 \
+      "$stage/shellcheck-v$SHELLCHECK_VERSION/shellcheck" \
+      "$bin_dir/shellcheck"
+    ;;
+  stylua)
+    archive="$stage/stylua.zip"
+    download \
+      "https://github.com/JohnnyMorganz/StyLua/releases/download/v$STYLUA_VERSION/stylua-linux-x86_64.zip" \
+      "$STYLUA_SHA256" "$archive"
+    unzip -q "$archive" -d "$stage"
+    install -m 0755 "$stage/stylua" "$bin_dir/stylua"
+    ;;
+  yamllint)
+    venv="$tools_dir/yamllint-$YAMLLINT_VERSION"
+    if [[ -e $venv ]]; then
+      find "$venv" -depth -delete
+    fi
+    python3 -m venv "$venv"
+    "$venv/bin/python" -m pip install --disable-pip-version-check \
+      'pathspec==0.12.1' \
+      'PyYAML==6.0.2' \
+      "yamllint==$YAMLLINT_VERSION"
+    ln -sfn "$venv/bin/yamllint" "$bin_dir/yamllint"
+    ;;
+  zizmor)
+    archive="$stage/zizmor.tar.gz"
+    download \
+      "https://github.com/zizmorcore/zizmor/releases/download/v$ZIZMOR_VERSION/zizmor-x86_64-unknown-linux-gnu.tar.gz" \
+      "$ZIZMOR_SHA256" "$archive"
+    tar -xzf "$archive" -C "$stage"
+    install -m 0755 "$stage/zizmor" "$bin_dir/zizmor"
+    ;;
+esac
+
+[[ $(installed_version "$tool") == "$version" ]] ||
+  die "$tool $version installation failed"
