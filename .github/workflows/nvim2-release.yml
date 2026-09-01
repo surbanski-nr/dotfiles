@@ -157,15 +157,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
-      contents: write
+      contents: write  # Required to upload release assets.
     strategy:
       fail-fast: false
       matrix:
         platform: ${{ fromJSON(needs.preflight.outputs.platforms) }}
     steps:
       - name: Check out release commit
-        # v7.0.1
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -188,6 +187,7 @@ jobs:
 
       - name: Build platform release
         env:
+          BUILDER_IMAGE: ${{ steps.image.outputs.image }}
           COMMIT_SHA: ${{ needs.preflight.outputs.commit_sha }}
           PLATFORM: ${{ matrix.platform }}
           RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
@@ -195,19 +195,20 @@ jobs:
           set -euo pipefail
           output=$RUNNER_TEMP/nvim2-output
           mkdir -p "$output"
-          timeout 300s docker pull "${{ steps.image.outputs.image }}"
+          timeout 300s docker pull "$BUILDER_IMAGE"
           timeout --signal=TERM --kill-after=30s 3600s docker run --rm \
             --volume "$GITHUB_WORKSPACE:/workspace:ro" \
             --volume "$output:/out" \
             --env RELEASE_TAG="$RELEASE_TAG" \
             --env SOURCE_COMMIT="$COMMIT_SHA" \
-            --env BUILDER_IMAGE="${{ steps.image.outputs.image }}" \
-            "${{ steps.image.outputs.image }}" \
+            --env BUILDER_IMAGE="$BUILDER_IMAGE" \
+            "$BUILDER_IMAGE" \
             bash /workspace/scripts/nvim2-release \
               build "$PLATFORM" /workspace /out
 
       - name: Verify without network
         env:
+          BUILDER_IMAGE: ${{ steps.image.outputs.image }}
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
@@ -221,7 +222,7 @@ jobs:
           trap cleanup EXIT
 
           docker run --detach --name "$runtime_container" \
-            "${{ steps.image.outputs.image }}" sleep infinity
+            "$BUILDER_IMAGE" sleep infinity
           docker cp scripts/nvim2-release \
             "$runtime_container:/usr/local/bin/nvim2-release"
           timeout --signal=TERM --kill-after=15s 600s docker exec \
@@ -266,6 +267,7 @@ jobs:
 
       - name: Upload release asset
         env:
+          ARCHIVE: ${{ steps.asset.outputs.archive }}
           FORCE: ${{ needs.preflight.outputs.force }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -277,5 +279,5 @@ jobs:
           timeout 300s gh release upload \
             --repo "$REPOSITORY" \
             "$RELEASE_TAG" \
-            "${{ steps.asset.outputs.archive }}" \
+            "$ARCHIVE" \
             "${options[@]}"
