@@ -47,6 +47,7 @@ tasks:
 
   validate:repo:
     desc: Validate repository invariants and changed whitespace
+    deps: [tools:yamllint]
     cmds:
       - bash scripts/validate repo
 

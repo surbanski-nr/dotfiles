@@ -46,7 +46,7 @@ validate_scripts() {
   need shellcheck
   need timeout
   local bash_files=()
-  local files=(bstow vim/setup tests/bstow_test.sh)
+  local files=(bstow vim/setup tests/bstow_test.sh tests/validate_test.sh)
   local first_line
   local posix_files=()
 
@@ -116,13 +116,19 @@ validate_configs() {
   local yaml_files=()
 
   while IFS= read -r -d '' file; do
-    [[ $file == .github/workflows/* ]] || yaml_files+=("$file")
-  done < <(rg --files --hidden -0 -g '!.git/**' -g '*.yml' -g '*.yaml' | sort -z)
+    [[ -f $file ]] || continue
+    case "$file" in
+      *.yml | *.yaml)
+        [[ $file == .github/workflows/* ]] || yaml_files+=("$file")
+        ;;
+    esac
+  done < <(git ls-files --cached --others --exclude-standard -z | sort -z)
   yamllint --strict --config-file .yamllint.yml "${yaml_files[@]}"
 
   while IFS= read -r -d '' file; do
-    json_files+=("$file")
-  done < <(rg --files --hidden -0 -g '!.git/**' -g '*.json' | sort -z)
+    [[ -f $file ]] || continue
+    [[ $file == *.json ]] && json_files+=("$file")
+  done < <(git ls-files --cached --others --exclude-standard -z | sort -z)
   for file in "${json_files[@]}"; do
     jq empty "$file"
   done
@@ -196,6 +202,8 @@ validate_repo() {
   for file in scripts/* bstow vim/setup nvim2/.config/nvim2/tests/check.sh; do
     [[ -x $file ]] || die "executable bit is missing: $file"
   done
+
+  timeout 120s bash tests/validate_test.sh
 
   if [[ $base =~ ^[0-9a-f]{40}$ ]] &&
     [[ $base != 0000000000000000000000000000000000000000 ]] &&
