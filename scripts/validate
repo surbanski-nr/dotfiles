@@ -165,9 +165,9 @@ validate_repo() {
   local image
   local variable
 
-  bash -n .github/nvim2-release.env validation.env
+  bash -n nvim2-release.env validation.env
   # shellcheck source=/dev/null
-  source .github/nvim2-release.env
+  source nvim2-release.env
   for variable in UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE AMZN_2023_IMAGE; do
     image=${!variable}
     [[ $image =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||

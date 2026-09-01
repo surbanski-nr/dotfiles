@@ -28,7 +28,7 @@ require_value() {
 
 load_release_config() {
   local source_dir=$1
-  local config_file="$source_dir/.github/nvim2-release.env"
+  local config_file="$source_dir/nvim2-release.env"
 
   [[ -f $config_file ]] || die "missing release config: $config_file"
   # shellcheck source=/dev/null

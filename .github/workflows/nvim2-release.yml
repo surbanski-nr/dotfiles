@@ -176,7 +176,7 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
-          source .github/nvim2-release.env
+          source nvim2-release.env
           case "$PLATFORM" in
             ubuntu-24.04-x86_64) image=$UBUNTU_2404_IMAGE ;;
             ubuntu-26.04-x86_64) image=$UBUNTU_2604_IMAGE ;;
@@ -212,7 +212,7 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
-          source .github/nvim2-release.env
+          source nvim2-release.env
           runtime_container="nvim2-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM"
           runtime_image="nvim2-runtime:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM"
           cleanup() {
