@@ -80,7 +80,7 @@ its minimal or full packages. Do not request the other variant because DNF
 would report a conflict. Its packaged Node.js 18 is
 also too old for the pinned TypeScript language server, and ripgrep is absent.
 Install a current Node.js with asdf in step 5. Follow the
-[platform release runbook](docs/nvim2-platform-releases.md#install-nodejs-and-ripgrep-in-the-builder)
+[offline release runbook](nvim2/.config/nvim2/offline-releases.md#install-nodejs-and-ripgrep-in-the-builder)
 to install a checksum-verified ripgrep release in `~/bin`, or follow the whole
 runbook to build a complete offline Nvim2 release.
 
@@ -391,7 +391,7 @@ timeout 1200s env NVIM_APPNAME=nvim2 \
 
 On Amazon Linux 2023, first replace Mason's glibc-2.39 Tree-sitter CLI with the
 same pinned version built on AL2023. Follow the AL2023 commands under
-[Build a clean Nvim2 data directory](docs/nvim2-platform-releases.md#build-a-clean-nvim2-data-directory).
+[Build a clean Nvim2 data directory](nvim2/.config/nvim2/offline-releases.md#build-a-clean-nvim2-data-directory).
 
 `Nvim2ToolsInstallSync` already runs `MasonToolsInstallSync`. Do not run the
 latter separately outside the documented AL2023 builder step. The command
@@ -424,7 +424,7 @@ Install `ansible-core` as a project or operating-system dependency when working
 with Ansible. Terraform, Helm and Docker CLIs are also project-level runtime
 dependencies rather than Mason-owned editor dependencies.
 
-See the [Nvim2 README](nvim2/.config/nvim2/README.md) for daily workflows and
+See the [Nvim2 guide](nvim2/.config/nvim2/guide.md) for daily workflows and
 key mappings.
 
 ### 8. Install optional tmux plugins
@@ -523,7 +523,7 @@ kubectl krew install cnpg
 ### Mermaid ASCII preview
 
 The Mermaid renderer is optional and is not installed by Mason. Follow the
-[Nvim2 Mermaid instructions](nvim2/.config/nvim2/README.md#markdown-colors-and-todo-comments)
+[Nvim2 Mermaid instructions](nvim2/.config/nvim2/guide.md#markdown-colors-and-todo-comments)
 to install the reviewed binary in `~/bin`.
 
 ## Set up or upgrade a restricted VM
@@ -534,7 +534,7 @@ Mason installation commands on a restricted target.
 Build and test one complete platform artifact on a connected builder matching
 the target distribution, architecture, username, home path and Python version.
 Transfer and activate it using the
-[Nvim2 platform release runbook](docs/nvim2-platform-releases.md).
+[Nvim2 offline release runbook](nvim2/.config/nvim2/offline-releases.md).
 The runbook also documents the GitHub Actions workflow that attaches tested
 platform archives to an existing commit-based draft release.
 
@@ -761,7 +761,7 @@ Updates are intentionally manual. On a trusted connected machine:
   release.
 
 See [Plugin and configuration maintenance](nvim2/.config/nvim2/README.md#plugin-and-configuration-maintenance)
-and the [platform release runbook](docs/nvim2-platform-releases.md).
+and the [offline release runbook](nvim2/.config/nvim2/offline-releases.md).
 
 ### Recover an SSH agent socket from tmux
 
