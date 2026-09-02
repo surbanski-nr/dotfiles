@@ -46,7 +46,13 @@ validate_scripts() {
   need shellcheck
   need timeout
   local bash_files=()
-  local files=(bstow vim/setup tests/bstow_test.sh tests/validate_test.sh)
+  local files=(
+    bstow
+    vim/setup
+    tests/bstow_test.sh
+    tests/nvim2_release_test.sh
+    tests/validate_test.sh
+  )
   local first_line
   local posix_files=()
 
@@ -69,6 +75,7 @@ validate_scripts() {
   done
   shellcheck --external-sources -e SC1090,SC1091 "${files[@]}"
   timeout 120s bash tests/bstow_test.sh
+  timeout 30s bash tests/nvim2_release_test.sh
 }
 
 validate_nvim2() {

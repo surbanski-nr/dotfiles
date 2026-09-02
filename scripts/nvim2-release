@@ -146,7 +146,7 @@ ensure_target_user() {
     return
   fi
 
-  existing_user=$(getent passwd "$TARGET_UID" | cut -d: -f1)
+  existing_user=$(lookup_uid_owner "$TARGET_UID")
   if [[ -n $existing_user ]]; then
     existing_group=$(id -gn "$existing_user")
     usermod --login "$TARGET_USER" --home "$TARGET_HOME" --move-home \
@@ -162,6 +162,18 @@ ensure_target_user() {
   fi
   useradd --create-home --uid "$TARGET_UID" --gid "$TARGET_USER" \
     --home-dir "$TARGET_HOME" --shell /bin/bash "$TARGET_USER"
+}
+
+lookup_uid_owner() {
+  local entry
+  local status=0
+
+  entry=$(getent passwd "$1") || status=$?
+  case "$status" in
+    0) printf '%s\n' "${entry%%:*}" ;;
+    2) return 0 ;;
+    *) return "$status" ;;
+  esac
 }
 
 link_python() {
@@ -542,22 +554,28 @@ verify_release() {
     timeout 300s bash "$TARGET_HOME/.config/nvim2/tests/check.sh"
 }
 
-case ${1:-} in
-  build)
-    [[ $# -eq 4 ]] || usage
-    build_release "$2" "$3" "$4"
-    ;;
-  build-user)
-    [[ $# -eq 3 ]] || usage
-    build_user "$2" "$3"
-    ;;
-  prepare-runtime)
-    [[ $# -eq 2 ]] || usage
-    prepare_runtime "$2"
-    ;;
-  verify)
-    [[ $# -eq 3 ]] || usage
-    verify_release "$2" "$3"
-    ;;
-  *) usage ;;
-esac
+main() {
+  case ${1:-} in
+    build)
+      [[ $# -eq 4 ]] || usage
+      build_release "$2" "$3" "$4"
+      ;;
+    build-user)
+      [[ $# -eq 3 ]] || usage
+      build_user "$2" "$3"
+      ;;
+    prepare-runtime)
+      [[ $# -eq 2 ]] || usage
+      prepare_runtime "$2"
+      ;;
+    verify)
+      [[ $# -eq 3 ]] || usage
+      verify_release "$2" "$3"
+      ;;
+    *) usage ;;
+  esac
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi
