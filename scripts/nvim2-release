@@ -506,8 +506,8 @@ verify_release() {
     TARGET_HOME; do
     require_value "$name"
   done
-  validate_platform "$platform"
   [[ $PLATFORM_ID == "$platform" ]] || die "artifact is for $PLATFORM_ID, not $platform"
+  validate_platform "$platform"
   [[ $TARGET_HOME == "/home/$TARGET_USER" ]] || die 'target home and user do not match'
   [[ $(id -u "$TARGET_USER") -eq $TARGET_UID ]] || die 'target UID does not match artifact'
   timeout 5s getent hosts github.com >/dev/null 2>&1 && die 'offline validation container has external DNS'
