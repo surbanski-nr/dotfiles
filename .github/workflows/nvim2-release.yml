@@ -59,7 +59,7 @@ jobs:
             force=false
           fi
 
-          [[ $release_tag =~ ^nvim2-[0-9a-f]{40}$ ]] || {
+          [[ $release_tag =~ ^nvim2-[0-9a-f]{7,40}$ ]] || {
             printf 'Invalid release tag: %s\n' "$release_tag" >&2
             exit 1
           }
@@ -114,7 +114,8 @@ jobs:
               "$release_tag" >&2
             exit 1
           }
-          [[ ${release_tag#nvim2-} == "$commit_sha" ]] || {
+          tag_sha=${release_tag#nvim2-}
+          [[ $commit_sha == "$tag_sha"* ]] || {
             printf 'Tag suffix does not match target commit %s.\n' \
               "$commit_sha" >&2
             exit 1

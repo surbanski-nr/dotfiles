@@ -61,7 +61,7 @@ It does not use workflow artifacts, create releases or publish drafts.
 Release tags have this exact format:
 
 ```text
-nvim2-<full 40-character lowercase commit SHA>
+nvim2-<7-to-40-character lowercase commit SHA prefix>
 ```
 
 The suffix must match the commit referenced by the tag. The workflow checks
