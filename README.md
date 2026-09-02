@@ -79,10 +79,9 @@ Amazon Linux 2023 already supplies `curl`, coreutils and GnuPG through either
 its minimal or full packages. Do not request the other variant because DNF
 would report a conflict. Its packaged Node.js 18 is
 also too old for the pinned TypeScript language server, and ripgrep is absent.
-Install a current Node.js with asdf in step 5. Follow the
-[offline release runbook](nvim2/.config/nvim2/offline-releases.md#install-nodejs-and-ripgrep-in-the-builder)
-to install a checksum-verified ripgrep release in `~/bin`, or follow the whole
-runbook to build a complete offline Nvim2 release.
+Install a current Node.js with asdf in step 5. The Nvim2 offline-release
+instructions cover installing a checksum-verified ripgrep release in `~/bin`
+and building a complete offline Nvim2 release.
 
 Amazon Linux 2 reached its public support end date on 2026-06-30 and is not a
 supported Nvim2 release target.
@@ -390,8 +389,8 @@ timeout 1200s env NVIM_APPNAME=nvim2 \
 ```
 
 On Amazon Linux 2023, first replace Mason's glibc-2.39 Tree-sitter CLI with the
-same pinned version built on AL2023. Follow the AL2023 commands under
-[Build a clean Nvim2 data directory](nvim2/.config/nvim2/offline-releases.md#build-a-clean-nvim2-data-directory).
+same pinned version built on AL2023. Follow the matching builder procedure in
+the Nvim2 offline-release instructions.
 
 `Nvim2ToolsInstallSync` already runs `MasonToolsInstallSync`. Do not run the
 latter separately outside the documented AL2023 builder step. The command
@@ -424,8 +423,7 @@ Install `ansible-core` as a project or operating-system dependency when working
 with Ansible. Terraform, Helm and Docker CLIs are also project-level runtime
 dependencies rather than Mason-owned editor dependencies.
 
-See the [Nvim2 guide](nvim2/.config/nvim2/guide.md) for daily workflows and
-key mappings.
+Daily workflows and key mappings are documented with the Nvim2 configuration.
 
 ### 8. Install optional tmux plugins
 
@@ -520,12 +518,6 @@ The Bash configuration adds `~/.krew/bin` to `PATH`. For example:
 kubectl krew install cnpg
 ```
 
-### Mermaid ASCII preview
-
-The Mermaid renderer is optional and is not installed by Mason. Follow the
-[Nvim2 Mermaid instructions](nvim2/.config/nvim2/guide.md#markdown-colors-and-todo-comments)
-to install the reviewed binary in `~/bin`.
-
 ## Set up or upgrade a restricted VM
 
 Do not run online installers, asdf plugin commands, `vim.pack.update()` or
@@ -533,10 +525,9 @@ Mason installation commands on a restricted target.
 
 Build and test one complete platform artifact on a connected builder matching
 the target distribution, architecture, username, home path and Python version.
-Transfer and activate it using the
-[Nvim2 offline release runbook](nvim2/.config/nvim2/offline-releases.md).
-The runbook also documents the GitHub Actions workflow that attaches tested
-platform archives to an existing commit-based draft release.
+Transfer and activate it using the Nvim2 offline-release instructions. They
+also document the GitHub Actions workflow that attaches tested platform
+archives to an existing commit-based release.
 
 The transferred release contains Neovim, Node.js, ripgrep, plugins, Mason
 packages and Treesitter parsers. The target still needs:
@@ -548,9 +539,9 @@ packages and Treesitter parsers. The target still needs:
 Install Python from the approved operating-system repository. asdf remains a
 connected-machine version manager and is not part of the offline release.
 
-Standalone reviewed binaries such as kubectl, Helm, k9s, yq, Trivy,
-Oh My Posh and Mermaid ASCII can be downloaded on a connected machine and
-copied to `~/bin`. Verify their published checksums before transfer:
+Standalone reviewed binaries such as kubectl, Helm, k9s, yq, Trivy and
+Oh My Posh can be downloaded on a connected machine and copied to `~/bin`.
+Verify their published checksums before transfer:
 
 ```bash
 mkdir -p "$HOME/bin"
@@ -634,10 +625,9 @@ tmux new-session -s work
 ```
 
 For Nvim2, a normal pull and restart is usually sufficient. After a major
-plugin or tool rewrite, follow the
-[clean Nvim2 rebuild](nvim2/.config/nvim2/README.md#clean-rebuild-on-a-connected-machine)
-to remove obsolete plugin checkouts, Mason packages, language servers,
-formatters, linters, parsers and caches.
+plugin or tool rewrite, follow its clean-rebuild procedure to remove obsolete
+plugin checkouts, Mason packages, language servers, formatters, linters,
+parsers and caches.
 
 For MC, keep its mutable `panels.ini`, history and file-position data; `restow`
 updates the managed `ini` and `surb` skin. For k9s, unused files under
@@ -760,8 +750,8 @@ Updates are intentionally manual. On a trusted connected machine:
 - Run `bash ~/.config/nvim2/tests/check.sh` before creating a new platform
   release.
 
-See [Plugin and configuration maintenance](nvim2/.config/nvim2/README.md#plugin-and-configuration-maintenance)
-and the [offline release runbook](nvim2/.config/nvim2/offline-releases.md).
+Detailed plugin maintenance and offline-release procedures are stored with the
+Nvim2 configuration.
 
 ### Recover an SSH agent socket from tmux
 
