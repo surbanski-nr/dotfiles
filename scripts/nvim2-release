@@ -284,9 +284,10 @@ install_nvim2_data() {
       nvim --headless '+MasonToolsInstallSync' '+qa!'
     tree_sitter_version=$(
       NVIM_APPNAME=nvim2 nvim --headless \
-        "+lua for _, tool in ipairs(require('custom.lsp').tools) do if tool[1] == 'tree-sitter-cli' then io.write(tool.version:gsub('^v', '')) end end" \
+        "+lua for _, tool in ipairs(require('custom.lsp').tools) do if tool[1] == 'tree-sitter-cli' then io.write(tool.version) end end" \
         '+qa!'
     )
+    tree_sitter_version=${tree_sitter_version#v}
     [[ -n $tree_sitter_version ]] || die 'tree-sitter-cli version is empty'
     tree_sitter_root="$HOME/.local/opt/tree-sitter-cli-$tree_sitter_version"
     tree_sitter_binary=$(readlink -f "$HOME/.local/share/nvim2/mason/bin/tree-sitter")
