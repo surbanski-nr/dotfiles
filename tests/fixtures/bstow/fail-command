@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+printf 'injected %s failure\n' "${0##*/}" >&2
+exit "${BSTOW_FAIL_STATUS:-73}"

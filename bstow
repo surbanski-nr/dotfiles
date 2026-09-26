@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # bstow - per-file dotfiles linker in pure Bash
-# Usage: bstow [stow|unstow|restow] package1 package2 ...
 
 set -euo pipefail
 
-# Configuration
 STOW_DIR="${STOW_DIR:-$PWD}"
 TARGET_DIR="${TARGET_DIR:-$HOME}"
 VERBOSE="${VERBOSE:-0}"
@@ -13,14 +11,184 @@ FORCE="${FORCE:-0}"
 STATE_DIR="${BSTOW_STATE_DIR:-}"
 declare -A PREVIEWED_PARENT_SYMLINKS=()
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Logging functions
+show_help() {
+    cat <<EOF
+Usage: bstow [OPTIONS] COMMAND PACKAGES...
+
+A per-file dotfiles linker in pure Bash. Each package must be the name of one
+direct, non-symlink directory under the stow directory. Package symlinks and
+empty directories are ignored.
+
+COMMANDS:
+    stow        Create symlinks for packages
+    unstow      Remove symlinks for packages
+    restow      Unstow and then stow packages
+
+OPTIONS:
+    -d, --dir DIR       Set stow directory (default: current directory)
+    -t, --target DIR    Set target directory (default: \$HOME)
+    -n, --dry-run       Preview actions without changing files
+    -f, --force         Replace foreign symlinks or adopt state from another source
+    -v, --verbose       Show additional diagnostic details
+    -h, --help          Show this help
+
+EXAMPLES:
+    bstow stow bash tmux nvim2
+    bstow unstow bash
+    bstow --dry-run stow tmux
+    bstow restow git
+
+ENVIRONMENT:
+    STOW_DIR    Stow directory (default: \$PWD)
+    TARGET_DIR  Target directory (default: \$HOME)
+    VERBOSE     Enable verbose output (0 or 1)
+    DRY_RUN     Enable dry run mode (0 or 1)
+    FORCE       Replace foreign symlinks or adopt package state (0 or 1)
+    BSTOW_STATE_DIR
+                Ownership state directory (default: TARGET_DIR/.local/state/bstow)
+EOF
+}
+
+main() {
+    local command
+    local package
+    local exit_code=0
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -d|--dir)
+                if [[ $# -lt 2 ]]; then
+                    error "$1 requires a directory"
+                    return 1
+                fi
+                STOW_DIR=$2
+                shift 2
+                ;;
+            --dir=*)
+                STOW_DIR=${1#*=}
+                shift
+                ;;
+            -t|--target)
+                if [[ $# -lt 2 ]]; then
+                    error "$1 requires a directory"
+                    return 1
+                fi
+                TARGET_DIR=$2
+                shift 2
+                ;;
+            --target=*)
+                TARGET_DIR=${1#*=}
+                shift
+                ;;
+            -n|--dry-run)
+                DRY_RUN=1
+                shift
+                ;;
+            -f|--force)
+                FORCE=1
+                shift
+                ;;
+            -v|--verbose)
+                VERBOSE=1
+                shift
+                ;;
+            -h|--help)
+                show_help
+                return 0
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                error "Unknown option: $1"
+                show_help
+                return 1
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    if [[ $# -lt 2 ]]; then
+        error "Missing command or packages"
+        show_help
+        return 1
+    fi
+
+    command=$1
+    shift
+    case $command in
+        stow|unstow|restow) ;;
+        *)
+            error "Unknown command: $command"
+            show_help
+            return 1
+            ;;
+    esac
+
+    validate_boolean_option VERBOSE "$VERBOSE" || return 1
+    validate_boolean_option DRY_RUN "$DRY_RUN" || return 1
+    validate_boolean_option FORCE "$FORCE" || return 1
+
+    if [[ ! -d $STOW_DIR ]]; then
+        error "Stow directory not found: $STOW_DIR"
+        return 1
+    fi
+    if [[ ! -d $TARGET_DIR ]]; then
+        error "Target directory not found: $TARGET_DIR"
+        return 1
+    fi
+    if ! STOW_DIR=$(cd -- "$STOW_DIR" && pwd -P); then
+        error "Cannot resolve stow directory: $STOW_DIR"
+        return 1
+    fi
+    if ! TARGET_DIR=$(cd -- "$TARGET_DIR" && pwd -P); then
+        error "Cannot resolve target directory: $TARGET_DIR"
+        return 1
+    fi
+    if [[ -z $STATE_DIR ]]; then
+        STATE_DIR="$TARGET_DIR/.local/state/bstow"
+    elif ! STATE_DIR=$(realpath -m -- "$STATE_DIR"); then
+        error "Cannot resolve state directory: $STATE_DIR"
+        return 1
+    fi
+
+    log "Stow directory: $STOW_DIR"
+    log "Target directory: $TARGET_DIR"
+    if [[ $DRY_RUN -eq 1 ]]; then
+        preview "Preview only; no filesystem changes will be made"
+    fi
+
+    for package in "$@"; do
+        case $command in
+            stow)
+                if ! stow_package "$package"; then
+                    exit_code=1
+                fi
+                ;;
+            unstow)
+                if ! unstow_package "$package"; then
+                    exit_code=1
+                fi
+                ;;
+            restow)
+                if ! restow_package "$package"; then
+                    exit_code=1
+                fi
+                ;;
+        esac
+    done
+    return "$exit_code"
+}
+
 log() {
     if [[ $VERBOSE -eq 1 ]]; then
         printf '%b[INFO]%b %s\n' "$BLUE" "$NC" "$*" >&2
@@ -43,82 +211,102 @@ preview() {
     printf '[DRY-RUN] %s\n' "$*" >&2
 }
 
-resolve_link_target() {
-    local dest="$1"
-    local target
-    target="$(readlink -- "$dest")"
-
-    if [[ $target == /* ]]; then
-        realpath -m -- "$target"
-    else
-        realpath -m -- "$(dirname -- "$dest")/$target"
+validate_boolean_option() {
+    local name=$1
+    local value=$2
+    if [[ $value != 0 && $value != 1 ]]; then
+        error "$name must be 0 or 1"
+        return 1
     fi
 }
 
+resolve_link_target() {
+    local dest=$1
+    local target
+    local resolved
+
+    if ! target=$(readlink -- "$dest"); then
+        error "Cannot read symlink: $dest"
+        return 1
+    fi
+    if [[ $target == /* ]]; then
+        if ! resolved=$(realpath -m -- "$target"); then
+            error "Cannot resolve symlink target: $target"
+            return 1
+        fi
+    elif ! resolved=$(realpath -m -- "$(dirname -- "$dest")/$target"); then
+        error "Cannot resolve symlink target: $dest -> $target"
+        return 1
+    fi
+    printf '%s\n' "$resolved"
+}
+
 link_points_to() {
-    local dest="$1"
-    local expected_src="$2"
+    local dest=$1
+    local expected_src=$2
     local current_resolved
     local expected_resolved
 
     [[ -L $dest ]] || return 1
-    current_resolved="$(resolve_link_target "$dest")"
-    expected_resolved="$(realpath -m -- "$expected_src")"
+    current_resolved=$(resolve_link_target "$dest") || return 1
+    expected_resolved=$(realpath -m -- "$expected_src") || return 1
     [[ $current_resolved == "$expected_resolved" ]]
 }
 
 find_parent_symlink() {
-    local dest="$1"
-    local current="$TARGET_DIR"
+    local dest=$1
+    local current=$TARGET_DIR
     local relative
     local component
 
     [[ $dest == "$TARGET_DIR/"* ]] || return 1
-    relative="${dest#"$TARGET_DIR"/}"
+    relative=${dest#"$TARGET_DIR"/}
     while [[ $relative == */* ]]; do
-        component="${relative%%/*}"
+        component=${relative%%/*}
         current="$current/$component"
         if [[ -L $current ]]; then
             printf '%s\n' "$current"
             return 0
         fi
-        relative="${relative#*/}"
+        relative=${relative#*/}
     done
     return 1
 }
 
 parent_symlink_matches_package() {
-    local src="$1"
-    local dest="$2"
-    local parent_link="$3"
-    local rel_path="${dest#"$TARGET_DIR"/}"
-    local rel_parent="${parent_link#"$TARGET_DIR"/}"
-    local package_dir="${src%/"$rel_path"}"
-    local package_name="${package_dir##*/}"
+    local src=$1
+    local dest=$2
+    local parent_link=$3
+    local rel_path=${dest#"$TARGET_DIR"/}
+    local rel_parent=${parent_link#"$TARGET_DIR"/}
+    local package_dir=${src%/"$rel_path"}
+    local package_name=${package_dir##*/}
     local resolved_parent
 
-    resolved_parent="$(resolve_link_target "$parent_link")"
+    resolved_parent=$(resolve_link_target "$parent_link") || return 1
     [[ $resolved_parent == */"$package_name"/"$rel_parent" ]]
 }
 
 validate_parent_symlink() {
-    local src="$1"
-    local dest="$2"
+    local src=$1
+    local dest=$2
     local parent_symlink
     local resolved_dest
     local resolved_src
+    local target
 
-    if ! parent_symlink="$(find_parent_symlink "$dest")"; then
+    if ! parent_symlink=$(find_parent_symlink "$dest"); then
         return 0
     fi
-    resolved_dest="$(realpath -m -- "$dest")"
-    resolved_src="$(realpath -m -- "$src")"
+    resolved_dest=$(realpath -m -- "$dest") || return 1
+    resolved_src=$(realpath -m -- "$src") || return 1
     if [[ $resolved_dest == "$resolved_src" ]]; then
         printf '%s\n' "$parent_symlink"
         return 0
     fi
+    target=$(readlink -- "$parent_symlink") || return 1
     if [[ $FORCE -ne 1 ]]; then
-        error "Parent directory is a foreign symlink: $parent_symlink -> $(readlink -- "$parent_symlink")"
+        error "Parent directory is a foreign symlink: $parent_symlink -> $target"
         error "Use --force only if bstow should replace that symlink"
         return 1
     fi
@@ -130,38 +318,79 @@ validate_parent_symlink() {
 }
 
 unfold_parent_symlink() {
-    local src="$1"
-    local dest="$2"
+    local src=$1
+    local dest=$2
     local parent_symlink
+    local target
 
-    parent_symlink="$(validate_parent_symlink "$src" "$dest")" || return 1
+    parent_symlink=$(validate_parent_symlink "$src" "$dest") || return 1
     [[ -n $parent_symlink ]] || return 0
-
+    target=$(readlink -- "$parent_symlink") || return 1
     if [[ $DRY_RUN -eq 1 ]]; then
         if [[ ! -v PREVIEWED_PARENT_SYMLINKS[$parent_symlink] ]]; then
-            preview "Would replace directory symlink: $parent_symlink -> $(readlink -- "$parent_symlink") with a real directory"
+            preview "Would replace directory symlink: $parent_symlink -> $target with a real directory"
             PREVIEWED_PARENT_SYMLINKS[$parent_symlink]=1
         fi
         return 0
     fi
 
-    warn "Replacing directory symlink: $parent_symlink -> $(readlink -- "$parent_symlink")"
-    unlink "$parent_symlink"
-    mkdir -p "$parent_symlink"
+    warn "Replacing directory symlink: $parent_symlink -> $target"
+    if ! unlink "$parent_symlink"; then
+        error "Failed to remove directory symlink: $parent_symlink"
+        return 1
+    fi
+    if ! mkdir -p "$parent_symlink"; then
+        error "Failed to create directory after unfolding: $parent_symlink"
+        return 1
+    fi
+}
+
+collect_find_results() {
+    local result_name=$1
+    local description=$2
+    shift 2
+    local -n find_results_ref=$result_name
+    local find_fd
+    local find_pid
+    local entry
+    local status
+
+    find_results_ref=()
+    if ! exec {find_fd}< <(find "$@" -print0); then
+        error "Failed to start enumeration: $description"
+        return 1
+    fi
+    find_pid=$!
+    while IFS= read -r -d '' -u "$find_fd" entry; do
+        find_results_ref+=("$entry")
+    done
+    exec {find_fd}<&-
+    if wait "$find_pid"; then
+        return 0
+    else
+        status=$?
+    fi
+    error "Failed to enumerate $description (status $status)"
+    return "$status"
+}
+
+package_files() {
+    local package_dir=$1
+    local result_name=$2
+    collect_find_results "$result_name" "package files under $package_dir" "$package_dir" -type f
 }
 
 common_directory() {
-    local left="$1"
-    local right="$2"
+    local left=$1
+    local right=$2
 
     if [[ $left == . || $right == . ]]; then
         printf '.\n'
-        return
+        return 0
     fi
-
     while [[ $right != "$left" && $right != "$left/"* ]]; do
         if [[ $left == */* ]]; then
-            left="${left%/*}"
+            left=${left%/*}
         else
             left=.
         fi
@@ -170,7 +399,13 @@ common_directory() {
 }
 
 package_scan_roots() {
-    local package_dir="$1"
+    local package_dir=$1
+    local files_name=$2
+    local roots_name=$3
+    local shallow_name=$4
+    local -n files_ref=$files_name
+    local -n roots_ref=$roots_name
+    local -n shallow_ref=$shallow_name
     local file
     local rel_path
     local parent
@@ -178,102 +413,127 @@ package_scan_roots() {
     local current
     declare -A common_by_group=()
 
-    while IFS= read -r -d '' file; do
-        rel_path="${file#"$package_dir"/}"
+    roots_ref=()
+    shallow_ref=()
+    for file in "${files_ref[@]}"; do
+        rel_path=${file#"$package_dir"/}
         if [[ $rel_path == */* ]]; then
-            parent="${rel_path%/*}"
-            group="${parent%%/*}"
+            parent=${rel_path%/*}
+            group=${parent%%/*}
         else
             parent=.
             group=.
         fi
-
-        current="${common_by_group[$group]:-}"
+        current=${common_by_group[$group]:-}
         if [[ -z $current ]]; then
-            common_by_group[$group]="$parent"
+            common_by_group[$group]=$parent
         else
-            common_by_group[$group]="$(common_directory "$current" "$parent")"
+            common_by_group[$group]=$(common_directory "$current" "$parent")
         fi
-    done < <(find "$package_dir" -type f -print0)
+    done
 
     for current in "${common_by_group[@]}"; do
         if [[ $current == . ]]; then
-            printf '%s\0%s\0' "$TARGET_DIR" 1
+            roots_ref+=("$TARGET_DIR")
+            shallow_ref+=(1)
         else
-            printf '%s\0%s\0' "$TARGET_DIR/$current" 0
+            roots_ref+=("$TARGET_DIR/$current")
+            shallow_ref+=(0)
         fi
     done
 }
 
 managed_link_source() {
-    local link="$1"
-    local package_dir="$2"
+    local link=$1
+    local package_dir=$2
     local source
     local rel_path
 
-    source="$(resolve_link_target "$link")"
-    if [[ $source != "$package_dir/"* ]]; then
-        return 1
-    fi
-
-    rel_path="${source#"$package_dir"/}"
-    if [[ $link != "$TARGET_DIR/$rel_path" ]]; then
-        return 1
-    fi
-
+    source=$(resolve_link_target "$link") || return 1
+    [[ $source == "$package_dir/"* ]] || return 1
+    rel_path=${source#"$package_dir"/}
+    [[ $link == "$TARGET_DIR/$rel_path" ]] || return 1
     printf '%s\n' "$source"
 }
 
 find_managed_links() {
-    local package_dir="$1"
+    local package_dir=$1
+    local files_name=$2
+    local result_name=$3
+    local -n managed_links_ref=$result_name
+    local -a roots=()
+    local -a shallow=()
+    local -a candidates=()
+    local index
     local root
-    local shallow
     local link
 
-    while IFS= read -r -d '' root && IFS= read -r -d '' shallow; do
+    managed_links_ref=()
+    package_scan_roots "$package_dir" "$files_name" roots shallow
+    for ((index = 0; index < ${#roots[@]}; index++)); do
+        root=${roots[$index]}
         [[ -d $root ]] || continue
-        if [[ $shallow -eq 1 ]]; then
-            while IFS= read -r -d '' link; do
-                if managed_link_source "$link" "$package_dir" >/dev/null; then
-                    printf '%s\0' "$link"
-                fi
-            done < <(find "$root" -xdev -maxdepth 1 -type l -print0)
+        if [[ ${shallow[$index]} -eq 1 ]]; then
+            collect_find_results candidates "managed links under $root" \
+                "$root" -xdev -maxdepth 1 -type l || return 1
         else
-            while IFS= read -r -d '' link; do
-                if managed_link_source "$link" "$package_dir" >/dev/null; then
-                    printf '%s\0' "$link"
-                fi
-            done < <(find "$root" -xdev -type l -print0)
+            collect_find_results candidates "managed links under $root" \
+                "$root" -xdev -type l || return 1
         fi
-    done < <(package_scan_roots "$package_dir")
+        for link in "${candidates[@]}"; do
+            if managed_link_source "$link" "$package_dir" >/dev/null; then
+                managed_links_ref+=("$link")
+            fi
+        done
+    done
 }
 
 package_state_file() {
-    local package="$1"
-    local name="${package##*/}"
+    local package=$1
+    local name=${package##*/}
     local checksum
-    name="${name//[^a-zA-Z0-9_.-]/_}"
-    checksum="$(printf '%s' "$package" | cksum)"
-    checksum="${checksum%% *}"
+
+    name=${name//[^a-zA-Z0-9_.-]/_}
+    if ! checksum=$(printf '%s' "$package" | cksum); then
+        error "Failed to calculate package state name: $package"
+        return 1
+    fi
+    checksum=${checksum%% *}
     printf '%s/%s-%s.links\n' "$STATE_DIR" "${name:-package}" "$checksum"
 }
 
+valid_state_source() {
+    local source=$1
+    local normalized
+
+    [[ $source == /* && $source != / && $source != */ ]] || return 1
+    normalized=$(realpath -m -- "$source") || return 1
+    [[ $normalized == "$source" ]]
+}
+
 valid_relative_path() {
-    local path="$1"
-    [[ -n $path && $path != /* && $path != .. && $path != ../* && $path != */../* && $path != */.. ]]
+    local path=$1
+    local normalized
+
+    [[ -n $path && $path != /* && $path != */ ]] || return 1
+    normalized=$(realpath -m -- "/$path") || return 1
+    [[ $normalized != / && $normalized == "/$path" ]]
 }
 
 PACKAGE_STATE_SOURCE=''
 PACKAGE_STATE_PATHS=()
 
 load_package_state() {
-    local package="$1"
+    local package=$1
     local state_file
+    local state_fd
+    local source
     local path
-    state_file="$(package_state_file "$package")"
+    local -a paths=()
+
+    state_file=$(package_state_file "$package") || return 2
     PACKAGE_STATE_SOURCE=''
     PACKAGE_STATE_PATHS=()
-
     if [[ ! -e $state_file && ! -L $state_file ]]; then
         return 1
     fi
@@ -281,27 +541,50 @@ load_package_state() {
         error "Invalid bstow state file: $state_file"
         return 2
     fi
-
-    exec 3<"$state_file"
-    if ! IFS= read -r -d '' PACKAGE_STATE_SOURCE <&3 || [[ $PACKAGE_STATE_SOURCE != /* ]]; then
-        exec 3<&-
+    if ! exec {state_fd}<"$state_file"; then
+        error "Cannot open bstow state file: $state_file"
+        return 2
+    fi
+    if ! IFS= read -r -d '' -u "$state_fd" source; then
+        exec {state_fd}<&-
         error "Corrupt bstow state file: $state_file"
         return 2
     fi
-    while IFS= read -r -d '' path <&3; do
-        if ! valid_relative_path "$path"; then
-            exec 3<&-
-            error "Unsafe path in bstow state file: $state_file"
+    if ! valid_state_source "$source"; then
+        exec {state_fd}<&-
+        error "Invalid source in bstow state file: $state_file"
+        return 2
+    fi
+
+    while true; do
+        path=''
+        if IFS= read -r -d '' -u "$state_fd" path; then
+            if ! valid_relative_path "$path"; then
+                exec {state_fd}<&-
+                error "Unsafe path in bstow state file: $state_file"
+                return 2
+            fi
+            paths+=("$path")
+        elif [[ -n $path ]]; then
+            exec {state_fd}<&-
+            error "Unterminated record in bstow state file: $state_file"
             return 2
+        else
+            break
         fi
-        PACKAGE_STATE_PATHS+=("$path")
     done
-    exec 3<&-
+    if ! exec {state_fd}<&-; then
+        error "Cannot close bstow state file: $state_file"
+        return 2
+    fi
+
+    PACKAGE_STATE_SOURCE=$source
+    PACKAGE_STATE_PATHS=("${paths[@]}")
 }
 
 validate_package_state() {
-    local package="$1"
-    local package_dir="$2"
+    local package=$1
+    local package_dir=$2
     local status
 
     if load_package_state "$package"; then
@@ -317,98 +600,160 @@ validate_package_state() {
     [[ $status -eq 1 ]]
 }
 
+append_unique_path() {
+    local paths_name=$1
+    local candidate=$2
+    local -n paths_ref=$paths_name
+    local path
+
+    for path in "${paths_ref[@]}"; do
+        [[ $path == "$candidate" ]] && return 0
+    done
+    paths_ref+=("$candidate")
+}
+
+write_state_records() {
+    local package_dir=$1
+    shift
+    local path
+
+    printf '%s\0' "$package_dir" || return 1
+    for path in "$@"; do
+        printf '%s\0' "$path" || return 1
+    done
+}
+
+discard_temporary_state() {
+    local temporary=$1
+    if ! rm -f -- "$temporary"; then
+        warn "Failed to remove temporary state file: $temporary"
+    fi
+}
+
 write_package_state() {
-    local package="$1"
-    local package_dir="$2"
+    local package=$1
+    local package_dir=$2
+    shift 2
     local state_file
     local temporary
-    local file
-    local rel_path
-    declare -A paths=()
+    local path
+    local -a paths=()
 
-    state_file="$(package_state_file "$package")"
-    if load_package_state "$package" && [[ $PACKAGE_STATE_SOURCE == "$package_dir" ]]; then
-        for rel_path in "${PACKAGE_STATE_PATHS[@]}"; do
-            paths[$rel_path]=1
-        done
+    for path in "$@"; do
+        append_unique_path paths "$path"
+    done
+    state_file=$(package_state_file "$package") || return 1
+    if ! mkdir -p "$STATE_DIR"; then
+        error "Failed to create state directory: $STATE_DIR"
+        return 1
     fi
-    while IFS= read -r -d '' file; do
-        rel_path="${file#"$package_dir"/}"
-        paths[$rel_path]=1
-    done < <(find "$package_dir" -type f -print0)
-
-    mkdir -p "$STATE_DIR"
-    temporary="$(mktemp "$STATE_DIR/.bstow-state.XXXXXX")"
-    chmod 0600 "$temporary"
-    {
-        printf '%s\0' "$package_dir"
-        for rel_path in "${!paths[@]}"; do
-            printf '%s\0' "$rel_path"
-        done
-    } >"$temporary"
-    mv -f -- "$temporary" "$state_file"
+    if ! temporary=$(mktemp "$STATE_DIR/.bstow-state.XXXXXX"); then
+        error "Failed to create temporary state file in: $STATE_DIR"
+        return 1
+    fi
+    if ! chmod 0600 "$temporary"; then
+        error "Failed to protect temporary state file: $temporary"
+        discard_temporary_state "$temporary"
+        return 1
+    fi
+    if ! write_state_records "$package_dir" "${paths[@]}" >"$temporary"; then
+        error "Failed to write package state: $temporary"
+        discard_temporary_state "$temporary"
+        return 1
+    fi
+    if ! mv -f -- "$temporary" "$state_file"; then
+        error "Failed to publish package state: $state_file"
+        discard_temporary_state "$temporary"
+        return 1
+    fi
 }
 
 remove_package_state() {
-    local package="$1"
+    local package=$1
     local state_file
-    state_file="$(package_state_file "$package")"
+
+    state_file=$(package_state_file "$package") || return 1
     [[ -f $state_file && ! -L $state_file ]] || return 0
-    rm -- "$state_file"
+    if ! rm -- "$state_file"; then
+        error "Failed to remove package state: $state_file"
+        return 1
+    fi
     rmdir "$STATE_DIR" 2>/dev/null || true
 }
 
+valid_package_name() {
+    local package=$1
+    [[ -n $package && $package != . && $package != .. && $package != */* ]]
+}
+
+get_package_dir() {
+    local package=$1
+    local result_name=$2
+    local -n package_dir_ref=$result_name
+
+    if ! valid_package_name "$package"; then
+        error "Invalid package name: $package"
+        error "Package names must identify one direct child of the stow directory"
+        return 1
+    fi
+    package_dir_ref="$STOW_DIR/$package"
+    if [[ -L $package_dir_ref ]]; then
+        error "Package directory must not be a symlink: $package_dir_ref"
+        return 1
+    fi
+    if [[ ! -d $package_dir_ref ]]; then
+        error "Package not found: $package_dir_ref"
+        return 1
+    fi
+}
+
 validate_destination() {
-    local src="$1"
-    local dest="$2"
+    local src=$1
+    local dest=$2
     local parent_symlink
+    local target
 
-    parent_symlink="$(validate_parent_symlink "$src" "$dest")" || return 1
+    parent_symlink=$(validate_parent_symlink "$src" "$dest") || return 1
     [[ -z $parent_symlink ]] || return 0
-
     if [[ ! -e $dest && ! -L $dest ]]; then
         return 0
     fi
-
     if [[ -L $dest ]]; then
         if link_points_to "$dest" "$src" || [[ $FORCE -eq 1 ]]; then
             return 0
         fi
-
-        error "Symlink exists and points elsewhere: $dest -> $(readlink -- "$dest")"
+        target=$(readlink -- "$dest") || return 1
+        error "Symlink exists and points elsewhere: $dest -> $target"
         error "Use --force only if bstow should replace that symlink"
         return 1
     fi
-
     error "File exists and is not a symlink: $dest"
     error "Please remove or back it up manually"
     return 1
 }
 
 validate_package() {
-    local package_dir="$1"
+    local package_dir=$1
+    local files_name=$2
+    local -n files_ref=$files_name
     local file
     local rel_path
-    local src
-    local dest
 
-    while IFS= read -r -d '' file; do
-        rel_path="${file#"$package_dir"/}"
-        src="$package_dir/$rel_path"
-        dest="$TARGET_DIR/$rel_path"
-        validate_destination "$src" "$dest" || return 1
-    done < <(find "$package_dir" -type f -print0)
+    for file in "${files_ref[@]}"; do
+        rel_path=${file#"$package_dir"/}
+        validate_destination "$file" "$TARGET_DIR/$rel_path" || return 1
+    done
 }
 
 create_link() {
-    local src="$1"
-    local dest="$2"
+    local src=$1
+    local dest=$2
     local parent_dir
+    local target
 
     log "Creating link: $dest -> $src"
     validate_destination "$src" "$dest" || return 1
     unfold_parent_symlink "$src" "$dest" || return 1
-
     if [[ -L $dest ]]; then
         if link_points_to "$dest" "$src"; then
             if [[ $DRY_RUN -eq 1 ]]; then
@@ -418,40 +763,47 @@ create_link() {
             fi
             return 0
         fi
-
+        target=$(readlink -- "$dest") || return 1
         if [[ $DRY_RUN -eq 1 ]]; then
-            preview "Would replace symlink: $dest -> $(readlink -- "$dest") with $src"
+            preview "Would replace symlink: $dest -> $target with $src"
             return 0
         fi
-
-        warn "Replacing symlink: $dest -> $(readlink -- "$dest")"
-        unlink "$dest"
+        warn "Replacing symlink: $dest -> $target"
+        if ! unlink "$dest"; then
+            error "Failed to remove symlink: $dest"
+            return 1
+        fi
     fi
 
-    parent_dir="$(dirname -- "$dest")"
+    parent_dir=$(dirname -- "$dest") || return 1
     if [[ ! -d $parent_dir ]]; then
         if [[ $DRY_RUN -eq 1 ]]; then
             preview "Would create directory: $parent_dir"
         else
             log "Creating directory: $parent_dir"
-            mkdir -p "$parent_dir"
+            if ! mkdir -p "$parent_dir"; then
+                error "Failed to create target directory: $parent_dir"
+                return 1
+            fi
         fi
     fi
-
     if [[ $DRY_RUN -eq 1 ]]; then
         preview "Would link: $dest -> $src"
         return 0
     fi
-
-    ln -s "$src" "$dest"
+    if ! ln -s "$src" "$dest"; then
+        error "Failed to create link: $dest -> $src"
+        return 1
+    fi
     success "Linked: $dest -> $src"
 }
 
-# Remove symlink
 remove_link() {
-    local dest="$1"
-    local expected_src="$2"
-    
+    local dest=$1
+    local expected_src=$2
+    local parent_dir
+    local target
+
     if [[ ! -L $dest ]]; then
         if [[ $DRY_RUN -eq 1 ]]; then
             preview "No managed link: $dest"
@@ -460,123 +812,117 @@ remove_link() {
         fi
         return 0
     fi
-
     if ! link_points_to "$dest" "$expected_src"; then
-        warn "Link points elsewhere, skipping: $dest -> $(readlink -- "$dest") (expected: $expected_src)"
+        target=$(readlink -- "$dest") || return 1
+        warn "Link points elsewhere, skipping: $dest -> $target (expected: $expected_src)"
         return 0
     fi
 
     log "Removing link: $dest"
-
     if [[ $DRY_RUN -eq 1 ]]; then
         preview "Would remove: $dest"
         return 0
     fi
-
-    unlink "$dest"
+    if ! unlink "$dest"; then
+        error "Failed to remove link: $dest"
+        return 1
+    fi
     success "Removed: $dest"
 
-    # Remove empty parent directories
-    local parent_dir
-    parent_dir="$(dirname -- "$dest")"
+    parent_dir=$(dirname -- "$dest") || return 1
     while [[ $parent_dir != "$TARGET_DIR" && $parent_dir != / ]]; do
         if rmdir "$parent_dir" 2>/dev/null; then
             log "Removed empty directory: $parent_dir"
-            parent_dir="$(dirname -- "$parent_dir")"
+            parent_dir=$(dirname -- "$parent_dir") || return 1
         else
             break
         fi
     done
 }
 
-# Stow a package
 stow_package() {
-    local package="$1"
-    local package_dir="$STOW_DIR/$package"
-    
-    if [[ ! -d "$package_dir" ]]; then
-        error "Package not found: $package_dir"
-        return 1
-    fi
-    
+    local package=$1
+    local package_dir
+    local file
+    local rel_path
+    local -a files=()
+    local -a state_paths=()
+
+    get_package_dir "$package" package_dir || return 1
     printf 'Stowing package: %s\n' "$package"
+    package_files "$package_dir" files || return 1
     validate_package_state "$package" "$package_dir" || return 1
-    validate_package "$package_dir" || return 1
+    validate_package "$package_dir" files || return 1
+    if [[ $PACKAGE_STATE_SOURCE == "$package_dir" ]]; then
+        state_paths=("${PACKAGE_STATE_PATHS[@]}")
+    fi
 
-    while IFS= read -r -d '' file; do
-        local rel_path="${file#"$package_dir"/}"
-        local src="$package_dir/$rel_path"
-        local dest="$TARGET_DIR/$rel_path"
-
-        create_link "$src" "$dest" || return 1
-    done < <(find "$package_dir" -type f -print0)
-
-    if [[ $DRY_RUN -ne 1 ]]; then
-        write_package_state "$package" "$package_dir" || return 1
+    for file in "${files[@]}"; do
+        rel_path=${file#"$package_dir"/}
+        create_link "$file" "$TARGET_DIR/$rel_path" || return 1
+        if [[ $DRY_RUN -ne 1 ]]; then
+            append_unique_path state_paths "$rel_path"
+            write_package_state "$package" "$package_dir" "${state_paths[@]}" || return 1
+        fi
+    done
+    if [[ ${#files[@]} -eq 0 && $DRY_RUN -ne 1 ]]; then
+        write_package_state "$package" "$package_dir" "${state_paths[@]}" || return 1
     fi
 }
 
-# Unstow a package
 unstow_package() {
-    local package="$1"
-    local package_dir="$STOW_DIR/$package"
-    
-    if [[ ! -d "$package_dir" ]]; then
-        error "Package not found: $package_dir"
-        return 1
-    fi
-    
-    printf 'Unstowing package: %s\n' "$package"
-    validate_package_state "$package" "$package_dir" || return 1
-
-    local managed_links=()
+    local package=$1
+    local package_dir
     local dest
     local src
+    local file
     local rel_path
     local has_state=0
-    if load_package_state "$package"; then
+    local -a files=()
+    local -a managed_links=()
+
+    get_package_dir "$package" package_dir || return 1
+    printf 'Unstowing package: %s\n' "$package"
+    package_files "$package_dir" files || return 1
+    validate_package_state "$package" "$package_dir" || return 1
+    if [[ -n $PACKAGE_STATE_SOURCE ]]; then
         has_state=1
-        src="$PACKAGE_STATE_SOURCE"
+        src=$PACKAGE_STATE_SOURCE
         for rel_path in "${PACKAGE_STATE_PATHS[@]}"; do
-            dest="$TARGET_DIR/$rel_path"
-            remove_link "$dest" "$src/$rel_path"
+            remove_link "$TARGET_DIR/$rel_path" "$src/$rel_path" || return 1
         done
     else
-        while IFS= read -r -d '' dest; do
-            managed_links+=("$dest")
-        done < <(find_managed_links "$package_dir")
-
+        find_managed_links "$package_dir" files managed_links || return 1
         for dest in "${managed_links[@]}"; do
-            src="$(resolve_link_target "$dest")"
-            remove_link "$dest" "$src"
+            src=$(resolve_link_target "$dest") || return 1
+            remove_link "$dest" "$src" || return 1
         done
     fi
 
-    while IFS= read -r -d '' file; do
-        rel_path="${file#"$package_dir"/}"
-        src="$package_dir/$rel_path"
+    for file in "${files[@]}"; do
+        rel_path=${file#"$package_dir"/}
         dest="$TARGET_DIR/$rel_path"
-
         if [[ -L $dest ]]; then
-            remove_link "$dest" "$src"
+            remove_link "$dest" "$file" || return 1
         fi
-    done < <(find "$package_dir" -type f -print0)
-
+    done
     if [[ $has_state -eq 1 && $DRY_RUN -ne 1 ]]; then
-        remove_package_state "$package"
+        remove_package_state "$package" || return 1
     fi
 }
 
 preview_obsolete_links() {
-    local package="$1"
-    local package_dir="$2"
+    local package=$1
+    local package_dir=$2
+    local files_name=$3
     local dest
     local src
     local rel_path
     local status
+    local -a managed_links=()
 
     if load_package_state "$package"; then
-        src="$PACKAGE_STATE_SOURCE"
+        src=$PACKAGE_STATE_SOURCE
         for rel_path in "${PACKAGE_STATE_PATHS[@]}"; do
             if [[ ! -f $package_dir/$rel_path || -L $package_dir/$rel_path ]]; then
                 dest="$TARGET_DIR/$rel_path"
@@ -591,31 +937,32 @@ preview_obsolete_links() {
     fi
     [[ $status -eq 1 ]] || return "$status"
 
-    while IFS= read -r -d '' dest; do
-        src="$(resolve_link_target "$dest")"
+    find_managed_links "$package_dir" "$files_name" managed_links || return 1
+    for dest in "${managed_links[@]}"; do
+        src=$(resolve_link_target "$dest") || return 1
         if [[ ! -f $src || -L $src ]]; then
             preview "Would remove: $dest"
         fi
-    done < <(find_managed_links "$package_dir")
+    done
 }
 
 preview_restow_link() {
-    local src="$1"
-    local dest="$2"
+    local src=$1
+    local dest=$2
     local parent_dir
+    local target
 
     unfold_parent_symlink "$src" "$dest" || return 1
-
     if [[ -L $dest ]]; then
         if link_points_to "$dest" "$src"; then
             preview "Would relink: $dest -> $src"
         else
-            preview "Would replace symlink: $dest -> $(readlink -- "$dest") with $src"
+            target=$(readlink -- "$dest") || return 1
+            preview "Would replace symlink: $dest -> $target with $src"
         fi
         return 0
     fi
-
-    parent_dir="$(dirname -- "$dest")"
+    parent_dir=$(dirname -- "$dest") || return 1
     if [[ ! -d $parent_dir ]]; then
         preview "Would create directory: $parent_dir"
     fi
@@ -623,195 +970,27 @@ preview_restow_link() {
 }
 
 restow_package() {
-    local package="$1"
-    local package_dir="$STOW_DIR/$package"
+    local package=$1
+    local package_dir
+    local file
+    local rel_path
+    local -a files=()
 
-    if [[ ! -d $package_dir ]]; then
-        error "Package not found: $package_dir"
-        return 1
-    fi
-
+    get_package_dir "$package" package_dir || return 1
+    package_files "$package_dir" files || return 1
     validate_package_state "$package" "$package_dir" || return 1
-    validate_package "$package_dir" || return 1
-
+    validate_package "$package_dir" files || return 1
     if [[ $DRY_RUN -eq 1 ]]; then
         printf 'Restowing package: %s\n' "$package"
-        preview_obsolete_links "$package" "$package_dir"
-        while IFS= read -r -d '' file; do
-            local rel_path="${file#"$package_dir"/}"
-            preview_restow_link "$package_dir/$rel_path" "$TARGET_DIR/$rel_path"
-        done < <(find "$package_dir" -type f -print0)
+        preview_obsolete_links "$package" "$package_dir" files || return 1
+        for file in "${files[@]}"; do
+            rel_path=${file#"$package_dir"/}
+            preview_restow_link "$file" "$TARGET_DIR/$rel_path" || return 1
+        done
         return 0
     fi
-
     unstow_package "$package" || return 1
     stow_package "$package" || return 1
 }
 
-# Show help
-show_help() {
-    cat <<EOF
-Usage: bstow [OPTIONS] COMMAND PACKAGES...
-
-A per-file dotfiles linker in pure Bash. Package symlinks and empty directories
-are ignored.
-
-COMMANDS:
-    stow        Create symlinks for packages
-    unstow      Remove symlinks for packages
-    restow      Unstow and then stow packages
-
-OPTIONS:
-    -d, --dir DIR       Set stow directory (default: current directory)
-    -t, --target DIR    Set target directory (default: \$HOME)
-    -n, --dry-run       Preview actions without changing files
-    -f, --force         Replace foreign symlinks or adopt state from another source
-    -v, --verbose       Show additional diagnostic details
-    -h, --help          Show this help
-
-EXAMPLES:
-    bstow stow vim nvim        # Stow vim and nvim packages
-    bstow unstow bash          # Unstow bash package
-    bstow --dry-run stow tmux  # Preview without changing files
-    bstow restow git           # Restow git package
-
-ENVIRONMENT:
-    STOW_DIR    Stow directory (default: \$PWD)
-    TARGET_DIR  Target directory (default: \$HOME)
-    VERBOSE     Enable verbose output (0 or 1)
-    DRY_RUN     Enable dry run mode (0 or 1)
-    FORCE       Replace foreign symlinks or adopt package state (0 or 1)
-    BSTOW_STATE_DIR
-                Ownership state directory (default: TARGET_DIR/.local/state/bstow)
-
-PACKAGE STRUCTURE:
-    dotfiles/
-    ├── bash/
-    │   └── .bashrc
-    ├── vim/
-    │   └── .vimrc
-    └── nvim/
-        └── .config/
-            └── nvim/
-                └── init.lua
-
-EOF
-}
-
-# Main
-main() {
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -d|--dir)
-                [[ $# -ge 2 ]] || { error "$1 requires a directory"; exit 1; }
-                STOW_DIR="$2"
-                shift 2
-                ;;
-            --dir=*)
-                STOW_DIR="${1#*=}"
-                shift
-                ;;
-            -t|--target)
-                [[ $# -ge 2 ]] || { error "$1 requires a directory"; exit 1; }
-                TARGET_DIR="$2"
-                shift 2
-                ;;
-            --target=*)
-                TARGET_DIR="${1#*=}"
-                shift
-                ;;
-            -n|--dry-run)
-                DRY_RUN=1
-                shift
-                ;;
-            -f|--force)
-                FORCE=1
-                shift
-                ;;
-            -v|--verbose)
-                VERBOSE=1
-                shift
-                ;;
-            -h|--help)
-                show_help
-                exit 0
-                ;;
-            --)
-                shift
-                break
-                ;;
-            -*)
-                error "Unknown option: $1"
-                show_help
-                exit 1
-                ;;
-            *)
-                break
-                ;;
-        esac
-    done
-
-    # Check arguments
-    if [[ $# -lt 2 ]]; then
-        error "Missing command or packages"
-        show_help
-        exit 1
-    fi
-    
-    local command="$1"
-    shift
-    
-    # Validate directories
-    if [[ ! -d "$STOW_DIR" ]]; then
-        error "Stow directory not found: $STOW_DIR"
-        exit 1
-    fi
-    
-    if [[ ! -d "$TARGET_DIR" ]]; then
-        error "Target directory not found: $TARGET_DIR"
-        exit 1
-    fi
-    
-    # Convert to absolute paths
-    STOW_DIR="$(cd "$STOW_DIR" && pwd)"
-    TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
-    if [[ -z $STATE_DIR ]]; then
-        STATE_DIR="$TARGET_DIR/.local/state/bstow"
-    else
-        STATE_DIR="$(realpath -m -- "$STATE_DIR")"
-    fi
-    
-    log "Stow directory: $STOW_DIR"
-    log "Target directory: $TARGET_DIR"
-    if [[ $DRY_RUN -eq 1 ]]; then
-        preview "Preview only; no filesystem changes will be made"
-    fi
-
-    # Execute command for each package
-    local exit_code=0
-    for package in "$@"; do
-        case $command in
-            stow)
-                stow_package "$package" || exit_code=1
-                ;;
-            unstow)
-                unstow_package "$package" || exit_code=1
-                ;;
-            restow)
-                restow_package "$package" || exit_code=1
-                ;;
-            *)
-                error "Unknown command: $command"
-                show_help
-                exit 1
-                ;;
-        esac
-    done
-    
-    exit $exit_code
-}
-
-# Run if executed directly
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
-fi
+main "$@"
