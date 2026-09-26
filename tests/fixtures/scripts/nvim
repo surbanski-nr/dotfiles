@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -eu
+
+if [[ -n ${TEST_COMMAND_LOG:-} ]]; then
+  printf 'NVIM_APPNAME=%s\n' "${NVIM_APPNAME:-}" >>"$TEST_COMMAND_LOG"
+  for argument in "$@"; do
+    printf 'ARG\t%s\n' "$argument" >>"$TEST_COMMAND_LOG"
+  done
+fi
+
+[[ ${TEST_NVIM_FAIL:-0} == 0 ]] || exit 53

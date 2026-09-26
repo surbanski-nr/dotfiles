@@ -1,13 +1,73 @@
-#!/bin/bash
-  
-contexts=("invhub-preprod-uksouth-aks" "invhub-dev-uksouth-aks")  
-  
-for context in "${contexts[@]}"; do  
-  echo "Checking context: $context"  
-    
-  kubectl config use-context "$context"  
-    
-  kubectl get Backup --all-namespaces -o custom-columns=NAME:.metadata.name,AGE:.metadata.creationTimestamp,NAMESPACE:.metadata.namespace,STATUS:.status.phase | grep -v 'completed'  
-    
-  echo "-----------------------------------------"  
-done  
+#!/usr/bin/env bash
+
+set -uo pipefail
+
+die() {
+  printf 'checkbackups: %s\n' "$*" >&2
+  exit 1
+}
+
+trim() {
+  local value=$1
+
+  value=${value#"${value%%[![:space:]]*}"}
+  value=${value%"${value##*[![:space:]]}"}
+  REPLY=$value
+}
+
+contains() {
+  local needle=$1
+  local value
+  shift
+
+  for value in "$@"; do
+    [[ $value == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+[[ $# -eq 0 ]] || die 'usage: checkbackups'
+command -v kubectl >/dev/null 2>&1 || die 'required command is missing: kubectl'
+command -v jq >/dev/null 2>&1 || die 'required command is missing: jq'
+
+context_file=$HOME/kube-backup-contexts.txt
+[[ -r $context_file ]] || die "cannot read context list: $context_file"
+
+contexts=()
+while IFS= read -r line || [[ -n $line ]]; do
+  line=${line%$'\r'}
+  trim "$line"
+  [[ -n $REPLY && $REPLY != \#* ]] || continue
+  if ! contains "$REPLY" "${contexts[@]}"; then
+    contexts+=("$REPLY")
+  fi
+done <"$context_file"
+[[ ${#contexts[@]} -gt 0 ]] || die "context list is empty: $context_file"
+
+status=0
+for context in "${contexts[@]}"; do
+  printf 'Context: %s\n' "$context"
+  if ! output=$(kubectl --context "$context" get backups --all-namespaces -o json |
+    jq -r '
+      .items[]
+      | select((.status.phase // "") | ascii_downcase != "completed")
+      | [
+          (.metadata.namespace // "-"),
+          (.metadata.name // "-"),
+          (.status.phase // "unknown"),
+          (.metadata.creationTimestamp // "-")
+        ]
+      | @tsv
+    '); then
+    printf 'checkbackups: failed to query context: %s\n' "$context" >&2
+    status=1
+    continue
+  fi
+  if [[ -n $output ]]; then
+    printf 'NAMESPACE\tNAME\tSTATUS\tCREATED\n%s\n' "$output"
+  else
+    printf 'No unfinished or failed backups.\n'
+  fi
+done
+
+exit "$status"

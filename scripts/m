@@ -1,5 +1,29 @@
-#!/bin/bash
-# Script to switch to main branch and pull
+#!/usr/bin/env bash
 
-git checkout master || git checkout main
-git pull
+set -euo pipefail
+
+die() {
+  printf 'm: %s\n' "$*" >&2
+  exit 1
+}
+
+[[ $# -eq 0 ]] || die 'usage: m'
+[[ $(git rev-parse --is-inside-work-tree 2>/dev/null) == true ]] ||
+  die 'current directory is not a Git work tree'
+
+remote_head=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+if [[ -n $remote_head ]]; then
+  [[ $remote_head == origin/* ]] || die 'origin/HEAD has an unexpected target'
+  branch=${remote_head#origin/}
+elif git show-ref --verify --quiet refs/heads/main ||
+  git show-ref --verify --quiet refs/remotes/origin/main; then
+  branch=main
+elif git show-ref --verify --quiet refs/heads/master ||
+  git show-ref --verify --quiet refs/remotes/origin/master; then
+  branch=master
+else
+  die 'cannot find the primary branch from origin/HEAD, main or master'
+fi
+
+git switch "$branch"
+git pull --ff-only origin "$branch"

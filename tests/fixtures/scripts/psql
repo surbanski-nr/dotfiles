@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -eu
+
+if [[ -n ${TEST_COMMAND_LOG:-} ]]; then
+  for argument in "$@"; do
+    printf 'ARG\t%s\n' "$argument" >>"$TEST_COMMAND_LOG"
+  done
+fi
+
+[[ ${TEST_PSQL_FAIL:-0} == 0 ]] || exit 51
+printf '%s' "${TEST_PSQL_OUTPUT-[]}"

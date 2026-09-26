@@ -1,21 +1,34 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-if [ -z "$1" ]; then
-  echo "Usage: $0 kubernetes.azure.com/agentpool=nodepool1"
+set -uo pipefail
+
+die() {
+  printf 'findpodsonnodepool: %s\n' "$*" >&2
   exit 1
+}
+
+[[ $# -eq 1 && -n $1 ]] ||
+  die 'usage: findpodsonnodepool LABEL_SELECTOR'
+command -v kubectl >/dev/null 2>&1 || die 'required command is missing: kubectl'
+
+selector=$1
+if ! node_output=$(kubectl get nodes --selector="$selector"   -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}'); then
+  die "failed to list nodes for selector: $selector"
 fi
 
-NODEPOOL_LABEL="$1"
-
-NODES=$(kubectl get nodes --selector="$NODEPOOL_LABEL" -o jsonpath='{.items[*].metadata.name}')
-
-if [ -z "$NODES" ]; then
-  echo "No nodes found for the label $NODEPOOL_LABEL"
-  exit 1
+if [[ -z $node_output ]]; then
+  printf 'No nodes found for selector: %s\n' "$selector"
+  exit 0
 fi
 
-for NODE in $NODES; do
-  echo "Pods on node $NODE:"
-  kubectl get pods --all-namespaces --field-selector="spec.nodeName=$NODE" -o wide
-  echo "---------------------------------"
+mapfile -t nodes <<<"$node_output"
+status=0
+for node in "${nodes[@]}"; do
+  printf 'Pods on node %s:\n' "$node"
+  if ! kubectl get pods --all-namespaces     --field-selector="spec.nodeName=$node" -o wide; then
+    printf 'findpodsonnodepool: failed to list pods on node: %s\n' "$node" >&2
+    status=1
+  fi
 done
+
+exit "$status"

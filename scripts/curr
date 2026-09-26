@@ -1,10 +1,22 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-cluster=$(kubectl config current-context)
-namespace=$(
-	kubectl config view --minify -o jsonpath='{..namespace}'
-	echo
-)
+set -uo pipefail
 
-echo "Current cluster:   $cluster"
-echo "Current namespace: $namespace"
+die() {
+  printf 'curr: %s\n' "$*" >&2
+  exit 1
+}
+
+[[ $# -eq 0 ]] || die 'usage: curr'
+command -v kubectl >/dev/null 2>&1 || die 'required command is missing: kubectl'
+
+if ! cluster=$(kubectl config current-context); then
+  die 'failed to read the current Kubernetes context'
+fi
+if ! namespace=$(kubectl config view --minify -o 'jsonpath={..namespace}'); then
+  die 'failed to read the current Kubernetes namespace'
+fi
+namespace=${namespace:-default}
+
+printf 'Current cluster:   %s\n' "$cluster"
+printf 'Current namespace: %s\n' "$namespace"

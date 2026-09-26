@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+
+set -eu
+
+if [[ -n ${TEST_COMMAND_LOG:-} ]]; then
+  printf 'CALL\n' >>"$TEST_COMMAND_LOG"
+  for argument in "$@"; do
+    printf 'ARG\t%s\n' "$argument" >>"$TEST_COMMAND_LOG"
+  done
+fi
+
+scenario=${TEST_KUBECTL_SCENARIO:-}
+
+if [[ ${1:-} == --context ]]; then
+  context=${2:-}
+  [[ ${3:-} == get && ${4:-} == backups ]] || exit 90
+  case "$context" in
+    'prod context')
+      cat <<'EOF'
+{"items":[
+  {"metadata":{"namespace":"one","name":"finished","creationTimestamp":"2026-09-25"},"status":{"phase":"Completed"}},
+  {"metadata":{"namespace":"two","name":"failed backup","creationTimestamp":"2026-09-26"},"status":{"phase":"Failed"}}
+]}
+EOF
+      ;;
+    empty | 'literal ; touch injected')
+      printf '{"items":[]}\n'
+      ;;
+    bad)
+      exit 44
+      ;;
+    *)
+      exit 91
+      ;;
+  esac
+  exit 0
+fi
+
+if [[ ${1:-} == config && ${2:-} == use-context ]]; then
+  exit 92
+fi
+
+if [[ ${1:-} == config && ${2:-} == current-context ]]; then
+  [[ $scenario != curr-context-fail ]] || exit 45
+  printf 'fixture-context\n'
+  exit 0
+fi
+
+if [[ ${1:-} == config && ${2:-} == view ]]; then
+  [[ $scenario != curr-namespace-fail ]] || exit 46
+  [[ $scenario != curr-default ]] && printf 'fixture-namespace'
+  exit 0
+fi
+
+if [[ ${1:-} == get && ${2:-} == nodes ]]; then
+  [[ $scenario != nodes-fail ]] || exit 47
+  if [[ $scenario == nodes-empty ]]; then
+    exit 0
+  fi
+  printf 'node-a\nnode-b\n'
+  exit 0
+fi
+
+if [[ ${1:-} == get && ${2:-} == pods && $* == *--field-selector=* ]]; then
+  if [[ $* == *spec.nodeName=node-b* && $scenario == node-pods-fail ]]; then
+    exit 48
+  fi
+  printf 'fixture pod output for %s\n' "$*"
+  exit 0
+fi
+
+if [[ ${1:-} == get && ${2:-} == pods ]]; then
+  [[ $scenario != pod-list-fail ]] || exit 49
+  case "$scenario" in
+    no-pod-match) printf 'worker-1\n' ;;
+    *) printf 'api-good-1\napi-bad-2\nworker-1\n' ;;
+  esac
+  exit 0
+fi
+
+if [[ ${1:-} == logs ]]; then
+  if [[ ${2:-} == api-bad-2 ]]; then
+    exit 50
+  fi
+  printf 'logs for %s\n' "${2:-}"
+  exit 0
+fi
+
+exit 93

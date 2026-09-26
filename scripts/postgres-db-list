@@ -1,7 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-db_list=$(psql --record-separator="," -q -t -c "SELECT array(SELECT datname FROM pg_database)")
-db_list="${db_list//\{/\[ }"
-db_list="${db_list//\}/\ ] }"
+set -euo pipefail
 
-echo "$db_list"
+die() {
+  printf 'postgres-db-list: %s\n' "$*" >&2
+  exit 1
+}
+
+[[ $# -eq 0 ]] || die 'usage: postgres-db-list'
+command -v psql >/dev/null 2>&1 || die 'required command is missing: psql'
+
+query="SELECT COALESCE(json_agg(datname ORDER BY datname), '[]'::json)::text FROM pg_database;"
+if ! databases=$(psql -X -v ON_ERROR_STOP=1 -qAt -c "$query"); then
+  die 'database query failed'
+fi
+[[ -n $databases ]] || die 'database query returned no output'
+printf '%s\n' "$databases"

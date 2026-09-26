@@ -1,49 +1,123 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-POD_PREFIXES=(
-  "api"
-  "disc-api"
-  "transac-api"
-  "web"
-  "cdc"
-  "search-indexing"
-  "invhub-interaction-engine"
-  "invhub-prompt-engine"
-  "invhub-context-engine"
-  "invhub-websearch"
-  "copilot-interaction-engine"
-  "copilot-prompt-engine"
-  "copilot-context-engine"
-  "copilot-websearch"
-  "copilotv2"
-  "copilot-data-adapter"
-  "sail-data-agent"
-  "eureka-workflows-registry"
-  "workflow-canvas-ui"
-  "workflow-manager"
-  "webhook-service"
-  "activity-release"
-  "orchestrator-api"
-  "workers-release"
-)
+set -uo pipefail
 
-TIMESTAMP=$(date "+%Y-%m-%d_%H-%M-%S")
+temporary_file=
 
-LOG_DIR="${TIMESTAMP}_invhub_logs"
-mkdir -p "$LOG_DIR"
+cleanup() {
+  if [[ -n $temporary_file && -e $temporary_file ]]; then
+    rm -f "$temporary_file" || true
+  fi
+}
+trap cleanup EXIT
 
-SINCE_ARGS=()
-if [ -n "${1:-}" ]; then
-  SINCE_ARGS=("--since=$1")
+die() {
+  printf 'dumplogs: %s\n' "$*" >&2
+  exit 1
+}
+
+trim() {
+  local value=$1
+
+  value=${value#"${value%%[![:space:]]*}"}
+  value=${value%"${value##*[![:space:]]}"}
+  REPLY=$value
+}
+
+contains() {
+  local needle=$1
+  local value
+  shift
+
+  for value in "$@"; do
+    [[ $value == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+[[ $# -le 1 ]] || die 'usage: dumplogs [SINCE]'
+command -v kubectl >/dev/null 2>&1 || die 'required command is missing: kubectl'
+
+prefix_file=$HOME/kube-log-prefixes.txt
+[[ -r $prefix_file ]] || die "cannot read pod-prefix list: $prefix_file"
+
+prefixes=()
+while IFS= read -r line || [[ -n $line ]]; do
+  line=${line%$'\r'}
+  trim "$line"
+  [[ -n $REPLY && $REPLY != \#* ]] || continue
+  if ! contains "$REPLY" "${prefixes[@]}"; then
+    prefixes+=("$REPLY")
+  fi
+done <"$prefix_file"
+[[ ${#prefixes[@]} -gt 0 ]] || die "pod-prefix list is empty: $prefix_file"
+
+if ! pod_output=$(kubectl get pods -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}'); then
+  die 'failed to list pods'
 fi
 
-for PREFIX in "${POD_PREFIXES[@]}"; do
-  mapfile -t PODS < <(kubectl get pods --no-headers -o custom-columns=":metadata.name" |
-    awk -v prefix="$PREFIX" 'index($0, prefix) == 1')
+pods=()
+if [[ -n $pod_output ]]; then
+  mapfile -t pods <<<"$pod_output"
+fi
 
-  for POD in "${PODS[@]}"; do
-    LOG_FILE="${LOG_DIR}/${TIMESTAMP}-${POD}.log"
-    kubectl logs "${SINCE_ARGS[@]}" "$POD" >"$LOG_FILE"
-    echo "Logs for $POD saved to $LOG_FILE"
+matched_pods=()
+for prefix in "${prefixes[@]}"; do
+  for pod in "${pods[@]}"; do
+    if [[ $pod == "$prefix"* ]] && ! contains "$pod" "${matched_pods[@]}"; then
+      matched_pods+=("$pod")
+    fi
   done
 done
+
+if [[ ${#matched_pods[@]} -eq 0 ]]; then
+  printf 'No pods matched the configured prefixes.\n'
+  exit 0
+fi
+
+timestamp=$(date '+%Y-%m-%d_%H-%M-%S') || die 'failed to read current time'
+log_dir=${timestamp}_kubernetes-logs
+mkdir "$log_dir" || die "cannot create output directory: $log_dir"
+
+since_args=()
+if [[ $# -eq 1 && -n $1 ]]; then
+  since_args+=("--since=$1")
+fi
+
+status=0
+failed_pods=()
+for pod in "${matched_pods[@]}"; do
+  log_file=$log_dir/$timestamp-$pod.log
+  temporary_file=$(mktemp "$log_dir/.${timestamp}-${pod}.XXXXXX") || {
+    printf 'dumplogs: cannot create temporary log for pod: %s\n' "$pod" >&2
+    failed_pods+=("$pod")
+    status=1
+    continue
+  }
+  if kubectl logs "$pod" "${since_args[@]}" >"$temporary_file"; then
+    if mv "$temporary_file" "$log_file"; then
+      temporary_file=
+      printf 'Logs for %s saved to %s\n' "$pod" "$log_file"
+    else
+      rm -f "$temporary_file"
+      temporary_file=
+      printf 'dumplogs: cannot save log for pod: %s\n' "$pod" >&2
+      failed_pods+=("$pod")
+      status=1
+    fi
+  else
+    rm -f "$temporary_file"
+    temporary_file=
+    printf 'dumplogs: failed to download logs for pod: %s\n' "$pod" >&2
+    failed_pods+=("$pod")
+    status=1
+  fi
+done
+
+if [[ ${#failed_pods[@]} -gt 0 ]]; then
+  printf 'dumplogs: failed pods (%d): %s\n' \
+    "${#failed_pods[@]}" "${failed_pods[*]}" >&2
+fi
+trap - EXIT
+cleanup
+exit "$status"

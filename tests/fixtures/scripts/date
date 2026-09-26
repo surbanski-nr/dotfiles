@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -eu
+
+case "$*" in
+  '+%Y-%m-%d') printf '2026-09-26\n' ;;
+  '+%Y-%m-%d_%H-%M-%S') printf '2026-09-26_12-00-00\n' ;;
+  '-d 2026-09-26 - 1 day +%Y-%m-%d') printf '2026-09-25\n' ;;
+  '-d 2026-09-26 + 1 day +%Y-%m-%d') printf '2026-09-27\n' ;;
+  '+%V') printf '%s\n' "${TEST_WEEK:-08}" ;;
+  *) exit 52 ;;
+esac

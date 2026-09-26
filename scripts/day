@@ -1,17 +1,48 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-today=$(date +"%Y-%m-%d")
-tomorrow=$(gdate -d "tomorrow" '+%Y-%m-%d')
-yesterday=$(gdate -d "yesterday" '+%Y-%m-%d')
-file="$SECOND_BRAIN"'/periodic-notes/daily-notes/'$(date +"%Y-%m-%d").md
+set -euo pipefail
 
-cd "$SECOND_BRAIN" || exit
+die() {
+  printf 'day: %s\n' "$*" >&2
+  exit 1
+}
 
-new_note() {
-	touch "$file"
+cleanup_file=
+cleanup() {
+  local status=$?
 
-	# Format the file with the daily template
-	cat <<EOF >"$file"
+  trap - EXIT
+  if [[ -n $cleanup_file && -e $cleanup_file ]]; then
+    rm -f "$cleanup_file" || true
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+
+[[ $# -eq 0 ]] || die 'usage: day'
+command -v date >/dev/null 2>&1 || die 'required command is missing: date'
+command -v nvim >/dev/null 2>&1 || die 'required command is missing: nvim'
+
+notes_root=${NOTES:-${SECOND_BRAIN:-}}
+[[ -n $notes_root ]] || die 'set NOTES or SECOND_BRAIN to the notes root'
+[[ -d $notes_root ]] || die "notes root is not a directory: $notes_root"
+
+today=$(date '+%Y-%m-%d') || die 'failed to read the current date'
+yesterday=$(date -d "$today - 1 day" '+%Y-%m-%d') ||
+  die 'GNU date is required to compute yesterday'
+tomorrow=$(date -d "$today + 1 day" '+%Y-%m-%d') ||
+  die 'GNU date is required to compute tomorrow'
+
+notes_dir=$notes_root/periodic-notes/daily-notes
+mkdir -p "$notes_dir"
+file=$notes_dir/$today.md
+
+if [[ -e $file || -L $file ]]; then
+  [[ -f $file && ! -L $file ]] ||
+    die "daily note target is not a regular file: $file"
+else
+  cleanup_file=$(mktemp "$notes_dir/.day.XXXXXX")
+  cat >"$cleanup_file" <<EOF_NOTE
 # $today
 
 [[$yesterday]] - [[$tomorrow]]
@@ -25,16 +56,12 @@ What do I want to achieve today and tomorrow?
 - [ ] Something to track
 
 ## Log
-EOF
-
-}
-
-# If the daily note does not exist, create a new one.
-# this uses the test command with the -f flag.
-if [ ! -f "$file" ]; then
-	echo "File does not exist, creating new daily note."
-	new_note
+EOF_NOTE
+  ln "$cleanup_file" "$file" ||
+    die "daily note appeared while it was being created: $file"
+  rm "$cleanup_file"
+  cleanup_file=
+  printf 'Created daily note: %s\n' "$file"
 fi
 
-# Open the daily note at the bottom of the file in insert mode and run NoNeckPain to make it center
-nvim '+ normal Gzzo' "$file" -c :NoNeckPain
+NVIM_APPNAME=nvim2 nvim '+normal Gzzo' "$file"

@@ -127,6 +127,7 @@ validate_scripts() {
     tests/bstow_test.sh
     tests/install_validation_tool_test.sh
     tests/nvim2_release_test.sh
+    tests/scripts_test.sh
     tests/setup_asdf_test.sh
     tests/setup_system_test.sh
     tests/setup_tools_test.sh
@@ -155,11 +156,11 @@ validate_scripts() {
 
   check_shell_syntax bash "${bash_files[@]}"
   check_shell_syntax sh "${posix_files[@]}"
-  shellcheck --external-sources --source-path=SCRIPTDIR \
-    -e SC1090,SC1091 "${files[@]}"
+  shellcheck --external-sources --source-path=SCRIPTDIR "${files[@]}"
   timeout 120s bash tests/bstow_test.sh
   timeout 30s bash tests/install_validation_tool_test.sh
   timeout 30s bash tests/nvim2_release_test.sh
+  timeout 120s bash tests/scripts_test.sh
   timeout 30s bash tests/setup_asdf_test.sh
   timeout 30s bash tests/setup_system_test.sh
   timeout 120s bash tests/setup_tools_test.sh
