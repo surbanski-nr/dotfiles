@@ -14,21 +14,31 @@ tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/.cache/validation-tools}
 bin_dir=$tools_dir/bin
 tool=$1
 
-# shellcheck source=/dev/null
+# shellcheck source=../validation.env
 source "$repo_dir/validation.env"
 
 mkdir -p "$bin_dir"
 export PATH="$bin_dir:$PATH"
 
-installed_version() {
+tool_version() {
+  local executable=$2
+
   case "$1" in
-    actionlint) actionlint -version 2>/dev/null | head -n 1 ;;
-    shellcheck) shellcheck --version 2>/dev/null | awk '/^version:/ { print $2 }' ;;
-    stylua) stylua --version 2>/dev/null | awk '{ print $2 }' ;;
-    yamllint) yamllint --version 2>/dev/null | awk '{ print $2 }' ;;
-    zizmor) zizmor --version 2>/dev/null | awk '{ print $2 }' ;;
+    actionlint) "$executable" -version 2>/dev/null | head -n 1 ;;
+    shellcheck) "$executable" --version 2>/dev/null | awk '/^version:/ { print $2 }' ;;
+    stylua) "$executable" --version 2>/dev/null | awk '{ print $2 }' ;;
+    task) "$executable" --version 2>/dev/null | awk '{ sub(/^v/, "", $NF); print $NF }' ;;
+    yamllint) "$executable" --version 2>/dev/null | awk '{ print $2 }' ;;
+    zizmor) "$executable" --version 2>/dev/null | awk '{ print $2 }' ;;
     *) die "unsupported tool: $1" ;;
   esac
+}
+
+installed_version() {
+  local executable
+
+  executable=$(command -v "$1") || return 1
+  tool_version "$1" "$executable"
 }
 
 expected_version() {
@@ -36,6 +46,7 @@ expected_version() {
     actionlint) printf '%s\n' "$ACTIONLINT_VERSION" ;;
     shellcheck) printf '%s\n' "$SHELLCHECK_VERSION" ;;
     stylua) printf '%s\n' "$STYLUA_VERSION" ;;
+    task) printf '%s\n' "$TASK_VERSION" ;;
     yamllint) printf '%s\n' "$YAMLLINT_VERSION" ;;
     zizmor) printf '%s\n' "$ZIZMOR_VERSION" ;;
     *) die "unsupported tool: $1" ;;
@@ -52,7 +63,10 @@ fi
   die 'automatic tool installation supports Linux x86_64 only'
 
 stage=$(mktemp -d "$tools_dir/install-$tool.XXXXXX")
+staged_venv=
 cleanup() {
+  [[ -z $staged_venv || ! -e $staged_venv ]] ||
+    find "$staged_venv" -depth -delete
   find "$stage" -depth -delete
 }
 trap cleanup EXIT
@@ -68,6 +82,61 @@ download() {
     sha256sum --check --strict
 }
 
+activate_binary() {
+  local candidate=$1
+  local destination=$bin_dir/$tool
+  local previous=$stage/previous-$tool
+  local previous_exists=0
+
+  install -m 0755 "$candidate" "$stage/$tool.candidate"
+  candidate=$stage/$tool.candidate
+  [[ $(tool_version "$tool" "$candidate") == "$version" ]] ||
+    die "$tool $version candidate validation failed"
+
+  if [[ -e $destination || -L $destination ]]; then
+    cp -a "$destination" "$previous"
+    previous_exists=1
+  fi
+  mv -f "$candidate" "$destination"
+  if [[ $(tool_version "$tool" "$destination") == "$version" ]]; then
+    return 0
+  fi
+
+  rm -f "$destination"
+  if ((previous_exists)); then
+    mv "$previous" "$destination"
+  fi
+  die "$tool $version activation failed; restored the previous executable"
+}
+
+activate_yamllint() {
+  local candidate=$1
+  local destination=$bin_dir/yamllint
+  local link=$stage/yamllint-link
+  local previous=$stage/previous-yamllint
+  local previous_exists=0
+
+  [[ $(tool_version yamllint "$candidate/bin/yamllint") == "$version" ]] ||
+    die "yamllint $version candidate validation failed"
+  ln -s "$candidate/bin/yamllint" "$link"
+
+  if [[ -e $destination || -L $destination ]]; then
+    cp -a "$destination" "$previous"
+    previous_exists=1
+  fi
+  mv -Tf "$link" "$destination"
+  if [[ $(tool_version yamllint "$destination") == "$version" ]]; then
+    staged_venv=
+    return 0
+  fi
+
+  rm -f "$destination"
+  if ((previous_exists)); then
+    mv "$previous" "$destination"
+  fi
+  die "yamllint $version activation failed; restored the previous environment"
+}
+
 case "$tool" in
   actionlint)
     archive="$stage/actionlint.tar.gz"
@@ -75,7 +144,7 @@ case "$tool" in
       "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
       "$ACTIONLINT_SHA256" "$archive"
     tar -xzf "$archive" -C "$stage"
-    install -m 0755 "$stage/actionlint" "$bin_dir/actionlint"
+    activate_binary "$stage/actionlint"
     ;;
   shellcheck)
     archive="$stage/shellcheck.tar.xz"
@@ -83,9 +152,7 @@ case "$tool" in
       "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/shellcheck-v$SHELLCHECK_VERSION.linux.x86_64.tar.xz" \
       "$SHELLCHECK_SHA256" "$archive"
     tar -xJf "$archive" -C "$stage"
-    install -m 0755 \
-      "$stage/shellcheck-v$SHELLCHECK_VERSION/shellcheck" \
-      "$bin_dir/shellcheck"
+    activate_binary "$stage/shellcheck-v$SHELLCHECK_VERSION/shellcheck"
     ;;
   stylua)
     archive="$stage/stylua.zip"
@@ -93,19 +160,28 @@ case "$tool" in
       "https://github.com/JohnnyMorganz/StyLua/releases/download/v$STYLUA_VERSION/stylua-linux-x86_64.zip" \
       "$STYLUA_SHA256" "$archive"
     unzip -q "$archive" -d "$stage"
-    install -m 0755 "$stage/stylua" "$bin_dir/stylua"
+    activate_binary "$stage/stylua"
+    ;;
+  task)
+    archive="$stage/task.tar.gz"
+    download \
+      "https://github.com/go-task/task/releases/download/v$TASK_VERSION/task_linux_amd64.tar.gz" \
+      "$TASK_SHA256" "$archive"
+    tar -xzf "$archive" -C "$stage"
+    activate_binary "$stage/task"
     ;;
   yamllint)
     venv="$tools_dir/yamllint-$YAMLLINT_VERSION"
-    if [[ -e $venv ]]; then
-      find "$venv" -depth -delete
+    if [[ -e $venv || -L $venv ]]; then
+      venv=$tools_dir/yamllint-$YAMLLINT_VERSION-${stage##*.}
     fi
+    staged_venv=$venv
     python3 -m venv "$venv"
     "$venv/bin/python" -m pip install --disable-pip-version-check \
-      'pathspec==0.12.1' \
-      'PyYAML==6.0.2' \
+      "pathspec==$YAMLLINT_PATHSPEC_VERSION" \
+      "PyYAML==$YAMLLINT_PYYAML_VERSION" \
       "yamllint==$YAMLLINT_VERSION"
-    ln -sfn "$venv/bin/yamllint" "$bin_dir/yamllint"
+    activate_yamllint "$venv"
     ;;
   zizmor)
     archive="$stage/zizmor.tar.gz"
@@ -113,7 +189,7 @@ case "$tool" in
       "https://github.com/zizmorcore/zizmor/releases/download/v$ZIZMOR_VERSION/zizmor-x86_64-unknown-linux-gnu.tar.gz" \
       "$ZIZMOR_SHA256" "$archive"
     tar -xzf "$archive" -C "$stage"
-    install -m 0755 "$stage/zizmor" "$bin_dir/zizmor"
+    activate_binary "$stage/zizmor"
     ;;
 esac
 

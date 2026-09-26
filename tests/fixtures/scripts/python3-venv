@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -eu
+
+if [[ $# -eq 3 && $1 == -m && $2 == venv ]]; then
+  mkdir -p "$3/bin"
+  ln -s "$0" "$3/bin/python"
+  exit 0
+fi
+
+[[ ${1:-} == -m && ${2:-} == pip ]] || exit 62
+[[ ${TEST_VENV_PIP_FAIL:-0} == 0 ]] || exit 63
+bin_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  "printf 'yamllint %s\\n' '${TEST_YAMLLINT_VERSION:?}'" \
+  >"$bin_dir/yamllint"
+chmod +x "$bin_dir/yamllint"

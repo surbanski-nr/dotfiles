@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+: "${TEST_ZIZMOR_LOG:?}"
+printf '%s\n' "$*" >"$TEST_ZIZMOR_LOG"

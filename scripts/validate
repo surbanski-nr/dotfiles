@@ -20,8 +20,74 @@ need() {
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/.cache/validation-tools}
+cleanup_paths=()
+cleanup_tmux_home=
+cleanup_tmux_socket=
 export PATH="$tools_dir/bin:$PATH"
 cd "$repo_dir"
+
+cleanup() {
+  local status=$?
+  local path
+
+  trap - EXIT
+  set +e
+  if [[ -n $cleanup_tmux_home && -n $cleanup_tmux_socket ]] &&
+    command -v tmux >/dev/null 2>&1; then
+    HOME="$cleanup_tmux_home" tmux -L "$cleanup_tmux_socket" \
+      kill-server >/dev/null 2>&1
+  fi
+  for path in "${cleanup_paths[@]}"; do
+    [[ -e $path ]] && find "$path" -depth -delete
+  done
+  exit "$status"
+}
+trap cleanup EXIT
+
+check_shell_syntax() {
+  local interpreter=$1
+  local file
+  shift
+
+  for file in "$@"; do
+    printf '%s -n: %s\n' "$interpreter" "$file"
+    "$interpreter" -n "$file"
+  done
+}
+
+check_markdown_bash() {
+  local document
+  local block_file=
+  local block_start=0
+  local line
+  local line_number=0
+  local temporary_dir
+
+  temporary_dir=$(mktemp -d)
+  cleanup_paths+=("$temporary_dir")
+  for document in "$@"; do
+    [[ -f $document ]] || continue
+    block_file=
+    line_number=0
+    while IFS= read -r line || [[ -n $line ]]; do
+      ((line_number += 1))
+      if [[ -z $block_file && $line == '```bash' ]]; then
+        block_start=$((line_number + 1))
+        block_file="$temporary_dir/block-${document//\//_}-$block_start.sh"
+        : >"$block_file"
+      elif [[ -n $block_file && $line == '```' ]]; then
+        if ! bash -n "$block_file"; then
+          die "invalid Bash syntax in $document block starting at line $block_start"
+        fi
+        block_file=
+      elif [[ -n $block_file ]]; then
+        printf '%s\n' "$line" >>"$block_file"
+      fi
+    done <"$document"
+    [[ -z $block_file ]] ||
+      die "unterminated Bash block in $document at line $block_start"
+  done
+}
 
 validate_bash() {
   need bash
@@ -34,22 +100,29 @@ validate_bash() {
     tests/bash_test.sh
   )
 
-  bash -n "${files[@]}"
-  shellcheck --shell=bash --external-sources \
+  check_shell_syntax bash "${files[@]}" nvim2-release.env validation.env
+  check_markdown_bash README.md SETUP.md TOOL_UPDATES.md \
+    nvim2/.config/nvim2/offline-releases.md
+  shellcheck --shell=bash --external-sources --source-path=SCRIPTDIR \
     -e SC1090,SC1091 "${files[@]}"
   timeout 120s bash tests/bash_test.sh
 }
 
 validate_scripts() {
   need bash
+  need git
+  need jq
+  need sha256sum
   need sh
   need shellcheck
+  need tar
   need timeout
   local bash_files=()
   local files=(
     bstow
     vim/setup
     tests/bstow_test.sh
+    tests/install_validation_tool_test.sh
     tests/nvim2_release_test.sh
     tests/validate_test.sh
   )
@@ -59,6 +132,11 @@ validate_scripts() {
   while IFS= read -r -d '' file; do
     files+=("$file")
   done < <(find scripts -maxdepth 1 -type f -print0 | sort -z)
+  if [[ -d tests/fixtures ]]; then
+    while IFS= read -r -d '' file; do
+      files+=("$file")
+    done < <(find tests/fixtures -type f -print0 | sort -z)
+  fi
 
   for file in "${files[@]}"; do
     IFS= read -r first_line <"$file" || true
@@ -69,12 +147,12 @@ validate_scripts() {
     esac
   done
 
-  bash -n "${bash_files[@]}"
-  for file in "${posix_files[@]}"; do
-    sh -n "$file"
-  done
-  shellcheck --external-sources -e SC1090,SC1091 "${files[@]}"
+  check_shell_syntax bash "${bash_files[@]}"
+  check_shell_syntax sh "${posix_files[@]}"
+  shellcheck --external-sources --source-path=SCRIPTDIR \
+    -e SC1090,SC1091 "${files[@]}"
   timeout 120s bash tests/bstow_test.sh
+  timeout 30s bash tests/install_validation_tool_test.sh
   timeout 30s bash tests/nvim2_release_test.sh
 }
 
@@ -142,17 +220,13 @@ validate_configs() {
 
   git config --file git/.gitconfig --null --list >/dev/null
   temporary_home=$(mktemp -d)
-  cleanup_tmux() {
-    HOME="$temporary_home" tmux -L "$socket" kill-server >/dev/null 2>&1 || true
-    find "$temporary_home" -depth -delete
-  }
-  trap cleanup_tmux RETURN
+  cleanup_paths+=("$temporary_home")
+  cleanup_tmux_home=$temporary_home
+  cleanup_tmux_socket=$socket
   HOME="$temporary_home" timeout 10s tmux -L "$socket" \
     -f "$repo_dir/tmux/.tmux.conf" new-session -d
   HOME="$temporary_home" tmux -L "$socket" show-options -gv prefix >/dev/null
   HOME="$temporary_home" tmux -L "$socket" show-options -gv status-right >/dev/null
-  cleanup_tmux
-  trap - RETURN
 }
 
 validate_workflows() {
@@ -161,16 +235,22 @@ validate_workflows() {
   need yamllint
   need zizmor
   local token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
+  local discovered_token
 
   actionlint -color
   yamllint --strict --config-file .yamllint.yml .github/workflows
-  if [[ -z $token ]]; then
-    need gh
-    token=$(gh auth token 2>/dev/null) ||
-      die 'GitHub token unavailable; run gh auth login'
+  if [[ -z $token ]] && command -v gh >/dev/null 2>&1; then
+    if discovered_token=$(gh auth token 2>/dev/null); then
+      token=$discovered_token
+    fi
   fi
-  GH_TOKEN=$token zizmor --persona=pedantic \
-    --config zizmor.yml .
+  if [[ -n $token ]]; then
+    GH_TOKEN=$token zizmor --persona=pedantic \
+      --config zizmor.yml .
+  else
+    zizmor --offline --persona=pedantic \
+      --config zizmor.yml .
+  fi
 }
 
 validate_repo() {

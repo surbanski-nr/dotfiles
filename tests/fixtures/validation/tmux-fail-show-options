@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+: "${TEST_REAL_TMUX:?}"
+: "${TEST_TMUX_LOG:?}"
+
+socket=
+previous=
+for argument in "$@"; do
+  if [[ $previous == -L ]]; then
+    socket=$argument
+  fi
+  previous=$argument
+done
+printf '%s\t%s\n' "$HOME" "$socket" >>"$TEST_TMUX_LOG"
+
+for argument in "$@"; do
+  [[ $argument == show-options ]] && exit 73
+done
+
+exec "$TEST_REAL_TMUX" "$@"
