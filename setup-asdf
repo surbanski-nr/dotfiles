@@ -1,0 +1,298 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: setup-asdf [NAME ...]
+
+Install the pinned asdf executable, pin the selected project-tool plugins,
+install every listed version and set the first version as the home default.
+
+Names: terraform kubectl helm python nodejs terragrunt
+EOF
+}
+
+main() {
+  local -a requested=()
+
+  while (($#)); do
+    case $1 in
+      -h | --help) usage; return 0 ;;
+      --*) setup_die "unknown option: $1" ;;
+      *) requested+=("$1"); shift ;;
+    esac
+  done
+  if ((${#requested[@]} == 0)); then
+    requested=(terraform kubectl helm python nodejs terragrunt)
+  fi
+
+  load_config
+  validate_host
+  normalize_requested "${requested[@]}"
+  preflight
+  install_asdf
+  export PATH="$BIN_DIR:$ASDF_DATA_DIR/shims:$PATH"
+  reconcile_tools "${NORMALIZED_TOOLS[@]}"
+}
+
+load_config() {
+  # shellcheck source=versions.env
+  source "$REPO_DIR/versions.env"
+  setup_validate_versions
+  BIN_DIR=${SETUP_ASDF_BIN_DIR:-$HOME/bin}
+  ASDF_DATA_DIR=${ASDF_DATA_DIR:-$HOME/.asdf}
+  export ASDF_DATA_DIR
+  STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup-asdf
+}
+
+validate_host() {
+  [[ $(uname -s) == Linux ]] || setup_die 'only Linux is supported'
+  [[ $(uname -m) == x86_64 ]] || setup_die 'only Linux x86-64 is supported'
+  for command_name in awk curl find git sha256sum tar mktemp mv ln readlink; do
+    setup_need "$command_name"
+  done
+}
+
+normalize_requested() {
+  local name
+  local seen=' '
+
+  NORMALIZED_TOOLS=()
+  for name in "$@"; do
+    case $name in
+      terraform | kubectl | helm | python | nodejs | terragrunt) ;;
+      *) setup_die "unknown project tool: $name" ;;
+    esac
+    if [[ $seen != *" $name "* ]]; then
+      NORMALIZED_TOOLS+=("$name")
+      seen+="$name "
+    fi
+  done
+}
+
+plugin_spec() {
+  case $1 in
+    terraform)
+      PLUGIN_REPO=$ASDF_TERRAFORM_PLUGIN_REPO
+      PLUGIN_COMMIT=$ASDF_TERRAFORM_PLUGIN_COMMIT
+      TOOL_VERSIONS=$TERRAFORM_VERSIONS
+      ;;
+    kubectl)
+      PLUGIN_REPO=$ASDF_KUBECTL_PLUGIN_REPO
+      PLUGIN_COMMIT=$ASDF_KUBECTL_PLUGIN_COMMIT
+      TOOL_VERSIONS=$KUBECTL_VERSIONS
+      ;;
+    helm)
+      PLUGIN_REPO=$ASDF_HELM_PLUGIN_REPO
+      PLUGIN_COMMIT=$ASDF_HELM_PLUGIN_COMMIT
+      TOOL_VERSIONS=$HELM_VERSIONS
+      ;;
+    python)
+      PLUGIN_REPO=$ASDF_PYTHON_PLUGIN_REPO
+      PLUGIN_COMMIT=$ASDF_PYTHON_PLUGIN_COMMIT
+      TOOL_VERSIONS=$PYTHON_VERSIONS
+      ;;
+    nodejs)
+      PLUGIN_REPO=$ASDF_NODEJS_PLUGIN_REPO
+      PLUGIN_COMMIT=$ASDF_NODEJS_PLUGIN_COMMIT
+      TOOL_VERSIONS=$NODEJS_VERSIONS
+      ;;
+    terragrunt)
+      PLUGIN_REPO=$ASDF_TERRAGRUNT_PLUGIN_REPO
+      PLUGIN_COMMIT=$ASDF_TERRAGRUNT_PLUGIN_COMMIT
+      TOOL_VERSIONS=$TERRAGRUNT_VERSIONS
+      ;;
+    *) setup_die "missing asdf plugin mapping for $1" ;;
+  esac
+}
+
+preflight_asdf_link() {
+  local link="$BIN_DIR/asdf"
+  local target
+
+  if [[ -L $link ]]; then
+    target=$(readlink -- "$link")
+    [[ $target == asdf-* ]] || setup_die "refusing foreign link: $link -> $target"
+  elif [[ -e $link ]]; then
+    setup_die "refusing unmanaged path: $link"
+  fi
+  if [[ -e $BIN_DIR/asdf-$ASDF_VERSION || -L $BIN_DIR/asdf-$ASDF_VERSION ]]; then
+    [[ -f $BIN_DIR/asdf-$ASDF_VERSION && -x $BIN_DIR/asdf-$ASDF_VERSION &&
+      ! -L $BIN_DIR/asdf-$ASDF_VERSION ]] ||
+      setup_die "invalid asdf installation: $BIN_DIR/asdf-$ASDF_VERSION"
+  fi
+}
+
+preflight_plugin() {
+  local name=$1
+  local directory="$ASDF_DATA_DIR/plugins/$name"
+  local remote
+
+  plugin_spec "$name"
+  if [[ -e $directory || -L $directory ]]; then
+    [[ -d $directory/.git && ! -L $directory ]] ||
+      setup_die "asdf plugin is not a Git checkout: $directory"
+    remote=$(git -C "$directory" remote get-url origin)
+    [[ $remote == "$PLUGIN_REPO" || ${remote%.git} == "${PLUGIN_REPO%.git}" ]] ||
+      setup_die "$name plugin uses unexpected origin: $remote"
+    if ! git -C "$directory" diff --quiet --ignore-submodules -- ||
+      ! git -C "$directory" diff --cached --quiet --ignore-submodules --; then
+      setup_die "$name plugin checkout has local changes"
+    fi
+  fi
+}
+
+preflight_project_command() {
+  local name=$1
+  local command_name=$name
+  local path
+
+  case $name in
+    nodejs) command_name=node ;;
+  esac
+  path="$BIN_DIR/$command_name"
+  if [[ -e $path || -L $path ]]; then
+    setup_die "$name conflicts with the direct launcher: $path"
+  fi
+}
+
+preflight() {
+  local name
+
+  if [[ -e $BIN_DIR || -L $BIN_DIR ]]; then
+    [[ -d $BIN_DIR && ! -L $BIN_DIR ]] || setup_die "invalid bin directory: $BIN_DIR"
+  fi
+  if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
+    [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || setup_die "invalid state directory: $STATE_DIR"
+  fi
+  preflight_asdf_link
+  for name in "${NORMALIZED_TOOLS[@]}"; do
+    preflight_project_command "$name"
+    preflight_plugin "$name"
+  done
+  mkdir -p "$BIN_DIR" "$STATE_DIR"
+  mkdir -- "$STATE_DIR/lock" 2>/dev/null ||
+    setup_die 'another setup-asdf process is running'
+  LOCK_DIR=$STATE_DIR/lock
+}
+
+install_asdf() {
+  local destination="$BIN_DIR/asdf-$ASDF_VERSION"
+  local link="$BIN_DIR/asdf"
+  local asset="asdf-v${ASDF_VERSION}-linux-amd64.tar.gz"
+  local url="https://github.com/asdf-vm/asdf/releases/download/v${ASDF_VERSION}/$asset"
+  local archive
+  local executable
+  local output
+  local stage
+
+  if [[ -f $destination ]]; then
+    output=$("$destination" version 2>&1)
+    [[ $output == *"$ASDF_VERSION"* ]] ||
+      setup_die "existing asdf binary did not report $ASDF_VERSION"
+  else
+    stage=$(mktemp -d "$BIN_DIR/.setup-asdf.XXXXXX")
+    TEMP_PATHS+=("$stage")
+    archive="$stage/$asset"
+    executable="$stage/asdf"
+    setup_download "$url" "$archive"
+    setup_verify_sha256 "$archive" "$ASDF_SHA256"
+    tar -xOzf "$archive" -- asdf >"$executable"
+    chmod 0755 "$executable"
+    output=$("$executable" version 2>&1)
+    [[ $output == *"$ASDF_VERSION"* ]] ||
+      setup_die "downloaded asdf did not report $ASDF_VERSION"
+    mv -- "$executable" "$destination"
+    printf 'setup-asdf: installed asdf %s\n' "$ASDF_VERSION"
+  fi
+  temporary_link="$BIN_DIR/.asdf.link.$$"
+  ln -s -- "asdf-$ASDF_VERSION" "$temporary_link"
+  TEMP_PATHS+=("$temporary_link")
+  mv -T -- "$temporary_link" "$link"
+}
+
+pin_plugin() {
+  local name=$1
+  local directory="$ASDF_DATA_DIR/plugins/$name"
+  local current
+
+  plugin_spec "$name"
+  if [[ ! -d $directory ]]; then
+    "$BIN_DIR/asdf" plugin add "$name" "$PLUGIN_REPO"
+  fi
+  current=$(git -C "$directory" rev-parse HEAD)
+  if [[ $current != "$PLUGIN_COMMIT" ]]; then
+    git -C "$directory" fetch --depth 1 origin "$PLUGIN_COMMIT"
+    git -C "$directory" checkout --detach "$PLUGIN_COMMIT"
+  fi
+  [[ $(git -C "$directory" rev-parse HEAD) == "$PLUGIN_COMMIT" ]] ||
+    setup_die "failed to pin $name plugin"
+}
+
+reconcile_tool() {
+  local name=$1
+  local version
+  local -a versions=()
+
+  plugin_spec "$name"
+  read -r -a versions <<<"$TOOL_VERSIONS"
+  pin_plugin "$name"
+  for version in "${versions[@]}"; do
+    if "$BIN_DIR/asdf" list "$name" "$version" 2>/dev/null |
+      awk -v wanted="$version" '{sub(/^[* ]+/, ""); if ($1 == wanted) found=1} END {exit !found}'; then
+      printf 'setup-asdf: reuse %s %s\n' "$name" "$version"
+    else
+      "$BIN_DIR/asdf" install "$name" "$version"
+      printf 'setup-asdf: installed %s %s\n' "$name" "$version"
+    fi
+    "$BIN_DIR/asdf" reshim "$name" "$version"
+  done
+}
+
+select_tool() {
+  local name=$1
+  local first
+
+  plugin_spec "$name"
+  first=${TOOL_VERSIONS%% *}
+  "$BIN_DIR/asdf" set -u "$name" "$first"
+  printf 'setup-asdf: selected %s %s for home\n' "$name" "$first"
+}
+
+reconcile_tools() {
+  local name
+  for name in "$@"; do reconcile_tool "$name"; done
+  for name in "$@"; do select_tool "$name"; done
+}
+
+cleanup() {
+  local status=$?
+  local path
+
+  trap - EXIT
+  set +e
+  for path in "${TEMP_PATHS[@]:-}"; do
+    if [[ -e $path || -L $path ]]; then find "$path" -depth -delete; fi
+  done
+  if [[ -n ${LOCK_DIR:-} && -d $LOCK_DIR && ! -L $LOCK_DIR ]]; then
+    rmdir -- "$LOCK_DIR"
+  fi
+  exit "$status"
+}
+
+REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/setup-lib
+source "$REPO_DIR/scripts/setup-lib"
+SETUP_PROGRAM=setup-asdf
+declare -a NORMALIZED_TOOLS=()
+declare -a TEMP_PATHS=()
+BIN_DIR=
+STATE_DIR=
+LOCK_DIR=
+PLUGIN_REPO=
+PLUGIN_COMMIT=
+TOOL_VERSIONS=
+temporary_link=
+trap cleanup EXIT
+main "$@"

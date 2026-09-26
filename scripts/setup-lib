@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+setup_die() {
+  printf '%s: %s\n' "${SETUP_PROGRAM:-setup}" "$*" >&2
+  return 1
+}
+
+setup_need() {
+  command -v "$1" >/dev/null 2>&1 || setup_die "required command is missing: $1"
+}
+
+setup_validate_version() {
+  local name=$1
+  local value=$2
+
+  [[ $value =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] ||
+    setup_die "$name has an invalid version: $value"
+}
+
+setup_validate_digest() {
+  local name=$1
+  local value=$2
+
+  [[ $value =~ ^[0-9a-f]{64}$ ]] || setup_die "$name is not a SHA-256 digest"
+}
+
+setup_validate_commit() {
+  local name=$1
+  local value=$2
+
+  [[ $value =~ ^[0-9a-f]{40}$ ]] || setup_die "$name is not a commit SHA"
+}
+
+setup_validate_list() {
+  local name=$1
+  local value=$2
+  local item
+  local previous
+  local seen_items=
+
+  [[ -n $value ]] || setup_die "$name is empty"
+  for item in $value; do
+    setup_validate_version "$name" "$item" || return
+    for previous in ${seen_items:-}; do
+      [[ $previous != "$item" ]] || setup_die "$name contains duplicate $item" || return
+    done
+    seen_items="${seen_items:+$seen_items }$item"
+  done
+}
+
+setup_validate_versions() {
+  local commit_name
+  local digest_name
+  local list_name
+  local scalar_name
+  local version
+
+  for scalar_name in ASDF_VERSION GH_VERSION K9S_VERSION TRIVY_VERSION \
+    KYVERNO_VERSION KUBECONFORM_VERSION SHELLCHECK_VERSION RG_VERSION \
+    ZOXIDE_VERSION UV_VERSION OMP_VERSION KUBECTX_VERSION NVIM_VERSION \
+    NPM_VERSION KREW_VERSION; do
+    setup_validate_version "$scalar_name" "${!scalar_name:-}" || return
+  done
+  for digest_name in ASDF_SHA256 GH_SHA256 K9S_SHA256 TRIVY_SHA256 \
+    KYVERNO_SHA256 KUBECONFORM_SHA256 SHELLCHECK_SHA256 RG_SHA256 \
+    ZOXIDE_SHA256 UV_SHA256 OMP_SHA256 KUBECTX_SHA256 KUBENS_SHA256 \
+    NVIM_SHA256 KREW_SHA256; do
+    setup_validate_digest "$digest_name" "${!digest_name:-}" || return
+  done
+  for list_name in TERRAFORM_VERSIONS KUBECTL_VERSIONS HELM_VERSIONS \
+    PYTHON_VERSIONS NODEJS_VERSIONS TERRAGRUNT_VERSIONS; do
+    setup_validate_list "$list_name" "${!list_name:-}" || return
+  done
+  for version in $KUBECTL_VERSIONS; do
+    setup_validate_digest "KUBECTL_SHA256_BY_VERSION[$version]" \
+      "${KUBECTL_SHA256_BY_VERSION[$version]:-}" || return
+  done
+  for version in $HELM_VERSIONS; do
+    setup_validate_digest "HELM_SHA256_BY_VERSION[$version]" \
+      "${HELM_SHA256_BY_VERSION[$version]:-}" || return
+  done
+  version=${NODEJS_VERSIONS%% *}
+  setup_validate_digest "NODEJS_SHA256_BY_VERSION[$version]" \
+    "${NODEJS_SHA256_BY_VERSION[$version]:-}" || return
+  for commit_name in ASDF_TERRAFORM_PLUGIN_COMMIT ASDF_KUBECTL_PLUGIN_COMMIT \
+    ASDF_HELM_PLUGIN_COMMIT ASDF_PYTHON_PLUGIN_COMMIT \
+    ASDF_NODEJS_PLUGIN_COMMIT ASDF_TERRAGRUNT_PLUGIN_COMMIT TPM_COMMIT \
+    TMUX_SENSIBLE_COMMIT TMUX_RESURRECT_COMMIT TMUX_CONTINUUM_COMMIT; do
+    setup_validate_commit "$commit_name" "${!commit_name:-}" || return
+  done
+}
+
+setup_verify_sha256() {
+  local path=$1
+  local digest=$2
+
+  printf '%s  %s\n' "$digest" "$path" | sha256sum --check --strict >/dev/null
+}
+
+setup_download() {
+  local url=$1
+  local destination=$2
+
+  curl --fail --location --silent --show-error \
+    --connect-timeout 15 --max-time 300 --retry 2 \
+    --output "$destination" "$url"
+}

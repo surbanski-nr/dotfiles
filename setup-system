@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: setup-system
+
+Install the approved operating-system packages on Debian 13, Ubuntu 24.04,
+Ubuntu 26.04 or Amazon Linux 2023. This is the only setup entry point that
+uses root privileges.
+EOF
+}
+
+main() {
+  if (($#)); then
+    case $1 in
+      -h | --help) (($# == 1)) || setup_die 'help takes no arguments'; usage; return 0 ;;
+      *) setup_die "unexpected argument: $1" ;;
+    esac
+  fi
+  validate_host
+  install_packages
+  verify_packages
+}
+
+validate_host() {
+  [[ $(uname -s) == Linux ]] || setup_die 'only Linux is supported'
+  [[ $(uname -m) == x86_64 ]] || setup_die 'only Linux x86-64 is supported'
+  [[ -r /etc/os-release ]] || setup_die 'cannot read /etc/os-release'
+  # shellcheck disable=SC1091
+  source /etc/os-release
+  case "${ID:-}:${VERSION_ID:-}" in
+    debian:13 | ubuntu:24.04 | ubuntu:26.04 | amzn:2023)
+      PLATFORM="$ID:$VERSION_ID"
+      ;;
+    *) setup_die "unsupported distribution: ${ID:-unknown} ${VERSION_ID:-unknown}" ;;
+  esac
+  if ((EUID != 0)); then setup_need sudo; fi
+}
+
+as_root() {
+  if ((EUID == 0)); then "$@"; else sudo -- "$@"; fi
+}
+
+install_packages() {
+  case $PLATFORM in
+    debian:* | ubuntu:*)
+      as_root env DEBIAN_FRONTEND=noninteractive apt-get update
+      as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        bash bash-completion build-essential ca-certificates coreutils curl \
+        dirmngr dos2unix file findutils gawk git gnupg htop jq \
+        libbz2-dev libffi-dev liblzma-dev libncurses-dev libreadline-dev \
+        libssl-dev libsqlite3-dev make ncurses-term patch python3 python3-pip \
+        python3-venv tar tk-dev tmux unzip uuid-dev vim xz-utils zlib1g-dev
+      ;;
+    amzn:2023)
+      if rpm -q gnupg2-minimal >/dev/null 2>&1; then
+        as_root dnf swap -y gnupg2-minimal gnupg2
+      else
+        as_root dnf install -y gnupg2
+      fi
+      as_root dnf install -y \
+        bash bash-completion bzip2-devel ca-certificates dos2unix file \
+        findutils gawk gcc gcc-c++ git htop jq \
+        libffi-devel make ncurses-devel openssl-devel patch python3 \
+        python3-pip readline-devel sqlite-devel tar tk-devel tmux unzip \
+        util-linux-user vim-enhanced vim-minimal which xz xz-devel zlib-devel
+      ;;
+  esac
+}
+
+verify_packages() {
+  local command_name
+
+  for command_name in bash curl file find git gpg gpg-agent htop jq make \
+    python3 tar tmux unzip vi vim xz; do
+    command -v "$command_name" >/dev/null 2>&1 ||
+      setup_die "package installation did not provide $command_name"
+  done
+  printf 'setup-system: ready on %s\n' "$PLATFORM"
+}
+
+REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/setup-lib
+source "$REPO_DIR/scripts/setup-lib"
+SETUP_PROGRAM=setup-system
+PLATFORM=
+main "$@"

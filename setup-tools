@@ -1,0 +1,710 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  setup-tools [NAME ...]
+  setup-tools --from DIR NAME ...
+
+Install selected Linux x86-64 release files under ~/bin. With --from, read
+only DIR/NAME/VERSION/UPSTREAM_ASSET and require at least one NAME.
+
+Names: gh kyverno task trivy k9s kubeconform shellcheck oh-my-posh
+       kubectx kubens rg zoxide uv nvim kubectl helm
+EOF
+}
+
+main() {
+  local from_dir=
+  local -a requested=()
+
+  while (($#)); do
+    case $1 in
+      --from)
+        (($# >= 2)) || setup_die '--from requires a directory'
+        [[ -z $from_dir ]] || setup_die '--from may be supplied only once'
+        from_dir=$2
+        shift 2
+        ;;
+      -h | --help)
+        usage
+        return 0
+        ;;
+      --*) setup_die "unknown option: $1" ;;
+      *) requested+=("$1"); shift ;;
+    esac
+  done
+
+  if [[ -n $from_dir && ${#requested[@]} -eq 0 ]]; then
+    setup_die '--from requires at least one tool name'
+  fi
+  if ((${#requested[@]} == 0)); then
+    requested=(gh kyverno task trivy k9s kubeconform shellcheck oh-my-posh
+      kubectx kubens rg zoxide uv nvim)
+  fi
+
+  load_setup_config
+  validate_host
+  normalize_requested "${requested[@]}"
+  preflight "$from_dir" "${NORMALIZED_TOOLS[@]}"
+  install_requested "$from_dir" "${NORMALIZED_TOOLS[@]}"
+}
+
+load_setup_config() {
+  # shellcheck source=versions.env
+  source "$REPO_DIR/versions.env"
+  # Task deliberately keeps its only editable pin in validation.env.
+  # shellcheck source=validation.env
+  source "$REPO_DIR/validation.env"
+  setup_validate_versions
+  setup_validate_version TASK_VERSION "$TASK_VERSION"
+  setup_validate_digest TASK_SHA256 "$TASK_SHA256"
+
+  BIN_DIR=${SETUP_TOOLS_BIN_DIR:-$HOME/bin}
+  STATE_DIR=${SETUP_TOOLS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup-tools}
+}
+
+validate_host() {
+  [[ $(uname -s) == Linux ]] || setup_die 'only Linux is supported'
+  [[ $(uname -m) == x86_64 ]] || setup_die 'only Linux x86-64 is supported'
+  setup_need sha256sum
+  setup_need tar
+  setup_need mktemp
+  setup_need find
+  setup_need mv
+  setup_need ln
+  setup_need readlink
+}
+
+normalize_requested() {
+  local name
+  local seen=' '
+
+  NORMALIZED_TOOLS=()
+  for name in "$@"; do
+    case $name in
+      gh | kyverno | task | trivy | k9s | kubeconform | shellcheck | \
+        oh-my-posh | kubectx | kubens | rg | zoxide | uv | nvim | \
+        kubectl | helm) ;;
+      *) setup_die "unknown tool: $name" ;;
+    esac
+    if [[ $seen != *" $name "* ]]; then
+      NORMALIZED_TOOLS+=("$name")
+      seen+="$name "
+    fi
+  done
+}
+
+tool_versions() {
+  local -a versions=()
+
+  case $1 in
+    gh) printf '%s\n' "$GH_VERSION" ;;
+    kyverno) printf '%s\n' "$KYVERNO_VERSION" ;;
+    task) printf '%s\n' "$TASK_VERSION" ;;
+    trivy) printf '%s\n' "$TRIVY_VERSION" ;;
+    k9s) printf '%s\n' "$K9S_VERSION" ;;
+    kubeconform) printf '%s\n' "$KUBECONFORM_VERSION" ;;
+    shellcheck) printf '%s\n' "$SHELLCHECK_VERSION" ;;
+    oh-my-posh) printf '%s\n' "$OMP_VERSION" ;;
+    kubectx | kubens) printf '%s\n' "$KUBECTX_VERSION" ;;
+    rg) printf '%s\n' "$RG_VERSION" ;;
+    zoxide) printf '%s\n' "$ZOXIDE_VERSION" ;;
+    uv) printf '%s\n' "$UV_VERSION" ;;
+    nvim) printf '%s\n' "$NVIM_VERSION" ;;
+    kubectl)
+      read -r -a versions <<<"$KUBECTL_VERSIONS"
+      printf '%s\n' "${versions[@]}"
+      ;;
+    helm)
+      read -r -a versions <<<"$HELM_VERSIONS"
+      printf '%s\n' "${versions[@]}"
+      ;;
+    *) setup_die "missing version mapping for $1" ;;
+  esac
+}
+
+artifact_spec() {
+  local name=$1
+  local version=$2
+
+  SPEC_DESTS=()
+  SPEC_LINKS=()
+  SPEC_SECOND_MEMBER=
+  case $name in
+    gh)
+      SPEC_ASSET="gh_${version}_linux_amd64.tar.gz"
+      SPEC_URL="https://github.com/cli/cli/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$GH_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER="gh_${version}_linux_amd64/bin/gh"
+      SPEC_DESTS=("gh-$version")
+      SPEC_LINKS=("gh:gh-$version")
+      ;;
+    kyverno)
+      SPEC_ASSET="kyverno-cli_v${version}_linux_x86_64.tar.gz"
+      SPEC_URL="https://github.com/kyverno/kyverno/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$KYVERNO_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=kyverno
+      SPEC_DESTS=("kyverno-$version")
+      SPEC_LINKS=("kyverno:kyverno-$version")
+      ;;
+    task)
+      SPEC_ASSET=task_linux_amd64.tar.gz
+      SPEC_URL="https://github.com/go-task/task/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$TASK_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=task
+      SPEC_DESTS=("task-$version")
+      SPEC_LINKS=("task:task-$version")
+      ;;
+    trivy)
+      SPEC_ASSET="trivy_${version}_Linux-64bit.tar.gz"
+      SPEC_URL="https://github.com/aquasecurity/trivy/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$TRIVY_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=trivy
+      SPEC_DESTS=("trivy-$version")
+      SPEC_LINKS=("trivy:trivy-$version")
+      ;;
+    k9s)
+      SPEC_ASSET=k9s_Linux_amd64.tar.gz
+      SPEC_URL="https://github.com/derailed/k9s/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$K9S_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=k9s
+      SPEC_DESTS=("k9s-$version")
+      SPEC_LINKS=("k9s:k9s-$version")
+      ;;
+    kubeconform)
+      SPEC_ASSET=kubeconform-linux-amd64.tar.gz
+      SPEC_URL="https://github.com/yannh/kubeconform/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$KUBECONFORM_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=kubeconform
+      SPEC_DESTS=("kubeconform-$version")
+      SPEC_LINKS=("kubeconform:kubeconform-$version")
+      ;;
+    shellcheck)
+      SPEC_ASSET="shellcheck-v${version}.linux.x86_64.tar.xz"
+      SPEC_URL="https://github.com/koalaman/shellcheck/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$SHELLCHECK_SHA256
+      SPEC_FORMAT=xz-member
+      SPEC_MEMBER="shellcheck-v${version}/shellcheck"
+      SPEC_DESTS=("shellcheck-$version")
+      SPEC_LINKS=("shellcheck:shellcheck-$version")
+      ;;
+    oh-my-posh)
+      SPEC_ASSET=posh-linux-amd64
+      SPEC_URL="https://github.com/JanDeDobbeleer/oh-my-posh/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$OMP_SHA256
+      SPEC_FORMAT=raw
+      SPEC_MEMBER=
+      SPEC_DESTS=("oh-my-posh-$version")
+      SPEC_LINKS=("oh-my-posh:oh-my-posh-$version")
+      ;;
+    kubectx | kubens)
+      SPEC_ASSET="${name}_v${version}_linux_x86_64.tar.gz"
+      SPEC_URL="https://github.com/ahmetb/kubectx/releases/download/v${version}/$SPEC_ASSET"
+      if [[ $name == kubectx ]]; then SPEC_DIGEST=$KUBECTX_SHA256; else SPEC_DIGEST=$KUBENS_SHA256; fi
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=$name
+      SPEC_DESTS=("$name-$version")
+      SPEC_LINKS=("$name:$name-$version")
+      ;;
+    rg)
+      SPEC_ASSET="ripgrep-${version}-x86_64-unknown-linux-musl.tar.gz"
+      SPEC_URL="https://github.com/BurntSushi/ripgrep/releases/download/${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$RG_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER="ripgrep-${version}-x86_64-unknown-linux-musl/rg"
+      SPEC_DESTS=("rg-$version")
+      SPEC_LINKS=("rg:rg-$version")
+      ;;
+    zoxide)
+      SPEC_ASSET="zoxide-${version}-x86_64-unknown-linux-musl.tar.gz"
+      SPEC_URL="https://github.com/ajeetdsouza/zoxide/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$ZOXIDE_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=zoxide
+      SPEC_DESTS=("zoxide-$version")
+      SPEC_LINKS=("zoxide:zoxide-$version")
+      ;;
+    uv)
+      SPEC_ASSET=uv-x86_64-unknown-linux-gnu.tar.gz
+      SPEC_URL="https://github.com/astral-sh/uv/releases/download/${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$UV_SHA256
+      SPEC_FORMAT=gz-pair
+      SPEC_MEMBER=uv-x86_64-unknown-linux-gnu/uv
+      SPEC_SECOND_MEMBER=uv-x86_64-unknown-linux-gnu/uvx
+      SPEC_DESTS=("uv-$version" "uvx-$version")
+      SPEC_LINKS=("uv:uv-$version" "uvx:uvx-$version")
+      ;;
+    nvim)
+      SPEC_ASSET=nvim-linux-x86_64.tar.gz
+      SPEC_URL="https://github.com/neovim/neovim/releases/download/${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$NVIM_SHA256
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER=nvim-linux-x86_64
+      SPEC_DESTS=("nvim-$version")
+      SPEC_LINKS=("nvim:nvim-$version/bin/nvim")
+      ;;
+    kubectl)
+      SPEC_ASSET=kubectl
+      SPEC_URL="https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubectl"
+      SPEC_DIGEST=${KUBECTL_SHA256_BY_VERSION[$version]:-}
+      SPEC_FORMAT=raw
+      SPEC_MEMBER=
+      SPEC_DESTS=("kubectl-$version")
+      SPEC_LINKS=("kubectl:kubectl-$version")
+      ;;
+    helm)
+      SPEC_ASSET="helm-v${version}-linux-amd64.tar.gz"
+      SPEC_URL="https://get.helm.sh/$SPEC_ASSET"
+      SPEC_DIGEST=${HELM_SHA256_BY_VERSION[$version]:-}
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=linux-amd64/helm
+      SPEC_DESTS=("helm-$version")
+      SPEC_LINKS=("helm:helm-$version")
+      ;;
+    *) setup_die "missing artifact mapping for $name" ;;
+  esac
+}
+
+state_path() {
+  printf '%s/%s-%s.state\n' "$STATE_DIR" "$1" "$2"
+}
+
+content_digest() {
+  local root=$1
+  local destination
+  local -a basenames=()
+  shift
+
+  for destination in "$@"; do
+    basenames+=("$(basename -- "$destination")")
+  done
+  tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+    -C "$root" -cf - -- "${basenames[@]}" | sha256sum | awk '{print $1}'
+}
+
+read_state() {
+  local path=$1
+  STATE_STATUS=
+  STATE_ARTIFACT=
+  STATE_CONTENT=
+  [[ -f $path && ! -L $path ]] || return 1
+  IFS=$'\t' read -r STATE_STATUS STATE_ARTIFACT STATE_CONTENT <"$path" || return 1
+  [[ $STATE_STATUS == pending || $STATE_STATUS == complete ]] || return 1
+  setup_validate_digest state-artifact "$STATE_ARTIFACT" || return 1
+  setup_validate_digest state-content "$STATE_CONTENT" || return 1
+}
+
+destinations_exist() {
+  local destination
+  for destination in "${SPEC_DESTS[@]}"; do
+    [[ -e $BIN_DIR/$destination || -L $BIN_DIR/$destination ]] || return 1
+  done
+}
+
+installation_status() {
+  local name=$1
+  local version=$2
+  local path
+  local actual
+  local destination
+
+  path=$(state_path "$name" "$version")
+  if ! read_state "$path"; then
+    for destination in "${SPEC_DESTS[@]}"; do
+      if [[ -e $BIN_DIR/$destination || -L $BIN_DIR/$destination ]]; then
+        setup_die "unmanaged versioned destination exists: $BIN_DIR/$destination"
+        return 1
+      fi
+    done
+    return 10
+  fi
+  [[ $STATE_ARTIFACT == "$SPEC_DIGEST" ]] ||
+    setup_die "state digest differs for $name $version" || return
+  if ! destinations_exist; then
+    [[ $STATE_STATUS == pending ]] ||
+      setup_die "managed installation is incomplete: $name $version" || return
+    return 12
+  fi
+  actual=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}")
+  if [[ $actual != "$STATE_CONTENT" ]]; then
+    [[ $STATE_STATUS == pending ]] ||
+      setup_die "managed installation was modified: $name $version" || return
+    return 12
+  fi
+  [[ $STATE_STATUS == complete ]] && return 0
+  return 11
+}
+
+managed_link_target() {
+  local command_name=$1
+  local target=$2
+
+  case $target in
+    "$command_name-"*) return 0 ;;
+  esac
+  case "$command_name:$target" in
+    nvim:nvim-v*/bin/nvim) return 0 ;;
+    nvim:"$HOME"/.local/opt/nvim-*/bin/nvim) return 0 ;;
+    rg:"$HOME"/.local/opt/ripgrep-*/rg) return 0 ;;
+  esac
+  return 1
+}
+
+preflight_link() {
+  local entry=$1
+  local command_name=${entry%%:*}
+  local link="$BIN_DIR/$command_name"
+  local provider
+  local target
+
+  if [[ -L $link ]]; then
+    target=$(readlink -- "$link")
+    managed_link_target "$command_name" "$target" ||
+      setup_die "refusing foreign link: $link -> $target"
+  elif [[ -e $link ]]; then
+    setup_die "refusing unmanaged path: $link"
+  elif provider=$(command -v "$command_name" 2>/dev/null) &&
+    [[ $provider == "$HOME/.asdf/shims/"* || $provider == "$HOME/.krew/bin/"* ||
+      $provider == "$HOME/.local/share/nvim2/mason/bin/"* ]]; then
+    setup_die "$command_name is already provided by $provider"
+  fi
+}
+
+preflight() {
+  local from_dir=$1
+  local name
+  local version
+  local status
+  local entry
+  local input
+
+  if [[ -e $BIN_DIR || -L $BIN_DIR ]]; then
+    [[ -d $BIN_DIR && ! -L $BIN_DIR ]] || setup_die "invalid bin directory: $BIN_DIR"
+  fi
+  if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
+    [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || setup_die "invalid state directory: $STATE_DIR"
+  fi
+  [[ -n $from_dir ]] || setup_need curl
+
+  for name in "${@:2}"; do
+    while IFS= read -r version; do
+      artifact_spec "$name" "$version"
+      setup_validate_digest "$name $version digest" "$SPEC_DIGEST"
+      if installation_status "$name" "$version"; then
+        status=0
+      else
+        status=$?
+      fi
+      case $status in
+        0 | 11) ;;
+        10 | 12)
+          if [[ -n $from_dir ]]; then
+            input="$from_dir/$name/$version/$SPEC_ASSET"
+            [[ -f $input && ! -L $input && -r $input ]] ||
+              setup_die "missing input: $input"
+          fi
+          ;;
+        *) return "$status" ;;
+      esac
+    done < <(tool_versions "$name")
+    artifact_spec "$name" "$(tool_versions "$name" | head -n 1)"
+    for entry in "${SPEC_LINKS[@]}"; do preflight_link "$entry"; done
+  done
+  mkdir -p "$BIN_DIR" "$STATE_DIR/locks"
+}
+
+acquire_lock() {
+  local name=$1
+  local lock="$STATE_DIR/locks/$name.lock"
+
+  mkdir -- "$lock" 2>/dev/null || setup_die "another setup-tools process owns $name"
+  HELD_LOCKS+=("$lock")
+}
+
+write_state() {
+  local name=$1
+  local version=$2
+  local status=$3
+  local content=$4
+  local path
+  local temporary
+
+  path=$(state_path "$name" "$version")
+  temporary=$(mktemp "$STATE_DIR/.state.XXXXXX")
+  TEMP_PATHS+=("$temporary")
+  printf '%s\t%s\t%s\n' "$status" "$SPEC_DIGEST" "$content" >"$temporary"
+  mv -- "$temporary" "$path"
+}
+
+remove_pending_installation() {
+  local destination
+  local entry
+  local command_name
+  local link_target
+
+  for destination in "${SPEC_DESTS[@]}"; do
+    for entry in "${SPEC_LINKS[@]}"; do
+      command_name=${entry%%:*}
+      if [[ -L $BIN_DIR/$command_name ]]; then
+        link_target=$(readlink -- "$BIN_DIR/$command_name")
+        [[ $link_target != "$destination" && $link_target != "$destination/"* ]] ||
+          setup_die "pending installation is active: $destination" || return
+      fi
+    done
+  done
+  for destination in "${SPEC_DESTS[@]}"; do
+    if [[ -e $BIN_DIR/$destination || -L $BIN_DIR/$destination ]]; then
+      find "$BIN_DIR/$destination" -depth -delete
+    fi
+  done
+}
+
+archive_member_to_file() {
+  local archive=$1
+  local format=$2
+  local member=$3
+  local output=$4
+
+  case $format in
+    gz-member | gz-pair) tar -xOzf "$archive" -- "$member" >"$output" ;;
+    xz-member) tar -xOJf "$archive" -- "$member" >"$output" ;;
+    *) setup_die "invalid member format: $format" ;;
+  esac
+  chmod 0755 "$output"
+}
+
+extract_artifact() {
+  local archive=$1
+  local stage=$2
+  local listing
+  local path
+
+  case $SPEC_FORMAT in
+    raw)
+      install -m 0755 "$archive" "$stage/${SPEC_DESTS[0]}"
+      ;;
+    gz-member | xz-member)
+      archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_MEMBER" \
+        "$stage/${SPEC_DESTS[0]}"
+      ;;
+    gz-pair)
+      archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_MEMBER" \
+        "$stage/${SPEC_DESTS[0]}"
+      archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_SECOND_MEMBER" \
+        "$stage/${SPEC_DESTS[1]}"
+      ;;
+    gz-tree)
+      listing="$stage/archive.list"
+      tar -tzf "$archive" >"$listing"
+      while IFS= read -r path || [[ -n $path ]]; do
+        [[ $path == "$SPEC_MEMBER" || $path == "$SPEC_MEMBER/"* ]] ||
+          setup_die "unexpected archive member: $path"
+        [[ $path != /* && $path != *'/../'* && $path != ../* ]] ||
+          setup_die "unsafe archive member: $path"
+      done <"$listing"
+      tar -xzf "$archive" -C "$stage" -- "$SPEC_MEMBER"
+      mv -- "$stage/$SPEC_MEMBER" "$stage/${SPEC_DESTS[0]}"
+      ;;
+    *) setup_die "invalid artifact format: $SPEC_FORMAT" ;;
+  esac
+}
+
+verify_executable() {
+  local name=$1
+  local executable=$2
+  local version=${3#v}
+  local output
+
+  case $name in
+    kubeconform) output=$("$executable" -v 2>&1) ;;
+    kyverno) output=$("$executable" version 2>&1) ;;
+    k9s) output=$("$executable" version --short 2>&1) ;;
+    kubectl) output=$("$executable" version --client 2>&1) ;;
+    helm) output=$("$executable" version --short 2>&1) ;;
+    nvim) output=$("$executable" --version 2>&1 | head -n 1) ;;
+    oh-my-posh) output=$("$executable" version 2>&1) ;;
+    *) output=$("$executable" --version 2>&1) ;;
+  esac
+  [[ $output == *"$version"* ]] ||
+    setup_die "$name executable did not report version $version: ${output%%$'\n'*}"
+}
+
+verify_staged() {
+  local name=$1
+  local version=$2
+  local executable
+
+  case $name in
+    nvim) executable="$STAGE_DIR/${SPEC_DESTS[0]}/bin/nvim" ;;
+    *) executable="$STAGE_DIR/${SPEC_DESTS[0]}" ;;
+  esac
+  verify_executable "$name" "$executable" "$version"
+  if [[ $name == uv ]]; then
+    verify_executable uvx "$STAGE_DIR/${SPEC_DESTS[1]}" "$version"
+  fi
+}
+
+install_version() {
+  local from_dir=$1
+  local name=$2
+  local version=$3
+  local status
+  local input
+  local content
+  local destination
+
+  artifact_spec "$name" "$version"
+  if installation_status "$name" "$version"; then
+    printf 'setup-tools: reuse %s %s\n' "$name" "$version"
+    return
+  else
+    status=$?
+  fi
+  if [[ $status -eq 11 ]]; then
+    content=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}")
+    write_state "$name" "$version" complete "$content"
+    printf 'setup-tools: recovered %s %s\n' "$name" "$version"
+    return
+  fi
+  if [[ $status -eq 12 ]]; then
+    remove_pending_installation
+  elif [[ $status -ne 10 ]]; then
+    return "$status"
+  fi
+
+  STAGE_DIR=$(mktemp -d "$BIN_DIR/.setup-tools.XXXXXX")
+  TEMP_PATHS+=("$STAGE_DIR")
+  if [[ -n $from_dir ]]; then
+    input="$from_dir/$name/$version/$SPEC_ASSET"
+  else
+    input="$STAGE_DIR/$SPEC_ASSET"
+    setup_download "$SPEC_URL" "$input"
+  fi
+  setup_verify_sha256 "$input" "$SPEC_DIGEST"
+  extract_artifact "$input" "$STAGE_DIR"
+  verify_staged "$name" "$version"
+
+  content=$(content_digest "$STAGE_DIR" "${SPEC_DESTS[@]}")
+  write_state "$name" "$version" pending "$content"
+  for destination in "${SPEC_DESTS[@]}"; do
+    mv -- "$STAGE_DIR/$destination" "$BIN_DIR/$destination"
+  done
+  write_state "$name" "$version" complete "$content"
+  printf 'setup-tools: installed %s %s\n' "$name" "$version"
+}
+
+activate_links() {
+  local name=$1
+  shift
+  local entry
+  local command_name
+  local target
+  local temporary
+  local status
+  local index
+  local -a commands=()
+  local -a previous_targets=()
+  local -a had_previous=()
+
+  for entry in "$@"; do
+    command_name=${entry%%:*}
+    target=${entry#*:}
+    temporary="$BIN_DIR/.${command_name}.link.$$"
+    [[ ! -e $temporary && ! -L $temporary ]] || setup_die "temporary link exists: $temporary"
+    ln -s -- "$target" "$temporary"
+    TEMP_PATHS+=("$temporary")
+    commands+=("$command_name")
+    if [[ -L $BIN_DIR/$command_name ]]; then
+      had_previous+=(true)
+      previous_targets+=("$(readlink -- "$BIN_DIR/$command_name")")
+    else
+      had_previous+=(false)
+      previous_targets+=('')
+    fi
+  done
+  for index in "${!commands[@]}"; do
+    command_name=${commands[$index]}
+    temporary="$BIN_DIR/.${command_name}.link.$$"
+    if mv -T -- "$temporary" "$BIN_DIR/$command_name"; then
+      continue
+    else
+      status=$?
+      for ((; index >= 0; index--)); do
+        command_name=${commands[$index]}
+        if [[ ${had_previous[$index]} == true ]]; then
+          temporary="$BIN_DIR/.${command_name}.restore.$$"
+          ln -s -- "${previous_targets[$index]}" "$temporary" || continue
+          TEMP_PATHS+=("$temporary")
+          mv -T -- "$temporary" "$BIN_DIR/$command_name" || true
+        elif [[ -L $BIN_DIR/$command_name ]]; then
+          unlink -- "$BIN_DIR/$command_name" || true
+        fi
+      done
+      setup_die "failed to select $name; restored the previous selection" || true
+      return "$status"
+    fi
+  done
+  printf 'setup-tools: selected %s\n' "$name"
+}
+
+install_requested() {
+  local from_dir=$1
+  local name
+  local version
+  local selected
+
+  for name in "${@:2}"; do
+    acquire_lock "$name"
+    selected=$(tool_versions "$name" | head -n 1)
+    while IFS= read -r version; do
+      install_version "$from_dir" "$name" "$version"
+    done < <(tool_versions "$name")
+    artifact_spec "$name" "$selected"
+    activate_links "$name" "${SPEC_LINKS[@]}"
+  done
+}
+
+cleanup() {
+  local status=$?
+  local path
+
+  trap - EXIT
+  set +e
+  for path in "${TEMP_PATHS[@]:-}"; do
+    if [[ -e $path || -L $path ]]; then find "$path" -depth -delete; fi
+  done
+  for path in "${HELD_LOCKS[@]:-}"; do
+    if [[ -d $path && ! -L $path ]]; then rmdir -- "$path"; fi
+  done
+  exit "$status"
+}
+
+REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/setup-lib
+source "$REPO_DIR/scripts/setup-lib"
+SETUP_PROGRAM=setup-tools
+declare -a NORMALIZED_TOOLS=()
+declare -a SPEC_DESTS=()
+declare -a SPEC_LINKS=()
+declare -a TEMP_PATHS=()
+declare -a HELD_LOCKS=()
+BIN_DIR=
+STATE_DIR=
+STAGE_DIR=
+SPEC_ASSET=
+SPEC_URL=
+SPEC_DIGEST=
+SPEC_FORMAT=
+SPEC_MEMBER=
+SPEC_SECOND_MEMBER=
+trap cleanup EXIT
+main "$@"

@@ -100,7 +100,7 @@ validate_bash() {
     tests/bash_test.sh
   )
 
-  check_shell_syntax bash "${files[@]}" nvim2-release.env validation.env
+  check_shell_syntax bash "${files[@]}" nvim2-release.env validation.env versions.env
   check_markdown_bash README.md SETUP.md TOOL_UPDATES.md \
     nvim2/.config/nvim2/offline-releases.md
   shellcheck --shell=bash --external-sources --source-path=SCRIPTDIR \
@@ -120,10 +120,16 @@ validate_scripts() {
   local bash_files=()
   local files=(
     bstow
+    setup-asdf
+    setup-system
+    setup-tools
     vim/setup
     tests/bstow_test.sh
     tests/install_validation_tool_test.sh
     tests/nvim2_release_test.sh
+    tests/setup_asdf_test.sh
+    tests/setup_system_test.sh
+    tests/setup_tools_test.sh
     tests/validate_test.sh
   )
   local first_line
@@ -154,6 +160,9 @@ validate_scripts() {
   timeout 120s bash tests/bstow_test.sh
   timeout 30s bash tests/install_validation_tool_test.sh
   timeout 30s bash tests/nvim2_release_test.sh
+  timeout 30s bash tests/setup_asdf_test.sh
+  timeout 30s bash tests/setup_system_test.sh
+  timeout 120s bash tests/setup_tools_test.sh
 }
 
 validate_nvim2() {
@@ -265,8 +274,14 @@ validate_repo() {
   local user_variable
   local variable
 
-  bash -n nvim2-release.env validation.env
-  # shellcheck source=/dev/null
+  check_shell_syntax bash nvim2-release.env validation.env versions.env
+  # shellcheck source=../versions.env
+  source versions.env
+  # shellcheck source=setup-lib
+  source scripts/setup-lib
+  SETUP_PROGRAM=validate
+  setup_validate_versions
+  # shellcheck source=../nvim2-release.env
   source nvim2-release.env
   for variable in UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE AMZN_2023_IMAGE; do
     image=${!variable}
@@ -286,7 +301,10 @@ validate_repo() {
       die "$home_variable does not match $user_variable"
   done
 
-  for file in scripts/* bstow vim/setup nvim2/.config/nvim2/tests/check.sh; do
+  [[ ! -x scripts/setup-lib ]] || die 'source-only library is executable: scripts/setup-lib'
+  for file in scripts/* tests/fixtures/*/* \
+    bstow vim/setup nvim2/.config/nvim2/tests/check.sh; do
+    [[ $file == scripts/setup-lib ]] && continue
     [[ -x $file ]] || die "executable bit is missing: $file"
   done
 
