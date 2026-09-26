@@ -283,12 +283,13 @@ validate_repo() {
   setup_validate_versions
   # shellcheck source=../nvim2-release.env
   source nvim2-release.env
-  for variable in UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE AMZN_2023_IMAGE; do
+  for variable in DEBIAN_13_IMAGE UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE \
+    AMZN_2023_IMAGE; do
     image=${!variable}
     [[ $image =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
       die "$variable is not pinned to a SHA-256 digest"
   done
-  for prefix in UBUNTU AMZN; do
+  for prefix in DEBIAN UBUNTU AMZN; do
     user_variable="${prefix}_TARGET_USER"
     uid_variable="${prefix}_TARGET_UID"
     home_variable="${prefix}_TARGET_HOME"
