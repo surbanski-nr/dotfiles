@@ -28,6 +28,38 @@ _dotfiles_eval_init() {
   fi
 }
 
+add_to_path() {
+  if [[ -d $1 && :${PATH:-}: != *":$1:"* ]]; then
+    PATH="$1${PATH:+":$PATH"}"
+    export PATH
+  fi
+}
+
+_dotfiles_source=$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null ||
+  printf '%s\n' "${BASH_SOURCE[0]}")
+export GITUSER="${GITUSER:-surbanski}"
+export GHREPOS="${GHREPOS:-$HOME/github.com/$GITUSER}"
+export LAB="${LAB:-$GHREPOS/lab}"
+export NOTES="${NOTES:-$GHREPOS/notes-md}"
+export DOTFILES="${DOTFILES:-$(CDPATH='' cd -- "$(dirname -- "$_dotfiles_source")/.." && pwd)}"
+export WORK="${WORK:-$HOME/work}"
+unset _dotfiles_source
+
+add_to_path "$HOME/.local/share/nvim2/mason/bin"
+add_to_path "$HOME/bin"
+add_to_path "$HOME/.local/bin"
+add_to_path "$DOTFILES/scripts"
+add_to_path "$HOME/.krew/bin"
+add_to_path "$HOME/.asdf/shims"
+if [[ -n ${VIRTUAL_ENV:-} && -d $VIRTUAL_ENV/bin ]]; then
+  PATH=":$PATH:"
+  PATH=${PATH//":$VIRTUAL_ENV/bin:"/:}
+  PATH=${PATH#:}
+  PATH=${PATH%:}
+  PATH="$VIRTUAL_ENV/bin${PATH:+":$PATH"}"
+  export PATH
+fi
+
 _dotfiles_history_sync() {
   history -a
   history -n
@@ -177,6 +209,7 @@ fi
 # See /usr/share/doc/bash-doc/examples in the bash-doc package.
 
 if [ -f ~/.bash_aliases ]; then
+  # shellcheck source=.bash_aliases
   if ! . ~/.bash_aliases 2>/dev/null; then
     _dotfiles_warn 'failed to load ~/.bash_aliases'
   fi
@@ -185,6 +218,8 @@ fi
 # Use MC's shell wrapper when packaged so F10 returns to its final directory.
 for mc_profile in /usr/lib/mc/mc.sh /usr/libexec/mc/mc.sh; do
   if [ -r "$mc_profile" ]; then
+    # The distribution selects one of two external wrapper locations.
+    # shellcheck disable=SC1090
     if ! . "$mc_profile" 2>/dev/null; then
       _dotfiles_warn "failed to load Midnight Commander wrapper: $mc_profile"
     fi
@@ -198,63 +233,19 @@ unset mc_profile
 # sources /etc/bash.bashrc).
 if ! shopt -oq posix; then
   if [ -f /usr/share/bash-completion/bash_completion ]; then
+    # Distribution-owned optional integration.
+    # shellcheck disable=SC1091
     if ! . /usr/share/bash-completion/bash_completion 2>/dev/null; then
       _dotfiles_warn 'failed to load bash completion'
     fi
   elif [ -f /etc/bash_completion ]; then
+    # Distribution-owned optional integration.
+    # shellcheck disable=SC1091
     if ! . /etc/bash_completion 2>/dev/null; then
       _dotfiles_warn 'failed to load bash completion'
     fi
   fi
 fi
-
-add_to_path() {
-  if [ -d "$1" ] && [[ ":${PATH:-}:" != *":$1:"* ]]; then
-    PATH="$1${PATH:+":$PATH"}"
-    export PATH
-  fi
-}
-
-export GITUSER="surbanski"
-export GHREPOS="$HOME/github.com/$GITUSER"
-
-export LAB="$GHREPOS/lab"
-export NOTES="$GHREPOS/notes-md"
-export DOTFILES="$GHREPOS/dotfiles"
-export WORK="$HOME/work"
-
-add_to_path "$HOME/.local/share/nvim2/mason/bin"
-add_to_path "$HOME/homebrew/bin"
-add_to_path "$HOME/homebrew/sbin"
-add_to_path "/home/linuxbrew/.linuxbrew/bin"
-add_to_path "/home/linuxbrew/.linuxbrew/sbin"
-
-if command -v brew >/dev/null 2>&1; then
-  if HOMEBREW_PREFIX=$(brew --prefix 2>/dev/null); then
-    _dotfiles_eval_init Homebrew "${HOMEBREW_PREFIX}/bin/brew" shellenv || true
-    if [[ -r "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh" ]]; then
-      if ! source "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh" 2>/dev/null; then
-        _dotfiles_warn 'failed to load Homebrew completion'
-      fi
-    else
-      for COMPLETION in "${HOMEBREW_PREFIX}/etc/bash_completion.d/"*; do
-        if [[ -r ${COMPLETION} ]] && ! source "${COMPLETION}" 2>/dev/null; then
-          _dotfiles_warn "failed to load Homebrew completion: $COMPLETION"
-        fi
-      done
-    fi
-  else
-    _dotfiles_warn 'Homebrew is installed but brew --prefix failed'
-  fi
-fi
-
-add_to_path "$HOME/bin"
-add_to_path "$HOME/.local/bin"
-add_to_path "$DOTFILES/scripts"
-add_to_path "$HOME/.krew/bin"
-add_to_path "$HOME/.asdf/shims"
-
-export GIT_PROMPT_THEME=Single_line_Ubuntu
 
 if command -v google-chrome >/dev/null 2>&1; then
   export BROWSER="google-chrome"
@@ -278,25 +269,27 @@ else
   export FZF_DEFAULT_COMMAND='find . -type f -not -path "*/.git/*" -print'
 fi
 
-# fzf key bindings (prefer distro packages, fallback to user install if compatible)
+# fzf key bindings
 if command -v fzf >/dev/null 2>&1; then
-  if [ -r /usr/share/doc/fzf/examples/key-bindings.bash ]; then
+  if fzf --bash >/dev/null 2>&1; then
+    _dotfiles_eval_init fzf fzf --bash || true
+  elif [ -r /usr/share/doc/fzf/examples/key-bindings.bash ]; then
+    # Distribution-owned optional integration.
+    # shellcheck disable=SC1091
     if ! source /usr/share/doc/fzf/examples/key-bindings.bash 2>/dev/null; then
       _dotfiles_warn 'failed to load fzf key bindings'
     fi
   elif [ -r /usr/share/fzf/shell/key-bindings.bash ]; then
+    # Distribution-owned optional integration.
+    # shellcheck disable=SC1091
     if ! source /usr/share/fzf/shell/key-bindings.bash 2>/dev/null; then
       _dotfiles_warn 'failed to load fzf key bindings'
     fi
   elif [ -r ~/.fzf.bash ]; then
-    if fzf --bash >/dev/null 2>&1; then
-      if ! source ~/.fzf.bash 2>/dev/null; then
-        _dotfiles_warn 'failed to load ~/.fzf.bash'
-      fi
-    elif ! grep -q "fzf --bash" ~/.fzf.bash 2>/dev/null; then
-      if ! source ~/.fzf.bash 2>/dev/null; then
-        _dotfiles_warn 'failed to load ~/.fzf.bash'
-      fi
+    # User-installed optional integration outside this repository.
+    # shellcheck disable=SC1090
+    if ! source ~/.fzf.bash 2>/dev/null; then
+      _dotfiles_warn 'failed to load ~/.fzf.bash'
     fi
   fi
 fi
@@ -334,6 +327,8 @@ export VISUAL=nvim
 export EDITOR=nvim
 
 if [ -f ~/.extras ]; then
+  # Private optional configuration is outside this repository's analysis.
+  # shellcheck disable=SC1090
   if ! source ~/.extras 2>/dev/null; then
     _dotfiles_warn 'failed to load ~/.extras'
   fi

@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+: "${TEST_REPO_DIR:?}"
+: "${TEST_SCENARIO:?}"
+
+load_aliases() {
+  # shellcheck source=../../../bash/.bash_aliases
+  source "$TEST_REPO_DIR/bash/.bash_aliases"
+}
+
+load_bashrc() {
+  # shellcheck source=../../../bash/.bashrc
+  source "$TEST_REPO_DIR/bash/.bashrc"
+}
+
+load_profile() {
+  # shellcheck source=../../../bash/.bash_profile
+  source "$TEST_REPO_DIR/bash/.bash_profile"
+}
+
+case $TEST_SCENARIO in
+  check-tools)
+    load_aliases
+    dotfiles-check
+    ;;
+  editor)
+    load_aliases
+    v 'file with space'
+    ;;
+  missing-kubectl)
+    load_aliases
+    kl pod-name
+    ;;
+  filter-pods)
+    load_aliases
+    kgp -v
+    ;;
+  failed-pod-list)
+    load_aliases
+    kpl api
+    ;;
+  failed-log-pipeline)
+    load_aliases
+    kl api
+    ;;
+  write-pod-logs)
+    load_aliases
+    kpl api
+    ;;
+  reload)
+    unset PROMPT_COMMAND
+    load_bashrc
+    load_bashrc
+    load_bashrc
+    declare -p PROMPT_COMMAND
+    printf 'settings=%s:%s:%s:%s:%s:%s\n' \
+      "$HISTSIZE" "$HISTFILESIZE" "$IGNOREEOF" \
+      "$(set -o | awk '$1 == "pipefail" { print $2 }')" \
+      "$(shopt -q histverify && printf on || printf off)" \
+      "$(shopt -q checkjobs && printf on || printf off)"
+    printf 'venv_disable_prompt=%s\n' "$VIRTUAL_ENV_DISABLE_PROMPT"
+    ;;
+  broken-integration)
+    zoxide() { return 9; }
+    load_bashrc
+    ;;
+  invalid-integration)
+    zoxide() { printf 'if broken'; }
+    load_bashrc
+    printf 'continued=yes\n'
+    ;;
+  failed-agent-key)
+    load_profile
+    printf 'profile_status=%s sock=%s pid=%s\n' \
+      "$?" "${SSH_AUTH_SOCK:-unset}" "${SSH_AGENT_PID:-unset}"
+    ;;
+  stale-agent-socket)
+    rm -f "$HOME/.ssh/github"
+    load_profile
+    printf 'stale_status=%s sock=%s\n' "$?" "${SSH_AUTH_SOCK:-unset}"
+    ;;
+  independent-editors)
+    vi() { v "$@"; }
+    vim() { v "$@"; }
+    load_bashrc
+    vi first
+    vim second
+    printf 'vi=%s vim=%s\n' "$(type -t vi)" "$(type -t vim)"
+    ;;
+  custom-dotfiles)
+    load_bashrc
+    eval cddot
+    printf 'dotfiles=%s pwd=%s\n' "$DOTFILES" "$PWD"
+    ;;
+  path-order)
+    load_bashrc
+    load_bashrc
+    printf 'path=%s terraform=%s python=%s\n' "$PATH" \
+      "$(command -v terraform)" "$(command -v python)"
+    ;;
+  fzf-init)
+    load_bashrc
+    declare -F __fzf_test_binding >/dev/null
+    printf 'fzf-init=yes\n'
+    ;;
+  *)
+    printf 'unknown test scenario: %s\n' "$TEST_SCENARIO" >&2
+    exit 2
+    ;;
+esac

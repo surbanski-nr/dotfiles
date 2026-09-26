@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+command_name=${0##*/}
+mode=${TEST_COMMAND_MODE:-ok}
+
+case "$command_name:$mode" in
+  nvim:editor)
+    printf 'app=%s argc=%s first=%s\n' "$NVIM_APPNAME" "$#" "$1"
+    ;;
+  vi:independent | vim:independent)
+    printf '%s:%s\n' "$command_name" "$1" >>"$TEST_EDITOR_LOG"
+    ;;
+  brew:*)
+    printf 'brew was invoked\n' >>"$TEST_BREW_LOG"
+    exit 99
+    ;;
+  fzf:fzf-init)
+    [[ ${1:-} == --bash ]] || exit 2
+    printf '%s\n' '__fzf_test_binding() { :; }'
+    ;;
+  kubectl:filter)
+    printf '%s\n' pod-a=-v pod-b
+    ;;
+  kubectl:failure)
+    printf 'simulated kubectl failure\n' >&2
+    exit 42
+    ;;
+  kubectl:logs)
+    case ${1:-} in
+      get) printf '%s\n' api-1 worker-1 ;;
+      logs) printf 'logs for %s\n' "$2" ;;
+      *) exit 2 ;;
+    esac
+    ;;
+  bat:*)
+    while IFS= read -r _; do :; done
+    ;;
+  ssh-agent:agent)
+    printf 'ssh-agent %s\n' "$*" >>"$TEST_AGENT_LOG"
+    if [[ ${1:-} == -s ]]; then
+      printf 'SSH_AUTH_SOCK=%q; export SSH_AUTH_SOCK;\n' "$HOME/fake-agent.sock"
+      printf 'SSH_AGENT_PID=4242; export SSH_AGENT_PID;\n'
+    fi
+    ;;
+  ssh-add:agent)
+    printf 'ssh-add %s\n' "$*" >>"$TEST_AGENT_LOG"
+    printf 'invalid key material\n' >&2
+    exit 42
+    ;;
+esac

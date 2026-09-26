@@ -104,7 +104,7 @@ validate_bash() {
   check_markdown_bash README.md SETUP.md TOOL_UPDATES.md \
     nvim2/.config/nvim2/offline-releases.md
   shellcheck --shell=bash --external-sources --source-path=SCRIPTDIR \
-    -e SC1090,SC1091 "${files[@]}"
+    "${files[@]}"
   timeout 120s bash tests/bash_test.sh
 }
 

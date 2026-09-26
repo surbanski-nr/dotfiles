@@ -15,12 +15,17 @@ _dotfiles_require() {
 }
 
 _dotfiles_check_tool() {
-  local candidate label path
+  local candidate kind label path
   label=$1
   shift
 
   for candidate in "$@"; do
     if path=$(command -v "$candidate" 2>/dev/null); then
+      kind=$(type -t "$candidate")
+      if [[ $kind == alias || $kind == function ]]; then
+        printf '  SHADOWED %-21s %s is a %s\n' "$label" "$candidate" "$kind"
+        return 1
+      fi
       printf '  OK      %-22s %s: %s\n' "$label" "$candidate" "$path"
       return 0
     fi
@@ -29,8 +34,55 @@ _dotfiles_check_tool() {
   return 1
 }
 
-dotfiles-check() {
+_dotfiles_check_version() {
+  local label=$1
+  local command_name=$2
+  local expected=${3#v}
+  local actual output path
+  shift 3
+
+  if ! path=$(command -v "$command_name" 2>/dev/null); then
+    printf '  ABSENT  %-22s selected=%s\n' "$label" "$expected"
+    return 0
+  fi
+  if [[ $(type -t "$command_name") == alias || $(type -t "$command_name") == function ]]; then
+    printf '  SHADOWED %-21s selected=%s provider=%s\n' \
+      "$label" "$expected" "$(type -t "$command_name")"
+    return 1
+  fi
+  if ! output=$(timeout 5s "$command_name" "$@" 2>&1); then
+    printf '  BROKEN  %-22s selected=%s path=%s\n' "$label" "$expected" "$path"
+    return 1
+  fi
+  actual=${output%%$'\n'*}
+  if [[ $output != *"$expected"* ]]; then
+    printf '  MISMATCH %-20s selected=%s actual=%s path=%s\n' \
+      "$label" "$expected" "$actual" "$path"
+    return 1
+  fi
+  if [[ (-e $HOME/bin/$command_name || -L $HOME/bin/$command_name) &&
+    $path != "$HOME/bin/$command_name" ]]; then
+    printf '  SHADOWED %-21s selected=%s path=%s managed=%s\n' \
+      "$label" "$expected" "$path" "$HOME/bin/$command_name"
+    return 1
+  fi
+  printf '  OK      %-22s selected=%s actual=%s path=%s\n' \
+    "$label" "$expected" "$actual" "$path"
+}
+
+dotfiles-check() (
+  local manifest_dir=${DOTFILES:-}
   local missing=0
+
+  if [[ -z $manifest_dir ]]; then
+    manifest_dir=$(CDPATH='' cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+  fi
+  if [[ -r $manifest_dir/versions.env && -r $manifest_dir/validation.env ]]; then
+    # shellcheck source=../versions.env
+    source "$manifest_dir/versions.env"
+    # shellcheck source=../validation.env
+    source "$manifest_dir/validation.env"
+  fi
 
   printf 'Required:\n'
   _dotfiles_check_tool git git || missing=1
@@ -39,6 +91,9 @@ dotfiles-check() {
   _dotfiles_check_tool fzf fzf || missing=1
   _dotfiles_check_tool less less || missing=1
   _dotfiles_check_tool mc mc || missing=1
+  _dotfiles_check_tool node node || missing=1
+  _dotfiles_check_tool Python python python3 || missing=1
+  _dotfiles_check_tool ripgrep rg || missing=1
 
   printf '\nOptional integrations:\n'
   _dotfiles_check_tool bat bat batcat || true
@@ -52,17 +107,39 @@ dotfiles-check() {
   _dotfiles_check_tool terraform terraform || true
   _dotfiles_check_tool ansible ansible || true
   _dotfiles_check_tool 'container runtime' docker podman || true
-  _dotfiles_check_tool ripgrep rg || true
   _dotfiles_check_tool jq jq || true
   _dotfiles_check_tool yq yq || true
   _dotfiles_check_tool 'GitHub CLI' gh || true
   _dotfiles_check_tool 'Oh My Posh' oh-my-posh || true
-  _dotfiles_check_tool Homebrew brew || true
   _dotfiles_check_tool ssh-agent ssh-agent || true
   _dotfiles_check_tool ssh-add ssh-add || true
 
+  if [[ -n ${GH_VERSION:-} ]]; then
+    printf '\nSelected versions:\n'
+    _dotfiles_check_version gh gh "$GH_VERSION" --version || missing=1
+    _dotfiles_check_version kyverno kyverno "$KYVERNO_VERSION" version || missing=1
+    _dotfiles_check_version Task task "$TASK_VERSION" --version || missing=1
+    _dotfiles_check_version Trivy trivy "$TRIVY_VERSION" --version || missing=1
+    _dotfiles_check_version k9s k9s "$K9S_VERSION" version --short || missing=1
+    _dotfiles_check_version kubeconform kubeconform "$KUBECONFORM_VERSION" -v || missing=1
+    _dotfiles_check_version ShellCheck shellcheck "$SHELLCHECK_VERSION" --version || missing=1
+    _dotfiles_check_version 'Oh My Posh' oh-my-posh "$OMP_VERSION" version || missing=1
+    _dotfiles_check_version kubectx kubectx "$KUBECTX_VERSION" --version || missing=1
+    _dotfiles_check_version kubens kubens "$KUBECTX_VERSION" --version || missing=1
+    _dotfiles_check_version ripgrep rg "$RG_VERSION" --version || missing=1
+    _dotfiles_check_version zoxide zoxide "$ZOXIDE_VERSION" --version || missing=1
+    _dotfiles_check_version uv uv "$UV_VERSION" --version || missing=1
+    _dotfiles_check_version Neovim nvim "$NVIM_VERSION" --version || missing=1
+    _dotfiles_check_version Terraform terraform "${TERRAFORM_VERSIONS%% *}" version || missing=1
+    _dotfiles_check_version kubectl kubectl "${KUBECTL_VERSIONS%% *}" version --client || missing=1
+    _dotfiles_check_version Helm helm "${HELM_VERSIONS%% *}" version --short || missing=1
+    _dotfiles_check_version Node.js node "${NODEJS_VERSIONS%% *}" --version || missing=1
+    _dotfiles_check_version Python python "${PYTHON_VERSIONS%% *}" --version || missing=1
+    _dotfiles_check_version Terragrunt terragrunt "${TERRAGRUNT_VERSIONS%% *}" --version || missing=1
+  fi
+
   return "$missing"
-}
+)
 
 # bat pages long output with less: j/k scroll, Space/b page, / searches,
 # n/N moves between matches, g/G jumps to the ends, h shows help, and q quits.
@@ -101,6 +178,7 @@ ffv() {
 }
 
 unalias vz vold v vi vim zz kc kn k tp t 2>/dev/null || true
+unset -f vi vim 2>/dev/null || true
 vz() {
   _dotfiles_require vz nvim || return
   NVIM_APPNAME=nvim-lazy command nvim "$@"
@@ -113,13 +191,6 @@ v() {
   _dotfiles_require v nvim || return
   NVIM_APPNAME=nvim2 command nvim "$@"
 }
-vi() {
-  v "$@"
-}
-vim() {
-  v "$@"
-}
-
 zz() {
   _dotfiles_require zz z || return
   z -
@@ -242,10 +313,10 @@ alias e='exit'
 alias mkdir='mkdir -p'
 
 alias ..="cd .."
-alias cdnotes='cd $NOTES'
-alias cdlab='cd $LAB'
-alias cddot='cd $DOTFILES'
-alias cdrepos='cd $GHREPOS'
-alias cdwork='cd $WORK'
+alias cdnotes='cd "$NOTES"'
+alias cdlab='cd "$LAB"'
+alias cddot='cd "$DOTFILES"'
+alias cdrepos='cd "$GHREPOS"'
+alias cdwork='cd "$WORK"'
 alias c="clear"
 alias in="cd \$NOTES/00-inbox/"
