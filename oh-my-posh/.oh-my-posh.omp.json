@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/v30.6.5/themes/schema.json",
+  "$schema": "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/v31.3.0/themes/schema.json",
   "blocks": [
     {
       "type": "prompt",
@@ -18,6 +18,12 @@
           "template": "<#ffffff>in</> {{ .Path }} ",
           "foreground": "cyan",
           "type": "path",
+          "style": "plain"
+        },
+        {
+          "template": "{{ if .Env.VIRTUAL_ENV }}{{ $prompt := trimAll \"() \" .Env.VIRTUAL_ENV_PROMPT }}({{ if $prompt }}{{ $prompt }}{{ else }}{{ base .Env.VIRTUAL_ENV }}{{ end }}) {{ end }}",
+          "foreground": "lightBlue",
+          "type": "text",
           "style": "plain"
         },
         {

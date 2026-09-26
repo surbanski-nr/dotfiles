@@ -121,6 +121,7 @@ reload_output=$(
 [[ $reload_output != *'history -r'* ]] ||
   fail 'legacy full history reload remains in PROMPT_COMMAND'
 assert_contains "$reload_output" 'settings=100000:100000:3:on:on:on'
+assert_contains "$reload_output" 'venv_disable_prompt=1'
 
 broken_output=$(
   timeout 15 env HOME="$reload_home" PATH="$test_root/bin:$original_path" \
