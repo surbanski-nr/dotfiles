@@ -8,7 +8,12 @@ local overrides = {
   CursorLine = { bg = '#343842', ctermbg = 237 },
   CursorLineNr = { fg = '#ff9e64', ctermfg = 214 },
   MatchParen = { fg = '#ff9e64', bg = '#3f342d', ctermfg = 214, ctermbg = 237 },
+  Nvim2MatrixBright = { fg = '#eef1f8', ctermfg = 15 },
+  Nvim2MatrixDim = { fg = '#176b66', ctermfg = 30 },
+  Nvim2MatrixHead = { fg = '#8cf8f7', ctermfg = 14, bold = true },
+  Nvim2MatrixMid = { fg = '#4db6ac', ctermfg = 73 },
   Number = { fg = '#ffcaff', ctermfg = 13 },
+  Nvim2SearchLens = { fg = '#07080d', bg = '#fce094', ctermfg = 0, ctermbg = 11, bold = true },
   GitSignsCurrentLineBlame = { link = 'Comment' },
   Type = { fg = '#c099ff', ctermfg = 13 },
   ['@type'] = class_module_color,
@@ -43,6 +48,15 @@ local overrides = {
   -- Statement = { fg = '#c099ff', ctermfg = 13 },
 }
 
-for name, value in pairs(overrides) do
-  vim.api.nvim_set_hl(0, name, value)
+local function apply()
+  for name, value in pairs(overrides) do
+    vim.api.nvim_set_hl(0, name, value)
+  end
 end
+
+apply()
+vim.api.nvim_create_autocmd('ColorScheme', {
+  desc = 'Reapply the Nvim2 palette after a colorscheme change',
+  group = vim.api.nvim_create_augroup('nvim2-default-colors', { clear = true }),
+  callback = apply,
+})

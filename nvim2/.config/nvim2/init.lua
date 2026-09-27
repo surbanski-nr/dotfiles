@@ -377,6 +377,8 @@ do
     spec = {
       { '<leader>s', group = '[S]earch', mode = { 'n', 'v' } },
       { '<leader>t', group = '[T]oggle' },
+      { '<leader>m', group = '[M]arks' },
+      { '<leader>p', group = '[P]review' },
       { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } }, -- Enable gitsigns recommended keymaps first
       { 'gr', group = 'LSP Actions', mode = { 'n' } },
     },
@@ -713,6 +715,22 @@ do
       --
       -- See `:help blink-cmp-config-keymap` for defining your own keymap
       preset = 'default',
+      ['<Tab>'] = {
+        'snippet_forward',
+        function(cmp)
+          if cmp.is_visible() then return false end
+          return require('custom.tabout').forward()
+        end,
+        'fallback',
+      },
+      ['<S-Tab>'] = {
+        'snippet_backward',
+        function(cmp)
+          if cmp.is_visible() then return false end
+          return require('custom.tabout').backward()
+        end,
+        'fallback',
+      },
     },
 
     appearance = {

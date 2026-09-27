@@ -17,11 +17,13 @@ if [[ -n ${NVIM2_MAX_STARTUP_MS:-} ]] && ! [[ $NVIM2_MAX_STARTUP_MS =~ ^[0-9]+([
   exit 2
 fi
 
-timeout "$timeout_seconds" env \
+for test_file in dependency_checks.lua feature_checks.lua smoke.lua language_checks.lua; do
+  timeout --signal=TERM --kill-after=10s "$timeout_seconds" env \
   XDG_CONFIG_HOME="$xdg_config_home" \
   NVIM_APPNAME="$app_name" \
   NVIM2_CHECK_TOOLS="${NVIM2_CHECK_TOOLS:-1}" \
-  nvim --headless "+lua dofile(vim.fn.stdpath('config') .. '/tests/smoke.lua')"
+  nvim --headless "+lua local ok, message = xpcall(function() dofile(vim.fn.stdpath('config') .. '/tests/$test_file') end, debug.traceback); if not ok then vim.api.nvim_err_writeln(message); vim.cmd('cquit 1') end"
+done
 
 temporary_dir=$(mktemp -d)
 trap 'rm -r -- "$temporary_dir"' EXIT
@@ -29,7 +31,7 @@ times_file="$temporary_dir/times"
 
 for ((run = 1; run <= runs; run++)); do
   startup_log="$temporary_dir/startup-$run.log"
-  timeout "$timeout_seconds" env \
+  timeout --signal=TERM --kill-after=10s "$timeout_seconds" env \
     XDG_CONFIG_HOME="$xdg_config_home" \
     NVIM_APPNAME="$app_name" \
     nvim --headless --startuptime "$startup_log" '+qa!'

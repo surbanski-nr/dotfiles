@@ -37,7 +37,7 @@ alone. Setup does not install Homebrew or initialize it from Bash.
 
 ## Nvim2
 
-The active editor profile uses Neovim 0.12.4 or newer, built-in `vim.pack`, a
+The active editor profile uses Neovim 0.12.5 or newer, built-in `vim.pack`, a
 generated plugin lock and explicitly pinned external tools. Start it with:
 
 ```bash

@@ -74,10 +74,12 @@ Notation used below:
 | Center current line                      | `zz`                                  |
 | Find character forward                   | `f<char>`                             |
 | Move before character forward            | `t<char>`                             |
+| Find/move before character backward      | `F<char>`, `T<char>`                  |
 | Repeat or reverse character search       | `;`, `,`                              |
 | Search forward or backward               | `/text`, `?text`                      |
 | Next or previous search match            | `n`, `N`                              |
 | Search word under cursor                 | `*` forward, `#` backward             |
+| Jump to a visible character in this pane | `<leader>j`, then character and label |
 | Clear search highlighting                | `<Esc>`                               |
 | Jump backward or forward in jump list    | `<C-o>`, `<C-i>`                      |
 | Browse and open a jump-list location     | `<leader>sj`, select, then `<Enter>`  |
@@ -96,6 +98,18 @@ text area above the statusline. It does not represent the visible viewport and
 hides in Neo-tree, Telescope, quickfix and other non-file buffers. Toggle it
 with `<leader>ts`. To remove the experiment entirely, delete
 `lua/custom/plugins/scroll_marker.lua`.
+
+Native `f` and `t` stay on one line. Use `F` and `T` in the reverse direction,
+then `;` to repeat in the same direction or `,` to reverse it. For a target
+anywhere in the buffer, use `/text<CR>` or `?text<CR>` and repeat with `n` or
+`N`. Prefix a literal search with `\V`, for example `/\Vkey[value]<CR>`, so
+regular-expression punctuation is treated as text.
+
+`<leader>j` starts Mini Jump2d for the current ordinary editing pane. Type the
+desired character, then its displayed label when more than one visible target
+matches. A single target is selected immediately. `Esc` cancels without moving.
+Labels cover visible, unfolded lines only; use native `/` or `?` for the whole
+buffer. Neo-tree, pickers, special buffers and other panes are excluded.
 
 ### Marks and a small Harpoon-like shortlist
 
@@ -128,10 +142,9 @@ have its own lowercase `a`; there is only one global uppercase `A`, and setting
 | Delete uppercase and numbered marks                         | `:delmarks A-Z 0-9`                |
 | Delete current-buffer marks except uppercase/numbered marks | `:delmarks!`                       |
 
-A Harpoon-like flow is: use `mA`, `mB` and `mC` in three frequently used
-places, jump back with `` `A ``, `` `B `` or `` `C ``, and browse them with
-`<leader>sm`. Setting the same uppercase mark elsewhere moves it. Mini Visits
-labels under `<leader>v` remain better for a larger named set of files.
+A short native flow is: use `mA`, `mB` and `mC` in frequently used places,
+jump back with `` `A ``, `` `B `` or `` `C ``, and browse them with
+`<leader>sm`. Setting the same uppercase mark elsewhere moves it.
 
 The character after a backtick or single quote is the mark name. A backtick
 jumps to its exact row and column; a single quote jumps to the first nonblank
@@ -152,13 +165,39 @@ you did not create:
 | `[` and `]`     | Start and end of the last changed or yanked text          | `` `[ `` and `` `] ``                                                   |
 | `<` and `>`     | Start and end of the last visual selection                | `` `< `` and `` `> ``                                                   |
 
+When a normal file is read, this profile restores the valid `"` mark, which is
+the position where that buffer was last exited. The `.` mark is instead the
+last change and is not used for startup restoration. An explicit command such
+as `nvim +42 file` is applied after the file-read event and remains
+authoritative.
+
 `<leader>sm` browses and jumps but does not delete. Note the mark name, close
 Telescope, then use `:delmarks {name}`. `:delmarks!` also clears the current
 buffer's changelist. Automatic `"` and numbered marks may reappear as Neovim
 records later exits; the previous-jump mark `'` is maintained continuously.
 
-`<leader>m` by itself has no action. It is a which-key prefix whose active
-mapping is `<leader>ma` for the optional Mermaid ASCII preview.
+Project marks provide a separate persistent, named list per nearest Git
+worktree. They do not consume or rewrite native letter marks:
+
+| Action                         | Keys or command                              |
+| ------------------------------ | -------------------------------------------- |
+| Add or update a named position | `<leader>ma` or `:ProjectMark X`             |
+| Pick and jump                  | `<leader>mm`, `<leader>sM`, or `:ProjectMarks` |
+| Delete a named position        | `<leader>md` or `:ProjectMarkDelete X`       |
+
+The current buffer must be a normal named file under a Git root. Each nested
+repository, clone and worktree has an independent namespace. Records live in
+`stdpath('state')/project-marks/` as private JSON files. Their repository path
+and file path are canonicalized, so a symlink alias reaches the same marks.
+Saved edits before a loaded mark move it with an extmark and persist the new
+position only after a successful file save. Discarded edits do not move the
+stored position. A missing target is reported as stale and remains deletable.
+
+Moving an entire checkout creates a new namespace. Renames and edits made
+while Neovim is closed are not followed automatically, and competing writes
+to the same name use the last successful atomic rename. Use the command again
+to update a stale position. Mini Visits labels under `<leader>v` remain useful
+for frecency and cwd-scoped groups of files.
 
 ### Editing, selection, undo and registers
 
@@ -227,6 +266,31 @@ This profile changes register behavior:
   ring.
 - `clipboard=unnamedplus` is enabled, so normal yanks and pastes also use the
   system clipboard when a clipboard provider is available.
+
+For a rectangular prefix, put the cursor on the first target column, press
+`<C-v>`, extend over the rows, press `I`, type the prefix, then press `<Esc>`.
+The prefix appears on every selected row after Insert mode ends. To append to
+unequal-length lines, select their first column with `<C-v>`, extend over the
+rows, press `$`, then `A`, type the suffix and press `<Esc>`. Without `$`, the
+append uses one fixed rectangular column.
+
+For example, selecting these lines with `<C-v>jj$A;<Esc>`:
+
+```text
+a
+longer
+xy
+```
+
+produces `a;`, `longer;`, and `xy;`. Select rectangular columns and use `"_d`
+to delete without replacing the yank register, or `c` to replace the block.
+For a Visual Line selection, alternatives are `:'<,'>s/^/prefix/`,
+`:'<,'>s/$/suffix/`, and `:'<,'>s/pattern//g`. Use `%s` for the whole buffer
+and add the `c` flag when each replacement needs confirmation. Use `grn` when
+an attached language server should rename a code symbol semantically. Record
+a macro with `q{register}`, perform a repeated multi-step edit, stop with `q`,
+and replay with `@{register}` when the change is textual rather than semantic.
+See `:help visual-block`, `:help :substitute`, and `:help recording`.
 
 #### Expand or shrink a selection and copy it to another application
 
@@ -315,6 +379,27 @@ it with Mini buffer removal.
 
 Splits are automatically resized evenly when the terminal size changes.
 
+### Restart and Matrix
+
+Neovim 0.12.5 `:restart` and `ZR` save and restore the current session when
+the attached UI supports restart. `:restart!` starts without restoring it.
+The default stop command is `:qall`, so modified file contents are not saved
+by session persistence and can stop a normal restart. `:set sessionoptions?`
+shows which windows, tabs and buffers are serialized. Do not use restart from
+a headless client or another UI that cannot take over the replacement process.
+
+Run `:MatrixToggle` or press `<leader>tm` for a temporary Matrix animation over
+all ordinary editing panes in the current tab. Neo-tree stays visible, as do
+help, terminal, quickfix and picker windows. The active overlay is read-only;
+`q`, `<Esc>` or `<leader>tm` closes every overlay and returns focus to the
+source pane. `\` runs the normal Neo-tree action from that saved source context
+and then adjusts the overlays. Leaving the tab also stops the session.
+
+Matrix uses one roughly 15 FPS timer, bounded ASCII streams and scratch buffers
+with no swap or undo history. It preserves source text, cursors, folds and
+modified flags. It is a temporary visual effect, not a background wallpaper,
+session manager or editing buffer.
+
 ### Terminal mode and terminal clipboard
 
 | Action                    | Keys           |
@@ -345,6 +430,7 @@ clipboard. Inside tmux, use `Ctrl+a` then `[`, select with `v`, and copy with
 | Search open buffers                          | `<leader><leader>`                    |
 | Recent files                                 | `<leader>s.`                          |
 | Search diagnostics                           | `<leader>sd`                          |
+| Search current document symbols              | `<leader>so`                          |
 | Browse quickfix with preview                 | `<leader>sq`                          |
 | Browse current location list with preview    | `<leader>sl`                          |
 | Browse jump list with preview                | `<leader>sj`, select, then `<Enter>`  |
@@ -381,6 +467,19 @@ The file and text searches under `<leader>sf`, `<leader>sg`, `<leader>sF` and
 `.config/`. They still respect `.gitignore`, `.ignore` and global ignore files,
 and always exclude `.git/` and `node_modules/`. The command-line
 `:Telescope find_files` and `:Telescope live_grep` pickers use the same rules.
+Telescope keeps its portable Lua sorter. The separately installed `fzf`
+command helps shell workflows but is not Telescope's compiled
+`telescope-fzf-native.nvim` extension, which remains intentionally absent to
+keep offline builds simple.
+
+After a completed native search, a compact current/total label appears at the
+end of the active match line. It uses bounded `searchcount()` work and displays
+`>999` or `?` rather than claiming an incomplete total is exact. `<leader>tS`
+toggles only this label for the session; native highlighting and the statusline
+count continue. `<Esc>` clears both search highlighting and the label. The
+first version draws one label in the active window only. It does not add a
+lens to every match or to live substitutions, and unusual offsets or patterns
+may suppress it safely.
 
 Scope file or text search to any other repository or subdirectory without
 changing the working directory:
@@ -511,6 +610,7 @@ preserving completion and navigation for this configuration and Neovim APIs.
 | Return through the tag stack      | `<C-t>`                        |
 | Toggle inlay hints when supported | `<leader>th`                   |
 | Signature help in insert mode     | `<C-s>` or `<C-k>`             |
+| Document symbols in Telescope     | `<leader>so`                   |
 
 Treesitter provides syntax highlighting, indentation, injections, folds and
 the `<C-Space>`/`<BS>` selection flow documented above. Native `an` and `in`
@@ -526,6 +626,12 @@ documented under
 After expanding a selection, `d` deletes it into the normal register, `"_d`
 deletes without changing registers, and `c` replaces it without changing the
 previous yank. Each operator leaves visual mode.
+
+Document symbols describe the current file; workspace symbols can span the
+language server's whole workspace. Both depend on server capabilities rather
+than textual matches. If no attached server supports document symbols,
+`<leader>so` reports that directly. Use `<leader>/` for text in the current
+buffer when the target is not an LSP symbol.
 
 ### Diagnostics
 
@@ -550,7 +656,7 @@ The diagnostic float opens automatically after jumping with `[d` or `]d`.
 | Accept selected completion                      | `<C-y>`                    |
 | Close completion menu                           | `<C-e>`                    |
 | Toggle signature help                           | `<C-k>`                    |
-| Move forward or backward through snippet fields | `<Tab>`, `<S-Tab>`         |
+| Move through snippet fields or out of a syntax pair | `<Tab>`, `<S-Tab>`      |
 
 Blink supplies completion from LSP and paths. LSP-provided snippets can be
 accepted with `<C-y>` and are expanded by Neovim's built-in `vim.snippet`
@@ -562,15 +668,24 @@ five pairs work in every insert-mode buffer:
 
 | Typed | Result |
 | ----- | ------ |
-| `(`   | `(     | )`  |
-| `[`   | `[     | ]`  |
-| `{`   | `{     | }`  |
-| `'`   | `'     | '`  |
-| `"`   | `"     | "`  |
+| `(`   | `(CURSOR)`   |
+| `[`   | `[CURSOR]`   |
+| `{`   | `{CURSOR}`   |
+| `'`   | `'CURSOR'`   |
+| `"`   | `"CURSOR"`   |
 
-`|` represents the cursor. Press `<Tab>` to leave the pair. These snippets are
-not syntax-aware, so they can also expand in comments or other places where a
-literal opening character was intended.
+`CURSOR` represents the insertion point and is not inserted. A live snippet
+field handles `<Tab>` first. Otherwise, tab-out uses Treesitter to move just
+after the nearest unambiguous `()`, `[]`, `{}`, quote or backtick node;
+`<S-Tab>` moves just before it. Nested, empty, multi-line and UTF-8 content use
+byte-correct syntax ranges. A completion menu, special buffer, missing parser,
+incomplete syntax or ambiguous language construct keeps Blink's normal
+fallback. Tab-out changes no text or registers.
+
+These local pair expansions are intentionally small and apply in every Insert
+mode context. They are not syntax-aware autopairs and do not promise smart
+quote handling, paired deletion or closing-character overtyping. The disabled
+Kickstart autopairs file is only an upstream example and is not active.
 
 These six triggers work only in Markdown buffers:
 
@@ -640,6 +755,12 @@ own `package.json`; Mason supplies the reusable `eslint_d` runner. The
 TypeScript Language Server provides completion, hover, navigation, references,
 rename, symbols and code actions for TypeScript, TSX, JavaScript and JSX. It
 uses the project's TypeScript version when one is installed locally.
+
+Terraform Language Server supplies Terraform navigation and code lenses, but
+`terraform fmt` still requires a host `terraform` executable. Ansible Language
+Server is managed by Mason and attaches to recognized playbooks; its wider
+project features invoke the host `ansible-config` command. Missing host tools
+remain visible in `:ConformInfo`, LSP messages and health output.
 
 For a new TypeScript repository, install the repository's chosen ESLint and
 Prettier versions locally and commit its configuration and lockfile. For
@@ -802,7 +923,7 @@ with `:cd` also changes the scope used by the lowercase pickers.
 | Toggle Markdown rendering globally                 | `:RenderMarkdown toggle`               |
 | Toggle Markdown rendering for current buffer       | `:RenderMarkdown buf_toggle`           |
 | Open a side-by-side rendered Markdown preview      | `:RenderMarkdown preview`              |
-| Preview the Mermaid fence under the cursor as text | `<leader>ma` or `:MermaidAsciiPreview` |
+| Preview the Mermaid fence under the cursor as text | `<leader>pm` or `:MermaidAsciiPreview` |
 | Search TODO comments                               | `:TodoTelescope`                       |
 | Put TODO comments in quickfix                      | `:TodoQuickFix`                        |
 
@@ -811,7 +932,7 @@ server supports LSP document colors. The configured Lua, CSS and HTML servers
 support them; the TypeScript and Python servers do not.
 
 The Mermaid preview is a local module, not a Neovim plugin or server. Put the
-cursor anywhere inside a fenced `mermaid` block and press `<leader>ma`. A
+cursor anywhere inside a fenced `mermaid` block and press `<leader>pm`. A
 successful render opens a read-only scratch tab. Navigate with the normal
 `h`, `j`, `k`, `l`, arrow, `Ctrl-u`, `Ctrl-d`, `gg`, `G`, `zh` and `zl` keys;
 press `q` to close it. Horizontal movement is available because wrapping is

@@ -1,6 +1,25 @@
 require('mini.align').setup()
 require('mini.splitjoin').setup()
 
+local jump2d = require 'mini.jump2d'
+jump2d.setup { mappings = { start_jumping = '' } }
+vim.keymap.set('n', '<leader>j', function()
+  local window = vim.api.nvim_get_current_win()
+  local config = vim.api.nvim_win_get_config(window)
+  if vim.bo.buftype ~= '' or vim.bo.filetype == 'neo-tree' or config.relative ~= '' then
+    vim.notify('Character jump is available in ordinary editing windows', vim.log.levels.INFO)
+    return
+  end
+  -- The builtin input hook mutates this exact table before Mini computes spots.
+  local opts = jump2d.builtin_opts.single_character
+  local allowed_windows = opts.allowed_windows
+  opts.spotter = function() return {} end
+  opts.allowed_windows = { current = true, not_current = false }
+  local ok, message = pcall(jump2d.start, opts)
+  opts.allowed_windows = allowed_windows
+  if not ok then error(message, 0) end
+end, { desc = '[J]ump to visible character' })
+
 ---@diagnostic disable-next-line: duplicate-set-field
 require('mini.statusline').section_location = function() return '%2l/%L:%-2v %p%%' end
 

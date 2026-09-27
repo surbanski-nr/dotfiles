@@ -192,6 +192,6 @@ vim.api.nvim_create_user_command('MermaidAsciiPreview', function() M.preview() e
   desc = 'Preview the Mermaid block under the cursor as Unicode text',
 })
 
-vim.keymap.set('n', '<leader>ma', M.preview, { desc = '[M]ermaid [A]SCII preview' })
+vim.keymap.set('n', '<leader>pm', M.preview, { desc = '[P]review [M]ermaid as text' })
 
 return M

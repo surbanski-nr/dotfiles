@@ -144,7 +144,7 @@ vim.api.nvim_create_autocmd('FileType', {
 })
 
 vim.api.nvim_create_autocmd('BufReadPost', {
-  desc = 'Restore the cursor to the last edit position',
+  desc = 'Restore the cursor to the last exit position',
   group = vim.api.nvim_create_augroup('nvim2-restore-cursor', { clear = true }),
   callback = function(event)
     local mark = vim.api.nvim_buf_get_mark(event.buf, '"')

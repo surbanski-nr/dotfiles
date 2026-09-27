@@ -18,6 +18,45 @@ local function run()
     'LuaLS library expanded beyond the reviewed low-memory scope'
   )
 
+  assert(
+    vim.wait(10000, function()
+      return vim.iter(vim.lsp.get_clients { bufnr = 0 }):any(function(client) return client.name == 'lua_ls' end)
+    end),
+    'Lua Language Server did not attach to init.lua'
+  )
+  local symbol_client = vim.iter(vim.lsp.get_clients { bufnr = 0 }):find(function(client) return client.name == 'lua_ls' end)
+  local symbol_response = symbol_client:request_sync(
+    'textDocument/documentSymbol',
+    { textDocument = vim.lsp.util.make_text_document_params(0) },
+    10000,
+    vim.api.nvim_get_current_buf()
+  )
+  assert(symbol_response and symbol_response.result and #symbol_response.result > 0, 'Lua Language Server returned no document symbols')
+  local symbol_source = vim.api.nvim_get_current_buf()
+  local symbol_map = vim.fn.maparg('<leader>so', 'n', false, true)
+  assert(type(symbol_map.callback) == 'function', 'document-symbol Telescope mapping is unavailable')
+  symbol_map.callback()
+  assert(
+    vim.wait(5000, function()
+      if vim.bo.filetype ~= 'TelescopePrompt' then return false end
+      local picker = require('telescope.actions.state').get_current_picker(vim.api.nvim_get_current_buf())
+      return picker and picker.manager and picker.manager:num_results() > 0
+    end),
+    'document-symbol Telescope picker returned no LSP symbols'
+  )
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'xt', false)
+  assert(vim.wait(2000, function() return vim.api.nvim_get_current_buf() == symbol_source end), 'selecting a document symbol did not return to its source file')
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'xt', false)
+  local cursor_before_cancel = vim.api.nvim_win_get_cursor(0)
+  symbol_map.callback()
+  assert(vim.wait(5000, function() return vim.bo.filetype == 'TelescopePrompt' end), 'document-symbol Telescope picker did not reopen')
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-c>', true, false, true), 'xt', false)
+  assert(vim.wait(2000, function() return vim.api.nvim_get_current_buf() == symbol_source end), 'cancelling document symbols did not close the picker')
+  assert(
+    vim.api.nvim_get_current_buf() == symbol_source and vim.deep_equal(vim.api.nvim_win_get_cursor(0), cursor_before_cancel),
+    'cancelling document symbols changed the source position'
+  )
+
   local visits = require 'mini.visits'
   local original_select_label = visits.select_label
   local label_scopes = {}
@@ -45,7 +84,10 @@ local function run()
     vim.api.nvim_win_set_cursor(0, { 1, column })
     vim.fn.setreg('"', 'saved yank', 'v')
     vim.api.nvim_feedkeys(keys, 'xt', false)
-    assert(vim.api.nvim_get_current_line() == expected, keys .. ' did not delete the expected text')
+    assert(
+      vim.api.nvim_get_current_line() == expected,
+      ('%s did not delete the expected text: mode=%s line=%q expected=%q'):format(keys, vim.fn.mode(), vim.api.nvim_get_current_line(), expected)
+    )
     assert(vim.fn.getreg '"' == 'saved yank', keys .. ' replaced the yank register')
   end
 
@@ -137,13 +179,15 @@ local function run()
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { '``x' })
   vim.api.nvim_win_set_cursor(0, { 1, 2 })
   local fence_trigger = vim.fn.maparg('`', 'i', false, true)
+  assert(type(fence_trigger.callback) == 'function', 'Markdown fenced-block mapping is unavailable')
   local fence_expansion = fence_trigger.callback()
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('i' .. fence_expansion, true, false, true), 'xt', false)
   assert(vim.snippet.active { direction = 1 }, 'native fenced-block snippet is not active after its language field')
   local tab_mapping = vim.fn.maparg('<Tab>', 'i', false, true)
   assert(type(tab_mapping.callback) == 'function', 'Blink did not install its Tab mapping')
-  vim.snippet.jump(1)
-  assert(vim.api.nvim_win_get_cursor(0)[1] == 2, 'the native snippet engine did not reach the fenced-block body')
+  assert(vim.startswith(tab_mapping.desc or '', 'blink.cmp:'), 'Tab is not owned by Blink in Insert mode')
+  tab_mapping.callback()
+  assert(vim.wait(1000, function() return vim.api.nvim_win_get_cursor(0)[1] == 2 end), 'Blink Tab did not advance the native snippet')
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('value<Esc>', true, false, true), 'xt', false)
   local fence_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
   assert(vim.deep_equal(fence_lines, { '```lang', 'value', '```x' }), 'Markdown fence did not expand: ' .. vim.inspect(fence_lines))
@@ -179,20 +223,26 @@ local function run()
     'missing Mermaid executable did not warn inside a Mermaid block'
   )
 
-  local renderer = vim.fn.tempname()
+  local renderer_directory = vim.fn.tempname()
+  assert(vim.fn.mkdir(renderer_directory, 'p') == 1, 'could not create the Mermaid renderer fixture directory')
+  local renderer = vim.fs.joinpath(renderer_directory, 'mermaid-ascii')
   vim.fn.writefile({ '#!/bin/sh', 'cat >/dev/null', "printf 'A --> B\\n'" }, renderer)
   vim.uv.fs_chmod(renderer, 493)
   vim.cmd.enew()
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { '```mermaid', 'flowchart LR', 'A --> B', '```' })
   vim.api.nvim_win_set_cursor(0, { 2, 0 })
   local source_tab = vim.api.nvim_get_current_tabpage()
-  mermaid.preview { executable = renderer }
+  local original_path = vim.env.PATH
+  vim.env.PATH = renderer_directory .. ':' .. original_path
+  vim.fn.maparg('<leader>pm', 'n', false, true).callback()
+  vim.env.PATH = original_path
   assert(vim.wait(5000, function() return vim.api.nvim_get_current_tabpage() ~= source_tab end), 'Mermaid preview did not open')
   assert(vim.api.nvim_buf_get_lines(0, 0, -1, false)[1] == 'A --> B', 'Mermaid preview output is incorrect')
   assert(not vim.wo.wrap and vim.bo.buftype == 'nofile', 'Mermaid preview buffer options are incorrect')
   assert(vim.fn.maparg('q', 'n') ~= '', 'Mermaid preview close mapping is missing')
   vim.cmd.tabclose()
   vim.uv.fs_unlink(renderer)
+  vim.uv.fs_rmdir(renderer_directory)
 
   vim.cmd.enew()
   vim.api.nvim_buf_set_name(0, '/tmp/nvim2-telescope-quickfix.lua')
@@ -360,7 +410,7 @@ local function run()
     end),
     'current Lua table scope guide was not rendered'
   )
-  local enclosing_pairs = require 'custom.plugins.enclosing_pairs'
+  local enclosing_pairs = require 'custom.plugins.highlight_enclosing_pairs'
   local nested_pair = enclosing_pairs.find(0, { 2, 4 })
   assert(nested_pair, 'enclosing bracket pair was not found from inside a Lua table')
   assert(nested_pair.open == '{' and nested_pair.close == '}', 'unexpected enclosing bracket pair')

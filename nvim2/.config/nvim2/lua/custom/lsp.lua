@@ -21,12 +21,7 @@ M.servers = {
   },
   taplo = {},
   ts_ls = {},
-  terraformls = {
-    -- Older 0.12 development builds lack the API used by lspconfig's default callback.
-    on_attach = function(_, bufnr)
-      if vim.lsp.codelens.enable then vim.lsp.codelens.enable(true, { bufnr = bufnr }) end
-    end,
-  },
+  terraformls = {},
   yamlls = {
     settings = {
       redhat = { telemetry = { enabled = false } },

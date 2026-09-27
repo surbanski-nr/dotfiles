@@ -307,6 +307,12 @@ exists, and atomically restore the complete set of links. Restore the matching
 dotfiles commit as well. Do not roll back only the editor binary against newer
 plugin or Mason data.
 
+The release switch replaces configuration and `~/.local/share/nvim2`, but it
+does not replace `~/.local/state/nvim2`. That retained state contains ShaDa,
+persistent undo and `project-marks/`. Back it up with the rollback record when
+the host backup policy does not already cover `~/.local/state`; never package
+a developer's project marks into a release artifact.
+
 ```bash
 source "$HOME/.local/state/nvim2-release-rollback.env"
 for target in "$PREVIOUS_DATA" "$PREVIOUS_NVIM" "$PREVIOUS_NODE" \

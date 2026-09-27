@@ -14,14 +14,15 @@ After stowing `nvim2`:
 NVIM_APPNAME=nvim2 nvim
 ```
 
-The stowed Bash configuration makes this profile the default for `nvim`,
-`vim`, `vi`, `v`, `$EDITOR`, `$VISUAL` and the FZF-based `ffv` command. Use
+The stowed Bash configuration sets `NVIM_APPNAME=nvim2`, `$EDITOR=nvim` and
+`$VISUAL=nvim`; the `v` and FZF-based `ffv` helpers also start this profile.
+It deliberately leaves `vi` and `vim` as independent recovery editors. Use
 `vold` only when the archived `~/.config/old-nvim` profile has been stowed
-explicitly and is needed for reference. To start directly from this repository:
+explicitly and is needed for reference. To start directly from a checkout:
 
 ```bash
-cd /home/surbanski/work/githubactions/dotfilesneovim/dotfiles/nvim2/.config/nvim2
-XDG_CONFIG_HOME="$(dirname "$PWD")" NVIM_APPNAME=nvim2 nvim
+cd /path/to/dotfiles
+XDG_CONFIG_HOME="$PWD/nvim2/.config" NVIM_APPNAME=nvim2 nvim
 ```
 
 If this profile was stowed before it moved under `.config/nvim2`, first check
@@ -73,7 +74,7 @@ Then validate the complete profile from the shell:
 bash ~/.config/nvim2/tests/check.sh
 ```
 
-Use Neovim 0.12.4 or newer.
+Use Neovim 0.12.5 or newer.
 
 ## Clean rebuild on a connected machine
 
@@ -110,7 +111,7 @@ history, ShaDa marks and registers, and persistent undo files:
   for file in mini-visits-index telescope_history; do
     [[ ! -f "$backup/data/$file" ]] || cp -a "$backup/data/$file" "$data/"
   done
-  for directory in shada undo; do
+  for directory in project-marks shada undo; do
     [[ ! -d "$backup/state/$directory" ]] || cp -a "$backup/state/$directory" "$state/"
   done
 
@@ -154,7 +155,7 @@ Amazon Linux 2023 builder containers.
 The complete connected-builder, offline-installation, upgrade, activation and
 rollback runbook is in
 [Nvim2 offline releases](offline-releases.md). It also
-explains the three-artifact matrix and why releases must be built from an empty
+explains the four-platform artifact matrix and why releases must be built from an empty
 data directory.
 
 Do not copy a developer's existing `~/.local/share/nvim2`, run update commands
@@ -188,10 +189,18 @@ unit.
 ### Validate the profile
 
 `:Nvim2Check` opens a normal Neovim health report for the custom profile. It
-checks Neovim 0.12.4 or newer, plugin revisions against
-`nvim-pack-lock.json`, disabled plugin build hooks, exact Mason and Treesitter
-inventories, Mason launchers and representative executable version commands.
-It does not install or update anything.
+checks Neovim 0.12.5 or newer, every active plugin's declaration, real Git
+checkout HEAD and tracked cleanliness against `nvim-pack-lock.json`, the
+all-`PackChanged`-autocmd policy, and exact Mason and Treesitter inventories.
+It also validates Mason receipts and launchers and runs representative
+executable version commands with finite timeouts. It does not install, repair,
+update or access the network.
+
+The `:Nvim2Check` command invokes `:checkhealth custom`; `custom/health.lua`
+is a thin adapter that reports each result returned by `custom/checks.lua`.
+The same implementation backs `assert_all()`, which makes the headless suite
+exit nonzero. A failure in one category does not hide results from later
+categories. Kickstart, LSP and Treesitter health reports remain separate.
 
 Run the stronger headless check after provisioning a VM and after accepting
 plugin, Mason or parser updates:
@@ -201,9 +210,19 @@ bash ~/.config/nvim2/tests/check.sh
 ```
 
 From this repository's Nvim2 configuration directory, the equivalent command
-is `bash tests/check.sh`. The script exits nonzero when a smoke check fails. It
-also exercises daily behavior such as register-preserving edits, snippets,
-hidden-file search, Treesitter folds, Mermaid preview and formatting controls.
+is `bash tests/check.sh`. The script exits nonzero when a check fails. It runs
+focused dependency and feature regressions, the broader smoke suite, and a
+real-file language integration suite. It exercises real Git checkouts,
+persistent project marks, tab-out, search lens, Mini Jump2d, Matrix lifecycle,
+register-preserving edits, snippets, hidden-file search, Treesitter folds,
+Mermaid preview, LSP attachment, diagnostics, completion and formatting.
+
+The language suite covers Lua, Python, Bash, TypeScript, TSX, Terraform,
+Ansible, Helm and generic YAML. Some servers also call host programs that are
+not Mason packages. In particular, full Terraform formatting requires the
+`terraform` executable and Ansible Language Server reports a warning when
+`ansible-config` is unavailable. Record those host limitations instead of
+hiding them or weakening the profile checks.
 
 The script performs five isolated headless starts and reports the minimum,
 median and maximum startup time. Startup speed depends on the VM, filesystem

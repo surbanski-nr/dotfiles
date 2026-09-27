@@ -83,10 +83,18 @@ function M.yank_history(opts)
     :find()
 end
 
-function M.nearest_git_root()
-  local path = vim.api.nvim_buf_get_name(0)
-  local start = path ~= '' and vim.fs.dirname(path) or vim.uv.cwd()
-  return vim.fs.root(start, '.git') or vim.fn.getcwd()
+function M.nearest_git_root() return require('custom.project').buffer_git_root(0) or vim.fn.getcwd() end
+
+function M.document_symbols()
+  local buffer = vim.api.nvim_get_current_buf()
+  local supported = vim
+    .iter(vim.lsp.get_clients { bufnr = buffer })
+    :any(function(client) return client:supports_method('textDocument/documentSymbol', buffer) end)
+  if not supported then
+    vim.notify('No attached language server provides document symbols for this buffer', vim.log.levels.INFO)
+    return
+  end
+  builtin.lsp_document_symbols()
 end
 
 function M.setup()
@@ -118,6 +126,7 @@ function M.setup()
   vim.keymap.set('n', '<leader>sl', builtin.loclist, { desc = '[S]earch [L]ocation list' })
   vim.keymap.set('n', '<leader>sj', builtin.jumplist, { desc = '[S]earch [J]ump list' })
   vim.keymap.set('n', '<leader>sm', builtin.marks, { desc = '[S]earch [M]arks' })
+  vim.keymap.set('n', '<leader>so', M.document_symbols, { desc = '[S]earch document [O]utline' })
   vim.keymap.set('n', '<leader>sy', M.yank_history, { desc = '[S]earch [Y]ank history' })
   vim.keymap.set('n', '<leader>sF', function()
     local root = M.nearest_git_root()

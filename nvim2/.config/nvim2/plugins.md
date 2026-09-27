@@ -20,7 +20,7 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `mason-lspconfig.nvim`      | Main `init.lua`                                      | Connect Mason-installed servers to Neovim's LSP configuration names                                              |
 | `mason-tool-installer.nvim` | Main `init.lua` plus `lua/custom/lsp.lua`            | Install pinned servers, formatters and linters only when explicitly requested                                    |
 | `mason.nvim`                | Main `init.lua`                                      | Provide the external-tool registry, installer and `:Mason` interface                                             |
-| `mini.nvim`                 | Main `init.lua` plus custom module                   | Supply text objects, surroundings, alignment, split/join, visited files, statusline, icons and buffer removal    |
+| `mini.nvim`                 | Main `init.lua` plus custom module                   | Supply text objects, surroundings, alignment, split/join, visible-character jumps, visits, statusline and buffer removal |
 | `neo-tree.nvim`             | Kickstart module enabled by the custom loader        | Provide the sidebar filesystem browser and file operations                                                       |
 | `nvim-lint`                 | Custom module                                        | Publish Actionlint, ESLint, Hadolint, TFLint and yamllint results as diagnostics                                 |
 | `nvim-lspconfig`            | Main `init.lua`                                      | Supply default commands, filetypes and root detection for language servers                                       |
@@ -42,7 +42,7 @@ Every Lua file under `lua/custom/plugins/` is loaded by Kickstart's standard
 custom-extension loop. External-plugin modules own their `vim.pack.add`
 declaration and setup. Local feature modules install nothing. Move or delete a
 module to disable it; leaving a module in this directory enables it on the next
-start. There is no persistence module or session plugin in this profile.
+start. Project-mark persistence is a local feature, not a session plugin.
 
 Configuration that must run at a specific point in Kickstart stays directly
 under `lua/custom/` and is called from a small seam in `init.lua`:
@@ -50,18 +50,31 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 | Module                        | Responsibility                                                                                |
 | ----------------------------- | --------------------------------------------------------------------------------------------- |
 | `core.lua`                    | Options, filetype detection, register behavior, general commands and autocommands             |
-| `checks.lua` and `health.lua` | Validate locked dependencies through `:Nvim2Check`; behavior lives in the headless smoke test |
+| `checks.lua` and `health.lua` | Inspect real locked checkouts and tools through `:Nvim2Check`; the health module only reports shared check results |
 | `lsp.lua`                     | Language-server configuration and pinned Mason tool versions                                  |
 | `conform.lua`                 | Formatter selection and format-on-save controls                                               |
-| `telescope.lua`               | Hidden-aware workspace searches and nearest-Git-root searches                                 |
+| `project.lua`                 | Canonical nearest-Git-root discovery shared by search and project marks                        |
+| `pairs.lua`                   | Treesitter-confirmed delimiter ranges shared by highlighting and tab-out                      |
+| `tabout.lua`                  | Bounded forward/backward navigation out of supported syntax pairs                             |
+| `telescope.lua`               | Hidden-aware workspace, nearest-Git-root and document-symbol searches                          |
 | `treesitter.lua`              | Managed parser list, native folds and explicit tool-install command                           |
+
+`:Nvim2Check` calls `:checkhealth custom`; `health.lua` reports every category
+returned by `checks.run()`, while the headless suite calls `assert_all()` to
+fail the process. Plugin verification reads each checkout's real Git HEAD and
+tracked status with bounded local commands. It does not trust cached pack
+metadata, fetch, repair or update dependencies. The runtime suite also contains
+isolated real-repository regressions for the failure paths.
 
 | Local feature module       | Purpose                                                                                           | External plugin added                            |
 | -------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `default_colors.lua`       | Apply local syntax and navigation colors to the built-in default colorscheme                      | No                                               |
-| `enclosing_pairs.lua`      | Highlight the nearest enclosing `()`, `[]` or `{}` pair while the cursor is anywhere inside it    | No; extends Neovim's built-in `MatchParen` style |
+| `default_colors.lua`       | Apply and reapply local syntax, search-lens and Matrix colors to the built-in default theme        | No                                               |
+| `highlight_enclosing_pairs.lua` | Highlight the nearest enclosing `()`, `[]` or `{}` while the cursor is inside it              | No; extends Neovim's built-in `MatchParen` style |
+| `matrix.lua`               | Draw a bounded temporary Matrix overlay over ordinary panes in the current tab                     | No                                               |
 | `mermaid_ascii.lua`        | Preview the Mermaid fence under the cursor in a scrollable scratch tab                            | No; invokes the optional `mermaid-ascii` binary  |
+| `project_marks.lua`        | Store and navigate persistent named positions scoped to canonical Git roots                        | No                                               |
 | `scroll_marker.lua`        | Show an experimental one-cell marker for the current position at the right edge                   | No                                               |
+| `search_lens.lua`          | Show one bounded native search count in the active window                                          | No                                               |
 | `treesitter_selection.lua` | Add simple keys for Neovim's built-in syntax-aware selection expansion                            | No                                               |
 | `toggle_values.lua`        | Add `<leader>tv` for boolean-like values without `nvim-toggler`                                   | No                                               |
 | `snippets.lua`             | Add five global delimiter pairs and six Markdown expansions with Neovim's built-in snippet engine | No                                               |
@@ -79,6 +92,14 @@ need a daily key sequence:
 | `nvim-lint`                                                           | Runs configured linters after save and publishes their results through the diagnostic workflow below                                              |
 | `nui.nvim`, `plenary.nvim`                                            | Runtime libraries for Neo-tree and Telescope; there is nothing to invoke directly                                                                 |
 | `telescope-ui-select.nvim`                                            | Shows `vim.ui.select` prompts, including Mini Visits choices, in a Telescope dropdown                                                             |
+
+Mini Jump2d is an enabled submodule of the already locked `mini.nvim`
+checkout. `<leader>j` starts its single-character flow only in the current
+ordinary editing window; the plugin's default `<CR>` mapping is disabled.
+Project marks, the search lens, tab-out and Matrix are local modules and add no
+dependency or plugin-lock entry. The local `pairs.lua` helper only shares
+Treesitter delimiter discovery between tab-out and the enclosing-pair
+highlighter.
 
 The active colorscheme is Neovim's built-in `default` with its dark
 `NvimDark*` palette and a small set of local overrides in `lua/custom/plugins/default_colors.lua`.
@@ -100,7 +121,7 @@ characters or colors in
 
 Neovim's built-in `matchparen` plugin highlights a matching `()`, `[]` or `{}`
 pair in orange when the cursor is on or immediately after one of the brackets.
-The small local `enclosing_pairs.lua` module keeps the nearest pair orange while
+The small local `highlight_enclosing_pairs.lua` module keeps the nearest pair orange while
 the cursor is anywhere inside it. It walks upward through the current
 Treesitter node instead of scanning the file, and silently does nothing for a
 filetype without an installed parser. Press `%` on a bracket to jump to its
@@ -117,9 +138,9 @@ table's guide.
 ### Adjust the colorscheme
 
 Edit `lua/custom/plugins/default_colors.lua` to experiment with the local
-overrides. Restart Neovim after editing it, or run `:source $MYVIMRC`. Running
-`:colorscheme default` later in a session clears the overrides until the next
-restart or source.
+overrides. Restart Neovim after editing it, or run `:source $MYVIMRC`. The
+module reapplies its overrides after `:colorscheme`, including the search-lens
+and Matrix groups.
 
 ## Plugin decisions and migration history
 
