@@ -188,7 +188,7 @@ independent_output=$(
     env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color \
     bash --noprofile --norc -i
 )
-assert_contains "$independent_output" 'vi=file vim=file'
+assert_contains "$independent_output" 'cat=file vi=function vim=alias v=function'
 assert_contains "$(<"$editor_log")" 'vi:first'
 assert_contains "$(<"$editor_log")" 'vim:second'
 

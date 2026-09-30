@@ -57,8 +57,9 @@ See the [Nvim2 guide](nvim2/.config/nvim2/README.md) for normal use and clean
 rebuilds. The [offline release runbook](nvim2/.config/nvim2/offline-releases.md)
 covers connected builds, restricted installation and whole-artifact rollback.
 
-`vi` and `vim` remain independent recovery editors. `old-nvim` is an
-unsupported archived profile and is not installed by the normal setup.
+`v` starts Nvim2. The shell configuration does not redefine `cat`, `vi` or
+`vim`, so the system editors remain independent. `old-nvim` is an unsupported
+archived profile and is not installed by the normal setup.
 
 ## Updates and rollback
 

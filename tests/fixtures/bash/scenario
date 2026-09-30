@@ -88,12 +88,14 @@ case $TEST_SCENARIO in
     printf 'stale_status=%s sock=%s\n' "$?" "${SSH_AUTH_SOCK:-unset}"
     ;;
   independent-editors)
-    vi() { v "$@"; }
-    vim() { v "$@"; }
+    shopt -s expand_aliases
+    vi() { command vi "$@"; }
+    alias vim='command vim'
     load_bashrc
     vi first
-    vim second
-    printf 'vi=%s vim=%s\n' "$(type -t vi)" "$(type -t vim)"
+    eval 'vim second'
+    printf 'cat=%s vi=%s vim=%s v=%s\n' \
+      "$(type -t cat)" "$(type -t vi)" "$(type -t vim)" "$(type -t v)"
     ;;
   custom-dotfiles)
     load_bashrc

@@ -158,15 +158,6 @@ dotfiles-check() (
   return "$missing"
 )
 
-# bat pages long output with less: j/k scroll, Space/b page, / searches,
-# n/N moves between matches, g/G jumps to the ends, h shows help, and q quits.
-unalias cat 2>/dev/null || true
-if command -v bat >/dev/null 2>&1; then
-  alias cat='bat'
-elif command -v batcat >/dev/null 2>&1; then
-  alias cat='batcat'
-fi
-
 # Remove the old alias before parsing its function replacement on reload.
 unalias ff 2>/dev/null || true
 ff() {
@@ -194,8 +185,8 @@ ffv() {
   NVIM_APPNAME=nvim2 command nvim -- "${files[@]}"
 }
 
-unalias vz vold v vi vim zz kc kn k tp t 2>/dev/null || true
-unset -f vz vi vim 2>/dev/null || true
+unalias vz vold v zz kc kn k tp t 2>/dev/null || true
+unset -f vz 2>/dev/null || true
 vold() {
   _dotfiles_require vold nvim || return
   NVIM_APPNAME=old-nvim command nvim "$@"
