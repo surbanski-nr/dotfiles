@@ -43,11 +43,8 @@ export LAB="${LAB:-$GHREPOS/lab}"
 export NOTES="${NOTES:-$GHREPOS/notes-md}"
 export DOTFILES="${DOTFILES:-$(CDPATH='' cd -- "$(dirname -- "$_dotfiles_source")/.." && pwd)}"
 export WORK="${WORK:-$HOME/work}"
-# Let Oh My Posh show the active environment without a second prefix from the
-# activation script.
-export VIRTUAL_ENV_DISABLE_PROMPT="${VIRTUAL_ENV_DISABLE_PROMPT:-1}"
-_DOTFILES_LAST_VIRTUAL_ENV=${VIRTUAL_ENV:-}
-_DOTFILES_LAST_VIRTUAL_ENV_PROMPT=${VIRTUAL_ENV_PROMPT:-}
+# Keep virtual environment activation from modifying the prompt.
+export VIRTUAL_ENV_DISABLE_PROMPT=1
 unset _dotfiles_source
 
 add_to_path "$HOME/.local/share/nvim2/mason/bin"
@@ -70,21 +67,6 @@ _dotfiles_history_sync() {
   history -n
 }
 
-_dotfiles_sync_virtual_env_prompt() {
-  local active=${VIRTUAL_ENV:-}
-  local prompt=${VIRTUAL_ENV_PROMPT:-}
-
-  if [[ $active == "$_DOTFILES_LAST_VIRTUAL_ENV" ]]; then
-    return
-  fi
-  if [[ -z $active || $prompt == "$_DOTFILES_LAST_VIRTUAL_ENV_PROMPT" ]]; then
-    unset VIRTUAL_ENV_PROMPT
-    prompt=
-  fi
-  _DOTFILES_LAST_VIRTUAL_ENV=$active
-  _DOTFILES_LAST_VIRTUAL_ENV_PROMPT=$prompt
-}
-
 _dotfiles_install_prompt_command() {
   local duplicate entry existing
   local -a current=() normalized=()
@@ -97,7 +79,7 @@ _dotfiles_install_prompt_command() {
 
   for entry in "${current[@]}"; do
     case $entry in
-    'history -a; history -r' | 'history -a; history -n' | '_dotfiles_history_sync' | '_dotfiles_sync_virtual_env_prompt')
+    'history -a; history -r' | 'history -a; history -n' | '_dotfiles_history_sync')
       continue
       ;;
     *';history -a; history -r') entry=${entry%';history -a; history -r'} ;;
@@ -118,7 +100,7 @@ _dotfiles_install_prompt_command() {
     $duplicate || normalized+=("$entry")
   done
 
-  PROMPT_COMMAND=('_dotfiles_sync_virtual_env_prompt' "${normalized[@]}" '_dotfiles_history_sync')
+  PROMPT_COMMAND=("${normalized[@]}" '_dotfiles_history_sync')
 }
 
 # Keep a large bounded history and share new commands between open shells.
@@ -335,7 +317,10 @@ fi
 
 if command -v oh-my-posh >/dev/null 2>&1 && ! declare -F _omp_hook >/dev/null; then
   if [[ -r $HOME/.oh-my-posh.omp.json ]]; then
-    _dotfiles_eval_init 'Oh My Posh' oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json" || true
+    if _dotfiles_eval_init 'Oh My Posh' oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json"; then
+      command oh-my-posh toggle kubectl ||
+        _dotfiles_warn 'failed to disable Kubernetes prompt by default'
+    fi
   else
     _dotfiles_warn 'Oh My Posh is installed but ~/.oh-my-posh.omp.json is missing'
   fi

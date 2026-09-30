@@ -227,12 +227,15 @@ k() {
   command kubectl "$@"
 }
 kp() {
-  if [[ -n ${POSH_KUBE:-} ]]; then
-    unset POSH_KUBE
-    printf 'Kubernetes prompt disabled\n'
-  else
-    export POSH_KUBE=1
+  local toggles
+
+  _dotfiles_require kp oh-my-posh || return
+  toggles=$(command oh-my-posh get toggles) || return
+  command oh-my-posh toggle kubectl || return
+  if [[ $toggles == *'- kubectl'* ]]; then
     printf 'Kubernetes prompt enabled\n'
+  else
+    printf 'Kubernetes prompt disabled\n'
   fi
 }
 kgp() {

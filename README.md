@@ -44,6 +44,10 @@ remaining conflict, including a foreign symlink.
 Existing Homebrew installations and private shell configuration are left
 alone. Setup does not install Homebrew or initialize it from Bash.
 
+The Kubernetes prompt segment is disabled by default. Run `kp` to toggle it
+for the current shell session. While disabled, Oh My Posh does not read the
+kubeconfig for that segment.
+
 ## Nvim2
 
 The active editor profile uses Neovim 0.12.5 or newer, built-in `vim.pack`, a
@@ -64,8 +68,8 @@ archived profile and is not installed by the normal setup.
 ## Updates and rollback
 
 [TOOL_UPDATES.md](TOOL_UPDATES.md) describes disposable upgrade candidates,
-health evidence, retained version rollback and the measured Python virtual
-environment prompt. Release publication remains a separate explicit action.
+health evidence, retained version rollback and prompt behavior. Release
+publication remains a separate explicit action.
 
 ## Validation
 
@@ -82,6 +86,4 @@ online audits. The GitHub Actions workflow supplies its repository token.
 
 Focused tasks include `validate:bash`, `validate:configs`, `validate:nvim2`,
 `validate:old-nvim`, `validate:repo`, `validate:scripts` and
-`validate:workflows`. After the pinned Oh My Posh and uv tools are installed,
-run `validate:prompt` to exercise real `python -m venv` and `uv venv`
-activation.
+`validate:workflows`.

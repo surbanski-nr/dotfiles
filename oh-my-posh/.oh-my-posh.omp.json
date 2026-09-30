@@ -21,12 +21,6 @@
           "style": "plain"
         },
         {
-          "template": "{{ if .Env.VIRTUAL_ENV }}{{ $prompt := trimAll \"() \" .Env.VIRTUAL_ENV_PROMPT }}({{ if $prompt }}{{ $prompt }}{{ else }}{{ base .Env.VIRTUAL_ENV }}{{ end }}) {{ end }}",
-          "foreground": "lightBlue",
-          "type": "text",
-          "style": "plain"
-        },
-        {
           "options": {
             "branch_icon": "<#ff94df><b> </b></>",
             "branch_template": "{{ trunc 25 .Branch }}",
@@ -60,7 +54,7 @@
           "options": {
             "display_error": true
           },
-          "template": "{{ if .Env.POSH_KUBE }}󱃾 {{ .Context }}::{{ if .Namespace }}{{ .Namespace }}{{ else }}default{{ end }}{{ end }}",
+          "template": "󱃾 {{ .Context }}::{{ if .Namespace }}{{ .Namespace }}{{ else }}default{{ end }}",
           "foreground": "lightBlue",
           "type": "kubectl",
           "style": "plain"

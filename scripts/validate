@@ -9,7 +9,7 @@ die() {
 
 usage() {
   printf '%s\n' \
-    'usage: validate {bash|configs|nvim2|old-nvim|prompt|repo|scripts|workflows}' \
+    'usage: validate {bash|configs|nvim2|old-nvim|repo|scripts|workflows}' \
     >&2
   exit 2
 }
@@ -127,7 +127,6 @@ validate_scripts() {
     tests/bstow_test.sh
     tests/install_validation_tool_test.sh
     tests/nvim2_release_test.sh
-    tests/prompt_test.sh
     tests/scripts_test.sh
     tests/setup_asdf_test.sh
     tests/setup_system_test.sh
@@ -199,16 +198,6 @@ validate_old_nvim() {
   stylua --check \
     --config-path old-nvim/.config/old-nvim/stylua.toml \
     old-nvim/.config/old-nvim
-}
-
-validate_prompt() {
-  need bash
-  need oh-my-posh
-  need python3
-  need timeout
-  need uv
-
-  timeout 180s bash tests/prompt_test.sh
 }
 
 validate_configs() {
@@ -337,7 +326,6 @@ case ${1:-} in
   configs) validate_configs ;;
   nvim2) validate_nvim2 ;;
   old-nvim) validate_old_nvim ;;
-  prompt) validate_prompt ;;
   repo) validate_repo ;;
   scripts) validate_scripts ;;
   workflows) validate_workflows ;;

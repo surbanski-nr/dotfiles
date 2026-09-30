@@ -126,35 +126,15 @@ The next `setup-tools k9s` selects the scalar pin again. Keep the older pin in
 `versions.env` for a persistent rollback. Treat `uv` with `uvx`, and `kubectx`
 with `kubens`, as paired selections.
 
-## Python environment prompt
+## Python environments
 
-The Oh My Posh theme shows a short label only when `VIRTUAL_ENV` is active. It
-uses the normalized `VIRTUAL_ENV_PROMPT` label when one is available and falls
-back to the environment directory name. The segment reads environment
-variables directly and does not run Python or uv. Bash exports
-`VIRTUAL_ENV_DISABLE_PROMPT=1` before activation so the activation script does
-not add a second prefix.
+The prompt deliberately does not display Python virtual environments. Bash
+exports `VIRTUAL_ENV_DISABLE_PROMPT=1` so activation scripts do not add their
+own prefix, and the Oh My Posh theme performs no venv discovery or rendering.
 
-The Bash prompt hook also tracks environment changes before Oh My Posh renders.
-This clears a label left behind when an older activation script replaces a
-newer one, while preserving a new or manually changed label. There is no label
-for a dormant `.venv` directory, and `uv run` does not change the parent
-shell's environment.
-
-After installing the pinned daily tools, exercise real `python -m venv` and
-`uv venv` activation, switching and deactivation with:
-
-```bash
-task validate:prompt
-```
-
-The accepted incremental budget is less than 5 ms at the median and less than
-10 ms at p95. The qualifying Oh My Posh 31.3.0 measurement used 200 alternating
-`oh-my-posh debug` samples for each baseline/candidate pair in the same Git
-working tree. Without a venv, median changed from 5.882 ms to 5.944 ms and p95
-from 6.396 ms to 6.390 ms. With a venv, median changed from 5.862 ms to 5.954 ms
-and p95 from 6.434 ms to 6.438 ms. The incremental costs were 0.062 ms and
--0.006 ms without a venv, and 0.091 ms and 0.004 ms with a venv.
+The Kubernetes segment starts toggled off in each shell session. Run `kp` to
+toggle it. This uses Oh My Posh's segment toggle, so the disabled segment is
+skipped before it reads or parses kubeconfig files.
 
 ## Project runtime rollback
 

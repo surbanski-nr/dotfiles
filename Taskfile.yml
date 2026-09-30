@@ -45,11 +45,6 @@ tasks:
     cmds:
       - bash scripts/validate old-nvim
 
-  validate:prompt:
-    desc: Verify the active Python environment prompt with installed tools
-    cmds:
-      - bash scripts/validate prompt
-
   validate:repo:
     desc: Validate repository invariants and changed whitespace
     deps: [tools:yamllint]

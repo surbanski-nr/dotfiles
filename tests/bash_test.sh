@@ -130,6 +130,8 @@ reload_output=$(
   fail 'zoxide prompt hook was duplicated on reload'
 [[ $reload_output != *'history -r'* ]] ||
   fail 'legacy full history reload remains in PROMPT_COMMAND'
+[[ $reload_output != *'_dotfiles_sync_virtual_env_prompt'* ]] ||
+  fail 'removed virtual environment prompt hook remains in PROMPT_COMMAND'
 assert_contains "$reload_output" 'settings=100000:100000:3:on:on:on'
 assert_contains "$reload_output" 'venv_disable_prompt=1'
 
@@ -242,5 +244,34 @@ stale_vz_output=$(
 )
 [[ $stale_vz_output == 'editors=v,vold vz=removed' ]] ||
   fail 'alias reload did not remove stale vz while preserving v and vold'
+
+posh_log=$test_root/oh-my-posh.log
+posh_state=$test_root/kubectl-prompt-disabled
+ln -s "$command_fixture" "$test_root/bin/oh-my-posh"
+ln -s "$repo_dir/oh-my-posh/.oh-my-posh.omp.json" \
+  "$reload_home/.oh-my-posh.omp.json"
+kube_init_output=$(
+  TEST_COMMAND_MODE=kube-prompt TEST_POSH_LOG="$posh_log" \
+    TEST_POSH_STATE="$posh_state" run_scenario kube-prompt-init \
+    env HOME="$reload_home" PATH="$test_root/bin:$original_path" \
+    TERM=xterm-256color bash --noprofile --norc -i
+)
+assert_contains "$kube_init_output" 'kube-default=disabled'
+[[ $(grep -c '^init bash ' "$posh_log") -eq 1 ]] ||
+  fail 'Oh My Posh was initialized more than once on Bash reload'
+[[ $(grep -c '^toggle kubectl$' "$posh_log") -eq 1 ]] ||
+  fail 'Kubernetes prompt default was not initialized exactly once'
+
+kube_toggle_output=$(
+  TEST_COMMAND_MODE=kube-prompt TEST_POSH_LOG="$posh_log" \
+    TEST_POSH_STATE="$posh_state" run_scenario kube-prompt-toggle \
+    env HOME="$reload_home" PATH="$test_root/bin:$original_path"
+)
+assert_contains "$kube_toggle_output" 'Kubernetes prompt enabled'
+assert_contains "$kube_toggle_output" 'Kubernetes prompt disabled'
+[[ $(grep -c '^get toggles$' "$posh_log") -eq 2 ]] ||
+  fail 'kp did not inspect the native Oh My Posh toggle state'
+[[ $(grep -c '^toggle kubectl$' "$posh_log") -eq 3 ]] ||
+  fail 'kp did not toggle the Kubernetes segment twice'
 
 printf 'Bash tests passed\n'

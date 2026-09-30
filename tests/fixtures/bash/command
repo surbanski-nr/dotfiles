@@ -34,6 +34,31 @@ case "$command_name:$mode" in
       *) exit 2 ;;
     esac
     ;;
+  oh-my-posh:kube-prompt)
+    : "${TEST_POSH_LOG:?}"
+    : "${TEST_POSH_STATE:?}"
+    printf '%s\n' "$*" >>"$TEST_POSH_LOG"
+    case ${1:-}:${2:-} in
+      init:bash)
+        printf '%s\n' '_omp_hook() { :; }'
+        ;;
+      get:toggles)
+        if [[ -e $TEST_POSH_STATE ]]; then
+          printf '%s\n' 'Toggled off segments:' '- kubectl'
+        else
+          printf '%s\n' 'No segments are toggled off'
+        fi
+        ;;
+      toggle:kubectl)
+        if [[ -e $TEST_POSH_STATE ]]; then
+          rm "$TEST_POSH_STATE"
+        else
+          : >"$TEST_POSH_STATE"
+        fi
+        ;;
+      *) exit 2 ;;
+    esac
+    ;;
   bat:*)
     while IFS= read -r _; do :; done
     ;;

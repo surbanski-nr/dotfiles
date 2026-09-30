@@ -113,6 +113,17 @@ case $TEST_SCENARIO in
     declare -F __fzf_test_binding >/dev/null
     printf 'fzf-init=yes\n'
     ;;
+  kube-prompt-init)
+    unset PROMPT_COMMAND
+    load_bashrc
+    load_bashrc
+    printf 'kube-default=%s\n' "$(test -e "$TEST_POSH_STATE" && printf disabled || printf enabled)"
+    ;;
+  kube-prompt-toggle)
+    load_aliases
+    kp
+    kp
+    ;;
   stale-vz)
     vz() { printf 'stale-vz\n'; }
     vz >/dev/null
