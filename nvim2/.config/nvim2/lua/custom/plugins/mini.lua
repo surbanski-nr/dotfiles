@@ -36,6 +36,59 @@ vim.keymap.set('n', '<leader>vL', function() visits.select_label('', '', visit_o
 
 vim.keymap.set('n', '<C-x>', function() require('mini.bufremove').delete() end, { desc = 'Delete buffer' })
 
+local function buffer_label(buffer)
+  local name = vim.api.nvim_buf_get_name(buffer)
+  if name == '' then return ('[No Name %d]'):format(buffer) end
+  return vim.fn.fnamemodify(name, ':~:.')
+end
+
+local function remove_other_buffers(force)
+  local current = vim.api.nvim_get_current_buf()
+  local others = vim.iter(vim.api.nvim_list_bufs()):filter(function(buffer) return buffer ~= current and vim.fn.buflisted(buffer) == 1 end):totable()
+
+  local blockers = vim
+    .iter(others)
+    :filter(function(buffer) return vim.bo[buffer].modified or vim.bo[buffer].buftype == 'terminal' end)
+    :map(buffer_label)
+    :totable()
+  if not force and #blockers > 0 then
+    vim.notify(
+      'Cannot remove other buffers safely: ' .. table.concat(blockers, ', ') .. '. Save changes or stop terminals, or use :DeleteOtherBuffers! to discard them.',
+      vim.log.levels.WARN
+    )
+    return false
+  end
+
+  local failed = {}
+  local removed = 0
+  local bufremove = require 'mini.bufremove'
+  for _, buffer in ipairs(others) do
+    if vim.api.nvim_buf_is_valid(buffer) and vim.fn.buflisted(buffer) == 1 then
+      local label = buffer_label(buffer)
+      local ok, result = pcall(bufremove.delete, buffer, force)
+      if ok and result then
+        removed = removed + 1
+      else
+        failed[#failed + 1] = label
+      end
+    end
+  end
+
+  if #failed > 0 then
+    vim.notify('Could not remove buffers: ' .. table.concat(failed, ', '), vim.log.levels.ERROR)
+    return false
+  end
+
+  vim.notify(('Removed %d other buffer%s'):format(removed, removed == 1 and '' or 's'))
+  return true
+end
+
+vim.api.nvim_create_user_command('DeleteOtherBuffers', function(options) remove_other_buffers(options.bang) end, {
+  bang = true,
+  desc = 'Remove all listed buffers except the current buffer',
+})
+vim.keymap.set('n', '<leader>xo', function() remove_other_buffers(false) end, { desc = 'Remove all [O]ther buffers' })
+
 require('which-key').add {
   { '<leader>v', group = '[V]isits' },
 }

@@ -352,17 +352,28 @@ installed only by `:Nvim2ToolsInstallSync`, never while opening a file.
 
 ### Buffers
 
-| Action                                            | Keys or command                      |
-| ------------------------------------------------- | ------------------------------------ |
-| Pick an open buffer                               | `<leader><leader>`                   |
-| Remove current buffer without breaking the layout | `<C-x>`                              |
-| List buffers                                      | `:ls`                                |
-| Next or previous buffer                           | `]b`, `[b` or `:bnext`, `:bprevious` |
-| Switch by buffer number or name                   | `:buffer <number-or-name>`           |
-| Delete current buffer                             | `:bdelete`                           |
+| Action                                            | Keys or command                       |
+| ------------------------------------------------- | ------------------------------------- |
+| Pick an open buffer                               | `<leader><leader>`                    |
+| Remove current buffer without breaking the layout | `<C-x>`                               |
+| Remove all other listed buffers                   | `<leader>xo` or `:DeleteOtherBuffers` |
+| List buffers                                      | `:ls`                                 |
+| Next or previous buffer                           | `]b`, `[b` or `:bnext`, `:bprevious`  |
+| Switch by buffer number or name                   | `:buffer <number-or-name>`            |
+| Delete current buffer                             | `:bdelete`                            |
 
 `<C-x>` normally decrements a number in stock Neovim. This profile replaces
-it with Mini buffer removal.
+it with Mini buffer removal. `:q` closes the current window, which is a pane
+showing a buffer; it does not reliably remove that buffer from `:ls`. Use
+`<C-x>` when the buffer itself should be removed while preserving the window
+layout.
+
+`<leader>xo` and `:DeleteOtherBuffers` remove every other listed buffer while
+keeping the current buffer and window layout. They refuse to remove anything
+when another buffer has unsaved changes or is a terminal. Save or close those
+buffers first. `:DeleteOtherBuffers!` explicitly discards their changes and
+stops their terminal jobs. Use `]b` and `[b` to move through open buffers
+directly without opening Telescope.
 
 ### Windows and splits
 
@@ -522,32 +533,55 @@ also depends on the terminal correctly sending Alt-modified keys.
 
 Using the resulting quickfix list:
 
-| Action                                                        | Keys or command                      |
-| ------------------------------------------------------------- | ------------------------------------ |
-| Toggle the quickfix window without clearing its items         | `<leader>tq`                         |
-| Open or close the quickfix window directly                    | `:copen`, `:cclose`                  |
-| Browse quickfix through Telescope with a file preview         | `<leader>sq`                         |
-| Browse the current window's location list with a file preview | `<leader>sl`                         |
-| Open the entry under the cursor                               | `<CR>`                               |
-| Open the entry in a new split                                 | `<C-w><CR>`                          |
-| Alternate between quickfix and the previous code window       | `<C-w>p`                             |
-| Next or previous entry                                        | `]q`, `[q` or `:cnext`, `:cprevious` |
-| Last or first entry                                           | `]Q`, `[Q` or `:clast`, `:cfirst`    |
-| Remove the entry under the cursor from this list              | `dd` in the quickfix window          |
-| Run an Ex command for every entry                             | `:cdo {command}`                     |
+| Action                                                        | Keys or command                            |
+| ------------------------------------------------------------- | ------------------------------------------ |
+| Toggle the quickfix window without clearing its items         | `<leader>tq`                               |
+| Open or close the quickfix window directly                    | `:copen`, `:cclose`                        |
+| Browse quickfix through Telescope with a file preview         | `<leader>sq`                               |
+| Browse the current window's location list with a file preview | `<leader>sl`                               |
+| Open the entry under the cursor                               | `<CR>`                                     |
+| Open the entry in a new split                                 | `<C-w><CR>`                                |
+| Alternate between quickfix and the previous code window       | `<C-w>p`                                   |
+| Next or previous entry                                        | `]q`, `[q` or `:cnext`, `:cprevious`       |
+| Next or previous file represented in quickfix                 | `]<C-q>`, `[<C-q>` or `:cnfile`, `:cpfile` |
+| Last or first entry                                           | `]Q`, `[Q` or `:clast`, `:cfirst`          |
+| Remove the entry under the cursor from this list              | `dd` in the quickfix window                |
+| Run an Ex command for every entry                             | `:cdo {command}`                           |
 
 `dd` only removes the selected location from the current quickfix list. It
 does not delete a file, change source code or affect a window-local location
 list. Diagnostic `<leader>q` uses a location list instead; open and close that
 with `:lopen` and `:lclose`, and navigate it with `]l` and `[l`.
 
-The fastest review flow usually stays in the code window: keep quickfix open
-and press `]q` or `[q` to load the next or previous location into that window.
-Use `<C-w>p` only when you need to edit the list itself, such as removing an
-entry with `dd`, then press `<C-w>p` again to return to code. Use `<leader>sq`
-when fuzzy filtering and a preview are more useful than the split list. The
-Telescope picker only reads the existing quickfix list; opening it does not
-replace or clear the list.
+### Review selected files without returning to quickfix
+
+There is no need to move focus back to the quickfix window between files:
+
+1. In Telescope, mark the files with `<Tab>` and press `<M-q>` to put only
+   those files in quickfix. Use `<C-q>` instead when every filtered result is
+   wanted.
+2. When the quickfix window opens, press `<CR>` on the first file once. Focus
+   moves to the editing window.
+3. Review or edit the file, then press `]q`. Neovim loads the next quickfix
+   entry in the same editing window. Use `[q` to go back.
+4. Save each changed buffer with `:update`, or keep moving and run `:wall` once
+   after the review.
+
+The quickfix window may remain open or be hidden with `<leader>tq`; navigation
+uses the list in either case. Use `<C-w>p` only when the list itself needs an
+edit, such as removing an entry with `dd`. No extra mapping is needed because
+`]q` and `[q` already provide next and previous navigation from the code
+window.
+
+With Telescope `find_files`, each quickfix entry is a file, so `]q` opens the
+next selected file. With `live_grep`, entries are individual matches and more
+than one may belong to the same file. Use `]<C-q>` or `[<C-q>` when that list
+should skip directly to the next or previous distinct file. These are the
+built-in mappings for `:cnfile` and `:cpfile`.
+
+Use `<leader>sq` when fuzzy filtering and a preview are more useful than the
+split list. The Telescope picker only reads the existing quickfix list;
+opening it does not replace or clear the list.
 
 ### Find and replace with review
 
@@ -894,6 +928,7 @@ rules.
 | Action                                             | Keys         |
 | -------------------------------------------------- | ------------ |
 | Remove current buffer                              | `<C-x>`      |
+| Remove all other listed buffers                    | `<leader>xo` |
 | Select frecent file from current working directory | `<leader>vv` |
 | Select frecent file from all tracked directories   | `<leader>vV` |
 | Add a label to current file                        | `<leader>va` |

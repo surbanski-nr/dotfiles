@@ -17,7 +17,7 @@ if [[ -n ${NVIM2_MAX_STARTUP_MS:-} ]] && ! [[ $NVIM2_MAX_STARTUP_MS =~ ^[0-9]+([
   exit 2
 fi
 
-for test_file in dependency_checks.lua feature_checks.lua smoke.lua language_checks.lua; do
+for test_file in dependency_checks.lua feature_checks.lua smoke.lua buffer_checks.lua language_checks.lua; do
   timeout --signal=TERM --kill-after=10s "$timeout_seconds" env \
   XDG_CONFIG_HOME="$xdg_config_home" \
   NVIM_APPNAME="$app_name" \
