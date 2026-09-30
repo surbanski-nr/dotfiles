@@ -2,6 +2,7 @@ local function run()
   require('custom.checks').assert_all { tools = vim.env.NVIM2_CHECK_TOOLS ~= '0' }
   assert(require('mason.settings').current.max_concurrent_installers == 1, 'Mason installers are not serialized')
   vim.lsp.enable('markdown_oxide', false)
+  dofile(vim.fs.joinpath(vim.fn.stdpath 'config', 'tests', 'telescope_query.lua'))()
 
   vim.cmd.tabnew()
   vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'init.lua'))
@@ -43,6 +44,32 @@ local function run()
       return picker and picker.manager and picker.manager:num_results() > 0
     end),
     'document-symbol Telescope picker returned no LSP symbols'
+  )
+  local symbol_picker = require('telescope.actions.state').get_current_picker(vim.api.nvim_get_current_buf())
+  symbol_picker:set_prompt ':function: run'
+  vim.api.nvim_exec_autocmds('TextChangedI', { buffer = symbol_picker.prompt_bufnr })
+  assert(
+    vim.wait(3000, function()
+      if symbol_picker.manager:num_results() == 0 then return false end
+      for entry in symbol_picker.manager:iter() do
+        if entry.symbol_type:lower() ~= 'function' then return false end
+      end
+      return true
+    end),
+    'document-symbol prefilter did not restrict results to functions'
+  )
+  local run_results = symbol_picker.manager:num_results()
+  symbol_picker:set_prompt ':function: run | gh'
+  vim.api.nvim_exec_autocmds('TextChangedI', { buffer = symbol_picker.prompt_bufnr })
+  assert(
+    vim.wait(3000, function()
+      if symbol_picker.manager:num_results() <= run_results then return false end
+      for entry in symbol_picker.manager:iter() do
+        if entry.symbol_type:lower() ~= 'function' then return false end
+      end
+      return true
+    end),
+    'document-symbol OR query did not restore functions through the real prefilter'
   )
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'xt', false)
   assert(vim.wait(2000, function() return vim.api.nvim_get_current_buf() == symbol_source end), 'selecting a document symbol did not return to its source file')

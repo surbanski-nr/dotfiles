@@ -57,7 +57,14 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 | `pairs.lua`                   | Treesitter-confirmed delimiter ranges shared by highlighting and tab-out                      |
 | `tabout.lua`                  | Bounded forward/backward navigation out of supported syntax pairs                             |
 | `telescope.lua`               | Hidden-aware workspace, nearest-Git-root and document-symbol searches                          |
+| `telescope_query.lua`         | Parse bounded Telescope query terms, escapes, anchors, negation and OR groups                  |
+| `telescope_sorter.lua`        | Adapt Telescope's Lua fzy scoring, filtering and highlighting to the local query syntax        |
 | `treesitter.lua`              | Managed parser list, native folds and explicit tool-install command                           |
+
+The query adapter adds no dependency, binary, FFI or build step. It delegates
+fuzzy matching to the locked Telescope Lua fzy implementation. Native fzf and
+its build hooks remain disabled, so the existing offline procedure is
+unchanged.
 
 `:Nvim2Check` calls `:checkhealth custom`; `health.lua` reports every category
 returned by `checks.run()`, while the headless suite calls `assert_all()` to

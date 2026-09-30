@@ -483,6 +483,65 @@ command helps shell workflows but is not Telescope's compiled
 `telescope-fzf-native.nvim` extension, which remains intentionally absent to
 keep offline builds simple.
 
+### Query operators
+
+The default file and generic Telescope sorters extend the existing Lua fzy
+matching with a small query language:
+
+| Query | Meaning |
+| --- | --- |
+| `foo` | Fuzzy fzy match |
+| `foo bar` | Both terms in any order |
+| `foo \| bar` | Either adjacent alternative |
+| `!test` | Exclude a literal substring |
+| `^src/` | Require a literal prefix |
+| `.lua$` | Require a literal suffix |
+| `^README.md$` | Require literal equality |
+| `!^test/`, `!_test.lua$`, `!^README.md$` | Exclude a prefix, suffix, or exact value |
+
+Whitespace-separated groups use AND. A standalone, unescaped `|` joins the
+neighboring terms with OR, and OR binds more tightly than AND. For example,
+`foo | bar baz` means `(foo OR bar) AND baz`, while
+`^src/ .lua$ | .vim$ !test` accepts `src/main.lua` and `src/view.vim` but
+rejects test paths. Parentheses are explanatory only and are not query syntax.
+
+Backslash quotes the next character, so `\!note`, `\^draft`, `file\$`, `\|`,
+`a\ b`, and `\\` search for those characters without treating them as
+operators. A final backslash is literal. Quotes have no grouping role and are
+ordinary searchable characters. This makes whitespace different from the old
+single-term behavior: an unescaped space is AND, while `a\ b` is one fuzzy
+term containing a space.
+
+Matching remains case-insensitive in the same way as Telescope's fzy sorter.
+There is no smartcase or additional Unicode normalization. Positive terms use
+the original fzy score, OR takes the best accepted alternative, AND adds group
+scores, and an accepted negative term contributes a neutral score of 1.
+Incomplete operator-only terms and empty OR branches are ignored while typing.
+An empty query shows every entry. Queries longer than 1,024 bytes or containing
+more than 32 nonempty terms intentionally show no results instead of being
+truncated. These are query limits, not candidate limits; long candidate
+behavior remains the behavior of the base fzy sorter. Regular expressions,
+parentheses, and the rest of the full fzf query language are not supported.
+
+Operators apply to the complete `ordinal` text supplied by each picker. In file
+pickers this is normally the path relative to that picker's working directory;
+in current-buffer and symbol pickers it includes the text chosen by those
+pickers. The adapter is active for file, current-buffer, symbol, and other
+pickers that use Telescope's default file or generic sorter factory. A picker
+that explicitly chooses another sorter is outside this contract.
+
+Highlighting is only a visual hint. Positive fuzzy terms reuse fzy positions,
+and visible literal anchor text is highlighted without reapplying the anchor
+to decorated display text. More than one visible OR alternative can therefore
+be highlighted. Negative terms and unescaped operator syntax are not
+highlighted; a quoted operator character is searchable and may be highlighted.
+Shortened or decorated displays may omit a valid match from highlighting.
+
+`live_grep` first asks ripgrep to collect lines for its initial prompt. In
+insert mode, press `<C-Space>` to switch that result set to fuzzy refinement;
+the local query operators then filter those collected lines. Refinement cannot
+find a line that the original ripgrep search did not return.
+
 After a completed native search, a compact current/total label appears at the
 end of the active match line. It uses bounded `searchcount()` work and displays
 `>999` or `?` rather than claiming an incomplete total is exact. `<leader>tS`

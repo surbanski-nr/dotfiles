@@ -1,6 +1,7 @@
 local M = {}
 
 local builtin = require 'telescope.builtin'
+local query_sorter = require 'custom.telescope_sorter'
 local excluded_patterns = { '^%.git/', '/%.git/', '^node_modules/', '/node_modules/' }
 local hidden_grep_args = { '--hidden', '--glob', '!**/.git/*', '--glob', '!**/node_modules/*' }
 
@@ -99,6 +100,10 @@ end
 
 function M.setup()
   require('telescope').setup {
+    defaults = {
+      file_sorter = query_sorter.new,
+      generic_sorter = query_sorter.new,
+    },
     pickers = {
       find_files = M.file_options(),
       live_grep = M.grep_options(),
