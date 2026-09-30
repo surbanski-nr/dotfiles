@@ -148,9 +148,9 @@ needed.
 Nvim2 is deployed as a versioned platform release containing Neovim, Node.js,
 ripgrep, the exact dotfiles commit, locked plugins, pinned Mason tools,
 compiled Treesitter parsers, parser revision metadata and queries. Build a
-separate release for each exact target platform and architecture. Use a
-connected Debian or Ubuntu host to run separate Ubuntu 24.04, Ubuntu 26.04 and
-Amazon Linux 2023 builder containers.
+separate release for each exact target platform and architecture. The
+authoritative supported-platform and pinned-builder-image matrix is maintained
+in the [offline release runbook](offline-releases.md).
 
 The complete connected-builder, offline-installation, upgrade, activation and
 rollback runbook is in

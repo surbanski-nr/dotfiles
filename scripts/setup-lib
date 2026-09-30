@@ -36,16 +36,19 @@ setup_validate_list() {
   local value=$2
   local item
   local previous
+  local count=0
   local seen_items=
 
-  [[ -n $value ]] || setup_die "$name is empty"
+  [[ -n $value ]] || setup_die "$name is empty" || return
   for item in $value; do
+    ((count += 1))
     setup_validate_version "$name" "$item" || return
     for previous in ${seen_items:-}; do
       [[ $previous != "$item" ]] || setup_die "$name contains duplicate $item" || return
     done
     seen_items="${seen_items:+$seen_items }$item"
   done
+  ((count > 0)) || setup_die "$name is empty" || return
 }
 
 setup_validate_versions() {

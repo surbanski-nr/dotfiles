@@ -14,6 +14,17 @@ cd "$HOME/github.com/surbanski/dotfiles"
 ./setup-tools
 ./setup-asdf
 
+for startup_file in .bash_profile .bashrc; do
+  if [[ -f $HOME/$startup_file && ! -L $HOME/$startup_file ]]; then
+    startup_backup=$HOME/$startup_file.before-dotfiles
+    [[ ! -e $startup_backup && ! -L $startup_backup ]] || {
+      printf 'Refusing to replace existing %s\n' "$startup_backup" >&2
+      return 1 2>/dev/null || exit 1
+    }
+    mv -- "$HOME/$startup_file" "$startup_backup"
+  fi
+done
+unset startup_file startup_backup
 ./bstow --dry-run -v -t "$HOME" stow \
   git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
 ./bstow -v -t "$HOME" stow \
@@ -23,6 +34,10 @@ source "$HOME/.bashrc"
 hash -r
 dotfiles-check
 ```
+
+The setup sequence preserves distribution-provided regular `.bash_profile`
+and `.bashrc` files with the `.before-dotfiles` suffix. It refuses to overwrite
+an existing backup or to adopt a foreign symlink.
 
 `setup-tools` installs the selected daily tools from exact official release
 files. `setup-asdf` installs the project runtimes in `versions.env`, pins each
@@ -51,8 +66,8 @@ the layout consumed by `setup-tools --from`.
 
 ```bash
 set -euo pipefail
-source versions.env
 source validation.env
+source versions.env
 archive_root=${1:-"$HOME/tool-archives"}
 
 download() {
@@ -127,6 +142,17 @@ cd "$HOME/github.com/surbanski/dotfiles"
   gh kyverno task trivy k9s kubeconform shellcheck oh-my-posh \
   kubectx kubens rg zoxide uv nvim kubectl helm
 
+for startup_file in .bash_profile .bashrc; do
+  if [[ -f $HOME/$startup_file && ! -L $HOME/$startup_file ]]; then
+    startup_backup=$HOME/$startup_file.before-dotfiles
+    [[ ! -e $startup_backup && ! -L $startup_backup ]] || {
+      printf 'Refusing to replace existing %s\n' "$startup_backup" >&2
+      return 1 2>/dev/null || exit 1
+    }
+    mv -- "$HOME/$startup_file" "$startup_backup"
+  fi
+done
+unset startup_file startup_backup
 ./bstow --dry-run -v -t "$HOME" stow \
   git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
 ./bstow -v -t "$HOME" stow \
@@ -321,6 +347,19 @@ Run the repository checks through Task:
 bash scripts/install-validation-tool task
 .cache/validation-tools/bin/task validate
 ```
+
+Repository-owned shell sources are linted from their real checked-in paths.
+The Bash startup also conditionally loads distribution-owned Midnight
+Commander, bash-completion and fzf files. Their paths differ by supported
+platform, so each distribution qualification uses the actual packaged files
+and exercises startup there; upstream package contents are not copied into the
+repository or replaced with empty lint fixtures. Generated Python and uv
+activation scripts are exercised in isolated prompt tests.
+
+`~/.fzf.bash` and `~/.extras` are optional private inputs outside repository
+static analysis. The supported contract is that they are loaded only when
+present and that a load failure emits a warning without aborting startup. Their
+contents remain the user's responsibility.
 
 Workflow validation runs locally without GitHub credentials. Set `GH_TOKEN`,
 `GITHUB_TOKEN` or use an active `gh` login to additionally enable Zizmor's

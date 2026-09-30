@@ -25,6 +25,12 @@ case $TEST_SCENARIO in
     load_aliases
     dotfiles-check
     ;;
+  check-mc-wrapper)
+    load_aliases
+    shopt -s expand_aliases
+    alias mc='command mc'
+    dotfiles-check
+    ;;
   editor)
     load_aliases
     v 'file with space'
@@ -104,6 +110,15 @@ case $TEST_SCENARIO in
     load_bashrc
     declare -F __fzf_test_binding >/dev/null
     printf 'fzf-init=yes\n'
+    ;;
+  stale-vz)
+    vz() { printf 'stale-vz\n'; }
+    vz >/dev/null
+    load_aliases
+    [[ $(type -t vz || true) != function ]]
+    declare -F v >/dev/null
+    declare -F vold >/dev/null
+    printf 'editors=v,vold vz=removed\n'
     ;;
   *)
     printf 'unknown test scenario: %s\n' "$TEST_SCENARIO" >&2

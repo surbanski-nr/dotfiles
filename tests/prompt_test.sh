@@ -4,6 +4,7 @@ if [[ ${PROMPT_TEST_MODE:-} == interactive ]]; then
   set -eo pipefail
 
   : "${PROMPT_TEST_OMP:?}"
+  : "${PROMPT_TEST_PYTHON:?}"
   : "${PROMPT_TEST_REPO:?}"
   : "${PROMPT_TEST_ROOT:?}"
   config=$PROMPT_TEST_REPO/oh-my-posh/.oh-my-posh.omp.json
@@ -83,7 +84,7 @@ if [[ ${PROMPT_TEST_MODE:-} == interactive ]]; then
   _dotfiles_sync_virtual_env_prompt
 
   unset VIRTUAL_ENV VIRTUAL_ENV_PROMPT
-  uv run --no-project --python "$(command -v python3)" \
+  uv run --no-project --python "$PROMPT_TEST_PYTHON" \
     python -c 'print("uv run completed")' | command grep -qx 'uv run completed'
   [[ -z ${VIRTUAL_ENV:-} ]] || fail 'uv run changed the parent VIRTUAL_ENV'
   assert_not_contains "$(render_prompt)" '(uv env)'
@@ -125,11 +126,13 @@ trap cleanup EXIT
 mkdir -p "$test_root/home" "$test_root/project/.venv" "$test_root/poison-bin"
 ln -s "$repo_dir/oh-my-posh/.oh-my-posh.omp.json" \
   "$test_root/home/.oh-my-posh.omp.json"
-python3 -m venv "$test_root/python env"
-uv venv --no-project --python "$(command -v python3)" "$test_root/uv env" >/dev/null
+python_path=$(python3 -c 'import os, sys; print(os.path.realpath(sys.executable))')
+"$python_path" -m venv "$test_root/python env"
+uv venv --no-project --python "$python_path" "$test_root/uv env" >/dev/null
 
 PROMPT_TEST_MODE=interactive \
 PROMPT_TEST_OMP=$(command -v oh-my-posh) \
+PROMPT_TEST_PYTHON=$python_path \
 PROMPT_TEST_REPO=$repo_dir \
 PROMPT_TEST_ROOT=$test_root \
 HOME="$test_root/home" \

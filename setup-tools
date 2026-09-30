@@ -18,13 +18,16 @@ EOF
 
 main() {
   local from_dir=
+  local from_requested=0
   local -a requested=()
 
   while (($#)); do
     case $1 in
       --from)
         (($# >= 2)) || setup_die '--from requires a directory'
-        [[ -z $from_dir ]] || setup_die '--from may be supplied only once'
+        ((from_requested == 0)) || setup_die '--from may be supplied only once'
+        [[ -n $2 ]] || setup_die '--from requires a nonempty directory'
+        from_requested=1
         from_dir=$2
         shift 2
         ;;
@@ -37,7 +40,7 @@ main() {
     esac
   done
 
-  if [[ -n $from_dir && ${#requested[@]} -eq 0 ]]; then
+  if ((from_requested == 1 && ${#requested[@]} == 0)); then
     setup_die '--from requires at least one tool name'
   fi
   if ((${#requested[@]} == 0)); then
@@ -53,11 +56,12 @@ main() {
 }
 
 load_setup_config() {
-  # shellcheck source=versions.env
-  source "$REPO_DIR/versions.env"
   # Task deliberately keeps its only editable pin in validation.env.
   # shellcheck source=validation.env
   source "$REPO_DIR/validation.env"
+  # Daily tools, including ShellCheck, are selected only by versions.env.
+  # shellcheck source=versions.env
+  source "$REPO_DIR/versions.env"
   setup_validate_versions
   setup_validate_version TASK_VERSION "$TASK_VERSION"
   setup_validate_digest TASK_SHA256 "$TASK_SHA256"
@@ -344,13 +348,46 @@ installation_status() {
   return 11
 }
 
-managed_link_target() {
-  local command_name=$1
-  local target=$2
+state_owns_link_target() {
+  local name=$1
+  local command_name=$2
+  local target=$3
+  local version
+  local state
+  local entry
+  local actual
 
-  case $target in
-    "$command_name-"*) return 0 ;;
+  case "$command_name:$target" in
+    nvim:nvim-*/bin/nvim)
+      version=${target#nvim-}
+      version=${version%/bin/nvim}
+      ;;
+    "$command_name:$command_name-"*)
+      version=${target#"$command_name-"}
+      ;;
+    *) return 1 ;;
   esac
+  [[ -n $version && $version != */* ]] || return 1
+  state=$(state_path "$name" "$version")
+  read_state "$state" || return 1
+  [[ $STATE_STATUS == complete ]] || return 1
+  artifact_spec "$name" "$version"
+  for entry in "${SPEC_LINKS[@]}"; do
+    [[ $entry == "$command_name:$target" ]] || continue
+    destinations_exist || return 1
+    actual=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}") || return 1
+    [[ $actual == "$STATE_CONTENT" ]]
+    return
+  done
+  return 1
+}
+
+managed_link_target() {
+  local name=$1
+  local command_name=$2
+  local target=$3
+
+  state_owns_link_target "$name" "$command_name" "$target" && return 0
   case "$command_name:$target" in
     nvim:nvim-v*/bin/nvim) return 0 ;;
     nvim:"$HOME"/.local/opt/nvim-*/bin/nvim) return 0 ;;
@@ -360,7 +397,8 @@ managed_link_target() {
 }
 
 preflight_link() {
-  local entry=$1
+  local name=$1
+  local entry=$2
   local command_name=${entry%%:*}
   local link="$BIN_DIR/$command_name"
   local provider
@@ -368,7 +406,7 @@ preflight_link() {
 
   if [[ -L $link ]]; then
     target=$(readlink -- "$link")
-    managed_link_target "$command_name" "$target" ||
+    managed_link_target "$name" "$command_name" "$target" ||
       setup_die "refusing foreign link: $link -> $target"
   elif [[ -e $link ]]; then
     setup_die "refusing unmanaged path: $link"
@@ -417,7 +455,7 @@ preflight() {
       esac
     done < <(tool_versions "$name")
     artifact_spec "$name" "$(tool_versions "$name" | head -n 1)"
-    for entry in "${SPEC_LINKS[@]}"; do preflight_link "$entry"; done
+    for entry in "${SPEC_LINKS[@]}"; do preflight_link "$name" "$entry"; done
   done
   mkdir -p "$BIN_DIR" "$STATE_DIR/locks"
 }

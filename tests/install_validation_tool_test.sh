@@ -127,4 +127,47 @@ run_installer yamllint
 [[ $("$tools_dir/bin/yamllint" --version) == 'yamllint 2.0.0' ]] ||
   fail 'activated Yamllint does not run from its final environment'
 
+task_version=3.53.1
+task_candidate_dir=$test_root/task-candidate
+mkdir "$task_candidate_dir"
+cat >"$task_candidate_dir/task" <<EOF
+#!/usr/bin/env bash
+printf 'Task version: v$task_version\\n'
+EOF
+chmod +x "$task_candidate_dir/task"
+task_archive=$test_root/task.tar.gz
+tar -czf "$task_archive" -C "$task_candidate_dir" task
+task_hash=$(sha256sum "$task_archive")
+task_hash=${task_hash%% *}
+cat >"$test_repo/validation.env" <<EOF
+TASK_VERSION=$task_version
+TASK_SHA256=$task_hash
+EOF
+cat >"$test_bin/task" <<EOF
+#!/usr/bin/env bash
+printf 'Task version: v$task_version\\n'
+EOF
+chmod +x "$test_bin/task"
+
+TEST_DOWNLOAD_FILE=$task_archive
+TEST_DOWNLOAD_FAIL=0
+export TEST_DOWNLOAD_FILE TEST_DOWNLOAD_FAIL
+run_installer task
+[[ $status -eq 0 ]] || fail "matching external Task blocked private installation: $output"
+[[ -x $tools_dir/bin/task ]] || fail 'matching external Task was reused instead of installing privately'
+[[ $("$tools_dir/bin/task" --version) == "Task version: v$task_version" ]] ||
+  fail 'privately installed Task does not run'
+
+cat >"$test_bin/task" <<'EOF'
+#!/usr/bin/env bash
+printf 'Task version: v0.0.0\n'
+EOF
+chmod +x "$test_bin/task"
+TEST_DOWNLOAD_FAIL=1
+export TEST_DOWNLOAD_FAIL
+run_installer task
+[[ $status -eq 0 ]] || fail "valid private Task was not reused: $output"
+[[ $("$tools_dir/bin/task" --version) == "Task version: v$task_version" ]] ||
+  fail 'external Task replaced the valid private Task'
+
 printf 'Validation tool installer tests passed\n'

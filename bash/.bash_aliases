@@ -34,6 +34,23 @@ _dotfiles_check_tool() {
   return 1
 }
 
+_dotfiles_check_backing_command() {
+  local command_name=$2
+  local kind path
+
+  if ! path=$(type -P "$command_name" 2>/dev/null); then
+    printf '  MISSING %s\n' "$1"
+    return 1
+  fi
+  kind=$(type -t "$command_name")
+  if [[ $kind == alias || $kind == function ]]; then
+    printf '  OK      %-22s %s: %s (shell wrapper: %s)\n' \
+      "$1" "$command_name" "$path" "$kind"
+  else
+    printf '  OK      %-22s %s: %s\n' "$1" "$command_name" "$path"
+  fi
+}
+
 _dotfiles_check_version() {
   local label=$1
   local command_name=$2
@@ -78,24 +95,24 @@ dotfiles-check() (
     manifest_dir=$(CDPATH='' cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
   fi
   if [[ -r $manifest_dir/versions.env && -r $manifest_dir/validation.env ]]; then
-    # shellcheck source=../versions.env
-    source "$manifest_dir/versions.env"
     # shellcheck source=../validation.env
     source "$manifest_dir/validation.env"
+    # shellcheck source=../versions.env
+    source "$manifest_dir/versions.env"
   fi
 
   printf 'Required:\n'
   _dotfiles_check_tool git git || missing=1
   _dotfiles_check_tool nvim nvim || missing=1
   _dotfiles_check_tool tmux tmux || missing=1
-  _dotfiles_check_tool fzf fzf || missing=1
   _dotfiles_check_tool less less || missing=1
-  _dotfiles_check_tool mc mc || missing=1
+  _dotfiles_check_backing_command mc mc || missing=1
   _dotfiles_check_tool node node || missing=1
   _dotfiles_check_tool Python python python3 || missing=1
   _dotfiles_check_tool ripgrep rg || missing=1
 
   printf '\nOptional integrations:\n'
+  _dotfiles_check_tool fzf fzf || true
   _dotfiles_check_tool bat bat batcat || true
   _dotfiles_check_tool fd fd fdfind || true
   _dotfiles_check_tool zoxide zoxide || true
@@ -178,11 +195,7 @@ ffv() {
 }
 
 unalias vz vold v vi vim zz kc kn k tp t 2>/dev/null || true
-unset -f vi vim 2>/dev/null || true
-vz() {
-  _dotfiles_require vz nvim || return
-  NVIM_APPNAME=nvim-lazy command nvim "$@"
-}
+unset -f vz vi vim 2>/dev/null || true
 vold() {
   _dotfiles_require vold nvim || return
   NVIM_APPNAME=old-nvim command nvim "$@"

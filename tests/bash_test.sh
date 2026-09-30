@@ -57,6 +57,16 @@ assert_contains "$check_output" 'MISSING nvim'
 assert_contains "$check_output" 'MISSING zoxide'
 
 link_command nvim
+for command_name in node python rg; do
+  link_command "$command_name"
+done
+wrapper_output=$(
+  run_scenario check-mc-wrapper \
+    env HOME="$test_root" DOTFILES="$test_root/no-manifest" PATH="$test_root/bin"
+)
+assert_contains "$wrapper_output" 'mc: '
+assert_contains "$wrapper_output" '(shell wrapper: alias)'
+
 editor_output=$(
   TEST_COMMAND_MODE=editor run_scenario editor \
     env HOME="$test_root" PATH="$test_root/bin"
@@ -225,5 +235,12 @@ fzf_output=$(
     bash --noprofile --norc -i
 )
 assert_contains "$fzf_output" 'fzf-init=yes'
+
+stale_vz_output=$(
+  run_scenario stale-vz \
+    env HOME="$reload_home" PATH="$test_root/bin:$original_path"
+)
+[[ $stale_vz_output == 'editors=v,vold vz=removed' ]] ||
+  fail 'alias reload did not remove stale vz while preserving v and vold'
 
 printf 'Bash tests passed\n'

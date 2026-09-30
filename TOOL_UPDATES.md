@@ -15,7 +15,9 @@ local changes, copy them deliberately and inspect the resulting diff:
 candidate_root=$(mktemp -d "$HOME/dotfiles-candidate.XXXXXX")
 git clone --local --no-hardlinks "$PWD" "$candidate_root/current"
 git diff --binary HEAD -- . ':!.cache' >"$candidate_root/working.patch"
-git -C "$candidate_root/current" apply "$candidate_root/working.patch"
+if [[ -s $candidate_root/working.patch ]]; then
+  git -C "$candidate_root/current" apply "$candidate_root/working.patch"
+fi
 git ls-files --others --exclude-standard -z |
   tar --null --files-from=- -cf - |
   tar -C "$candidate_root/current" -xf -
@@ -216,15 +218,25 @@ timeout --signal=TERM --kill-after=10s 180s \
   '+Nvim2Check' '+checkhealth' '+sleep 10' \
   "+silent write! $evidence_dir/checkhealth.txt" \
   "+redir! > $evidence_dir/messages.txt" '+silent messages' '+redir END' \
+  '+qa'
+timeout --signal=TERM --kill-after=10s 180s \
+  env NVIM_APPNAME=nvim2 nvim --headless \
   '+Mason' '+sleep 2' \
-  "+silent write! $evidence_dir/mason.txt" \
+  "+silent write! $evidence_dir/mason.txt" '+qa'
+timeout --signal=TERM --kill-after=10s 180s \
+  env NVIM_APPNAME=nvim2 nvim --headless \
+  '+ConformInfo' "+silent write! $evidence_dir/conform.txt" '+qa'
+timeout --signal=TERM --kill-after=10s 180s \
+  env NVIM_APPNAME=nvim2 nvim --headless \
+  '+checkhealth vim.lsp' '+sleep 2' \
+  "+silent write! $evidence_dir/lsp.txt" \
   '+qa'
 cp "${XDG_STATE_HOME:-$HOME/.local/state}/nvim2/mason.log" \
   "$evidence_dir/mason.log"
 ```
 
-Also capture `:ConformInfo`, `vim.lsp` and custom health output when reviewing
-the result. Review every warning and error. Record optional unavailable host
+The commands above capture `:ConformInfo`, `:checkhealth vim.lsp` and custom health output
+for review. Review every warning and error. Record optional unavailable host
 services instead of hiding their messages. Open representative Python, Lua,
 Bash, TypeScript/TSX, Terraform, Ansible, Helm and YAML files and check LSP,
 diagnostics, formatting, highlighting, folds and keys. Measure comparable

@@ -34,13 +34,6 @@ tool_version() {
   esac
 }
 
-installed_version() {
-  local executable
-
-  executable=$(command -v "$1") || return 1
-  tool_version "$1" "$executable"
-}
-
 expected_version() {
   case "$1" in
     actionlint) printf '%s\n' "$ACTIONLINT_VERSION" ;;
@@ -54,8 +47,8 @@ expected_version() {
 }
 
 version=$(expected_version "$tool")
-if command -v "$tool" >/dev/null 2>&1 &&
-  [[ $(installed_version "$tool") == "$version" ]]; then
+if [[ -x $bin_dir/$tool ]] &&
+  [[ $(tool_version "$tool" "$bin_dir/$tool") == "$version" ]]; then
   exit 0
 fi
 
@@ -193,5 +186,5 @@ case "$tool" in
     ;;
 esac
 
-[[ $(installed_version "$tool") == "$version" ]] ||
+[[ $(tool_version "$tool" "$bin_dir/$tool") == "$version" ]] ||
   die "$tool $version installation failed"

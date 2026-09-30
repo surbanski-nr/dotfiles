@@ -118,6 +118,7 @@ dotfiles.bundle
 node-vVERSION-linux-x64.tar.xz
 nvim-linux-x86_64.tar.gz
 nvim2-data.tar.gz
+nvim2-release
 os-packages.txt
 release.env
 ripgrep-VERSION-x86_64-unknown-linux-musl.tar.gz
@@ -173,128 +174,30 @@ Install operating-system runtime packages from approved repositories while
 they are reachable. Transfer the matching artifact, then disconnect external
 networking. Stop all Nvim2 processes before activation.
 
-Verify the outer archive digest recorded by the release service. After
-extracting it, verify its internal files and identity:
+Verify the outer archive digest recorded by the release service. Extract it,
+enter the artifact directory and run the installer shipped in that artifact:
 
 ```bash
 cd /path/to/platform-artifact
 sha256sum --check --strict SHA256SUMS
-source ./release.env
-test "$HOME" = "$TARGET_HOME"
-test "$(id -u)" = "$TARGET_UID"
-test "$(uname -m)" = x86_64
-test "$(readlink -f "$(command -v python3)")" = "$PYTHON_PATH"
-test "$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" = \
-  "$PYTHON_VERSION"
+bash ./nvim2-release install "$PWD"
 ```
 
-Preserve the current paths for rollback, and keep an existing regular data
-directory as its own retained release:
+The installer validates all checksums, release identity, OS, architecture,
+HOME, UID and Python ABI. It extracts Neovim, Node.js, ripgrep and Nvim2 data
+into hidden staging paths on the target filesystem, validates the staged
+executables and configuration, and runs a `bstow` dry run before changing any
+active path. An existing versioned destination is reused only when it exactly
+matches the staged content. A differing destination, regular executable,
+unknown link or unknown configuration source is a conflict.
 
-```bash
-mkdir -p "$HOME/.local/share/nvim2-releases" "$HOME/.local/state"
-if [[ -d "$HOME/.local/share/nvim2" && ! -L "$HOME/.local/share/nvim2" ]]; then
-  imported="$HOME/.local/share/nvim2-releases/imported-$(date -u +%Y%m%d-%H%M%S)"
-  mv "$HOME/.local/share/nvim2" "$imported"
-  ln -s "$imported" "$HOME/.local/share/nvim2"
-fi
-
-record_target() {
-  if [[ -L $1 ]]; then
-    readlink -f -- "$1"
-  elif [[ -e $1 ]]; then
-    printf 'refusing unmanaged path: %s\n' "$1" >&2
-    return 1
-  else
-    printf 'ABSENT\n'
-  fi
-}
-
-previous_init=$(record_target "$HOME/.config/nvim2/init.lua")
-case $previous_init in
-  ABSENT) previous_repo=ABSENT ;;
-  */nvim2/.config/nvim2/init.lua)
-    previous_repo=${previous_init%/nvim2/.config/nvim2/init.lua}
-    ;;
-  *) printf 'unknown Nvim2 configuration source: %s\n' "$previous_init" >&2; exit 1 ;;
-esac
-
-rollback_file="$HOME/.local/state/nvim2-release-rollback.env"
-printf '%s\n' \
-  "PREVIOUS_DATA=$(printf %q "$(record_target "$HOME/.local/share/nvim2")")" \
-  "PREVIOUS_NVIM=$(printf %q "$(record_target "$HOME/bin/nvim")")" \
-  "PREVIOUS_NODE=$(printf %q "$(record_target "$HOME/bin/node")")" \
-  "PREVIOUS_NPM=$(printf %q "$(record_target "$HOME/bin/npm")")" \
-  "PREVIOUS_NPX=$(printf %q "$(record_target "$HOME/bin/npx")")" \
-  "PREVIOUS_COREPACK=$(printf %q "$(record_target "$HOME/bin/corepack")")" \
-  "PREVIOUS_RG=$(printf %q "$(record_target "$HOME/bin/rg")")" \
-  "PREVIOUS_REPO=$(printf %q "$previous_repo")" \
-  >"$rollback_file"
-```
-
-Extract each component to a new versioned path. Clone the matching commit from
-the bundle and use `bstow` for the Nvim2 configuration:
-
-```bash
-nvim_dir="$HOME/bin/nvim-$NVIM_VERSION"
-node_dir="$HOME/bin/nodejs-$NODE_VERSION"
-rg_path="$HOME/bin/rg-$RG_VERSION"
-release_dir="$HOME/.local/share/nvim2-releases/$RELEASE_ID"
-repo="$HOME/github.com/surbanski/dotfiles-$DOTFILES_COMMIT"
-
-mkdir -p "$nvim_dir" "$node_dir" "$release_dir" "$(dirname "$repo")"
-tar -xzf "$NVIM_ARCHIVE" -C "$nvim_dir" --strip-components=1
-tar -xJf "$NODE_ARCHIVE" -C "$node_dir" --strip-components=1
-rg_stage=$(mktemp -d)
-tar -xzf "$RG_ARCHIVE" -C "$rg_stage"
-install -m 0755 \
-  "$rg_stage/ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl/rg" "$rg_path"
-find "$rg_stage" -depth -delete
-tar -xzf nvim2-data.tar.gz -C "$release_dir"
-git clone dotfiles.bundle "$repo"
-git -C "$repo" checkout --detach "$DOTFILES_COMMIT"
-(
-  cd "$repo"
-  ./bstow --dry-run --force -t "$HOME" stow nvim2
-  ./bstow --force -t "$HOME" stow nvim2
-)
-printf 'CURRENT_REPO=%q\n' "$repo" >>"$rollback_file"
-```
-
-Check the extracted executables directly before switching any canonical link:
-
-```bash
-"$nvim_dir/bin/nvim" --version
-"$node_dir/bin/node" --version
-"$rg_path" --version
-test -x "$release_dir/mason/bin/lua-language-server"
-```
-
-Activate with temporary relative links and atomic renames. Existing links must
-point to known managed versioned paths. Do not replace a regular file or an
-unknown link.
-
-```bash
-cd "$HOME/bin"
-ln -s "nvim-$NVIM_VERSION/bin/nvim" .nvim.release
-ln -s "nodejs-$NODE_VERSION/bin/node" .node.release
-ln -s "nodejs-$NODE_VERSION/bin/npm" .npm.release
-ln -s "nodejs-$NODE_VERSION/bin/npx" .npx.release
-ln -s "nodejs-$NODE_VERSION/bin/corepack" .corepack.release
-ln -s "rg-$RG_VERSION" .rg.release
-mv -T .nvim.release nvim
-mv -T .node.release node
-mv -T .npm.release npm
-mv -T .npx.release npx
-mv -T .corepack.release corepack
-mv -T .rg.release rg
-cd "$HOME/.local/share"
-ln -s "nvim2-releases/$RELEASE_ID" .nvim2.release
-mv -T .nvim2.release nvim2
-hash -r
-NVIM_APPNAME=nvim2 "$HOME/bin/nvim" --headless '+qa'
-NVIM2_CHECK_TOOLS=1 bash "$HOME/.config/nvim2/tests/check.sh"
-```
+After the full preflight, the installer promotes new versioned paths, records
+the previous complete set in mode-0600 state and atomically switches the
+configuration, data and executable links. It runs the tool-enabled Nvim2 check
+after activation. Any activation or check failure restores the previous set
+and removes staging and newly promoted paths. Repeating the command for an
+already active release is safe. A plugin-only release can reuse byte-identical
+runtime versions without extracting over them.
 
 Older managed releases may keep executable roots under `~/.local/opt`. Their
 recorded link targets remain valid during migration; do not delete them until
@@ -302,10 +205,8 @@ the new release and rollback have both passed.
 
 ## Roll back
 
-Stop all Nvim2 processes. Source the saved rollback file, verify every target
-exists, and atomically restore the complete set of links. Restore the matching
-dotfiles commit as well. Do not roll back only the editor binary against newer
-plugin or Mason data.
+Stop all Nvim2 processes, then use the script from the active artifact or its
+matching retained repository:
 
 The release switch replaces configuration and `~/.local/share/nvim2`, but it
 does not replace `~/.local/state/nvim2`. That retained state contains ShaDa,
@@ -314,45 +215,14 @@ the host backup policy does not already cover `~/.local/state`; never package
 a developer's project marks into a release artifact.
 
 ```bash
-source "$HOME/.local/state/nvim2-release-rollback.env"
-for target in "$PREVIOUS_DATA" "$PREVIOUS_NVIM" "$PREVIOUS_NODE" \
-  "$PREVIOUS_NPM" "$PREVIOUS_NPX" "$PREVIOUS_COREPACK" "$PREVIOUS_RG"; do
-  [[ $target == ABSENT || -e $target ]]
-done
-[[ $PREVIOUS_REPO == ABSENT || -x $PREVIOUS_REPO/bstow ]]
-
-restore_link() {
-  local link=$1 target=$2 temporary=$3 relative
-  if [[ $target == ABSENT ]]; then
-    unlink "$link"
-    return
-  fi
-  relative=$(realpath --relative-to="$(dirname "$link")" "$target")
-  ln -s "$relative" "$temporary"
-  mv -T "$temporary" "$link"
-}
-
-cd "$HOME/.local/share"
-restore_link "$HOME/.local/share/nvim2" "$PREVIOUS_DATA" .nvim2.rollback
-cd "$HOME/bin"
-restore_link "$HOME/bin/nvim" "$PREVIOUS_NVIM" .nvim.rollback
-restore_link "$HOME/bin/node" "$PREVIOUS_NODE" .node.rollback
-restore_link "$HOME/bin/npm" "$PREVIOUS_NPM" .npm.rollback
-restore_link "$HOME/bin/npx" "$PREVIOUS_NPX" .npx.rollback
-restore_link "$HOME/bin/corepack" "$PREVIOUS_COREPACK" .corepack.rollback
-restore_link "$HOME/bin/rg" "$PREVIOUS_RG" .rg.rollback
-(
-  cd "$CURRENT_REPO"
-  ./bstow -t "$HOME" unstow nvim2
-)
-if [[ $PREVIOUS_REPO != ABSENT ]]; then
-  (
-    cd "$PREVIOUS_REPO"
-    ./bstow --force -t "$HOME" stow nvim2
-  )
-fi
-hash -r
+bash ./nvim2-release rollback
 ```
+
+Rollback first verifies that every active path still belongs to the recorded
+release. It then restores the matching configuration, data and all runtime
+links as one set. A regular data directory imported by the first installation
+is restored as a regular directory, not converted permanently into a link. Do
+not roll back only the editor binary against newer plugin or Mason data.
 
 Repeat the full offline check and representative editing. Keep both releases
 until that verification succeeds. There is no purge command.

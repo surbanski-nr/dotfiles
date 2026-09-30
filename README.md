@@ -17,6 +17,17 @@ user. Only `setup-system` uses `sudo`:
 ./setup-tools
 ./setup-asdf
 
+for startup_file in .bash_profile .bashrc; do
+  if [[ -f $HOME/$startup_file && ! -L $HOME/$startup_file ]]; then
+    startup_backup=$HOME/$startup_file.before-dotfiles
+    [[ ! -e $startup_backup && ! -L $startup_backup ]] || {
+      printf 'Refusing to replace existing %s\n' "$startup_backup" >&2
+      return 1 2>/dev/null || exit 1
+    }
+    mv -- "$HOME/$startup_file" "$startup_backup"
+  fi
+done
+unset startup_file startup_backup
 ./bstow --dry-run -v -t "$HOME" stow \
   git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
 ./bstow -v -t "$HOME" stow \
@@ -31,6 +42,10 @@ dotfiles-check
 under `$HOME/.local/state/bstow`, and protects regular files and foreign links.
 Use `restow` after pulling deletions or renames. Preview `--force` before using
 it to adopt links from an older checkout.
+
+The setup sequence preserves distribution-provided regular `.bash_profile`
+and `.bashrc` files with the `.before-dotfiles` suffix. It refuses to overwrite
+an existing backup or to adopt a foreign symlink.
 
 Existing Homebrew installations and private shell configuration are left
 alone. Setup does not install Homebrew or initialize it from Bash.

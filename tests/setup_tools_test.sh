@@ -138,6 +138,96 @@ assert_link "$test_home/bin/nvim" "nvim-$NVIM_VERSION/bin/nvim"
 "$test_home/bin/k9s" --version | grep -F "$K9S_VERSION" >/dev/null
 "$test_home/bin/uvx" --version | grep -F "$UV_VERSION" >/dev/null
 
+set +e
+empty_from_output=$(HOME="$test_root/empty-from-home" PATH="$test_root/shim:$PATH" \
+  "$test_repository/setup-tools" --from '' k9s 2>&1)
+empty_from_status=$?
+set -e
+[[ $empty_from_status -ne 0 ]] || fail 'empty --from directory was accepted'
+[[ $empty_from_output == *'--from requires a nonempty directory'* ]] ||
+  fail 'empty --from directory did not report an argument error'
+[[ $empty_from_output != *'curl must not run'* ]] || fail 'empty --from attempted a download'
+[[ ! -e $test_root/empty-from-home/bin && ! -e $test_root/empty-from-home/.local ]] ||
+  fail 'empty --from changed the target home'
+
+set +e
+repeated_from_output=$(HOME="$test_root/repeated-from-home" PATH="$test_root/shim:$PATH" \
+  "$test_repository/setup-tools" --from "$archive_root" --from "$archive_root" k9s 2>&1)
+repeated_from_status=$?
+set -e
+[[ $repeated_from_status -ne 0 ]] || fail 'repeated --from option was accepted'
+[[ $repeated_from_output == *'--from may be supplied only once'* ]] ||
+  fail 'repeated --from option did not report an argument error'
+[[ ! -e $test_root/repeated-from-home/bin && ! -e $test_root/repeated-from-home/.local ]] ||
+  fail 'repeated --from changed the target home'
+
+foreign_home=$test_root/foreign-home
+mkdir -p "$foreign_home/bin"
+write_fake "$foreign_home/bin/k9s-manual" k9s manual
+ln -s k9s-manual "$foreign_home/bin/k9s"
+foreign_hash=$(sha256sum "$foreign_home/bin/k9s-manual")
+set +e
+foreign_output=$(HOME="$foreign_home" "$test_repository/setup-tools" \
+  --from "$archive_root" k9s 2>&1)
+foreign_status=$?
+set -e
+[[ $foreign_status -ne 0 ]] || fail 'foreign version-like link was accepted'
+[[ $foreign_output == *'refusing foreign link'* ]] || fail 'foreign link conflict was not reported'
+assert_link "$foreign_home/bin/k9s" k9s-manual
+[[ $(sha256sum "$foreign_home/bin/k9s-manual") == "$foreign_hash" ]] ||
+  fail 'foreign link target was changed'
+
+pin_repository=$test_root/pin-repository
+pin_archives=$test_root/pin-archives
+pin_home=$test_root/pin-home
+pin_work=$test_root/pin-work
+make_test_repo "$pin_repository"
+daily_shellcheck=0.10.0
+validation_shellcheck=0.11.0
+write_fake "$pin_work/shellcheck-v$daily_shellcheck/shellcheck" shellcheck "$daily_shellcheck"
+mkdir -p "$pin_archives/shellcheck/$daily_shellcheck"
+tar -C "$pin_work" -cJf \
+  "$pin_archives/shellcheck/$daily_shellcheck/shellcheck-v$daily_shellcheck.linux.x86_64.tar.xz" \
+  "shellcheck-v$daily_shellcheck"
+daily_shellcheck_digest=$(sha256sum \
+  "$pin_archives/shellcheck/$daily_shellcheck/shellcheck-v$daily_shellcheck.linux.x86_64.tar.xz")
+daily_shellcheck_digest=${daily_shellcheck_digest%% *}
+printf 'SHELLCHECK_VERSION=%s\nSHELLCHECK_SHA256=%s\n' \
+  "$daily_shellcheck" "$daily_shellcheck_digest" >>"$pin_repository/versions.env"
+printf 'SHELLCHECK_VERSION=%s\nSHELLCHECK_SHA256=%064d\n' \
+  "$validation_shellcheck" 0 >>"$pin_repository/validation.env"
+HOME="$pin_home" "$pin_repository/setup-tools" --from "$pin_archives" shellcheck
+assert_link "$pin_home/bin/shellcheck" "shellcheck-$daily_shellcheck"
+"$pin_home/bin/shellcheck" --version | grep -F "$daily_shellcheck" >/dev/null
+
+for invalid_list in '' '   '; do
+  list_repository=$test_root/list-repository-${#invalid_list}
+  list_archives=$test_root/list-archives-${#invalid_list}
+  list_home=$test_root/list-home-${#invalid_list}
+  make_test_repo "$list_repository"
+  make_archives "$list_repository" "$list_archives"
+  printf "TERRAFORM_VERSIONS='%s'\n" "$invalid_list" >>"$list_repository/versions.env"
+  set +e
+  list_output=$(HOME="$list_home" "$list_repository/setup-tools" \
+    --from "$list_archives" k9s 2>&1)
+  list_status=$?
+  set -e
+  [[ $list_status -ne 0 ]] || fail 'empty project version list was accepted'
+  [[ $list_output == *'TERRAFORM_VERSIONS is empty'* ]] ||
+    fail 'empty project version list did not report its variable'
+  [[ ! -e $list_home/bin && ! -e $list_home/.local ]] ||
+    fail 'empty project version list changed the target home'
+done
+
+single_repository=$test_root/single-list-repository
+single_archives=$test_root/single-list-archives
+single_home=$test_root/single-list-home
+make_test_repo "$single_repository"
+make_archives "$single_repository" "$single_archives"
+printf "TERRAFORM_VERSIONS='1.16.4'\n" >>"$single_repository/versions.env"
+HOME="$single_home" "$single_repository/setup-tools" --from "$single_archives" k9s
+assert_link "$single_home/bin/k9s" "k9s-$K9S_VERSION"
+
 find "$archive_root" -depth -delete
 HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" PATH="$test_root/shim:$PATH" \
   "$test_repository/setup-tools" --from "$archive_root" k9s gh uv nvim

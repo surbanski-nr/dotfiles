@@ -802,7 +802,30 @@ remove_link() {
     local dest=$1
     local expected_src=$2
     local parent_dir
+    local parent_symlink
     local target
+
+    if parent_symlink=$(find_parent_symlink "$dest"); then
+        target=$(readlink -- "$parent_symlink") || return 1
+        if ! parent_symlink_matches_package "$expected_src" "$dest" "$parent_symlink"; then
+            error "Refusing to remove through foreign parent symlink: $parent_symlink -> $target"
+            return 1
+        fi
+        log "Removing managed directory link: $parent_symlink"
+        if [[ $DRY_RUN -eq 1 ]]; then
+            if [[ ! -v PREVIEWED_PARENT_SYMLINKS[$parent_symlink] ]]; then
+                preview "Would remove managed directory symlink: $parent_symlink -> $target"
+                PREVIEWED_PARENT_SYMLINKS[$parent_symlink]=1
+            fi
+            return 0
+        fi
+        if ! unlink "$parent_symlink"; then
+            error "Failed to remove managed directory symlink: $parent_symlink"
+            return 1
+        fi
+        success "Removed managed directory symlink: $parent_symlink"
+        return 0
+    fi
 
     if [[ ! -L $dest ]]; then
         if [[ $DRY_RUN -eq 1 ]]; then

@@ -283,7 +283,9 @@ local function run()
   require('telescope.actions').close(prompt_buffer)
 
   local telescope = require 'custom.telescope'
-  local dotfiles_root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(vim.fn.stdpath 'config')))
+  local init_path = vim.fs.joinpath(vim.fn.stdpath 'config', 'init.lua')
+  local resolved_init = vim.uv.fs_realpath(init_path) or init_path
+  local dotfiles_root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(resolved_init))))
   local file_options = telescope.file_options { cwd = dotfiles_root }
   local files = vim.system(file_options.find_command, { cwd = dotfiles_root, text = true }):wait(10000)
   assert(files.code == 0, 'hidden-aware file command failed: ' .. (files.stderr or ''))

@@ -103,7 +103,7 @@ local function track(record, bufnr)
   local existing = tracked[path]
   if existing and vim.api.nvim_buf_is_valid(existing.bufnr) then pcall(vim.api.nvim_buf_del_extmark, existing.bufnr, namespace, existing.id) end
   local id = vim.api.nvim_buf_set_extmark(bufnr, namespace, row, column, { right_gravity = false })
-  tracked[path] = { bufnr = bufnr, id = id, record = record, dirty = false }
+  tracked[path] = { bufnr = bufnr, id = id, record = record }
 end
 
 ---@param root string
@@ -190,17 +190,45 @@ function M.jump(record)
     return false
   end
 
-  local ok, edit_error = pcall(vim.api.nvim_cmd, { cmd = 'edit', args = { target } }, {})
-  if not ok then
-    warn(('Could not open project mark %q: %s'):format(record.name, edit_error))
-    return false
+  local path = record_path(record.root, record.name)
+  local entry = tracked[path]
+  local bufnr
+  local position = {}
+  if entry and vim.api.nvim_buf_is_valid(entry.bufnr) and vim.api.nvim_buf_is_loaded(entry.bufnr) then
+    local buffer_path = project.canonical(vim.api.nvim_buf_get_name(entry.bufnr))
+    if buffer_path == target then
+      position = vim.api.nvim_buf_get_extmark_by_id(entry.bufnr, namespace, entry.id, {})
+      if #position == 2 then bufnr = entry.bufnr end
+    end
+  end
+
+  pcall(vim.cmd.normal, { args = { "m'" }, bang = true })
+  if bufnr then
+    if bufnr ~= vim.api.nvim_get_current_buf() then
+      local ok, buffer_error = pcall(vim.api.nvim_cmd, { cmd = 'buffer', args = { tostring(bufnr) } }, {})
+      if not ok then
+        warn(('Could not open project mark %q: %s'):format(record.name, buffer_error))
+        return false
+      end
+    end
+  else
+    local ok, edit_error = pcall(vim.api.nvim_cmd, { cmd = 'edit', args = { target } }, {})
+    if not ok then
+      warn(('Could not open project mark %q: %s'):format(record.name, edit_error))
+      return false
+    end
+    bufnr = vim.api.nvim_get_current_buf()
+    track(record, bufnr)
+    entry = tracked[path]
+    if entry then position = vim.api.nvim_buf_get_extmark_by_id(bufnr, namespace, entry.id, {}) end
   end
   local line_count = vim.api.nvim_buf_line_count(0)
-  local row = math.max(1, math.min(record.line, line_count))
+  local row = #position == 2 and position[1] + 1 or record.line
+  local column = #position == 2 and position[2] or record.column
+  row = math.max(1, math.min(row, line_count))
   local line = vim.api.nvim_buf_get_lines(0, row - 1, row, false)[1] or ''
-  vim.api.nvim_win_set_cursor(0, { row, math.min(record.column, #line) })
+  vim.api.nvim_win_set_cursor(0, { row, math.min(column, #line) })
   vim.cmd.normal { args = { 'zv' }, bang = true }
-  track(record, vim.api.nvim_get_current_buf())
   return true
 end
 
@@ -274,34 +302,26 @@ vim.api.nvim_create_autocmd('BufReadPost', {
   callback = function(event) load_buffer_marks(event.buf) end,
 })
 
-vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
-  desc = 'Remember which loaded project marks moved',
-  group = 'nvim2-project-marks',
-  callback = function(event)
-    for _, entry in pairs(tracked) do
-      if entry.bufnr == event.buf then entry.dirty = true end
-    end
-  end,
-})
-
 vim.api.nvim_create_autocmd('BufWritePost', {
   desc = 'Persist project marks moved by saved edits',
   group = 'nvim2-project-marks',
   callback = function(event)
     for path, entry in pairs(tracked) do
-      if entry.bufnr == event.buf and entry.dirty then
+      if entry.bufnr == event.buf then
         if not vim.uv.fs_stat(path) then
           tracked[path] = nil
         else
           local disk = decode_record(path, entry.record.root)
           if disk and disk.name == entry.record.name and disk.file == entry.record.file then
             local position = vim.api.nvim_buf_get_extmark_by_id(event.buf, namespace, entry.id, {})
-            if #position == 2 then
-              entry.record.line = position[1] + 1
-              entry.record.column = position[2]
-              local ok, write_error = pcall(write_record, entry.record)
+            local line = position[1] and position[1] + 1
+            local column = position[2]
+            if line and (line ~= entry.record.line or column ~= entry.record.column) then
+              disk.line = line
+              disk.column = column
+              local ok, write_error = pcall(write_record, disk)
               if ok then
-                entry.dirty = false
+                entry.record = disk
               else
                 warn(write_error)
               end

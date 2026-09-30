@@ -49,7 +49,7 @@ install_packages() {
       as_root env DEBIAN_FRONTEND=noninteractive apt-get update
       as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y \
         bash bash-completion build-essential ca-certificates coreutils curl \
-        dirmngr dos2unix file findutils gawk git gnupg htop jq \
+        dirmngr dos2unix file findutils gawk git gnupg htop jq mc \
         libbz2-dev libffi-dev liblzma-dev libncurses-dev libreadline-dev \
         libssl-dev libsqlite3-dev make ncurses-term patch python3 python3-pip \
         python3-venv tar tk-dev tmux unzip uuid-dev vim xz-utils zlib1g-dev
@@ -62,7 +62,7 @@ install_packages() {
       fi
       as_root dnf install -y \
         bash bash-completion bzip2-devel ca-certificates dos2unix file \
-        findutils gawk gcc gcc-c++ git htop jq \
+        findutils gawk gcc gcc-c++ git htop jq mc \
         libffi-devel make ncurses-devel openssl-devel patch python3 \
         python3-pip readline-devel sqlite-devel tar tk-devel tmux unzip \
         util-linux-user vim-enhanced vim-minimal which xz xz-devel zlib-devel
@@ -73,7 +73,7 @@ install_packages() {
 verify_packages() {
   local command_name
 
-  for command_name in bash curl file find git gpg gpg-agent htop jq make \
+  for command_name in bash curl file find git gpg gpg-agent htop jq make mc \
     python3 tar tmux unzip vi vim xz; do
     command -v "$command_name" >/dev/null 2>&1 ||
       setup_die "package installation did not provide $command_name"

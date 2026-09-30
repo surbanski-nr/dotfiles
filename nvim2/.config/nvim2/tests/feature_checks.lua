@@ -178,14 +178,42 @@ assert(vim.deep_equal(vim.fn.getpos "'a", native_local), 'project marks changed 
 vim.cmd.edit(vim.fs.joinpath(alias, 'tracked.lua'))
 assert(marks.set 'alias')
 assert(#marks.list(project.canonical(repository_b)) == 2, 'symlink alias used another mark namespace')
+
+local jump_file = vim.fs.joinpath(repository_b, 'jump target.lua')
+write(jump_file, { 'local first = true', 'local second = true', 'TARGET', 'return true' })
+vim.cmd.edit(jump_file)
+vim.api.nvim_win_set_cursor(0, { 3, 0 })
+assert(marks.set 'same-buffer jump')
+vim.api.nvim_buf_set_lines(0, 0, 0, false, { 'local inserted = true' })
+local same_buffer_record = vim.iter(marks.list(project.canonical(repository_b))):find(function(record) return record.name == 'same-buffer jump' end)
+assert(same_buffer_record and marks.jump(same_buffer_record), 'project mark could not jump in the current modified buffer')
+assert(
+  vim.api.nvim_win_get_cursor(0)[1] == 4 and vim.api.nvim_get_current_line() == 'TARGET' and vim.bo.modified,
+  'same-buffer project-mark jump ignored the moved extmark or discarded changes'
+)
+
+assert(marks.set 'hidden-buffer jump')
+vim.api.nvim_buf_set_lines(0, 0, 0, false, { 'local inserted again = true' })
+vim.cmd.edit(file_a)
+local hidden_buffer_record = vim.iter(marks.list(project.canonical(repository_b))):find(function(record) return record.name == 'hidden-buffer jump' end)
+assert(hidden_buffer_record and marks.jump(hidden_buffer_record), 'project mark could not return to a modified hidden buffer')
+assert(
+  vim.api.nvim_win_get_cursor(0)[1] == 5 and vim.api.nvim_get_current_line() == 'TARGET' and vim.bo.modified,
+  'hidden-buffer project-mark jump ignored the moved extmark or discarded changes'
+)
+vim.bo.modified = false
+
 vim.cmd.edit(file_b)
 vim.api.nvim_win_set_cursor(0, { 2, 1 })
 assert(marks.set 'moves')
-vim.api.nvim_buf_set_lines(0, 0, 0, false, { 'local inserted = true' })
-vim.api.nvim_exec_autocmds('TextChanged', { buffer = 0 })
-vim.cmd.write()
+vim.cmd [[1put ='local inserted = true' | write]]
 local moved = vim.iter(marks.list(project.canonical(repository_b))):find(function(record) return record.name == 'moves' end)
 assert(moved and moved.line == 3, 'saved edit did not persist the moved extmark')
+local root_b = project.canonical(repository_b)
+local moved_path = vim.fs.joinpath(vim.fn.stdpath 'state', 'project-marks', vim.fn.sha256(root_b), vim.fn.sha256 'moves' .. '.json')
+local unchanged_inode = assert(vim.uv.fs_stat(moved_path)).ino
+vim.cmd.write()
+assert(assert(vim.uv.fs_stat(moved_path)).ino == unchanged_inode, 'unchanged project mark was rewritten')
 
 vim.api.nvim_win_set_cursor(0, { 2, 0 })
 assert(marks.set 'discarded')
@@ -202,8 +230,14 @@ write(
 vim.opt.runtimepath:prepend(%q)
 vim.opt.swapfile = false
 vim.cmd.edit(%q)
-assert(require('custom.plugins.project_marks').set(vim.env.NVIM2_MARK_NAME, { position = { 1, 0 } }))
-]]):format(vim.fn.stdpath 'config', file_b)
+local marks = require 'custom.plugins.project_marks'
+if vim.env.NVIM2_MARK_READ_NAME then
+  local record = vim.iter(marks.list(%q)):find(function(item) return item.name == vim.env.NVIM2_MARK_READ_NAME end)
+  assert(record and record.line == tonumber(vim.env.NVIM2_MARK_READ_LINE), 'second process read the wrong saved position')
+else
+  assert(marks.set(vim.env.NVIM2_MARK_NAME, { position = { 1, 0 } }))
+end
+]]):format(vim.fn.stdpath 'config', file_b, root_b)
 )
 local child_init_path = vim.fs.joinpath(child_config, 'init.lua')
 local child_chunk, child_parse_error = loadfile(child_init_path)
@@ -225,6 +259,15 @@ assert(
     and not second_result.stderr:find('Error in', 1, true),
   ('independent Neovim processes could not persist marks:\n%s\n%s'):format(first_result.stderr, second_result.stderr)
 )
+local reader_environment = vim.tbl_extend('force', child_environment, {
+  NVIM2_MARK_READ_NAME = 'moves',
+  NVIM2_MARK_READ_LINE = '3',
+})
+local reader_result = vim.system({ vim.v.progpath, '--headless', '+qa!' }, { env = reader_environment, text = true }):wait(30000)
+assert(
+  reader_result.code == 0 and not reader_result.stderr:find('Error in', 1, true),
+  ('second Neovim process could not read the moved mark:\n%s'):format(reader_result.stderr)
+)
 local process_records = marks.list(project.canonical(repository_b))
 assert(vim.iter(process_records):any(function(record) return record.name == 'process one' end), 'first process mark was lost: ' .. vim.inspect(process_records))
 assert(
@@ -232,7 +275,6 @@ assert(
   'second process mark was lost: ' .. vim.inspect(process_records)
 )
 
-local root_b = project.canonical(repository_b)
 local state_directory = vim.fs.joinpath(vim.fn.stdpath 'state', 'project-marks', vim.fn.sha256(root_b))
 write(vim.fs.joinpath(state_directory, 'deadbeef.json'), '{broken')
 write(

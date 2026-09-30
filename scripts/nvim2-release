@@ -11,7 +11,9 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   nvim2-release build PLATFORM SOURCE_DIR OUTPUT_ROOT
+  nvim2-release install ARTIFACT_DIR
   nvim2-release prepare-runtime PLATFORM
+  nvim2-release rollback
   nvim2-release verify PLATFORM ARTIFACT_DIR
 EOF
   exit 2
@@ -380,6 +382,7 @@ package_release() {
 
   git -C "$repo" bundle create "$out/dotfiles.bundle" HEAD
   git -C "$repo" bundle verify "$out/dotfiles.bundle"
+  cp "$repo/scripts/nvim2-release" "$out/nvim2-release"
   cp "$HOME/release-inputs/$nvim_archive" "$out/"
   cp "$HOME/release-inputs/$node_archive" "$out/"
   cp "$HOME/release-inputs/$rg_archive" "$out/"
@@ -434,6 +437,7 @@ EOF
     cd "$out"
     sha256sum \
       dotfiles.bundle \
+      nvim2-release \
       nvim2-data.tar.gz \
       "$nvim_archive" \
       "$node_archive" \
@@ -620,11 +624,609 @@ verify_release() {
   )
 }
 
+remove_release_path() {
+  local path=$1
+
+  if [[ -d $path && ! -L $path ]]; then
+    find "$path" -depth -delete
+  elif [[ -e $path || -L $path ]]; then
+    unlink "$path"
+  fi
+}
+
+release_link_is_managed() {
+  local kind=$1
+  local command_name=$2
+  local target=$3
+
+  case "$kind" in
+    nvim)
+      [[ $target == "$HOME/bin/nvim-"*/bin/nvim ||
+        $target == "$HOME/.local/opt/nvim-"*/bin/nvim ]]
+      ;;
+    node)
+      case "$command_name" in
+        node) [[ $target == "$HOME/bin/nodejs-"*/bin/node ]] ;;
+        npm) [[ $target == "$HOME/bin/nodejs-"*/bin/npm || $target == "$HOME/bin/nodejs-"*/lib/node_modules/npm/bin/npm-cli.js ]] ;;
+        npx) [[ $target == "$HOME/bin/nodejs-"*/bin/npx || $target == "$HOME/bin/nodejs-"*/lib/node_modules/npm/bin/npx-cli.js ]] ;;
+        corepack) [[ $target == "$HOME/bin/nodejs-"*/bin/corepack || $target == "$HOME/bin/nodejs-"*/lib/node_modules/corepack/dist/corepack.js ]] ;;
+        *) return 1 ;;
+      esac
+      ;;
+    rg)
+      [[ $target == "$HOME/bin/rg-"* ||
+        $target == "$HOME/.local/opt/ripgrep-"*/rg ]]
+      ;;
+    data)
+      [[ $target == "$HOME/.local/share/nvim2-releases/"* ]]
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+release_link_points_to() {
+  local link=$1
+  local target=$2
+  local link_resolved
+  local target_resolved
+
+  [[ -L $link ]] || return 1
+  link_resolved=$(readlink -f -- "$link") || return 1
+  target_resolved=$(readlink -f -- "$target") || return 1
+  [[ $link_resolved == "$target_resolved" ]]
+}
+
+capture_release_link() {
+  local prefix=$1
+  local link=$2
+  local kind=$3
+  local command_name=$4
+  local raw=
+  local target=
+  local value_kind=absent
+
+  if [[ -L $link ]]; then
+    raw=$(readlink -- "$link")
+    target=$(readlink -f -- "$link")
+    [[ -n $target && -e $target ]] || die "managed link is broken: $link"
+    release_link_is_managed "$kind" "$command_name" "$target" ||
+      die "refusing unmanaged link: $link -> $raw"
+    value_kind=symlink
+  elif [[ -e $link ]]; then
+    die "refusing unmanaged path: $link"
+  fi
+
+  printf -v "${prefix}_KIND" '%s' "$value_kind"
+  printf -v "${prefix}_RAW" '%s' "$raw"
+  printf -v "${prefix}_TARGET" '%s' "$target"
+}
+
+capture_release_data() {
+  local link=$HOME/.local/share/nvim2
+  local import_path=$1
+
+  PREVIOUS_DATA_RAW=
+  PREVIOUS_DATA_TARGET=
+  if [[ -L $link ]]; then
+    PREVIOUS_DATA_RAW=$(readlink -- "$link")
+    PREVIOUS_DATA_TARGET=$(readlink -f -- "$link")
+    [[ -n $PREVIOUS_DATA_TARGET && -d $PREVIOUS_DATA_TARGET ]] ||
+      die "Nvim2 data link is broken: $link"
+    release_link_is_managed data nvim2 "$PREVIOUS_DATA_TARGET" ||
+      die "refusing unmanaged data link: $link -> $PREVIOUS_DATA_RAW"
+    PREVIOUS_DATA_KIND=symlink
+  elif [[ -d $link ]]; then
+    [[ ! -e $import_path && ! -L $import_path ]] ||
+      die "retained data destination already exists: $import_path"
+    PREVIOUS_DATA_KIND=directory
+    PREVIOUS_DATA_TARGET=$import_path
+  elif [[ -e $link ]]; then
+    die "refusing unmanaged data path: $link"
+  else
+    PREVIOUS_DATA_KIND=absent
+  fi
+}
+
+capture_release_repo() {
+  local init=$HOME/.config/nvim2/init.lua
+  local target
+
+  PREVIOUS_REPO=ABSENT
+  if [[ -L $init ]]; then
+    target=$(readlink -f -- "$init")
+    case "$target" in
+      */nvim2/.config/nvim2/init.lua)
+        PREVIOUS_REPO=${target%/nvim2/.config/nvim2/init.lua}
+        [[ -x $PREVIOUS_REPO/bstow ]] ||
+          die "previous Nvim2 repository has no bstow: $PREVIOUS_REPO"
+        ;;
+      *) die "unknown Nvim2 configuration source: $target" ;;
+    esac
+  elif [[ -e $init ]]; then
+    die "refusing unmanaged Nvim2 configuration: $init"
+  fi
+}
+
+release_tree_matches() {
+  diff --recursive --brief --no-dereference "$1" "$2" >/dev/null &&
+    diff --brief \
+      <(cd "$1" && find . -printf '%P\t%y\t%m\t%l\n' | LC_ALL=C sort) \
+      <(cd "$2" && find . -printf '%P\t%y\t%m\t%l\n' | LC_ALL=C sort) \
+      >/dev/null
+}
+
+promote_release_tree() {
+  local stage=$1
+  local destination=$2
+
+  if [[ -e $destination || -L $destination ]]; then
+    [[ -d $destination && ! -L $destination ]] ||
+      die "release destination is not a directory: $destination"
+    release_tree_matches "$stage" "$destination" ||
+      die "existing release destination differs: $destination"
+    remove_release_path "$stage"
+    return
+  fi
+  mv "$stage" "$destination"
+  INSTALL_CREATED_PATHS+=("$destination")
+}
+
+promote_release_data() {
+  local stage=$1
+  local destination=$2
+  local artifact_sha=$3
+  local marker=.nvim2-release-artifact.sha256
+
+  if [[ -e $destination || -L $destination ]]; then
+    [[ -d $destination && ! -L $destination ]] ||
+      die "release destination is not a directory: $destination"
+    [[ -f $destination/$marker && ! -L $destination/$marker &&
+      $(<"$destination/$marker") == "$artifact_sha" ]] ||
+      die "existing release destination differs: $destination"
+    remove_release_path "$stage"
+    return
+  fi
+  printf '%s\n' "$artifact_sha" >"$stage/$marker"
+  chmod 0444 "$stage/$marker"
+  mv "$stage" "$destination"
+  INSTALL_CREATED_PATHS+=("$destination")
+}
+
+promote_release_file() {
+  local stage=$1
+  local destination=$2
+
+  if [[ -e $destination || -L $destination ]]; then
+    [[ -f $destination && ! -L $destination ]] ||
+      die "release destination is not a file: $destination"
+    cmp -s "$stage" "$destination" ||
+      die "existing release destination differs: $destination"
+    [[ -x $destination ]] || die "existing release executable is not executable: $destination"
+    unlink "$stage"
+    return
+  fi
+  mv "$stage" "$destination"
+  INSTALL_CREATED_PATHS+=("$destination")
+}
+
+promote_release_repo() {
+  local stage=$1
+  local destination=$2
+  local commit=$3
+
+  if [[ -e $destination || -L $destination ]]; then
+    [[ -d $destination && ! -L $destination ]] ||
+      die "release repository destination is not a directory: $destination"
+    [[ $(git -C "$destination" rev-parse HEAD) == "$commit" ]] ||
+      die "existing release repository has a different commit: $destination"
+    [[ -z $(git -C "$destination" status --porcelain --untracked-files=normal) ]] ||
+      die "existing release repository is dirty: $destination"
+    remove_release_path "$stage"
+    return
+  fi
+  mv "$stage" "$destination"
+  INSTALL_CREATED_PATHS+=("$destination")
+}
+
+write_release_assignment() {
+  printf '%s=%q\n' "$1" "$2" >>"$3"
+}
+
+switch_release_link() {
+  local link=$1
+  local target=$2
+  local temporary=$3
+  local relative
+
+  relative=$(realpath --relative-to="$(dirname "$link")" "$target")
+  [[ ! -e $temporary && ! -L $temporary ]] ||
+    die "temporary activation link already exists: $temporary"
+  ln -s "$relative" "$temporary"
+  mv -Tf "$temporary" "$link"
+}
+
+release_path_is_previous() {
+  local link=$1
+  local kind=$2
+  local raw=$3
+  local target=$4
+
+  case "$kind" in
+    absent) [[ ! -e $link && ! -L $link ]] ;;
+    symlink)
+      [[ -L $link && $(readlink -- "$link") == "$raw" &&
+        $(readlink -f -- "$link") == "$target" ]]
+      ;;
+    directory) [[ -d $link && ! -L $link ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+restore_release_path() {
+  local link=$1
+  local current_target=$2
+  local previous_kind=$3
+  local previous_raw=$4
+  local previous_target=$5
+  local partial=$6
+  local temporary=$7
+  local actual_target=
+  local current_resolved
+
+  if release_path_is_previous "$link" "$previous_kind" "$previous_raw" "$previous_target"; then
+    if [[ $previous_kind == symlink ]]; then
+      current_resolved=$(readlink -f -- "$current_target" 2>/dev/null || true)
+      [[ -n $current_resolved && $previous_target == "$current_resolved" ]] && return 0
+    fi
+    [[ $partial == 1 ]] && return 0
+    die "release path is already rolled back: $link"
+  fi
+  current_resolved=$(readlink -f -- "$current_target")
+  [[ -n $current_resolved && -e $current_resolved ]] ||
+    die "current release target is missing: $current_target"
+  [[ -L $link ]] || die "current release path is not a link: $link"
+  actual_target=$(readlink -f -- "$link")
+  [[ $actual_target == "$current_resolved" ]] ||
+    die "release path changed after activation: $link"
+
+  case "$previous_kind" in
+    absent)
+      unlink "$link"
+      ;;
+    symlink)
+      [[ -e $previous_target ]] || die "previous release target is missing: $previous_target"
+      ln -s "$previous_raw" "$temporary"
+      mv -Tf "$temporary" "$link"
+      ;;
+    directory)
+      [[ -d $previous_target && ! -L $previous_target ]] ||
+        die "retained data directory is missing: $previous_target"
+      unlink "$link"
+      mv "$previous_target" "$link"
+      ;;
+    *) die "invalid rollback path kind: $previous_kind" ;;
+  esac
+}
+
+release_repo_is_active() {
+  local repo=$1
+  local init=$HOME/.config/nvim2/init.lua
+  local target=
+
+  [[ $repo != ABSENT && -L $init ]] || return 1
+  target=$(readlink -f -- "$init")
+  [[ $target == "$repo/nvim2/.config/nvim2/init.lua" ]]
+}
+
+restore_release_repo() {
+  local current_repo=$1
+  local previous_repo=$2
+  local partial=$3
+
+  if release_repo_is_active "$previous_repo"; then
+    [[ $partial == 1 ]] && return 0
+    die 'Nvim2 configuration is already rolled back'
+  fi
+  if [[ $previous_repo == ABSENT && ! -e $HOME/.config/nvim2/init.lua &&
+    ! -L $HOME/.config/nvim2/init.lua ]]; then
+    [[ $partial == 1 ]] && return 0
+    die 'Nvim2 configuration is already absent'
+  fi
+  release_repo_is_active "$current_repo" ||
+    die 'Nvim2 configuration changed after activation'
+  (
+    cd "$current_repo"
+    ./bstow -t "$HOME" unstow nvim2
+  )
+  if [[ $previous_repo != ABSENT ]]; then
+    (
+      cd "$previous_repo"
+      ./bstow --force -t "$HOME" stow nvim2
+    )
+  fi
+}
+
+rollback_release_file() {
+  local rollback_file=$1
+  local partial=${2:-0}
+  local CURRENT_REPO PREVIOUS_REPO
+
+  [[ -f $rollback_file ]] || die "missing rollback record: $rollback_file"
+  # The rollback record is generated locally with shell-escaped values and mode 0600.
+  # shellcheck disable=SC1090
+  source "$rollback_file"
+  restore_release_repo "$CURRENT_REPO" "$PREVIOUS_REPO" "$partial"
+  restore_release_path "$HOME/.local/share/nvim2" "$CURRENT_DATA" \
+    "$PREVIOUS_DATA_KIND" "$PREVIOUS_DATA_RAW" "$PREVIOUS_DATA_TARGET" \
+    "$partial" "$HOME/.local/share/.nvim2.rollback.$$"
+  restore_release_path "$HOME/bin/nvim" "$CURRENT_NVIM" \
+    "$PREVIOUS_NVIM_KIND" "$PREVIOUS_NVIM_RAW" "$PREVIOUS_NVIM_TARGET" \
+    "$partial" "$HOME/bin/.nvim.rollback.$$"
+  restore_release_path "$HOME/bin/node" "$CURRENT_NODE" \
+    "$PREVIOUS_NODE_KIND" "$PREVIOUS_NODE_RAW" "$PREVIOUS_NODE_TARGET" \
+    "$partial" "$HOME/bin/.node.rollback.$$"
+  restore_release_path "$HOME/bin/npm" "$CURRENT_NPM" \
+    "$PREVIOUS_NPM_KIND" "$PREVIOUS_NPM_RAW" "$PREVIOUS_NPM_TARGET" \
+    "$partial" "$HOME/bin/.npm.rollback.$$"
+  restore_release_path "$HOME/bin/npx" "$CURRENT_NPX" \
+    "$PREVIOUS_NPX_KIND" "$PREVIOUS_NPX_RAW" "$PREVIOUS_NPX_TARGET" \
+    "$partial" "$HOME/bin/.npx.rollback.$$"
+  restore_release_path "$HOME/bin/corepack" "$CURRENT_COREPACK" \
+    "$PREVIOUS_COREPACK_KIND" "$PREVIOUS_COREPACK_RAW" "$PREVIOUS_COREPACK_TARGET" \
+    "$partial" "$HOME/bin/.corepack.rollback.$$"
+  restore_release_path "$HOME/bin/rg" "$CURRENT_RG" \
+    "$PREVIOUS_RG_KIND" "$PREVIOUS_RG_RAW" "$PREVIOUS_RG_TARGET" \
+    "$partial" "$HOME/bin/.rg.rollback.$$"
+}
+
+rollback_release() {
+  local rollback_file=$HOME/.local/state/nvim2-release-rollback.env
+
+  rollback_release_file "$rollback_file"
+  unlink "$rollback_file"
+  hash -r
+  if [[ -x $HOME/bin/nvim ]]; then
+    NVIM_APPNAME=nvim2 "$HOME/bin/nvim" --headless '+qa'
+  fi
+  printf 'nvim2-release: rollback completed\n'
+}
+
+install_release_cleanup() {
+  local path
+  local index
+
+  for path in "${INSTALL_STAGE_PATHS[@]:-}"; do
+    [[ -n $path ]] && remove_release_path "$path"
+  done
+  if ((INSTALL_COMMITTED == 0)); then
+    for ((index = ${#INSTALL_CREATED_PATHS[@]} - 1; index >= 0; index--)); do
+      remove_release_path "${INSTALL_CREATED_PATHS[index]}"
+    done
+  fi
+}
+
+install_release() {
+  local artifact_dir=$1
+  local rollback_file=$HOME/.local/state/nvim2-release-rollback.env
+  local rollback_candidate
+  local previous_rollback=
+  local nvim_dir
+  local node_dir
+  local rg_path
+  local release_dir
+  local repo
+  local nvim_stage
+  local node_stage
+  local rg_stage_dir
+  local rg_stage
+  local data_stage
+  local repo_stage
+  local import_path
+  local data_archive_sha
+  local activation_status=0
+  local active_release=0
+  local name
+  local target
+
+  artifact_dir=$(CDPATH='' cd -- "$artifact_dir" && pwd)
+  [[ -f $artifact_dir/release.env ]] || die "missing $artifact_dir/release.env"
+  (cd "$artifact_dir" && sha256sum --check --strict SHA256SUMS)
+  # release.env is generated and checksum-verified as part of the artifact.
+  # shellcheck disable=SC1090,SC1091
+  source "$artifact_dir/release.env"
+  for name in RELEASE_ID PLATFORM_ID DOTFILES_COMMIT NVIM_VERSION NVIM_ARCHIVE \
+    NODE_VERSION NODE_ARCHIVE RG_VERSION RG_ARCHIVE TARGET_USER TARGET_UID \
+    TARGET_HOME PYTHON_PATH PYTHON_VERSION; do
+    require_value "$name"
+  done
+  [[ $RELEASE_ID =~ ^[A-Za-z0-9._+-]+$ ]] || die "invalid release ID: $RELEASE_ID"
+  [[ $DOTFILES_COMMIT =~ ^[0-9a-f]{40}$ ]] || die 'invalid dotfiles commit'
+  for name in NVIM_VERSION NODE_VERSION RG_VERSION; do
+    [[ ${!name} =~ ^[A-Za-z0-9._+-]+$ ]] || die "invalid $name: ${!name}"
+  done
+  [[ $HOME == "$TARGET_HOME" ]] || die "HOME is $HOME, artifact requires $TARGET_HOME"
+  [[ $(id -u) -eq $TARGET_UID ]] || die "UID is $(id -u), artifact requires $TARGET_UID"
+  [[ $(id -un) == "$TARGET_USER" ]] || die "user is $(id -un), artifact requires $TARGET_USER"
+  validate_platform "$PLATFORM_ID"
+  validate_runtime_python "$PYTHON_PATH" "$PYTHON_VERSION"
+  data_archive_sha=$(awk '$2 == "nvim2-data.tar.gz" { print $1 }' \
+    "$artifact_dir/SHA256SUMS")
+  [[ $data_archive_sha =~ ^[0-9a-f]{64}$ ]] ||
+    die 'invalid nvim2-data.tar.gz checksum entry'
+
+  nvim_dir=$HOME/bin/nvim-$NVIM_VERSION
+  node_dir=$HOME/bin/nodejs-$NODE_VERSION
+  rg_path=$HOME/bin/rg-$RG_VERSION
+  release_dir=$HOME/.local/share/nvim2-releases/$RELEASE_ID
+  repo=$HOME/github.com/surbanski/dotfiles-$DOTFILES_COMMIT
+  import_path=$HOME/.local/share/nvim2-releases/imported-before-$RELEASE_ID
+
+  mkdir -p "$HOME/bin" "$HOME/.local/share/nvim2-releases" \
+    "$HOME/.local/state" "$(dirname "$repo")"
+  capture_release_link PREVIOUS_NVIM "$HOME/bin/nvim" nvim nvim
+  capture_release_link PREVIOUS_NODE "$HOME/bin/node" node node
+  capture_release_link PREVIOUS_NPM "$HOME/bin/npm" node npm
+  capture_release_link PREVIOUS_NPX "$HOME/bin/npx" node npx
+  capture_release_link PREVIOUS_COREPACK "$HOME/bin/corepack" node corepack
+  capture_release_link PREVIOUS_RG "$HOME/bin/rg" rg rg
+  capture_release_data "$import_path"
+  capture_release_repo
+
+  INSTALL_STAGE_PATHS=()
+  INSTALL_CREATED_PATHS=()
+  INSTALL_COMMITTED=0
+  trap install_release_cleanup EXIT
+  nvim_stage=$(mktemp -d "$HOME/bin/.nvim-$NVIM_VERSION.stage.XXXXXX")
+  node_stage=$(mktemp -d "$HOME/bin/.nodejs-$NODE_VERSION.stage.XXXXXX")
+  rg_stage_dir=$(mktemp -d "$HOME/bin/.rg-$RG_VERSION.stage.XXXXXX")
+  data_stage=$(mktemp -d "$HOME/.local/share/nvim2-releases/.$RELEASE_ID.stage.XXXXXX")
+  repo_stage=$(mktemp -d "$(dirname "$repo")/.dotfiles-$DOTFILES_COMMIT.stage.XXXXXX")
+  INSTALL_STAGE_PATHS+=("$nvim_stage" "$node_stage" "$rg_stage_dir" "$data_stage" "$repo_stage")
+
+  tar -xzf "$artifact_dir/$NVIM_ARCHIVE" -C "$nvim_stage" --strip-components=1 ||
+    die "failed to extract $NVIM_ARCHIVE"
+  tar -xJf "$artifact_dir/$NODE_ARCHIVE" -C "$node_stage" --strip-components=1 ||
+    die "failed to extract $NODE_ARCHIVE"
+  tar -xzf "$artifact_dir/$RG_ARCHIVE" -C "$rg_stage_dir" ||
+    die "failed to extract $RG_ARCHIVE"
+  rg_stage=$rg_stage_dir/ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl/rg
+  [[ -x $rg_stage ]] || die "ripgrep executable is missing from $RG_ARCHIVE"
+  tar -xzf "$artifact_dir/nvim2-data.tar.gz" -C "$data_stage" ||
+    die 'failed to extract nvim2-data.tar.gz'
+  git clone --quiet "$artifact_dir/dotfiles.bundle" "$repo_stage"
+  git -C "$repo_stage" checkout --quiet --detach "$DOTFILES_COMMIT"
+  [[ -x $repo_stage/bstow ]] || die 'release repository has no executable bstow'
+  "$nvim_stage/bin/nvim" --version >/dev/null
+  "$node_stage/bin/node" --version >/dev/null
+  "$rg_stage" --version >/dev/null
+  [[ -x $data_stage/mason/bin/lua-language-server ]] ||
+    die 'release data is missing lua-language-server'
+  (
+    cd "$repo_stage"
+    ./bstow --dry-run --force -t "$HOME" stow nvim2
+  )
+
+  promote_release_tree "$nvim_stage" "$nvim_dir"
+  promote_release_tree "$node_stage" "$node_dir"
+  promote_release_file "$rg_stage" "$rg_path"
+  remove_release_path "$rg_stage_dir"
+  promote_release_repo "$repo_stage" "$repo" "$DOTFILES_COMMIT"
+  promote_release_data "$data_stage" "$release_dir" "$data_archive_sha"
+  if release_link_points_to "$HOME/bin/nvim" "$nvim_dir/bin/nvim" &&
+    release_link_points_to "$HOME/bin/node" "$node_dir/bin/node" &&
+    release_link_points_to "$HOME/bin/npm" "$node_dir/bin/npm" &&
+    release_link_points_to "$HOME/bin/npx" "$node_dir/bin/npx" &&
+    release_link_points_to "$HOME/bin/corepack" "$node_dir/bin/corepack" &&
+    release_link_points_to "$HOME/bin/rg" "$rg_path" &&
+    release_link_points_to "$HOME/.local/share/nvim2" "$release_dir" &&
+    release_repo_is_active "$repo"; then
+    active_release=1
+  fi
+  "$nvim_dir/bin/nvim" --version >/dev/null
+  "$node_dir/bin/node" --version >/dev/null
+  "$rg_path" --version >/dev/null
+  [[ -x $release_dir/mason/bin/lua-language-server ]] ||
+    die 'installed release data is missing lua-language-server'
+
+  if ((active_release)); then
+    hash -r
+    NVIM_APPNAME=nvim2 "$HOME/bin/nvim" --headless '+qa'
+    NVIM2_CHECK_TOOLS=1 bash "$HOME/.config/nvim2/tests/check.sh"
+    INSTALL_COMMITTED=1
+    trap - EXIT
+    install_release_cleanup
+    printf 'nvim2-release: release %s is already active and verified\n' "$RELEASE_ID"
+    return
+  fi
+
+  (
+    cd "$repo"
+    ./bstow --dry-run --force -t "$HOME" stow nvim2
+  )
+  rollback_candidate=$(mktemp "$HOME/.local/state/.nvim2-release-rollback.XXXXXX")
+  INSTALL_STAGE_PATHS+=("$rollback_candidate")
+  chmod 0600 "$rollback_candidate"
+  for name in PREVIOUS_DATA_KIND PREVIOUS_DATA_RAW PREVIOUS_DATA_TARGET \
+    PREVIOUS_NVIM_KIND PREVIOUS_NVIM_RAW PREVIOUS_NVIM_TARGET \
+    PREVIOUS_NODE_KIND PREVIOUS_NODE_RAW PREVIOUS_NODE_TARGET \
+    PREVIOUS_NPM_KIND PREVIOUS_NPM_RAW PREVIOUS_NPM_TARGET \
+    PREVIOUS_NPX_KIND PREVIOUS_NPX_RAW PREVIOUS_NPX_TARGET \
+    PREVIOUS_COREPACK_KIND PREVIOUS_COREPACK_RAW PREVIOUS_COREPACK_TARGET \
+    PREVIOUS_RG_KIND PREVIOUS_RG_RAW PREVIOUS_RG_TARGET PREVIOUS_REPO; do
+    write_release_assignment "$name" "${!name}" "$rollback_candidate"
+  done
+  write_release_assignment CURRENT_DATA "$release_dir" "$rollback_candidate"
+  write_release_assignment CURRENT_NVIM "$nvim_dir/bin/nvim" "$rollback_candidate"
+  write_release_assignment CURRENT_NODE "$node_dir/bin/node" "$rollback_candidate"
+  write_release_assignment CURRENT_NPM "$node_dir/bin/npm" "$rollback_candidate"
+  write_release_assignment CURRENT_NPX "$node_dir/bin/npx" "$rollback_candidate"
+  write_release_assignment CURRENT_COREPACK "$node_dir/bin/corepack" "$rollback_candidate"
+  write_release_assignment CURRENT_RG "$rg_path" "$rollback_candidate"
+  write_release_assignment CURRENT_REPO "$repo" "$rollback_candidate"
+  if [[ -e $rollback_file || -L $rollback_file ]]; then
+    previous_rollback=$(mktemp "$HOME/.local/state/.nvim2-release-previous.XXXXXX")
+    INSTALL_STAGE_PATHS+=("$previous_rollback")
+    cp -a "$rollback_file" "$previous_rollback"
+  fi
+  mv -f "$rollback_candidate" "$rollback_file"
+
+  if [[ $PREVIOUS_DATA_KIND == directory ]]; then
+    mv "$HOME/.local/share/nvim2" "$PREVIOUS_DATA_TARGET" || activation_status=$?
+  fi
+  if ((activation_status == 0)); then
+    switch_release_link "$HOME/.local/share/nvim2" "$release_dir" \
+      "$HOME/.local/share/.nvim2.release.$$" || activation_status=$?
+  fi
+  for name in nvim node npm npx corepack rg; do
+    if ((activation_status == 0)); then
+      case "$name" in
+        nvim) target=$nvim_dir/bin/nvim ;;
+        node | npm | npx | corepack) target=$node_dir/bin/$name ;;
+        rg) target=$rg_path ;;
+      esac
+      switch_release_link "$HOME/bin/$name" "$target" \
+        "$HOME/bin/.$name.release.$$" || activation_status=$?
+    fi
+  done
+  if ((activation_status == 0)); then
+    (
+      cd "$repo"
+      ./bstow --force -t "$HOME" stow nvim2
+    ) || activation_status=$?
+  fi
+  if ((activation_status == 0)); then
+    hash -r
+    NVIM_APPNAME=nvim2 "$HOME/bin/nvim" --headless '+qa' || activation_status=$?
+  fi
+  if ((activation_status == 0)); then
+    NVIM2_CHECK_TOOLS=1 bash "$HOME/.config/nvim2/tests/check.sh" || activation_status=$?
+  fi
+  if ((activation_status != 0)); then
+    rollback_release_file "$rollback_file" 1 ||
+      die "activation failed with status $activation_status and automatic rollback failed"
+    if [[ -n $previous_rollback ]]; then
+      mv -f "$previous_rollback" "$rollback_file"
+    else
+      unlink "$rollback_file"
+    fi
+    die "activation failed with status $activation_status; previous release restored"
+  fi
+
+  INSTALL_COMMITTED=1
+  trap - EXIT
+  install_release_cleanup
+  printf 'nvim2-release: installed release %s\n' "$RELEASE_ID"
+}
+
 main() {
   case ${1:-} in
     build)
       [[ $# -eq 4 ]] || usage
       build_release "$2" "$3" "$4"
+      ;;
+    install)
+      [[ $# -eq 2 ]] || usage
+      install_release "$2"
       ;;
     build-user)
       [[ $# -eq 3 ]] || usage
@@ -633,6 +1235,10 @@ main() {
     prepare-runtime)
       [[ $# -eq 2 ]] || usage
       prepare_runtime "$2"
+      ;;
+    rollback)
+      [[ $# -eq 1 ]] || usage
+      rollback_release
       ;;
     verify)
       [[ $# -eq 3 ]] || usage

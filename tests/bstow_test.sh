@@ -299,6 +299,74 @@ run_bstow --force --dir "$stow_dir" --target "$target_dir" stow changed-parent
 assert_link_target "$target_dir/.config/changed-parent" "$test_root/changed-parent-foreign"
 [[ $(<"$test_root/changed-parent-foreign/settings") == foreign ]] || fail 'changed foreign parent content was modified'
 
+mkdir -p "$stow_dir/unstow-parent/.config/unstow-parent" "$test_root/unstow-parent-foreign"
+printf 'source\n' >"$stow_dir/unstow-parent/.config/unstow-parent/settings"
+run_bstow --dir "$stow_dir" --target "$target_dir" stow unstow-parent
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'unstow-parent setup failed'
+unstow_parent_state=$(package_state_file unstow-parent)
+unstow_parent_state_before=$(cksum <"$unstow_parent_state")
+unlink "$target_dir/.config/unstow-parent/settings"
+rmdir "$target_dir/.config/unstow-parent"
+ln -s "$stow_dir/unstow-parent/.config/unstow-parent/settings" \
+  "$test_root/unstow-parent-foreign/settings"
+ln -s "$test_root/unstow-parent-foreign" "$target_dir/.config/unstow-parent"
+
+run_bstow --dry-run --dir "$stow_dir" --target "$target_dir" unstow unstow-parent
+[[ $BSTOW_STATUS -ne 0 ]] || fail 'dry-run unstow accepted a substituted foreign parent symlink'
+assert_link_target "$target_dir/.config/unstow-parent" "$test_root/unstow-parent-foreign"
+assert_link_target "$test_root/unstow-parent-foreign/settings" \
+  "$stow_dir/unstow-parent/.config/unstow-parent/settings"
+[[ $(cksum <"$unstow_parent_state") == "$unstow_parent_state_before" ]] ||
+  fail 'dry-run changed state after a substituted parent conflict'
+
+run_bstow --dir "$stow_dir" --target "$target_dir" unstow unstow-parent
+[[ $BSTOW_STATUS -ne 0 ]] || fail 'unstow accepted a substituted foreign parent symlink'
+assert_link_target "$target_dir/.config/unstow-parent" "$test_root/unstow-parent-foreign"
+assert_link_target "$test_root/unstow-parent-foreign/settings" \
+  "$stow_dir/unstow-parent/.config/unstow-parent/settings"
+[[ -f $stow_dir/unstow-parent/.config/unstow-parent/settings ]] ||
+  fail 'unstow changed source through a substituted parent symlink'
+[[ $(cksum <"$unstow_parent_state") == "$unstow_parent_state_before" ]] ||
+  fail 'unstow removed state after a substituted parent conflict'
+
+unlink "$target_dir/.config/unstow-parent"
+mkdir "$target_dir/.config/unstow-parent"
+ln -s "$stow_dir/unstow-parent/.config/unstow-parent/settings" \
+  "$target_dir/.config/unstow-parent/settings"
+run_bstow --dir "$stow_dir" --target "$target_dir" unstow unstow-parent
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'unstow retry failed after the parent conflict was removed'
+[[ ! -e $target_dir/.config/unstow-parent/settings && ! -L $target_dir/.config/unstow-parent/settings ]] ||
+  fail 'unstow retry retained the managed link'
+[[ ! -e $unstow_parent_state ]] || fail 'unstow retry retained ownership state'
+
+mkdir -p "$stow_dir/stateful-folded/.config/stateful-folded"
+printf 'one\n' >"$stow_dir/stateful-folded/.config/stateful-folded/one"
+printf 'two\n' >"$stow_dir/stateful-folded/.config/stateful-folded/two"
+run_bstow --dir "$stow_dir" --target "$target_dir" stow stateful-folded
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'stateful folded-link setup failed'
+stateful_folded_state=$(package_state_file stateful-folded)
+unlink "$target_dir/.config/stateful-folded/one"
+unlink "$target_dir/.config/stateful-folded/two"
+rmdir "$target_dir/.config/stateful-folded"
+ln -s "$stow_dir/stateful-folded/.config/stateful-folded" \
+  "$target_dir/.config/stateful-folded"
+
+run_bstow --dry-run --dir "$stow_dir" --target "$target_dir" unstow stateful-folded
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'dry-run rejected a managed directory link with state'
+assert_contains "$BSTOW_OUTPUT" 'Would remove managed directory symlink'
+assert_link_target "$target_dir/.config/stateful-folded" \
+  "$stow_dir/stateful-folded/.config/stateful-folded"
+[[ -f $stateful_folded_state ]] || fail 'dry-run removed folded-link state'
+
+run_bstow --dir "$stow_dir" --target "$target_dir" unstow stateful-folded
+[[ $BSTOW_STATUS -eq 0 ]] || fail 'unstow rejected a managed directory link with state'
+[[ ! -e $target_dir/.config/stateful-folded && ! -L $target_dir/.config/stateful-folded ]] ||
+  fail 'unstow retained a managed directory link'
+[[ -f $stow_dir/stateful-folded/.config/stateful-folded/one &&
+  -f $stow_dir/stateful-folded/.config/stateful-folded/two ]] ||
+  fail 'unstow changed the source behind a managed directory link'
+[[ ! -e $stateful_folded_state ]] || fail 'unstow retained folded-link state'
+
 mkdir -p "$stow_dir/missing-source"
 printf 'source\n' >"$stow_dir/missing-source/missing-source-file"
 run_bstow --dir "$stow_dir" --target "$target_dir" stow missing-source
