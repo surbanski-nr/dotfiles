@@ -1,10 +1,16 @@
 require 'kickstart.plugins.gitsigns'
 require 'kickstart.plugins.neo-tree'
-
-local plugins_dir = vim.fs.joinpath(vim.fn.stdpath 'config', 'lua', 'custom', 'plugins')
-for file_name, type in vim.fs.dir(plugins_dir, { follow = true }) do
-  if (type == 'file' or type == 'link') and file_name:match '%.lua$' and file_name ~= 'init.lua' then
-    local module = file_name:gsub('%.lua$', '')
-    require('custom.plugins.' .. module)
-  end
-end
+require 'custom.plugins.default_colors'
+require 'custom.plugins.highlight_enclosing_pairs'
+require 'custom.plugins.indent_guides'
+require 'custom.plugins.lint'
+require 'custom.plugins.matrix'
+require 'custom.plugins.mermaid_ascii'
+require 'custom.plugins.mini'
+require 'custom.plugins.project_marks'
+require 'custom.plugins.render_markdown'
+require 'custom.plugins.scroll_marker'
+require 'custom.plugins.search_lens'
+require 'custom.plugins.snippets'
+require 'custom.plugins.toggle_values'
+require 'custom.plugins.treesitter_selection'

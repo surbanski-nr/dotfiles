@@ -103,6 +103,7 @@ function M.setup()
     defaults = {
       file_sorter = query_sorter.new,
       generic_sorter = query_sorter.new,
+      history = { path = vim.fs.joinpath(vim.fn.stdpath 'state', 'telescope_history') },
     },
     pickers = {
       find_files = M.file_options(),

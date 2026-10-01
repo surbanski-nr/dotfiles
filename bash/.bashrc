@@ -29,30 +29,76 @@ _dotfiles_eval_init() {
 }
 
 add_to_path() {
-  if [[ -d $1 && :${PATH:-}: != *":$1:"* ]]; then
-    PATH="$1${PATH:+":$PATH"}"
-    export PATH
-  fi
+  local entry rebuilt=
+  local -a entries=()
+
+  [[ -d $1 ]] || return 0
+  IFS=: read -r -a entries <<<"${PATH:-}"
+  for entry in "${entries[@]}"; do
+    [[ -n $entry && $entry != "$1" ]] || continue
+    rebuilt+="${rebuilt:+:}$entry"
+  done
+  PATH="$1${rebuilt:+:$rebuilt}"
+  export PATH
 }
 
 _dotfiles_source=$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null ||
   printf '%s\n' "${BASH_SOURCE[0]}")
+_dotfiles_source_root=$(CDPATH='' cd -- "$(dirname -- "$_dotfiles_source")/.." && pwd)
 export GITUSER="${GITUSER:-surbanski}"
 export GHREPOS="${GHREPOS:-$HOME/github.com/$GITUSER}"
 export LAB="${LAB:-$GHREPOS/lab}"
 export NOTES="${NOTES:-$GHREPOS/notes-md}"
-export DOTFILES="${DOTFILES:-$(CDPATH='' cd -- "$(dirname -- "$_dotfiles_source")/.." && pwd)}"
+if [[ $_dotfiles_source_root =~ /dotfiles-releases/dotfiles-[0-9a-f]{12}/dotfiles$ &&
+  -f ${_dotfiles_source_root%/dotfiles}/release.env ]]; then
+  _dotfiles_release_mode=true
+  export DOTFILES=$_dotfiles_source_root
+  export DOTFILES_SNAPSHOT_ROOT=${_dotfiles_source_root%/dotfiles}
+else
+  _dotfiles_release_mode=false
+  export DOTFILES="${DOTFILES:-$_dotfiles_source_root}"
+  unset DOTFILES_SNAPSHOT_ROOT
+fi
 export WORK="${WORK:-$HOME/work}"
 # Keep virtual environment activation from modifying the prompt.
 export VIRTUAL_ENV_DISABLE_PROMPT=1
-unset _dotfiles_source
+unset _dotfiles_source _dotfiles_source_root
 
-add_to_path "$HOME/.local/share/nvim2/mason/bin"
-add_to_path "$HOME/bin"
-add_to_path "$HOME/.local/bin"
-add_to_path "$DOTFILES/scripts"
-add_to_path "$HOME/.krew/bin"
-add_to_path "$HOME/.asdf/shims"
+# Drop private paths inherited from a release launcher or tmux pane. Public
+# shell selection is always made through HOME/bin and the active `current`.
+IFS=: read -r -a _dotfiles_path_entries <<<"${PATH:-}"
+_dotfiles_clean_path=
+for _dotfiles_path_entry in "${_dotfiles_path_entries[@]}"; do
+  case $_dotfiles_path_entry in
+  "$HOME"/dotfiles-releases/dotfiles-*/bin | \
+    "$HOME"/dotfiles-releases/dotfiles-*/share/nvim2/mason/bin | \
+    "$HOME"/dotfiles-releases/dotfiles-*/share/nvim2/mason/packages/ansible-lint/venv/bin)
+    continue
+    ;;
+  esac
+  [[ -n $_dotfiles_path_entry ]] || continue
+  _dotfiles_clean_path+="${_dotfiles_clean_path:+:}$_dotfiles_path_entry"
+done
+PATH=$_dotfiles_clean_path
+export PATH
+unset _dotfiles_path_entries _dotfiles_path_entry _dotfiles_clean_path
+
+if $_dotfiles_release_mode; then
+  add_to_path "$HOME/.asdf/shims"
+  add_to_path "$HOME/.krew/bin"
+  add_to_path "$DOTFILES/scripts"
+  add_to_path "$HOME/.local/bin"
+  add_to_path "$HOME/.local/share/nvim2/mason/bin"
+  add_to_path "$HOME/bin"
+else
+  add_to_path "$HOME/.local/share/nvim2/mason/bin"
+  add_to_path "$HOME/bin"
+  add_to_path "$HOME/.local/bin"
+  add_to_path "$DOTFILES/scripts"
+  add_to_path "$HOME/.krew/bin"
+  add_to_path "$HOME/.asdf/shims"
+fi
+unset _dotfiles_release_mode
 if [[ -n ${VIRTUAL_ENV:-} && -d $VIRTUAL_ENV/bin ]]; then
   PATH=":$PATH:"
   PATH=${PATH//":$VIRTUAL_ENV/bin:"/:}
@@ -271,7 +317,13 @@ else
 fi
 
 # fzf key bindings
-if command -v fzf >/dev/null 2>&1; then
+_dotfiles_fzf_provider=$(type -P fzf 2>/dev/null || true)
+[[ -z $_dotfiles_fzf_provider ]] || _dotfiles_fzf_provider=$(readlink -f -- "$_dotfiles_fzf_provider")
+if [[ -n $_dotfiles_fzf_provider ]]; then
+  if [[ ${_DOTFILES_FZF_PROVIDER:-} != "$_dotfiles_fzf_provider" ]]; then
+    unset -f __fzf_select__ __fzf_cd__ __fzf_history__ 2>/dev/null || true
+    _DOTFILES_FZF_PROVIDER=$_dotfiles_fzf_provider
+  fi
   if fzf --bash >/dev/null 2>&1; then
     _dotfiles_eval_init fzf fzf --bash || true
   elif [ -r /usr/share/doc/fzf/examples/key-bindings.bash ]; then
@@ -294,10 +346,17 @@ if command -v fzf >/dev/null 2>&1; then
     fi
   fi
 fi
+unset _dotfiles_fzf_provider
 
-if command -v zoxide >/dev/null 2>&1 && ! declare -F __zoxide_hook >/dev/null; then
+_dotfiles_zoxide_provider=$(type -P zoxide 2>/dev/null || true)
+[[ -z $_dotfiles_zoxide_provider ]] || _dotfiles_zoxide_provider=$(readlink -f -- "$_dotfiles_zoxide_provider")
+if [[ -n $_dotfiles_zoxide_provider &&
+  (${_DOTFILES_ZOXIDE_PROVIDER:-} != "$_dotfiles_zoxide_provider" ||
+    $(type -t __zoxide_hook 2>/dev/null) != function) ]]; then
+  _DOTFILES_ZOXIDE_PROVIDER=$_dotfiles_zoxide_provider
   _dotfiles_eval_init zoxide zoxide init bash || true
 fi
+unset _dotfiles_zoxide_provider
 
 if command -v kubectl >/dev/null 2>&1; then
   if ! declare -F __start_kubectl >/dev/null; then
@@ -315,7 +374,12 @@ if command -v kubectl >/dev/null 2>&1; then
   unset kubectl_completion
 fi
 
-if command -v oh-my-posh >/dev/null 2>&1 && ! declare -F _omp_hook >/dev/null; then
+_dotfiles_omp_provider=$(type -P oh-my-posh 2>/dev/null || true)
+[[ -z $_dotfiles_omp_provider ]] || _dotfiles_omp_provider=$(readlink -f -- "$_dotfiles_omp_provider")
+if [[ -n $_dotfiles_omp_provider &&
+  (${_DOTFILES_OMP_PROVIDER:-} != "$_dotfiles_omp_provider" ||
+    $(type -t _omp_hook 2>/dev/null) != function) ]]; then
+  _DOTFILES_OMP_PROVIDER=$_dotfiles_omp_provider
   if [[ -r $HOME/.oh-my-posh.omp.json ]]; then
     if _dotfiles_eval_init 'Oh My Posh' oh-my-posh init bash --config "$HOME/.oh-my-posh.omp.json"; then
       command oh-my-posh toggle kubectl ||
@@ -325,6 +389,7 @@ if command -v oh-my-posh >/dev/null 2>&1 && ! declare -F _omp_hook >/dev/null; t
     _dotfiles_warn 'Oh My Posh is installed but ~/.oh-my-posh.omp.json is missing'
   fi
 fi
+unset _dotfiles_omp_provider
 
 export NVIM_APPNAME="${NVIM_APPNAME:-nvim2}"
 export VISUAL=nvim

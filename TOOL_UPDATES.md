@@ -27,7 +27,7 @@ cp -a "$candidate_root/current" "$candidate_root/candidate"
 ```
 
 Edit only the intended pins in `candidate/versions.env` or
-`candidate/nvim2-release.env`. For a daily tool, install the current selection
+`candidate/dotfiles-release.env`. For a daily tool, install the current selection
 first, record its version and canonical link, then run the candidate from the
 other read-only checkout. This tested example uses Debian 13 and an immutable
 image digest. Replace `TOOL` and the version check for another daily tool:
@@ -165,8 +165,10 @@ the required version first and rerun the importer:
 
 To roll back asdf itself or a plugin, restore its executable version, digest
 or plugin commit in `versions.env`, run `setup-asdf`, and verify every retained
-runtime. Restore TPM checkout commits without deleting tmux-resurrect data.
-Use Krew's supported manager install or downgrade process so its plugin
+runtime. For connected tmux, restore the TPM and plugin checkout commits
+without deleting tmux-resurrect data. Complete offline releases load sensible,
+resurrect and continuum directly from their physical release and do not bundle
+TPM. Use Krew's supported manager install or downgrade process so its plugin
 inventory is retained.
 
 ## Nvim2 candidate and health evidence
@@ -226,18 +228,21 @@ Run `task validate`, build and disconnect-test every affected platform release,
 then repeat the four-distribution qualification before transferring the
 reviewed diff to the normal checkout.
 
-## Complete Nvim2 rollback
+## Complete offline release rollback
 
-Stop running Nvim2 processes. Restore the matching dotfiles revision and the
-complete artifact for that revision: Neovim, Node.js, ripgrep, plugin data,
-lockfile, Mason tools, parsers and queries. Follow
+Use `dotfiles-release rollback` to select the retained previous unit, including
+all tools, configuration, plugins and language support. Existing Neovim and
+tmux processes remain pinned to the physical release from which they started.
+Follow
 [the offline release runbook](nvim2/.config/nvim2/offline-releases.md) for
-checksum verification and activation. Older artifacts may use their documented
-`~/.local/opt` executable roots; retain those roots during migration.
+checksum verification, activation and exact-ID uninstall. Older artifacts may
+use their documented `~/.local/opt` executable roots; retain those roots during
+migration.
 
 Do not combine an older editor with arbitrary newer plugin data. Keep the
-previous executable and data roots until editing, health and disconnected
-runtime checks pass. This repository provides no purge command.
+previous release until editing, health and disconnected runtime checks pass.
+Plain `uninstall` restores the baseline without deleting retained payloads.
+`uninstall ID` removes only an inactive, integrity-checked release.
 
 For an editor-independent recovery path, use `vi FILE` or `vim FILE`. To bypass
 optional Vim configuration and plugins, use `vim -Nu NONE FILE`. For a Git

@@ -90,9 +90,24 @@ _dotfiles_check_version() {
 dotfiles-check() (
   local manifest_dir=${DOTFILES:-}
   local missing=0
+  local release_id release_root
 
   if [[ -z $manifest_dir ]]; then
     manifest_dir=$(CDPATH='' cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+  fi
+  release_root=${manifest_dir%/dotfiles}
+  if [[ -f $release_root/release.env && -x $release_root/bin/dotfiles-release ]]; then
+    release_id=${release_root##*/}
+    "$release_root/bin/dotfiles-release" health "$release_id" || return
+    for command_name in dotfiles-release nvim tmux node npm npx corepack rg \
+      zoxide k9s kubectx kubens oh-my-posh task fzf terraform; do
+      [[ $(readlink -f -- "$HOME/bin/$command_name" 2>/dev/null) == \
+        "$release_root/"* ]] || {
+        printf '  MISMATCH active release command: %s\n' "$command_name" >&2
+        return 1
+      }
+    done
+    return 0
   fi
   if [[ -r $manifest_dir/versions.env && -r $manifest_dir/validation.env ]]; then
     # shellcheck source=../validation.env
@@ -147,12 +162,12 @@ dotfiles-check() (
     _dotfiles_check_version zoxide zoxide "$ZOXIDE_VERSION" --version || missing=1
     _dotfiles_check_version uv uv "$UV_VERSION" --version || missing=1
     _dotfiles_check_version Neovim nvim "$NVIM_VERSION" --version || missing=1
-    _dotfiles_check_version Terraform terraform "${TERRAFORM_VERSIONS%% *}" version || missing=1
-    _dotfiles_check_version kubectl kubectl "${KUBECTL_VERSIONS%% *}" version --client || missing=1
-    _dotfiles_check_version Helm helm "${HELM_VERSIONS%% *}" version --short || missing=1
-    _dotfiles_check_version Node.js node "${NODEJS_VERSIONS%% *}" --version || missing=1
-    _dotfiles_check_version Python python "${PYTHON_VERSIONS%% *}" --version || missing=1
-    _dotfiles_check_version Terragrunt terragrunt "${TERRAGRUNT_VERSIONS%% *}" --version || missing=1
+    _dotfiles_check_version Terraform terraform "${TERRAFORM_VERSIONS[0]}" version || missing=1
+    _dotfiles_check_version kubectl kubectl "${KUBECTL_VERSIONS[0]}" version --client || missing=1
+    _dotfiles_check_version Helm helm "${HELM_VERSIONS[0]}" version --short || missing=1
+    _dotfiles_check_version Node.js node "${NODEJS_VERSIONS[0]}" --version || missing=1
+    _dotfiles_check_version Python python "${PYTHON_VERSIONS[0]}" --version || missing=1
+    _dotfiles_check_version Terragrunt terragrunt "${TERRAGRUNT_VERSIONS[0]}" --version || missing=1
   fi
 
   return "$missing"

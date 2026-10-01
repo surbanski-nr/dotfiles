@@ -44,4 +44,47 @@ set -e
 [[ $wrong_arch_output == *'only Linux x86-64 is supported'* ]] ||
   fail 'setup-system did not report the unsupported architecture'
 
+fixture_bin=$test_root/fixture-bin
+package_log=$test_root/packages.log
+mkdir -p "$fixture_bin"
+cat >"$fixture_bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ ${1:-} == -- ]] && shift
+exec "$@"
+EOF
+cat >"$fixture_bin/apt-get" <<'EOF'
+#!/usr/bin/env bash
+printf 'apt-get' >>"$TEST_PACKAGE_LOG"
+printf '\t%s' "$@" >>"$TEST_PACKAGE_LOG"
+printf '\n' >>"$TEST_PACKAGE_LOG"
+EOF
+chmod 0755 "$fixture_bin/sudo" "$fixture_bin/apt-get"
+
+for _ in 1 2; do
+  PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \
+    "$repo_dir/setup-system" --runtime >/dev/null
+done
+[[ $(grep -c $'^apt-get\tupdate$' "$package_log") -eq 2 ]] ||
+  fail 'runtime setup did not repeat the package index refresh'
+[[ $(grep -c 'libevent-core-2.1-7t64' "$package_log") -eq 2 ]] ||
+  fail 'runtime setup omitted libevent runtime'
+[[ $(grep -c 'diffutils' "$package_log") -eq 2 ]] ||
+  fail 'runtime setup omitted cmp runtime'
+if grep $'^apt-get\tinstall' "$package_log" | grep -Eq $'\t(python3|tmux|build-essential)(\t|$)'; then
+  fail 'runtime setup included a connected-only package'
+fi
+
+: >"$package_log"
+for _ in 1 2; do
+  PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \
+    "$repo_dir/setup-system" >/dev/null
+done
+[[ $(grep -c $'^apt-get\tupdate$' "$package_log") -eq 2 ]] ||
+  fail 'connected setup did not repeat the package index refresh'
+grep $'^apt-get\tinstall' "$package_log" | grep -F $'\tbuild-essential\t' >/dev/null ||
+  fail 'connected setup omitted build prerequisites'
+grep $'^apt-get\tinstall' "$package_log" | grep -F $'\tpython3\t' >/dev/null ||
+  fail 'connected setup omitted its Python provider'
+
 printf 'Setup system tests passed\n'

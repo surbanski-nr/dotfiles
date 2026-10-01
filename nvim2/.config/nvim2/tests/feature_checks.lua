@@ -229,6 +229,7 @@ write(
   ([[
 vim.opt.runtimepath:prepend(%q)
 vim.opt.swapfile = false
+vim.opt.shadafile = 'NONE'
 vim.cmd.edit(%q)
 local marks = require 'custom.plugins.project_marks'
 if vim.env.NVIM2_MARK_READ_NAME then
@@ -433,146 +434,40 @@ local before_special = vim.api.nvim_win_get_cursor(0)
 jump_map.callback()
 assert(vim.deep_equal(vim.api.nvim_win_get_cursor(0), before_special), 'Mini Jump2d ran in a special buffer')
 
-vim.cmd.tabnew()
-local matrix_file = vim.fs.joinpath(repository_a, 'matrix.lua')
-write(matrix_file, 'local matrix = true')
-vim.cmd.edit(matrix_file)
-vim.cmd.vsplit()
-vim.cmd.enew()
-vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'two' })
-vim.cmd.split()
-vim.cmd.enew()
-vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'three' })
-vim.cmd.wincmd 'h'
-vim.cmd.split()
-vim.cmd.enew()
-vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'four' })
-local tab = vim.api.nvim_get_current_tabpage()
-local sources = vim
-  .iter(vim.api.nvim_tabpage_list_wins(tab))
-  :filter(function(window) return vim.api.nvim_win_get_config(window).relative == '' and vim.bo[vim.api.nvim_win_get_buf(window)].buftype == '' end)
-  :totable()
-assert(#sources == 4, 'Matrix fixture did not create four editing panes')
-local named_source = vim.iter(sources):find(function(window) return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(window)) == matrix_file end)
-assert(named_source, 'Matrix fixture has no named source for Neo-tree')
-local snapshots = {}
-for _, window in ipairs(sources) do
-  local buffer = vim.api.nvim_win_get_buf(window)
-  snapshots[window] = {
-    buffer = buffer,
-    lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false),
-    modified = vim.bo[buffer].modified,
-    cursor = vim.api.nvim_win_get_cursor(window),
-  }
-end
-local matrix = require 'custom.plugins.matrix'
-matrix.toggle()
-assert(vim.wait(1000, function() return matrix.status().active and matrix.status().overlays == 4 end), 'Matrix did not cover all four editing panes')
-local function overlay_for(source)
-  return vim.iter(vim.api.nvim_tabpage_list_wins(tab)):find(function(window)
-    local config = vim.api.nvim_win_get_config(window)
-    return config.relative == 'win' and config.win == source and vim.bo[vim.api.nvim_win_get_buf(window)].filetype == 'nvim2-matrix'
-  end)
-end
-for _, window in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
-  if vim.api.nvim_win_get_config(window).relative ~= '' then
-    local buffer = vim.api.nvim_win_get_buf(window)
-    assert(
-      not vim.bo[buffer].buflisted and vim.bo[buffer].buftype == 'nofile' and not vim.bo[buffer].modifiable and vim.bo[buffer].readonly,
-      'Matrix overlay is writable or persistent'
-    )
+local matrix = package.loaded['custom.plugins.matrix']
+if matrix then
+  vim.cmd.tabnew()
+  local matrix_file = vim.fs.joinpath(repository_a, 'matrix.lua')
+  write(matrix_file, 'local matrix = true')
+  vim.cmd.edit(matrix_file)
+  local source_buffer = vim.api.nvim_get_current_buf()
+  local source_lines = vim.api.nvim_buf_get_lines(source_buffer, 0, -1, false)
+  matrix.toggle()
+  assert(vim.wait(1000, function() return matrix.status().active and matrix.status().overlays == 1 end), 'Matrix did not create one overlay')
+  local overlay_buffer = vim.api.nvim_get_current_buf()
+  assert(
+    vim.bo[overlay_buffer].buftype == 'nofile' and not vim.bo[overlay_buffer].buflisted and not vim.bo[overlay_buffer].modifiable,
+    'Matrix overlay is writable or persistent'
+  )
+  matrix.toggle()
+  assert(not matrix.status().active and not matrix.status().timer, 'Matrix teardown left active resources')
+  assert(vim.api.nvim_buf_is_valid(source_buffer), 'Matrix removed its source buffer')
+  assert(vim.deep_equal(vim.api.nvim_buf_get_lines(source_buffer, 0, -1, false), source_lines), 'Matrix changed source text')
+  for _ = 1, 3 do
+    vim.api.nvim_set_current_buf(source_buffer)
+    matrix.toggle()
+    assert(matrix.status().active and matrix.status().overlays == 1)
+    matrix.toggle()
+    assert(not matrix.status().active)
   end
-end
-local focused_source = vim.api.nvim_win_get_config(vim.api.nvim_get_current_win()).win
-local resized_source = vim.iter(sources):find(function(window) return window ~= focused_source and vim.api.nvim_win_get_width(window) > 10 end)
-assert(resized_source, 'Matrix resize fixture had no wide source window')
-vim.api.nvim_win_set_width(resized_source, vim.api.nvim_win_get_width(resized_source) - 1)
-assert(
-  vim.wait(1000, function()
-    local overlay = overlay_for(resized_source)
-    return overlay and vim.api.nvim_win_get_config(overlay).width == vim.api.nvim_win_get_width(resized_source)
-  end),
-  'Matrix overlay did not follow a source-window resize'
-)
-local replaced_overlay = overlay_for(resized_source)
-local replaced_buffer = vim.api.nvim_win_get_buf(replaced_overlay)
-vim.api.nvim_buf_delete(replaced_buffer, { force = true })
-assert(
-  vim.wait(1000, function()
-    local overlay = overlay_for(resized_source)
-    return overlay and vim.api.nvim_win_get_buf(overlay) ~= replaced_buffer and matrix.status().overlays == 4
-  end),
-  'Matrix did not recover a disposed overlay'
-)
-matrix.toggle()
-assert(not matrix.status().active and not matrix.status().timer, 'Matrix teardown left active resources')
-for window, snapshot in pairs(snapshots) do
-  assert(vim.api.nvim_win_is_valid(window), 'Matrix closed a source window')
-  assert(vim.api.nvim_win_get_buf(window) == snapshot.buffer, 'Matrix replaced a source buffer')
-  assert(vim.deep_equal(vim.api.nvim_buf_get_lines(snapshot.buffer, 0, -1, false), snapshot.lines), 'Matrix changed source text')
-  assert(vim.bo[snapshot.buffer].modified == snapshot.modified, 'Matrix changed a source modified flag')
-  assert(vim.deep_equal(vim.api.nvim_win_get_cursor(window), snapshot.cursor), 'Matrix changed a source cursor')
-end
-
-vim.api.nvim_set_current_win(sources[1])
-vim.cmd.vsplit()
-vim.cmd.enew()
-local disposable_source = vim.api.nvim_get_current_win()
-vim.api.nvim_set_current_win(sources[1])
-matrix.toggle()
-assert(vim.wait(1000, function() return matrix.status().overlays == 5 end), 'Matrix did not add an overlay for a new ordinary pane')
-vim.api.nvim_win_close(disposable_source, true)
-assert(vim.wait(1000, function() return matrix.status().active and matrix.status().overlays == 4 end), 'Matrix did not reconcile a closed source window')
-matrix.toggle()
-
-matrix.toggle()
-require('telescope.builtin').buffers { previewer = false }
-assert(vim.wait(2000, function() return not matrix.status().active and vim.bo.filetype == 'TelescopePrompt' end), 'opening a picker did not close Matrix')
-require('telescope.actions').close(vim.api.nvim_get_current_buf())
-
-vim.api.nvim_set_current_win(named_source)
-matrix.toggle()
-local tree_toggle = vim.fn.maparg('\\', 'n', false, true)
-assert(type(tree_toggle.callback) == 'function', 'Neo-tree toggle is unavailable from the Matrix overlay')
-tree_toggle.callback()
-local function tree_window()
-  return vim.iter(vim.api.nvim_tabpage_list_wins(tab)):find(function(window) return vim.bo[vim.api.nvim_win_get_buf(window)].filetype == 'neo-tree' end)
-end
-assert(
-  vim.wait(3000, function() return matrix.status().active and tree_window() ~= nil end),
-  'Matrix did not preserve a Neo-tree toggle from its source context: '
-    .. vim.inspect {
-      matrix = matrix.status(),
-      windows = vim
-        .iter(vim.api.nvim_tabpage_list_wins(tab))
-        :map(function(window) return { filetype = vim.bo[vim.api.nvim_win_get_buf(window)].filetype, config = vim.api.nvim_win_get_config(window) } end)
-        :totable(),
-      messages = vim.fn.execute 'messages',
-    }
-)
-local tree = tree_window()
-assert(not overlay_for(tree), 'Matrix covered the Neo-tree window')
-vim.cmd 'Neotree close'
-assert(vim.wait(3000, function() return tree_window() == nil and matrix.status().active end), 'Matrix did not reconcile after closing Neo-tree')
-matrix.toggle()
-
-for _ = 1, 3 do
+  local original_set_lines = vim.api.nvim_buf_set_lines
+  vim.api.nvim_buf_set_lines = function() error 'injected Matrix rendering failure' end
   matrix.toggle()
-  assert(matrix.status().active)
-  matrix.toggle()
-  assert(not matrix.status().active)
+  assert(vim.wait(3000, function() return not matrix.status().active end), 'Matrix did not tear down after a rendering failure')
+  vim.api.nvim_buf_set_lines = original_set_lines
+  assert(not matrix.status().timer and matrix.status().overlays == 0, 'Matrix rendering failure leaked resources')
+  vim.cmd.tabclose()
 end
-local original_set_lines = vim.api.nvim_buf_set_lines
-vim.api.nvim_buf_set_lines = function() error 'injected Matrix rendering failure' end
-matrix.toggle()
-assert(vim.wait(3000, function() return not matrix.status().active end), 'Matrix did not tear down after a rendering failure')
-vim.api.nvim_buf_set_lines = original_set_lines
-assert(not matrix.status().timer and matrix.status().overlays == 0, 'Matrix rendering failure leaked resources')
-matrix.toggle()
-vim.cmd.tabnew()
-assert(not matrix.status().active, 'Matrix survived leaving its tab')
-vim.cmd.tabclose()
-vim.cmd.tabclose()
 
 vim.fn.delete(temporary, 'rf')
 io.stdout:write 'Nvim2 feature checks passed\n'

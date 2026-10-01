@@ -31,57 +31,87 @@ setup_validate_commit() {
   [[ $value =~ ^[0-9a-f]{40}$ ]] || setup_die "$name is not a commit SHA"
 }
 
-setup_validate_list() {
+setup_validate_array() {
   local name=$1
-  local value=$2
   local item
   local previous
-  local seen_items=
+  local -a seen_items=()
+  local -n values=$name
 
-  [[ $value == *[![:space:]]* ]] || setup_die "$name is empty" || return
-  for item in $value; do
+  declare -p "$name" 2>/dev/null | grep -q '^declare -a' ||
+    setup_die "$name must be an indexed array" || return
+  ((${#values[@]} > 0)) || setup_die "$name is empty" || return
+  for item in "${values[@]}"; do
     setup_validate_version "$name" "$item" || return
-    for previous in ${seen_items:-}; do
+    for previous in "${seen_items[@]}"; do
       [[ $previous != "$item" ]] || setup_die "$name contains duplicate $item" || return
     done
-    seen_items="${seen_items:+$seen_items }$item"
+    seen_items+=("$item")
   done
 }
 
 setup_validate_versions() {
   local commit_name
   local digest_name
-  local list_name
+  local array_name
   local scalar_name
   local version
+
+  declare -p OFFLINE_TOOLS 2>/dev/null | grep -q '^declare -a' ||
+    setup_die 'OFFLINE_TOOLS must be an indexed array' || return
+  local expected_tool tool
+  local seen_tools=' '
+  for tool in "${OFFLINE_TOOLS[@]}"; do
+    case $tool in
+      nvim | nodejs | python | rg | tmux | oh-my-posh | k9s | zoxide | \
+        kubectx | kubens | task | fzf | terraform) ;;
+      *) setup_die "OFFLINE_TOOLS contains unsupported tool $tool"; return ;;
+    esac
+    [[ $seen_tools != *" $tool "* ]] ||
+      setup_die "OFFLINE_TOOLS contains duplicate $tool" || return
+    seen_tools+="$tool "
+  done
+  for expected_tool in nvim nodejs python rg tmux oh-my-posh k9s zoxide \
+    kubectx kubens task fzf terraform; do
+    [[ $seen_tools == *" $expected_tool "* ]] ||
+      setup_die "offline profile requires $expected_tool" || return
+  done
+  ((${#OFFLINE_TOOLS[@]} == 13)) ||
+    setup_die 'OFFLINE_TOOLS must contain only the required offline profile' || return
 
   for scalar_name in ASDF_VERSION GH_VERSION K9S_VERSION TRIVY_VERSION \
     KYVERNO_VERSION KUBECONFORM_VERSION SHELLCHECK_VERSION RG_VERSION \
     ZOXIDE_VERSION UV_VERSION OMP_VERSION KUBECTX_VERSION NVIM_VERSION \
-    NPM_VERSION KREW_VERSION; do
+    NPM_VERSION KREW_VERSION TMUX_VERSION FZF_VERSION; do
     setup_validate_version "$scalar_name" "${!scalar_name:-}" || return
   done
   for digest_name in ASDF_SHA256 GH_SHA256 K9S_SHA256 TRIVY_SHA256 \
     KYVERNO_SHA256 KUBECONFORM_SHA256 SHELLCHECK_SHA256 RG_SHA256 \
     ZOXIDE_SHA256 UV_SHA256 OMP_SHA256 KUBECTX_SHA256 KUBENS_SHA256 \
-    NVIM_SHA256 KREW_SHA256; do
+    NVIM_SHA256 NPM_SHA256 KREW_SHA256 PYTHON_STANDALONE_SHA256 TMUX_SHA256 \
+    FZF_SHA256; do
     setup_validate_digest "$digest_name" "${!digest_name:-}" || return
   done
-  for list_name in TERRAFORM_VERSIONS KUBECTL_VERSIONS HELM_VERSIONS \
+  for array_name in TERRAFORM_VERSIONS KUBECTL_VERSIONS HELM_VERSIONS \
     PYTHON_VERSIONS NODEJS_VERSIONS TERRAGRUNT_VERSIONS; do
-    setup_validate_list "$list_name" "${!list_name:-}" || return
+    setup_validate_array "$array_name" || return
   done
-  for version in $KUBECTL_VERSIONS; do
+  for version in "${KUBECTL_VERSIONS[@]}"; do
     setup_validate_digest "KUBECTL_SHA256_BY_VERSION[$version]" \
       "${KUBECTL_SHA256_BY_VERSION[$version]:-}" || return
   done
-  for version in $HELM_VERSIONS; do
+  for version in "${HELM_VERSIONS[@]}"; do
     setup_validate_digest "HELM_SHA256_BY_VERSION[$version]" \
       "${HELM_SHA256_BY_VERSION[$version]:-}" || return
   done
-  version=${NODEJS_VERSIONS%% *}
+  version=${NODEJS_VERSIONS[0]}
   setup_validate_digest "NODEJS_SHA256_BY_VERSION[$version]" \
-    "${NODEJS_SHA256_BY_VERSION[$version]:-}" || return
+      "${NODEJS_SHA256_BY_VERSION[$version]:-}" || return
+  version=${TERRAFORM_VERSIONS[0]}
+  setup_validate_digest "TERRAFORM_SHA256_BY_VERSION[$version]" \
+    "${TERRAFORM_SHA256_BY_VERSION[$version]:-}" || return
+  [[ $PYTHON_STANDALONE_BUILD =~ ^[0-9]{8}$ ]] ||
+    setup_die 'PYTHON_STANDALONE_BUILD must use YYYYMMDD' || return
   for commit_name in ASDF_TERRAFORM_PLUGIN_COMMIT ASDF_KUBECTL_PLUGIN_COMMIT \
     ASDF_HELM_PLUGIN_COMMIT ASDF_PYTHON_PLUGIN_COMMIT \
     ASDF_NODEJS_PLUGIN_COMMIT ASDF_TERRAGRUNT_PLUGIN_COMMIT TPM_COMMIT \
@@ -102,6 +132,500 @@ setup_download() {
   local destination=$2
 
   curl --fail --location --silent --show-error \
-    --connect-timeout 15 --max-time 300 --retry 2 \
+    --connect-timeout 15 --max-time 900 --retry 3 --retry-all-errors \
     --output "$destination" "$url"
+}
+
+setup_artifact_spec() {
+  local name=$1
+  local version=$2
+
+  SPEC_DESTS=()
+  SPEC_LINKS=()
+  SPEC_SECOND_MEMBER=
+  case $name in
+    gh)
+      SPEC_ASSET="gh_${version}_linux_amd64.tar.gz"
+      SPEC_URL="https://github.com/cli/cli/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$GH_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER="gh_${version}_linux_amd64/bin/gh"
+      SPEC_DESTS=("gh-$version")
+      SPEC_LINKS=("gh:gh-$version")
+      ;;
+    kyverno)
+      SPEC_ASSET="kyverno-cli_v${version}_linux_x86_64.tar.gz"
+      SPEC_URL="https://github.com/kyverno/kyverno/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$KYVERNO_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=kyverno
+      SPEC_DESTS=("kyverno-$version")
+      SPEC_LINKS=("kyverno:kyverno-$version")
+      ;;
+    task)
+      SPEC_ASSET=task_linux_amd64.tar.gz
+      SPEC_URL="https://github.com/go-task/task/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$TASK_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=task
+      SPEC_DESTS=("task-$version")
+      SPEC_LINKS=("task:task-$version")
+      ;;
+    trivy)
+      SPEC_ASSET="trivy_${version}_Linux-64bit.tar.gz"
+      SPEC_URL="https://github.com/aquasecurity/trivy/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$TRIVY_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=trivy
+      SPEC_DESTS=("trivy-$version")
+      SPEC_LINKS=("trivy:trivy-$version")
+      ;;
+    k9s)
+      SPEC_ASSET=k9s_Linux_amd64.tar.gz
+      SPEC_URL="https://github.com/derailed/k9s/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$K9S_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=k9s
+      SPEC_DESTS=("k9s-$version")
+      SPEC_LINKS=("k9s:k9s-$version")
+      ;;
+    kubeconform)
+      SPEC_ASSET=kubeconform-linux-amd64.tar.gz
+      SPEC_URL="https://github.com/yannh/kubeconform/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$KUBECONFORM_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=kubeconform
+      SPEC_DESTS=("kubeconform-$version")
+      SPEC_LINKS=("kubeconform:kubeconform-$version")
+      ;;
+    shellcheck)
+      SPEC_ASSET="shellcheck-v${version}.linux.x86_64.tar.xz"
+      SPEC_URL="https://github.com/koalaman/shellcheck/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$SHELLCHECK_SHA256
+      SPEC_FORMAT=xz-member
+      SPEC_MEMBER="shellcheck-v${version}/shellcheck"
+      SPEC_DESTS=("shellcheck-$version")
+      SPEC_LINKS=("shellcheck:shellcheck-$version")
+      ;;
+    oh-my-posh)
+      SPEC_ASSET=posh-linux-amd64
+      SPEC_URL="https://github.com/JanDeDobbeleer/oh-my-posh/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$OMP_SHA256
+      SPEC_FORMAT=raw
+      SPEC_MEMBER=
+      SPEC_DESTS=("oh-my-posh-$version")
+      SPEC_LINKS=("oh-my-posh:oh-my-posh-$version")
+      ;;
+    kubectx | kubens)
+      SPEC_ASSET="${name}_v${version}_linux_x86_64.tar.gz"
+      SPEC_URL="https://github.com/ahmetb/kubectx/releases/download/v${version}/$SPEC_ASSET"
+      if [[ $name == kubectx ]]; then SPEC_DIGEST=$KUBECTX_SHA256; else SPEC_DIGEST=$KUBENS_SHA256; fi
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=$name
+      SPEC_DESTS=("$name-$version")
+      SPEC_LINKS=("$name:$name-$version")
+      ;;
+    rg)
+      SPEC_ASSET="ripgrep-${version}-x86_64-unknown-linux-musl.tar.gz"
+      SPEC_URL="https://github.com/BurntSushi/ripgrep/releases/download/${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$RG_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER="ripgrep-${version}-x86_64-unknown-linux-musl/rg"
+      SPEC_DESTS=("rg-$version")
+      SPEC_LINKS=("rg:rg-$version")
+      ;;
+    zoxide)
+      SPEC_ASSET="zoxide-${version}-x86_64-unknown-linux-musl.tar.gz"
+      SPEC_URL="https://github.com/ajeetdsouza/zoxide/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$ZOXIDE_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=zoxide
+      SPEC_DESTS=("zoxide-$version")
+      SPEC_LINKS=("zoxide:zoxide-$version")
+      ;;
+    uv)
+      SPEC_ASSET=uv-x86_64-unknown-linux-gnu.tar.gz
+      SPEC_URL="https://github.com/astral-sh/uv/releases/download/${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$UV_SHA256
+      SPEC_FORMAT=gz-pair
+      SPEC_MEMBER=uv-x86_64-unknown-linux-gnu/uv
+      SPEC_SECOND_MEMBER=uv-x86_64-unknown-linux-gnu/uvx
+      SPEC_DESTS=("uv-$version" "uvx-$version")
+      SPEC_LINKS=("uv:uv-$version" "uvx:uvx-$version")
+      ;;
+    nvim)
+      SPEC_ASSET=nvim-linux-x86_64.tar.gz
+      SPEC_URL="https://github.com/neovim/neovim/releases/download/${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$NVIM_SHA256
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER=nvim-linux-x86_64
+      SPEC_DESTS=("nvim-$version")
+      SPEC_LINKS=("nvim:nvim-$version/bin/nvim")
+      ;;
+    kubectl)
+      SPEC_ASSET=kubectl
+      SPEC_URL="https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubectl"
+      SPEC_DIGEST=${KUBECTL_SHA256_BY_VERSION[$version]:-}
+      SPEC_FORMAT=raw
+      SPEC_MEMBER=
+      SPEC_DESTS=("kubectl-$version")
+      SPEC_LINKS=("kubectl:kubectl-$version")
+      ;;
+    helm)
+      SPEC_ASSET="helm-v${version}-linux-amd64.tar.gz"
+      SPEC_URL="https://get.helm.sh/$SPEC_ASSET"
+      SPEC_DIGEST=${HELM_SHA256_BY_VERSION[$version]:-}
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=linux-amd64/helm
+      SPEC_DESTS=("helm-$version")
+      SPEC_LINKS=("helm:helm-$version")
+      ;;
+    nodejs)
+      SPEC_ASSET="node-v${version}-linux-x64.tar.xz"
+      SPEC_URL="https://nodejs.org/download/release/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=${NODEJS_SHA256_BY_VERSION[$version]:-}
+      SPEC_FORMAT=xz-tree
+      SPEC_MEMBER="node-v${version}-linux-x64"
+      SPEC_DESTS=("node-$version")
+      SPEC_LINKS=()
+      ;;
+    npm)
+      SPEC_ASSET="npm-${version}.tgz"
+      SPEC_URL="https://registry.npmjs.org/npm/-/npm-${version}.tgz"
+      SPEC_DIGEST=$NPM_SHA256
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER=package
+      SPEC_DESTS=(npm-package)
+      SPEC_LINKS=()
+      ;;
+    python)
+      SPEC_ASSET="cpython-${version}+${PYTHON_STANDALONE_BUILD}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+      SPEC_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_STANDALONE_BUILD}/${SPEC_ASSET/+/%2B}"
+      SPEC_DIGEST=$PYTHON_STANDALONE_SHA256
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER=python
+      SPEC_DESTS=("python-$version")
+      SPEC_LINKS=()
+      ;;
+    fzf)
+      SPEC_ASSET="fzf-${version}-linux_amd64.tar.gz"
+      SPEC_URL="https://github.com/junegunn/fzf/releases/download/v${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$FZF_SHA256
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=fzf
+      SPEC_DESTS=("fzf-$version")
+      SPEC_LINKS=()
+      ;;
+    terraform)
+      SPEC_ASSET="terraform_${version}_linux_amd64.zip"
+      SPEC_URL="https://releases.hashicorp.com/terraform/${version}/$SPEC_ASSET"
+      SPEC_DIGEST=${TERRAFORM_SHA256_BY_VERSION[$version]:-}
+      SPEC_FORMAT=zip-member
+      SPEC_MEMBER=terraform
+      SPEC_DESTS=("terraform-$version")
+      SPEC_LINKS=()
+      ;;
+    tmux)
+      SPEC_ASSET="tmux-${version}.tar.gz"
+      # Consumed by the release builder, which sources this library.
+      # shellcheck disable=SC2034
+      SPEC_URL="https://github.com/tmux/tmux/releases/download/${version}/$SPEC_ASSET"
+      SPEC_DIGEST=$TMUX_SHA256
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER="tmux-$version"
+      SPEC_DESTS=("tmux-$version")
+      # setup-tools does not install tmux, but release artifact preparation does.
+      # shellcheck disable=SC2034
+      SPEC_LINKS=()
+      ;;
+    *) setup_die "missing artifact mapping for $name" ;;
+  esac
+}
+
+setup_validate_tar_archive() {
+  local archive=$1 compression=$2 subtree=${3:-}
+  local member line type remainder name target resolved listing verbose
+  local -a list_args=(-tf) verbose_args=(-tvf)
+
+  case $compression in
+    gz) list_args=(-tzf); verbose_args=(-tvzf) ;;
+    xz) list_args=(-tJf); verbose_args=(-tvJf) ;;
+    *) setup_die "unsupported tar compression: $compression"; return ;;
+  esac
+  listing=$(tar "${list_args[@]}" "$archive") || return
+  while IFS= read -r member || [[ -n $member ]]; do
+    [[ -n $member && $member != /* && $member != ../* && /$member/ != *'/../'* ]] ||
+      { setup_die "unsafe archive member: $member"; return 1; }
+    if [[ -n $subtree ]]; then
+      [[ $member == "$subtree" || $member == "$subtree/"* ]] ||
+        { setup_die "unexpected archive member: $member"; return 1; }
+    fi
+  done <<<"$listing"
+  verbose=$(LC_ALL=C tar --numeric-owner --quoting-style=literal \
+    "${verbose_args[@]}" "$archive") || return
+  while IFS= read -r line || [[ -n $line ]]; do
+    type=${line:0:1}
+    case $type in
+      - | d) ;;
+      l)
+        read -r _ _ _ _ _ remainder <<<"$line"
+        [[ $remainder == *' -> '* ]] || { setup_die "cannot parse archive link: $line"; return 1; }
+        name=${remainder% -> *}
+        target=${remainder##* -> }
+        [[ $target != /* ]] || { setup_die "absolute archive link: $name -> $target"; return 1; }
+        resolved=$(readlink -m -- "/archive/$(dirname -- "$name")/$target")
+        [[ $resolved == /archive/* ]] || { setup_die "archive link escapes its root: $name -> $target"; return 1; }
+        if [[ -n $subtree ]]; then
+          [[ $resolved == "/archive/$subtree" || $resolved == "/archive/$subtree/"* ]] ||
+            { setup_die "archive link escapes expected subtree: $name -> $target"; return 1; }
+        fi
+        ;;
+      h) setup_die "archive hard links are not supported: $line"; return 1 ;;
+      *) setup_die "archive contains an unsupported member type: $line"; return 1 ;;
+    esac
+  done <<<"$verbose"
+}
+
+setup_archive_member_to_file() {
+  local archive=$1 format=$2 member=$3 output=$4
+
+  case $format in
+    gz-member | gz-pair) tar -xOzf "$archive" -- "$member" >"$output" ;;
+    xz-member) tar -xOJf "$archive" -- "$member" >"$output" ;;
+    *) setup_die "invalid member format: $format"; return ;;
+  esac
+  chmod 0755 "$output"
+}
+
+setup_extract_artifact() {
+  local archive=$1 destination=$2
+
+  case $SPEC_FORMAT in
+    raw)
+      install -m 0755 "$archive" "$destination/${SPEC_DESTS[0]}"
+      ;;
+    gz-member | xz-member)
+      setup_validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}"
+      setup_archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_MEMBER" \
+        "$destination/${SPEC_DESTS[0]}"
+      ;;
+    gz-pair)
+      setup_validate_tar_archive "$archive" gz
+      setup_archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_MEMBER" \
+        "$destination/${SPEC_DESTS[0]}"
+      setup_archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_SECOND_MEMBER" \
+        "$destination/${SPEC_DESTS[1]}"
+      ;;
+    gz-tree)
+      setup_validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" "$SPEC_MEMBER"
+      tar -xzf "$archive" -C "$destination" \
+        --no-same-owner --no-same-permissions --keep-directory-symlink -- "$SPEC_MEMBER"
+      if [[ $SPEC_MEMBER != "${SPEC_DESTS[0]}" ]]; then
+        mv -- "$destination/$SPEC_MEMBER" "$destination/${SPEC_DESTS[0]}"
+      fi
+      ;;
+    xz-tree)
+      setup_validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" "$SPEC_MEMBER"
+      tar -xJf "$archive" -C "$destination" \
+        --no-same-owner --no-same-permissions --keep-directory-symlink -- "$SPEC_MEMBER"
+      if [[ $SPEC_MEMBER != "${SPEC_DESTS[0]}" ]]; then
+        mv -- "$destination/$SPEC_MEMBER" "$destination/${SPEC_DESTS[0]}"
+      fi
+      ;;
+    zip-member)
+      unzip -p "$archive" "$SPEC_MEMBER" >"$destination/${SPEC_DESTS[0]}"
+      chmod 0755 "$destination/${SPEC_DESTS[0]}"
+      ;;
+    *) setup_die "invalid artifact format: $SPEC_FORMAT" ;;
+  esac
+}
+
+setup_prepare_artifact() {
+  local name=$1 version=$2 archive=$3 destination=$4
+
+  setup_artifact_spec "$name" "$version"
+  setup_validate_digest "$name $version digest" "$SPEC_DIGEST"
+  [[ -f $archive && ! -L $archive ]] || setup_die "missing artifact: $archive" || return
+  setup_verify_sha256 "$archive" "$SPEC_DIGEST"
+  mkdir -p "$destination"
+  setup_extract_artifact "$archive" "$destination"
+}
+
+setup_system_package_list() {
+  local platform=$1
+  local role=$2
+  local -a runtime=()
+  local -a extra=()
+
+  case $platform in
+    debian:* | ubuntu:* | debian-*-x86_64 | ubuntu-*-x86_64)
+      runtime=(
+        bash
+        ca-certificates
+        coreutils
+        diffutils
+        findutils
+        git
+        gawk
+        grep
+        gzip
+        iproute2
+        libevent-core-2.1-7t64
+        libtinfo6
+        ncurses-bin
+        ncurses-term
+        passwd
+        sed
+        tar
+        unzip
+        util-linux
+        xz-utils
+      )
+      case $role in
+        runtime) extra=() ;;
+        build)
+          extra=(
+            autoconf
+            automake
+            bison
+            build-essential
+            curl
+            file
+            libevent-dev
+            libncurses-dev
+            libtool
+            make
+            patch
+            pkg-config
+          )
+          ;;
+        connected)
+          extra=(
+            autoconf
+            automake
+            bash-completion
+            bison
+            build-essential
+            curl
+            dirmngr
+            dos2unix
+            file
+            gawk
+            gnupg
+            htop
+            jq
+            libbz2-dev
+            libevent-dev
+            libffi-dev
+            liblzma-dev
+            libncurses-dev
+            libreadline-dev
+            libssl-dev
+            libsqlite3-dev
+            libtool
+            make
+            mc
+            patch
+            pkg-config
+            python3
+            python3-pip
+            python3-venv
+            tk-dev
+            tmux
+            uuid-dev
+            vim
+            zlib1g-dev
+          )
+          ;;
+        *) setup_die "unknown system package role: $role"; return ;;
+      esac
+      ;;
+    amzn:2023 | amzn-2023-x86_64)
+      runtime=(
+        bash
+        ca-certificates
+        coreutils
+        diffutils
+        findutils
+        git
+        gawk
+        grep
+        gzip
+        iproute
+        libevent
+        ncurses-libs
+        ncurses-term
+        shadow-utils
+        sed
+        tar
+        unzip
+        util-linux
+        which
+        xz
+      )
+      case $role in
+        runtime) extra=() ;;
+        build)
+          extra=(
+            autoconf
+            automake
+            bison
+            cargo
+            clang-devel
+            curl
+            file
+            gcc
+            gcc-c++
+            libevent-devel
+            libtool
+            make
+            ncurses-devel
+            patch
+            pkgconf
+          )
+          ;;
+        connected)
+          extra=(
+            autoconf
+            automake
+            bash-completion
+            bison
+            bzip2-devel
+            curl
+            dos2unix
+            file
+            gawk
+            gcc
+            gcc-c++
+            htop
+            jq
+            libevent-devel
+            libffi-devel
+            libtool
+            make
+            mc
+            ncurses-devel
+            openssl-devel
+            patch
+            pkgconf
+            python3
+            python3-pip
+            readline-devel
+            sqlite-devel
+            tk-devel
+            tmux
+            vim-enhanced
+            vim-minimal
+            xz-devel
+            zlib-devel
+          )
+          ;;
+        *) setup_die "unknown system package role: $role"; return ;;
+      esac
+      ;;
+    *) setup_die "unsupported system package platform: $platform"; return ;;
+  esac
+  # Consumed by setup-system or dotfiles-release after sourcing this library.
+  # shellcheck disable=SC2034
+  SETUP_SYSTEM_PACKAGES=("${runtime[@]}" "${extra[@]}")
 }

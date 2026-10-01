@@ -59,7 +59,7 @@ NVIM_APPNAME=nvim2 nvim
 
 See the [Nvim2 guide](nvim2/.config/nvim2/README.md) for normal use and clean
 rebuilds. The [offline release runbook](nvim2/.config/nvim2/offline-releases.md)
-covers connected builds, restricted installation and whole-artifact rollback.
+covers connected builds, restricted installation and whole-dotfiles rollback.
 
 `v` starts Nvim2. The shell configuration does not redefine `cat`, `vi` or
 `vim`, so the system editors remain independent. `old-nvim` is an unsupported

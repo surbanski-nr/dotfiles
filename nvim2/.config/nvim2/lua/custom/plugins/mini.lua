@@ -24,7 +24,7 @@ end, { desc = '[J]ump to visible character' })
 require('mini.statusline').section_location = function() return '%2l/%L:%-2v %p%%' end
 
 local visits = require 'mini.visits'
-visits.setup()
+visits.setup { store = { path = vim.fs.joinpath(vim.fn.stdpath 'state', 'mini-visits-index') } }
 local visit_opts = { sort = visits.gen_sort.default { recency_weight = 0.5 } }
 
 vim.keymap.set('n', '<leader>vv', function() visits.select_path(vim.fn.getcwd(), visit_opts) end, { desc = '[V]isited files in cwd' })

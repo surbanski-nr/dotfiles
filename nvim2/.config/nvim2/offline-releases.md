@@ -1,228 +1,98 @@
-# Nvim2 offline releases
+# Nvim2 in complete offline releases
 
-An offline Nvim2 release is one unit containing the matching dotfiles commit,
-Neovim, Node.js, ripgrep, locked plugins, Mason packages, Treesitter parsers and
-queries. Do not update one of those parts independently on a restricted host.
+The authoritative multi-application build, prerequisite, installation,
+ownership, rollback and uninstall procedure is in
+[SETUP.md](../../../SETUP.md#complete-offline-release). This page documents the
+Neovim-specific parts of that release.
 
-## Supported matrix
+## Editor payload and process identity
 
-`nvim2-release.env` pins every builder image by digest and records each target
-identity explicitly.
+Each `dotfiles-COMMIT12-PLATFORM.tar.gz` artifact contains the full official
+Neovim tree, the matching `nvim2` configuration, exact `vim.pack` Git
+checkouts, Treesitter parsers and queries, and the complete pinned Mason tool
+inventory. The dotfiles snapshot, plugin lock and generated Mason receipts all
+come from the same source commit recorded in `release.env`.
 
-| Platform | User | Home | Python source |
-| --- | --- | --- | --- |
-| Debian 13 x86-64 | `surbanski` | `/home/surbanski` | Debian 13 packages |
-| Ubuntu 24.04 x86-64 | `surbanski` | `/home/surbanski` | Ubuntu 24.04 packages |
-| Ubuntu 26.04 x86-64 | `surbanski` | `/home/surbanski` | Ubuntu 26.04 packages |
-| Amazon Linux 2023 x86-64 | `ec2-user` | `/home/ec2-user` | Amazon Linux 2023 packages |
+The connected builder starts from empty Neovim data and runs
+`Nvim2ToolsInstallSync` and the tool-enabled test suite. It removes the Mason
+venvs for ansible-lint and yamllint before packaging. Their exact generated
+locks and wheels travel in the artifact. The target installer uses the bundled
+standalone Python to recreate ordinary isolated venvs at their final retained
+paths with `--no-index`, `--require-hashes` and `--only-binary=:all:`. It never
+moves a completed venv and does not use a host Python or site-packages.
 
-Mason Python environments contain absolute interpreter and home paths. The
-artifact therefore records and validates the interpreter's resolved path and
-major/minor version as well as the operating system, architecture, UID and
-home. The Python in this artifact is the distro runtime. It is separate from a
-project Python selected through asdf.
+The release `nvim` launcher resolves its physical release root once. For the
+`nvim2` app it sets physical `XDG_CONFIG_HOME` and `XDG_DATA_HOME` plus a
+private tool path, while leaving `XDG_STATE_HOME` under user control. An
+explicit different `NVIM_APPNAME` is passed through without those overrides.
+Therefore a Nvim process started from release A keeps configuration, plugins
+and tools from A after `current` changes to B. A new process uses B.
 
-## Build locally
+## Mutable data
 
-Build only from a clean commit. The release tag must be
-`nvim2-<7-to-40-character lowercase commit prefix>` and resolve to that commit.
-Use [TOOL_UPDATES.md](../../../TOOL_UPDATES.md) for uncommitted experiments.
+The immutable payload never owns ShaDa, undo files, project marks, Mini Visits
+or Telescope history. They use `${XDG_STATE_HOME:-$HOME/.local/state}/nvim2`.
+On first activation, the manager copies legacy `mini-visits-index`,
+`telescope_history` and `telescope_history.sqlite3` from the old data path only
+when the destination does not exist. It preserves the source and never replaces
+newer state.
+
+Cache and logs also stay outside the payload. In particular,
+lua-language-server writes its log below the Nvim2 state directory. Health uses
+a disposable HOME, state and cache, so it does not modify the operator's
+history, kubeconfig or editor data.
+
+## Offline health
+
+`dotfiles-release health [ID]` verifies the local content record, file modes,
+symlink targets, source metadata, Python isolation and all runtime versions.
+The full mode then runs functional rg, fzf, zoxide, Task, Terraform and tfvars
+operations, an embedded-library `helm-ls` lint without Helm, isolated
+kubectx/kubens and k9s checks, a private tmux socket with all three plugins,
+and a real interactive Bash reload. Finally it executes:
 
 ```bash
-test -z "$(git status --porcelain --untracked-files=normal)"
-source nvim2-release.env
-commit=$(git rev-parse HEAD)
-tag="nvim2-$commit"
-output="$HOME/nvim2-builder-output"
-mkdir -p "$output"
-
-platform=debian-13-x86_64
-image=$DEBIAN_13_IMAGE
-docker pull "$image"
-timeout --signal=TERM --kill-after=30s 3600s docker run --rm \
-  --volume "$PWD:/workspace:ro" \
-  --volume "$output:/out" \
-  --env RELEASE_TAG="$tag" \
-  --env SOURCE_COMMIT="$commit" \
-  --env BUILDER_IMAGE="$image" \
-  "$image" \
-  bash /workspace/scripts/nvim2-release \
-    build "$platform" /workspace /out
+NVIM2_CHECK_TOOLS=1 NVIM2_BENCHMARK_RUNS=3 \
+  bash "$PHYSICAL_RELEASE/config/nvim2/tests/check.sh"
 ```
 
-Repeat the command with these platform and image pairs:
+The Nvim2 suite covers plugin HEAD and cleanliness, Mason receipts and probes,
+Treesitter parsers, feature behavior, LSP, diagnostics, formatting and linting.
+Terraform and tfvars continue to use `terraform fmt`. The local Helm chart test
+uses helm-ls without a Helm executable. No plugin, parser, language server or
+formatter is installed or updated by health.
+
+For qualification evidence, preserve the unfiltered manager output and the
+files produced by the normal Nvim checks, including messages, Mason, Conform
+and LSP reports. An optional clipboard-provider warning in a headless
+container does not affect editing, while an error in a required plugin, tool,
+parser or server is a release failure.
+
+## Platform qualification and workflow
+
+The supported Linux x86-64 platforms are Debian 13, Ubuntu 24.04, Ubuntu
+26.04 and Amazon Linux 2023. Standalone Python wheels, tmux dynamic libraries
+and the complete Neovim profile are qualified separately in each pinned image.
+The final runtime check uses a fresh prepared container, a read-only artifact,
+an ordinary user and `--network none`.
+
+`.github/workflows/dotfiles-release.yml` accepts an existing
+`dotfiles-COMMIT12` release, verifies any existing asset identity, and builds
+only missing platform assets. It never creates a tag or release. A qualified
+asset is uploaded only after offline install and full health have passed.
+
+Expected assets are:
 
 ```text
-debian-13-x86_64       DEBIAN_13_IMAGE
-ubuntu-24.04-x86_64    UBUNTU_2404_IMAGE
-ubuntu-26.04-x86_64    UBUNTU_2604_IMAGE
-amzn-2023-x86_64       AMZN_2023_IMAGE
+dotfiles-COMMIT12-debian-13-x86_64.tar.gz
+dotfiles-COMMIT12-ubuntu-24.04-x86_64.tar.gz
+dotfiles-COMMIT12-ubuntu-26.04-x86_64.tar.gz
+dotfiles-COMMIT12-amzn-2023-x86_64.tar.gz
 ```
 
-The script installs target packages, creates the exact user, downloads and
-checks pinned release files, builds Nvim2 data from empty storage, runs the
-tool-enabled check and creates one artifact directory. It uses this layout:
-
-```text
-~/bin/nvim -> nvim-VERSION/bin/nvim
-~/bin/node -> nodejs-VERSION/bin/node
-~/bin/rg -> rg-VERSION
-```
-
-On Amazon Linux 2023 only, the builder compiles the pinned Tree-sitter CLI
-because Mason's upstream executable requires a newer glibc. The compiler,
-Cargo and its staging directory do not belong to the runtime artifact. Go is
-not installed or required on any target.
-
-## Verify without network access
-
-Prepare the runtime image while connected, then commit it and launch a new
-container with networking disabled. This checks the network boundary itself.
-
-```bash
-runtime_container="nvim2-runtime-$platform"
-runtime_image="nvim2-runtime:$platform"
-artifact="$output/$platform"
-
-docker run --detach --name "$runtime_container" "$image" sleep infinity
-docker cp scripts/nvim2-release \
-  "$runtime_container:/usr/local/bin/nvim2-release"
-timeout --signal=TERM --kill-after=15s 600s docker exec \
-  --env TARGET_HOME="$TARGET_HOME" \
-  --env TARGET_UID="$TARGET_UID" \
-  --env TARGET_USER="$TARGET_USER" \
-  "$runtime_container" \
-  bash /usr/local/bin/nvim2-release prepare-runtime "$platform"
-docker commit "$runtime_container" "$runtime_image"
-docker rm "$runtime_container"
-
-timeout --signal=TERM --kill-after=30s 900s docker run --rm \
-  --network none \
-  --volume "$artifact:/artifact:ro" \
-  "$runtime_image" \
-  bash /usr/local/bin/nvim2-release verify "$platform" /artifact
-```
-
-Set `TARGET_USER`, `TARGET_UID` and `TARGET_HOME` from the matching variables in
-`nvim2-release.env`. Verification checks every checksum before extraction and
-fails on a wrong platform, architecture, user, UID, home, Python path, Python
-major/minor version or source commit. It also checks that external DNS is not
-available, then runs the complete Nvim2 test with tools enabled.
-
-The artifact contains:
-
-```text
-SHA256SUMS
-build-manifest.txt
-dotfiles.bundle
-node-vVERSION-linux-x64.tar.xz
-nvim-linux-x86_64.tar.gz
-nvim2-data.tar.gz
-nvim2-release
-os-packages.txt
-release.env
-ripgrep-VERSION-x86_64-unknown-linux-musl.tar.gz
-```
-
-Review `build-manifest.txt`, `os-packages.txt`, all check output, and the
-captured health evidence described in [TOOL_UPDATES.md](../../../TOOL_UPDATES.md).
-Open representative Python, Lua, Bash, TypeScript/TSX, Terraform, Ansible, Helm
-and YAML files before accepting the release.
-
-## GitHub Actions
-
-The `Build Nvim2 offline release` workflow checks out the release commit and
-builds missing artifacts for all four platforms. It uploads directly to an
-existing draft release. It does not create or publish a release.
-
-Creating a tag or release is an explicitly authorized publishing operation.
-When authorized, create the draft for the reviewed clean commit:
-
-```bash
-commit=$(git rev-parse HEAD)
-tag="nvim2-$commit"
-gh release create "$tag" \
-  --target "$commit" \
-  --draft \
-  --title "$commit" \
-  --notes "Offline Nvim2 release for $commit"
-```
-
-The tag starts the workflow. A manual retry can build only missing assets, or
-replace all four while the release is still a draft:
-
-```bash
-gh workflow run nvim2-release.yml \
-  --ref main \
-  -f release_tag="$tag" \
-  -f force=false
-```
-
-Use `force=true` only after reviewing why an existing draft asset must be
-replaced. Published immutable assets are not rewritten. The expected names are:
-
-```text
-nvim2-offline-debian-13-x86_64.tar.gz
-nvim2-offline-ubuntu-24.04-x86_64.tar.gz
-nvim2-offline-ubuntu-26.04-x86_64.tar.gz
-nvim2-offline-amzn-2023-x86_64.tar.gz
-```
-
-## Install on a restricted machine
-
-Install operating-system runtime packages from approved repositories while
-they are reachable. Transfer the matching artifact, then disconnect external
-networking. Stop all Nvim2 processes before activation.
-
-Verify the outer archive digest recorded by the release service. Extract it,
-enter the artifact directory and run the installer shipped in that artifact:
-
-```bash
-cd /path/to/platform-artifact
-sha256sum --check --strict SHA256SUMS
-bash ./nvim2-release install "$PWD"
-```
-
-The installer validates all checksums, release identity, OS, architecture,
-HOME, UID and Python ABI. It extracts Neovim, Node.js, ripgrep and Nvim2 data
-into hidden staging paths on the target filesystem, validates the staged
-executables and configuration, and runs a `bstow` dry run before changing any
-active path. An existing versioned destination is reused only when it exactly
-matches the staged content. A differing destination, regular executable,
-unknown link or unknown configuration source is a conflict.
-
-After the full preflight, the installer promotes new versioned paths, records
-the previous complete set in mode-0600 state and atomically switches the
-configuration, data and executable links. It runs the tool-enabled Nvim2 check
-after activation. Any activation or check failure restores the previous set
-and removes staging and newly promoted paths. Repeating the command for an
-already active release is safe. A plugin-only release can reuse byte-identical
-runtime versions without extracting over them.
-
-Older managed releases may keep executable roots under `~/.local/opt`. Their
-recorded link targets remain valid during migration; do not delete them until
-the new release and rollback have both passed.
-
-## Roll back
-
-Stop all Nvim2 processes, then use the script from the active artifact or its
-matching retained repository:
-
-The release switch replaces configuration and `~/.local/share/nvim2`, but it
-does not replace `~/.local/state/nvim2`. That retained state contains ShaDa,
-persistent undo and `project-marks/`. Back it up with the rollback record when
-the host backup policy does not already cover `~/.local/state`; never package
-a developer's project marks into a release artifact.
-
-```bash
-bash ./nvim2-release rollback
-```
-
-Rollback first verifies that every active path still belongs to the recorded
-release. It then restores the matching configuration, data and all runtime
-links as one set. A regular data directory imported by the first installation
-is restored as a regular directory, not converted permanently into a link. Do
-not roll back only the editor binary against newer plugin or Mason data.
-
-Repeat the full offline check and representative editing. Keep both releases
-until that verification succeeds. There is no purge command.
+For a plugin or configuration change, edit the source checkout, regenerate
+`nvim-pack-lock.json` only through `vim.pack`, run repository validation, and
+build a new complete release. Never edit the installed snapshot or use it as a
+Git working tree. Keep A and B until their health, representative editing,
+rollback and process-pinning checks have passed, then remove an inactive ID as
+described in `SETUP.md`.

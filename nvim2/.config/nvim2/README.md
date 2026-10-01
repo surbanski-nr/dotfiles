@@ -108,8 +108,8 @@ history, ShaDa marks and registers, and persistent undo files:
   [[ ! -e "$cache" ]] || mv "$cache" "$backup/cache"
 
   mkdir -p "$data" "$state"
-  for file in mini-visits-index telescope_history; do
-    [[ ! -f "$backup/data/$file" ]] || cp -a "$backup/data/$file" "$data/"
+  for file in mini-visits-index telescope_history telescope_history.sqlite3; do
+    [[ ! -f "$backup/state/$file" ]] || cp -a "$backup/state/$file" "$state/"
   done
   for directory in project-marks shada undo; do
     [[ ! -d "$backup/state/$directory" ]] || cp -a "$backup/state/$directory" "$state/"
@@ -218,11 +218,10 @@ register-preserving edits, snippets, hidden-file search, Treesitter folds,
 Mermaid preview, LSP attachment, diagnostics, completion and formatting.
 
 The language suite covers Lua, Python, Bash, TypeScript, TSX, Terraform,
-Ansible, Helm and generic YAML. Some servers also call host programs that are
-not Mason packages. In particular, full Terraform formatting requires the
-`terraform` executable and Ansible Language Server reports a warning when
-`ansible-config` is unavailable. Record those host limitations instead of
-hiding them or weakening the profile checks.
+Terraform variables, Ansible, Helm and generic YAML. Some servers also call
+programs that are not Mason packages. The complete offline release supplies
+Terraform and the isolated ansible-core entry points used by Ansible Language
+Server. Connected installations must provide those commands separately.
 
 The script performs five isolated headless starts and reports the minimum,
 median and maximum startup time. Startup speed depends on the VM, filesystem

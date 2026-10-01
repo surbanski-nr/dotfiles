@@ -1,0 +1,2 @@
+# Python-backed Mason tool declared in nvim2/.config/nvim2/lua/custom/lsp.lua.
+ansible-lint==26.1.1

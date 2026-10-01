@@ -48,8 +48,9 @@ local function decode_record(path, expected_root)
 end
 
 local function ensure_directory(path)
-  local result = vim.fn.mkdir(path, 'p', 448)
-  assert(result == 1 or vim.uv.fs_stat(path), ('could not create state directory: %s'):format(path))
+  local create_ok, result = pcall(vim.fn.mkdir, path, 'p', 448)
+  local state = vim.uv.fs_lstat(path)
+  assert(state and state.type == 'directory', ('could not create state directory %s: %s'):format(path, create_ok and tostring(result) or result))
   local ok, message = vim.uv.fs_chmod(path, 448)
   assert(ok, ('could not set private permissions on %s: %s'):format(path, message))
 end

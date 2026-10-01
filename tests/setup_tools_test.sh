@@ -177,6 +177,60 @@ assert_link "$foreign_home/bin/k9s" k9s-manual
 [[ $(sha256sum "$foreign_home/bin/k9s-manual") == "$foreign_hash" ]] ||
   fail 'foreign link target was changed'
 
+foreign_nvim_home=$test_root/foreign-nvim-home
+mkdir -p "$foreign_nvim_home/bin/nvim-v999/bin"
+write_fake "$foreign_nvim_home/bin/nvim-v999/bin/nvim" nvim v999
+ln -s nvim-v999/bin/nvim "$foreign_nvim_home/bin/nvim"
+foreign_nvim_hash=$(sha256sum "$foreign_nvim_home/bin/nvim-v999/bin/nvim")
+set +e
+foreign_nvim_output=$(HOME="$foreign_nvim_home" "$test_repository/setup-tools" \
+  --from "$archive_root" nvim 2>&1)
+foreign_nvim_status=$?
+set -e
+[[ $foreign_nvim_status -ne 0 ]] || fail 'foreign nvim-v* link was accepted'
+[[ $foreign_nvim_output == *'refusing foreign link'* ]] ||
+  fail 'foreign nvim-v* link conflict was not reported'
+assert_link "$foreign_nvim_home/bin/nvim" nvim-v999/bin/nvim
+[[ $(sha256sum "$foreign_nvim_home/bin/nvim-v999/bin/nvim") == "$foreign_nvim_hash" ]] ||
+  fail 'foreign nvim-v* target was changed'
+
+unsafe_repository=$test_root/unsafe-repository
+unsafe_archives=$test_root/unsafe-archives
+unsafe_home=$test_root/unsafe-home
+unsafe_work=$test_root/unsafe-work
+make_test_repo "$unsafe_repository"
+# shellcheck source=../versions.env
+source "$unsafe_repository/versions.env"
+mkdir -p "$unsafe_work/nvim-linux-x86_64/bin" "$unsafe_archives/nvim/$NVIM_VERSION"
+ln -s ../../../outside "$unsafe_work/nvim-linux-x86_64/bin/nvim"
+tar -C "$unsafe_work" -czf \
+  "$unsafe_archives/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" nvim-linux-x86_64
+unsafe_digest=$(sha256sum \
+  "$unsafe_archives/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" | awk '{print $1}')
+printf 'NVIM_SHA256=%s\n' "$unsafe_digest" >>"$unsafe_repository/versions.env"
+set +e
+unsafe_output=$(HOME="$unsafe_home" "$unsafe_repository/setup-tools" \
+  --from "$unsafe_archives" nvim 2>&1)
+unsafe_status=$?
+set -e
+[[ $unsafe_status -ne 0 && $unsafe_output == *'archive link escapes its root'* ]] ||
+  fail 'setup-tools accepted an escaping archive symlink'
+[[ ! -e $unsafe_home/bin/nvim && ! -L $unsafe_home/bin/nvim ]] ||
+  fail 'unsafe archive changed the selected Neovim'
+
+tmux_work=$test_root/tmux-work
+tmux_destination=$test_root/tmux-destination
+mkdir -p "$tmux_work/tmux-$TMUX_VERSION" "$tmux_destination"
+write_fake "$tmux_work/tmux-$TMUX_VERSION/tmux" tmux "$TMUX_VERSION"
+tar -C "$tmux_work" -czf "$test_root/tmux.tar.gz" "tmux-$TMUX_VERSION"
+TMUX_SHA256=$(sha256sum "$test_root/tmux.tar.gz" | awk '{print $1}')
+# shellcheck source=../scripts/setup-lib
+source "$repo_dir/scripts/setup-lib"
+SETUP_PROGRAM=setup-tools-test
+setup_prepare_artifact tmux "$TMUX_VERSION" "$test_root/tmux.tar.gz" "$tmux_destination"
+[[ -x $tmux_destination/tmux-$TMUX_VERSION/tmux ]] ||
+  fail 'shared tree extractor did not preserve an equal source and destination name'
+
 pin_repository=$test_root/pin-repository
 pin_archives=$test_root/pin-archives
 pin_home=$test_root/pin-home
@@ -206,7 +260,8 @@ for invalid_list in '' '   '; do
   list_home=$test_root/list-home-${#invalid_list}
   make_test_repo "$list_repository"
   make_archives "$list_repository" "$list_archives"
-  printf "TERRAFORM_VERSIONS='%s'\n" "$invalid_list" >>"$list_repository/versions.env"
+  printf 'unset TERRAFORM_VERSIONS\ndeclare -ga TERRAFORM_VERSIONS=()\n' \
+    >>"$list_repository/versions.env"
   set +e
   list_output=$(HOME="$list_home" "$list_repository/setup-tools" \
     --from "$list_archives" k9s 2>&1)
@@ -224,7 +279,8 @@ single_archives=$test_root/single-list-archives
 single_home=$test_root/single-list-home
 make_test_repo "$single_repository"
 make_archives "$single_repository" "$single_archives"
-printf "TERRAFORM_VERSIONS='1.16.4'\n" >>"$single_repository/versions.env"
+printf 'unset TERRAFORM_VERSIONS\ndeclare -ga TERRAFORM_VERSIONS=(1.16.4)\n' \
+  >>"$single_repository/versions.env"
 HOME="$single_home" "$single_repository/setup-tools" --from "$single_archives" k9s
 assert_link "$single_home/bin/k9s" "k9s-$K9S_VERSION"
 

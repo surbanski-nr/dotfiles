@@ -38,6 +38,178 @@ files. `setup-asdf` installs the project runtimes in `versions.env`, pins each
 plugin checkout and selects the first version in each list as the home default.
 A project `.tool-versions` file continues to override those defaults.
 
+## Complete offline release
+
+For a restricted host, prefer the complete platform artifact over assembling
+individual tool archives. It contains one immutable dotfiles snapshot together
+with Neovim and its complete profile, Node.js, private standalone Python,
+ripgrep, tmux and plugins, Oh My Posh, k9s, zoxide, kubectx, kubens, Task, fzf
+and Terraform. Helm and kubectl deliberately remain separate setup choices.
+
+The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
+`ubuntu-26.04-x86_64` and `amzn-2023-x86_64`. Build from a clean committed
+checkout on a connected machine. Select the matching immutable image from
+`dotfiles-release.env` and keep the checkout read-only in the builder:
+
+```bash
+set -euo pipefail
+test -z "$(git status --porcelain --untracked-files=normal)"
+source dotfiles-release.env
+platform=debian-13-x86_64
+image=$DEBIAN_13_IMAGE
+output=${1:-"$PWD/offline-output"}
+mkdir -p "$output"
+
+docker pull "$image"
+timeout --signal=TERM --kill-after=30s 5400s docker run --rm \
+  --volume "$PWD:/workspace:ro" \
+  --volume "$output:/out" \
+  --env BUILDER_IMAGE="$image" \
+  "$image" \
+  bash /workspace/scripts/dotfiles-release \
+    build "$platform" /workspace /out
+```
+
+The builder verifies every downloaded archive, compiles tmux against the
+target distribution libraries, starts from empty Neovim data, and runs the
+tool-enabled profile checks. The official Node archive initially contains its
+upstream npm, then the builder installs the separately pinned and hashed npm
+archive. The standalone CPython runtime contains the standard library but not
+ansible-lint, yamllint or ansible-core. Separate generated hashed locks and a
+complete wheelhouse supply those dependencies. The target installer creates
+ordinary isolated venvs at their final retained paths using only those wheels.
+It does not need sudo, a distribution Python, a compiler or network access.
+
+The artifact contains a Git archive of the matching dotfiles commit, not the
+main repository history. It also contains the full Neovim runtime tree, pinned
+plugin Git metadata, parsers, queries, Mason receipts, tmux plugins, Python
+locks and the temporary wheelhouse. `release.env`, `build-manifest.txt` and
+`SHA256SUMS` record source identity, layout, versions, inputs and content.
+After venv creation the retained installation removes the wheelhouse and
+records a new local manifest covering file contents, modes and symlink targets.
+
+Install the target distribution prerequisites while approved repositories are
+available, then transfer the matching artifact. From the matching reviewed
+dotfiles snapshot:
+
+```bash
+./setup-system --runtime
+```
+
+After disconnecting external networking, run the installer as the intended
+ordinary user. It derives identity from that account and does not require a
+particular user name, UID or `/home` path:
+
+```bash
+bash scripts/dotfiles-release install \
+  "$PWD/dotfiles-COMMIT12-debian-13-x86_64.tar.gz"
+source "$HOME/.bashrc"
+hash -r
+dotfiles-release list
+dotfiles-release health
+```
+
+Verify the trusted transfer checksum before installation:
+
+```bash
+sha256sum --check --strict \
+  dotfiles-COMMIT12-debian-13-x86_64.tar.gz.sha256
+```
+
+The full qualification path runs the same install plus health in a fresh
+runtime container with `--network none`:
+
+```bash
+bash scripts/dotfiles-release verify debian-13-x86_64 \
+  "$PWD/dotfiles-COMMIT12-debian-13-x86_64.tar.gz"
+```
+
+Releases are retained under `~/dotfiles-releases/dotfiles-COMMIT12`.
+`current` controls new processes and `previous` supports whole-unit rollback.
+The first install records every managed entry and backs up an accepted prior
+file, link or provider tree under the private `.state` directory. A conflicting
+foreign link, a symlink parent or unproven tool/provider stops the install
+before activation. Existing `setup-tools`, `bstow`, historical Nvim release and
+clean pinned tmux plugin installations are migrated only when their records and
+content prove ownership. Private k9s files, kubeconfig inputs and unrelated
+tmux plugins are not touched.
+
+Use the manager for every selection change:
+
+```bash
+dotfiles-release list
+dotfiles-release health
+dotfiles-release health dotfiles-COMMIT12
+dotfiles-release rollback
+dotfiles-release rollback dotfiles-COMMIT12
+dotfiles-release uninstall
+dotfiles-release uninstall dotfiles-INACTIVE12
+```
+
+`rollback` selects `previous`, or an explicit complete retained ID. With no
+previous release it restores the baseline. Plain `uninstall` also restores the
+baseline without deleting retained payloads. `uninstall ID` removes only an
+inactive, locally unmodified payload. Close any process still using that ID
+before removing it because the manager deliberately does not guess process
+ownership or terminate applications. Run the retained
+`dotfiles-COMMIT12/bin/dotfiles-release` directly after restoring a baseline
+that did not contain the public manager link.
+
+All mutating operations share a non-blocking lock. A pending record lets the
+next mutating invocation recover an interrupted import, selection or baseline
+restore. Retry the same command after recovery. Do not edit `current`,
+`previous`, `.state`, installed files or the generated local manifests by hand.
+Drift is reported instead of repaired. Change configuration or pins in the
+source checkout and build a new complete release.
+
+Stable public links contain `current` literally. The Nvim and tmux launchers
+resolve one physical release when each process starts. After a switch, reload
+Bash with `source "$HOME/.bashrc" && hash -r`; new shells and applications use
+the new release, while an existing Nvim process and tmux server remain on their
+old physical configuration and plugins. Finish or safely stop a tmux server
+before expecting it to use a newly selected release.
+
+Mutable Nvim state, including ShaDa, undo, project marks, Mini Visits and
+Telescope history, stays under `XDG_STATE_HOME` or `~/.local/state/nvim2`.
+The first activation copies legacy Mini Visits and Telescope files only when
+the new destination is absent and preserves the source. zoxide data,
+tmux-resurrect sessions, caches, kubeconfig and credentials also remain outside
+the immutable payload.
+
+The release does not own `~/bin/python`, `~/bin/python3`, Helm or kubectl.
+`helm-ls` works through its embedded Helm libraries. Basic kubectx and kubens
+operations work against a local kubeconfig, while cluster operations, external
+authentication executables, `kubectx --shell` and the optional k9s helpers
+still require the corresponding host tools and services. Do not run the
+release Node/Terraform provider and an asdf provider for those same public
+commands in one HOME.
+
+The 2026-10-01 qualification of source commit
+`d4536234f5730fdb0e1f43335f9e0d5c0e79e935` measured:
+
+| Platform | Outer archive | Retained `du -sb` | Regular-file bytes |
+| --- | ---: | ---: | ---: |
+| Debian 13 | 483,095,534 B (460.72 MiB) | 1,628,221,711 B (1.516 GiB) | 1,628,205,324 B |
+| Ubuntu 24.04 | 483,098,178 B (460.72 MiB) | 1,628,132,819 B (1.516 GiB) | 1,628,116,432 B |
+| Ubuntu 26.04 | 483,173,129 B (460.79 MiB) | 1,628,365,783 B (1.517 GiB) | 1,628,349,396 B |
+| Amazon Linux 2023 | 479,423,683 B (457.21 MiB) | 1,642,467,571 B (1.530 GiB) | 1,613,590,766 B |
+
+For the Debian A/B upgrade, the two complete retained releases used
+3,256,448,240 B (3.033 GiB). Sampling the release store during the upgrade
+recorded a 3,276,595,409 B (3.052 GiB) peak. The two read-only input archives
+were another 966,198,014 B (921.44 MiB), outside the release store, for a
+combined capacity requirement of 4,242,793,423 B (3.951 GiB). Existing legacy
+installations are additional. The archive result is within the original
+435-475 MiB estimate. The retained result is below the 1.65-1.90 GiB estimate
+because verified input archives and the Python wheelhouse are removed from a
+completed retained release. Refresh these measurements for a new source
+revision or changed payload.
+
+The [Nvim2 offline notes](nvim2/.config/nvim2/offline-releases.md) describe the
+editor-specific runtime, health checks and state behavior. `TOOL_UPDATES.md`
+describes how a new source revision becomes a separately qualified immutable
+release.
+
 The direct kubectl and Helm route is an alternative for machines where asdf is
 not appropriate. Do not install both providers in the same home:
 
@@ -112,12 +284,12 @@ download uv "$UV_VERSION" uv-x86_64-unknown-linux-gnu.tar.gz \
 download nvim "$NVIM_VERSION" nvim-linux-x86_64.tar.gz \
   "https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.tar.gz" "$NVIM_SHA256"
 
-for version in $KUBECTL_VERSIONS; do
+for version in "${KUBECTL_VERSIONS[@]}"; do
   download kubectl "$version" kubectl \
     "https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubectl" \
     "${KUBECTL_SHA256_BY_VERSION[$version]}"
 done
-for version in $HELM_VERSIONS; do
+for version in "${HELM_VERSIONS[@]}"; do
   download helm "$version" "helm-v${version}-linux-amd64.tar.gz" \
     "https://get.helm.sh/helm-v${version}-linux-amd64.tar.gz" \
     "${HELM_SHA256_BY_VERSION[$version]}"
@@ -154,7 +326,7 @@ This importer does not use `curl`, package managers, asdf or source builds.
 Missing files are reported as
 `DIR/NAME/VERSION/UPSTREAM_ASSET`. It installs the complete Neovim runtime tree,
 but it does not include the Nvim2 plugins, Mason packages, parsers or Node
-runtime. Use the complete Nvim2 release procedure for an offline editor.
+runtime. Use the complete dotfiles release procedure for an offline editor.
 
 Terraform and Terragrunt remain asdf-managed. A restricted machine can install
 them only when the pinned plugins and their real release sources are reachable.
@@ -263,8 +435,11 @@ private configuration, and opens them with Nvim2.
 
 ## TPM and Krew
 
-TPM and its plugin checkouts use the commits in `versions.env`. On a connected
-machine, reconcile the managed checkouts with:
+TPM and its plugin checkouts use the commits in `versions.env`. This section is
+only for the connected setup. Complete offline releases do not bundle or run
+TPM; their tmux config loads sensible, resurrect and continuum directly from
+the physical release. On a connected machine, reconcile the managed checkouts
+with:
 
 ```bash
 set -euo pipefail

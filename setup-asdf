@@ -76,32 +76,32 @@ plugin_spec() {
     terraform)
       PLUGIN_REPO=$ASDF_TERRAFORM_PLUGIN_REPO
       PLUGIN_COMMIT=$ASDF_TERRAFORM_PLUGIN_COMMIT
-      TOOL_VERSIONS=$TERRAFORM_VERSIONS
+      TOOL_VERSIONS=("${TERRAFORM_VERSIONS[@]}")
       ;;
     kubectl)
       PLUGIN_REPO=$ASDF_KUBECTL_PLUGIN_REPO
       PLUGIN_COMMIT=$ASDF_KUBECTL_PLUGIN_COMMIT
-      TOOL_VERSIONS=$KUBECTL_VERSIONS
+      TOOL_VERSIONS=("${KUBECTL_VERSIONS[@]}")
       ;;
     helm)
       PLUGIN_REPO=$ASDF_HELM_PLUGIN_REPO
       PLUGIN_COMMIT=$ASDF_HELM_PLUGIN_COMMIT
-      TOOL_VERSIONS=$HELM_VERSIONS
+      TOOL_VERSIONS=("${HELM_VERSIONS[@]}")
       ;;
     python)
       PLUGIN_REPO=$ASDF_PYTHON_PLUGIN_REPO
       PLUGIN_COMMIT=$ASDF_PYTHON_PLUGIN_COMMIT
-      TOOL_VERSIONS=$PYTHON_VERSIONS
+      TOOL_VERSIONS=("${PYTHON_VERSIONS[@]}")
       ;;
     nodejs)
       PLUGIN_REPO=$ASDF_NODEJS_PLUGIN_REPO
       PLUGIN_COMMIT=$ASDF_NODEJS_PLUGIN_COMMIT
-      TOOL_VERSIONS=$NODEJS_VERSIONS
+      TOOL_VERSIONS=("${NODEJS_VERSIONS[@]}")
       ;;
     terragrunt)
       PLUGIN_REPO=$ASDF_TERRAGRUNT_PLUGIN_REPO
       PLUGIN_COMMIT=$ASDF_TERRAGRUNT_PLUGIN_COMMIT
-      TOOL_VERSIONS=$TERRAGRUNT_VERSIONS
+      TOOL_VERSIONS=("${TERRAGRUNT_VERSIONS[@]}")
       ;;
     *) setup_die "missing asdf plugin mapping for $1" ;;
   esac
@@ -109,18 +109,47 @@ plugin_spec() {
 
 preflight_asdf_link() {
   local link="$BIN_DIR/asdf"
-  local target
+  local state=$STATE_DIR/asdf-target
+  local target version output recorded extra actual install_state
 
   if [[ -L $link ]]; then
     target=$(readlink -- "$link")
-    [[ $target == asdf-* ]] || setup_die "refusing foreign link: $link -> $target"
+    [[ -f $state && ! -L $state ]] || setup_die "asdf link has no ownership state: $link"
+    IFS=$'\t' read -r recorded extra <"$state" || setup_die "empty asdf state: $state"
+    [[ -z $extra && $recorded =~ ^asdf-v?[0-9]+([.][0-9]+){1,3}$ ]] ||
+      setup_die "invalid asdf state: $state"
+    [[ $recorded == "$target" ]] ||
+      setup_die "managed asdf link differs from recorded target: $link"
+    [[ $target =~ ^asdf-v?([0-9]+([.][0-9]+){1,3})$ ]] ||
+      setup_die "refusing foreign link: $link -> $target"
+    version=${BASH_REMATCH[1]}
+    [[ -f $BIN_DIR/$target && -x $BIN_DIR/$target && ! -L $BIN_DIR/$target ]] ||
+      setup_die "invalid managed asdf target: $BIN_DIR/$target"
+    output=$("$BIN_DIR/$target" version 2>&1) ||
+      setup_die "managed asdf target failed: $BIN_DIR/$target"
+    [[ $output == *"$version"* ]] ||
+      setup_die "managed asdf target did not report $version"
+    install_state=$STATE_DIR/installations/$target.sha256
+    [[ -f $install_state && ! -L $install_state ]] ||
+      setup_die "asdf installation has no ownership state: $BIN_DIR/$target"
+    actual=$(sha256sum "$BIN_DIR/$target" | awk '{print $1}')
+    [[ $(<"$install_state") == "$actual" ]] ||
+      setup_die "managed asdf target was modified: $BIN_DIR/$target"
   elif [[ -e $link ]]; then
     setup_die "refusing unmanaged path: $link"
+  elif [[ -e $state || -L $state ]]; then
+    setup_die "asdf ownership state exists without its managed link: $state"
   fi
   if [[ -e $BIN_DIR/asdf-$ASDF_VERSION || -L $BIN_DIR/asdf-$ASDF_VERSION ]]; then
     [[ -f $BIN_DIR/asdf-$ASDF_VERSION && -x $BIN_DIR/asdf-$ASDF_VERSION &&
       ! -L $BIN_DIR/asdf-$ASDF_VERSION ]] ||
       setup_die "invalid asdf installation: $BIN_DIR/asdf-$ASDF_VERSION"
+    install_state=$STATE_DIR/installations/asdf-$ASDF_VERSION.sha256
+    [[ -f $install_state && ! -L $install_state ]] ||
+      setup_die "refusing unmanaged asdf installation: $BIN_DIR/asdf-$ASDF_VERSION"
+    actual=$(sha256sum "$BIN_DIR/asdf-$ASDF_VERSION" | awk '{print $1}')
+    [[ $(<"$install_state") == "$actual" ]] ||
+      setup_die "managed asdf installation was modified: $BIN_DIR/asdf-$ASDF_VERSION"
   fi
 }
 
@@ -186,6 +215,9 @@ install_asdf() {
   local executable
   local output
   local stage
+  local state="$STATE_DIR/asdf-target"
+  local install_state="$STATE_DIR/installations/asdf-$ASDF_VERSION.sha256"
+  local state_temporary digest
 
   if [[ -f $destination ]]; then
     output=$("$destination" version 2>&1)
@@ -204,12 +236,24 @@ install_asdf() {
     [[ $output == *"$ASDF_VERSION"* ]] ||
       setup_die "downloaded asdf did not report $ASDF_VERSION"
     mv -- "$executable" "$destination"
+    mkdir -p "$STATE_DIR/installations"
+    digest=$(sha256sum "$destination" | awk '{print $1}')
+    state_temporary=$(mktemp "$STATE_DIR/installations/.asdf-install.XXXXXX")
+    TEMP_PATHS+=("$state_temporary")
+    printf '%s\n' "$digest" >"$state_temporary"
+    chmod 0600 "$state_temporary"
+    mv -T -- "$state_temporary" "$install_state"
     printf 'setup-asdf: installed asdf %s\n' "$ASDF_VERSION"
   fi
   temporary_link="$BIN_DIR/.asdf.link.$$"
+  state_temporary=$(mktemp "$STATE_DIR/.asdf-state.XXXXXX")
+  TEMP_PATHS+=("$state_temporary")
+  printf '%s\n' "asdf-$ASDF_VERSION" >"$state_temporary"
+  chmod 0600 "$state_temporary"
   ln -s -- "asdf-$ASDF_VERSION" "$temporary_link"
   TEMP_PATHS+=("$temporary_link")
   mv -T -- "$temporary_link" "$link"
+  mv -T -- "$state_temporary" "$state"
 }
 
 pin_plugin() {
@@ -236,7 +280,7 @@ reconcile_tool() {
   local -a versions=()
 
   plugin_spec "$name"
-  read -r -a versions <<<"$TOOL_VERSIONS"
+  versions=("${TOOL_VERSIONS[@]}")
   pin_plugin "$name"
   for version in "${versions[@]}"; do
     if "$BIN_DIR/asdf" list "$name" "$version" 2>/dev/null |
@@ -255,7 +299,7 @@ select_tool() {
   local first
 
   plugin_spec "$name"
-  first=${TOOL_VERSIONS%% *}
+  first=${TOOL_VERSIONS[0]}
   "$BIN_DIR/asdf" set -u "$name" "$first"
   printf 'setup-asdf: selected %s %s for home\n' "$name" "$first"
 }
@@ -292,7 +336,7 @@ STATE_DIR=
 LOCK_DIR=
 PLUGIN_REPO=
 PLUGIN_COMMIT=
-TOOL_VERSIONS=
+declare -a TOOL_VERSIONS=()
 temporary_link=
 trap cleanup EXIT
 main "$@"

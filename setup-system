@@ -4,21 +4,23 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: setup-system
+Usage: setup-system [--runtime]
 
 Install the approved operating-system packages on Debian 13, Ubuntu 24.04,
 Ubuntu 26.04 or Amazon Linux 2023. This is the only setup entry point that
-uses root privileges.
+uses root privileges. --runtime installs only prerequisites for a prepared
+offline release.
 EOF
 }
 
 main() {
-  if (($#)); then
-    case $1 in
-      -h | --help) (($# == 1)) || setup_die 'help takes no arguments'; usage; return 0 ;;
-      *) setup_die "unexpected argument: $1" ;;
-    esac
-  fi
+  MODE=connected
+  case ${1:-} in
+    '') ;;
+    --runtime) (($# == 1)) || setup_die '--runtime takes no arguments'; MODE=runtime ;;
+    -h | --help) (($# == 1)) || setup_die 'help takes no arguments'; usage; return 0 ;;
+    *) setup_die "unexpected argument: $1" ;;
+  esac
   validate_host
   install_packages
   verify_packages
@@ -44,28 +46,22 @@ as_root() {
 }
 
 install_packages() {
+  setup_system_package_list "$PLATFORM" "$MODE"
   case $PLATFORM in
     debian:* | ubuntu:*)
       as_root env DEBIAN_FRONTEND=noninteractive apt-get update
       as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        bash bash-completion build-essential ca-certificates coreutils curl \
-        dirmngr dos2unix file findutils gawk git gnupg htop jq mc \
-        libbz2-dev libffi-dev liblzma-dev libncurses-dev libreadline-dev \
-        libssl-dev libsqlite3-dev make ncurses-term patch python3 python3-pip \
-        python3-venv tar tk-dev tmux unzip uuid-dev vim xz-utils zlib1g-dev
+        "${SETUP_SYSTEM_PACKAGES[@]}"
       ;;
     amzn:2023)
-      if rpm -q gnupg2-minimal >/dev/null 2>&1; then
-        as_root dnf swap -y gnupg2-minimal gnupg2
-      else
-        as_root dnf install -y gnupg2
+      if [[ $MODE == connected ]]; then
+        if rpm -q gnupg2-minimal >/dev/null 2>&1; then
+          as_root dnf swap -y gnupg2-minimal gnupg2
+        else
+          as_root dnf install -y gnupg2
+        fi
       fi
-      as_root dnf install -y \
-        bash bash-completion bzip2-devel ca-certificates dos2unix file \
-        findutils gawk gcc gcc-c++ git htop jq mc \
-        libffi-devel make ncurses-devel openssl-devel patch python3 \
-        python3-pip readline-devel sqlite-devel tar tk-devel tmux unzip \
-        util-linux-user vim-enhanced vim-minimal which xz xz-devel zlib-devel
+      as_root dnf install -y --allowerasing "${SETUP_SYSTEM_PACKAGES[@]}"
       ;;
   esac
 }
@@ -73,12 +69,17 @@ install_packages() {
 verify_packages() {
   local command_name
 
-  for command_name in bash curl file find git gpg gpg-agent htop jq make mc \
-    python3 tar tmux unzip vi vim xz; do
+  for command_name in bash cmp find flock git ip tar timeout unzip xz; do
     command -v "$command_name" >/dev/null 2>&1 ||
       setup_die "package installation did not provide $command_name"
   done
-  printf 'setup-system: ready on %s\n' "$PLATFORM"
+  if [[ $MODE == connected ]]; then
+    for command_name in curl file gpg gpg-agent htop jq make mc python3 tmux vi vim; do
+      command -v "$command_name" >/dev/null 2>&1 ||
+        setup_die "package installation did not provide $command_name"
+    done
+  fi
+  printf 'setup-system: %s packages ready on %s\n' "$MODE" "$PLATFORM"
 }
 
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -86,4 +87,6 @@ REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$REPO_DIR/scripts/setup-lib"
 SETUP_PROGRAM=setup-system
 PLATFORM=
+MODE=
+declare -a SETUP_SYSTEM_PACKAGES=()
 main "$@"

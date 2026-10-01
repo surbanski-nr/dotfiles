@@ -1,0 +1,2 @@
+# Python-backed Mason tool declared in nvim2/.config/nvim2/lua/custom/lsp.lua.
+yamllint==1.38.0

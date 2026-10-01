@@ -72,8 +72,17 @@ local function run()
       filetype = 'terraform',
       clients = { 'terraformls' },
       parser = 'terraform',
-      lines = { 'terraform {', 'required_version = ">= 1.0"', '}' },
+      lines = { 'terraform{required_version=">= 1.0"}' },
+      formatted = 'terraform { required_version = ">= 1.0" }',
       codelens = true,
+    },
+    {
+      path = 'terraform.tfvars',
+      filetype = 'terraform-vars',
+      clients = { 'terraformls' },
+      parser = 'terraform',
+      lines = { 'example_value="offline"' },
+      formatted = 'example_value = "offline"',
     },
     {
       path = 'playbooks/site.yml',

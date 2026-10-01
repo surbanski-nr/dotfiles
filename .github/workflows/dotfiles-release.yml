@@ -1,28 +1,23 @@
 ---
-name: Build Nvim2 offline release
+name: Build dotfiles offline release
 
 'on':
   push:
     tags:
-      - 'nvim2-*'
+      - 'dotfiles-*'
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing nvim2 release tag
+        description: Existing dotfiles release tag
         required: true
         type: string
-      force:
-        description: Rebuild and replace every platform asset
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
   group: >-
-    nvim2-release-${{
+    dotfiles-release-${{
       github.event_name == 'workflow_dispatch' && inputs.release_tag ||
       github.ref_name
     }}
@@ -34,7 +29,6 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       commit_sha: ${{ steps.release.outputs.commit_sha }}
-      force: ${{ steps.release.outputs.force }}
       platforms: ${{ steps.release.outputs.platforms }}
       release_tag: ${{ steps.release.outputs.release_tag }}
       should_build: ${{ steps.release.outputs.should_build }}
@@ -43,7 +37,6 @@ jobs:
         id: release
         env:
           EVENT_NAME: ${{ github.event_name }}
-          INPUT_FORCE: ${{ inputs.force }}
           INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -53,13 +46,10 @@ jobs:
 
           if [[ $EVENT_NAME == workflow_dispatch ]]; then
             release_tag=$INPUT_RELEASE_TAG
-            force=${INPUT_FORCE:-false}
           else
             release_tag=$TAG_NAME
-            force=false
           fi
-
-          [[ $release_tag =~ ^nvim2-[0-9a-f]{7,40}$ ]] || {
+          [[ $release_tag =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
             printf 'Invalid release tag: %s\n' "$release_tag" >&2
             exit 1
           }
@@ -80,16 +70,12 @@ jobs:
               cat "$error_file" >&2
               exit 1
             fi
-            if ((attempt < attempts)); then
-              sleep 10
-            fi
+            ((attempt == attempts)) || sleep 10
           done
-
           if [[ $release_found != true ]]; then
             printf 'Release %s does not exist; skipping build.\n' "$release_tag"
             printf '%s\n' \
               "release_tag=$release_tag" \
-              "force=$force" \
               'platforms=[]' \
               'should_build=false' \
               >>"$GITHUB_OUTPUT"
@@ -110,14 +96,11 @@ jobs:
             commit_sha=$(jq -r '.object.sha' "$object_file")
           done
           [[ $object_type == commit ]] || {
-            printf 'Tag %s does not resolve to a commit.\n' \
-              "$release_tag" >&2
+            printf 'Tag %s does not resolve to a commit.\n' "$release_tag" >&2
             exit 1
           }
-          tag_sha=${release_tag#nvim2-}
-          [[ $commit_sha == "$tag_sha"* ]] || {
-            printf 'Tag suffix does not match target commit %s.\n' \
-              "$commit_sha" >&2
+          [[ $release_tag == "dotfiles-${commit_sha:0:12}" ]] || {
+            printf 'Tag does not match target commit %s.\n' "$commit_sha" >&2
             exit 1
           }
 
@@ -129,35 +112,52 @@ jobs:
           )
           selected=()
           for platform in "${platforms[@]}"; do
-            asset="nvim2-offline-$platform.tar.gz"
-            if [[ $force == true ]] ||
-              ! jq -e --arg asset "$asset" \
-                '.assets[]? | select(.name == $asset)' \
-                "$release_file" >/dev/null; then
+            asset="$release_tag-$platform.tar.gz"
+            if ! jq -e --arg asset "$asset" \
+              '.assets[]? | select(.name == $asset)' \
+              "$release_file" >/dev/null; then
               selected+=("$platform")
+              continue
             fi
+            existing_dir=$RUNNER_TEMP/existing-$platform
+            mkdir -p "$existing_dir"
+            timeout 300s gh release download "$release_tag" \
+              --repo "$REPOSITORY" --pattern "$asset" --dir "$existing_dir"
+            root=$(tar -tzf "$existing_dir/$asset" | sed -n '1p')
+            root=${root%%/*}
+            [[ $root == "dotfiles-${commit_sha:0:12}" ]] || {
+              printf 'Existing %s has unexpected root %s.\n' "$asset" "$root" >&2
+              exit 1
+            }
+            while IFS= read -r member; do
+              [[ $member == "$root" || $member == "$root/"* ]] || {
+                printf 'Existing %s has unsafe member %s.\n' "$asset" "$member" >&2
+                exit 1
+              }
+            done < <(tar -tzf "$existing_dir/$asset")
+            tar -xzf "$existing_dir/$asset" -C "$existing_dir"
+            grep -Fx "SOURCE_COMMIT=$commit_sha" \
+              "$existing_dir/$root/release.env" >/dev/null
+            (cd "$existing_dir/$root" &&
+              sha256sum --check --strict SHA256SUMS >/dev/null)
           done
-          matrix=$(
-            printf '%s\n' "${selected[@]}" |
-              jq -Rsc 'split("\n") | map(select(length > 0))'
-          )
+          matrix=$(printf '%s\n' "${selected[@]}" |
+            jq -Rsc 'split("\n") | map(select(length > 0))')
           should_build=false
           ((${#selected[@]} > 0)) && should_build=true
-
           printf '%s\n' \
             "release_tag=$release_tag" \
             "commit_sha=$commit_sha" \
-            "force=$force" \
             "platforms=$matrix" \
             "should_build=$should_build" \
             >>"$GITHUB_OUTPUT"
 
   build:
-    name: Build ${{ matrix.platform }}
+    name: Build and qualify ${{ matrix.platform }}
     needs: preflight
     if: needs.preflight.outputs.should_build == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     permissions:
       contents: write  # Required to upload release assets.
     strategy:
@@ -172,119 +172,117 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.preflight.outputs.commit_sha }}
 
-      - name: Select builder image
+      - name: Select builder image and test identity
         id: image
         env:
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
-          source nvim2-release.env
+          source dotfiles-release.env
           case "$PLATFORM" in
             debian-13-x86_64)
-              image=$DEBIAN_13_IMAGE
-              target_user=$DEBIAN_TARGET_USER
-              target_uid=$DEBIAN_TARGET_UID
-              target_home=$DEBIAN_TARGET_HOME
+              image=$DEBIAN_13_IMAGE; uid=23131; home='/srv/debian offline'
               ;;
             ubuntu-24.04-x86_64)
-              image=$UBUNTU_2404_IMAGE
-              target_user=$UBUNTU_TARGET_USER
-              target_uid=$UBUNTU_TARGET_UID
-              target_home=$UBUNTU_TARGET_HOME
+              image=$UBUNTU_2404_IMAGE; uid=24141; home=/opt/ubuntu2404
               ;;
             ubuntu-26.04-x86_64)
-              image=$UBUNTU_2604_IMAGE
-              target_user=$UBUNTU_TARGET_USER
-              target_uid=$UBUNTU_TARGET_UID
-              target_home=$UBUNTU_TARGET_HOME
+              image=$UBUNTU_2604_IMAGE; uid=26161; home=/srv/ubuntu2604
               ;;
             amzn-2023-x86_64)
-              image=$AMZN_2023_IMAGE
-              target_user=$AMZN_TARGET_USER
-              target_uid=$AMZN_TARGET_UID
-              target_home=$AMZN_TARGET_HOME
+              image=$AMZN_2023_IMAGE; uid=23171; home=/opt/amazon2023
               ;;
             *) printf 'Unsupported platform: %s\n' "$PLATFORM" >&2; exit 1 ;;
           esac
           printf '%s\n' \
             "image=$image" \
-            "target_user=$target_user" \
-            "target_uid=$target_uid" \
-            "target_home=$target_home" \
+            "uid=$uid" \
+            "home=$home" \
             >>"$GITHUB_OUTPUT"
 
-      - name: Build platform release
+      - name: Build complete platform artifact
         env:
           BUILDER_IMAGE: ${{ steps.image.outputs.image }}
-          COMMIT_SHA: ${{ needs.preflight.outputs.commit_sha }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          output=$RUNNER_TEMP/dotfiles-output
+          evidence=$RUNNER_TEMP/dotfiles-evidence/$PLATFORM
+          mkdir -p "$output"
+          mkdir -p "$evidence"
+          timeout 300s docker pull "$BUILDER_IMAGE"
+          timeout --signal=TERM --kill-after=30s 5400s docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --volume "$output:/out" \
+            --env BUILDER_IMAGE="$BUILDER_IMAGE" \
+            "$BUILDER_IMAGE" \
+            bash /workspace/scripts/dotfiles-release \
+              build "$PLATFORM" /workspace /out 2>&1 | tee "$evidence/build.log"
+
+      - name: Qualify install and health without network
+        env:
+          BUILDER_IMAGE: ${{ steps.image.outputs.image }}
+          PLATFORM: ${{ matrix.platform }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+          TEST_HOME: ${{ steps.image.outputs.home }}
+          TEST_UID: ${{ steps.image.outputs.uid }}
+        run: |
+          set -euo pipefail
+          container="dotfiles-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM"
+          image="dotfiles-runtime:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM"
+          cleanup() {
+            docker rm --force "$container" >/dev/null 2>&1 || true
+            docker image rm "$image" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach --name "$container" "$BUILDER_IMAGE" sleep infinity
+          docker cp scripts/dotfiles-release \
+            "$container:/usr/local/bin/dotfiles-release"
+          docker exec "$container" mkdir -p /usr/local/lib/dotfiles
+          docker cp scripts/setup-lib \
+            "$container:/usr/local/lib/dotfiles/setup-lib"
+          timeout --signal=TERM --kill-after=15s 900s docker exec "$container" \
+            bash /usr/local/bin/dotfiles-release prepare-runtime \
+              "$PLATFORM" offline-test "$TEST_UID" "$TEST_HOME"
+          timeout 300s docker commit "$container" "$image"
+          docker rm --force "$container"
+
+          archive="$RUNNER_TEMP/dotfiles-output/$RELEASE_TAG-$PLATFORM.tar.gz"
+          evidence=$RUNNER_TEMP/dotfiles-evidence/$PLATFORM
+          (cd "$(dirname -- "$archive")" &&
+            sha256sum --check --strict "$(basename -- "$archive").sha256")
+          root=$(tar -tzf "$archive" | sed -n '1p')
+          root=${root%%/*}
+          delivered_manager=$RUNNER_TEMP/dotfiles-release
+          tar -xOzf "$archive" "$root/dotfiles-release" >"$delivered_manager"
+          chmod 0755 "$delivered_manager"
+          timeout --signal=TERM --kill-after=30s 1800s docker run --rm \
+            --network none \
+            --user "$TEST_UID:$TEST_UID" \
+            --env HOME="$TEST_HOME" \
+            --volume "$archive:/artifact.tar.gz:ro" \
+            --volume "$delivered_manager:/usr/local/bin/dotfiles-release:ro" \
+            "$image" \
+            bash /usr/local/bin/dotfiles-release \
+              verify "$PLATFORM" /artifact.tar.gz 2>&1 | tee "$evidence/offline-verify.log"
+          tar -xOzf "$archive" "$root/release.env" >"$evidence/release.env"
+          tar -xOzf "$archive" "$root/build-manifest.txt" \
+            >"$evidence/build-manifest.txt"
+          cp "$archive.sha256" "$evidence/archive.sha256"
+
+      - name: Record artifact
+        id: asset
+        env:
           PLATFORM: ${{ matrix.platform }}
           RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
         run: |
           set -euo pipefail
-          output=$RUNNER_TEMP/nvim2-output
-          mkdir -p "$output"
-          timeout 300s docker pull "$BUILDER_IMAGE"
-          timeout --signal=TERM --kill-after=30s 3600s docker run --rm \
-            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
-            --volume "$output:/out" \
-            --env RELEASE_TAG="$RELEASE_TAG" \
-            --env SOURCE_COMMIT="$COMMIT_SHA" \
-            --env BUILDER_IMAGE="$BUILDER_IMAGE" \
-            "$BUILDER_IMAGE" \
-            bash /workspace/scripts/nvim2-release \
-              build "$PLATFORM" /workspace /out
-
-      - name: Verify without network
-        env:
-          BUILDER_IMAGE: ${{ steps.image.outputs.image }}
-          PLATFORM: ${{ matrix.platform }}
-          TARGET_HOME: ${{ steps.image.outputs.target_home }}
-          TARGET_UID: ${{ steps.image.outputs.target_uid }}
-          TARGET_USER: ${{ steps.image.outputs.target_user }}
-        run: |
-          set -euo pipefail
-          runtime_container="nvim2-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM"
-          runtime_image="nvim2-runtime:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM"
-          cleanup() {
-            docker rm --force "$runtime_container" >/dev/null 2>&1 || true
-            docker image rm "$runtime_image" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
-          docker run --detach --name "$runtime_container" \
-            "$BUILDER_IMAGE" sleep infinity
-          docker cp scripts/nvim2-release \
-            "$runtime_container:/usr/local/bin/nvim2-release"
-          timeout --signal=TERM --kill-after=15s 600s docker exec \
-            --env TARGET_HOME="$TARGET_HOME" \
-            --env TARGET_UID="$TARGET_UID" \
-            --env TARGET_USER="$TARGET_USER" \
-            "$runtime_container" \
-            bash /usr/local/bin/nvim2-release \
-              prepare-runtime "$PLATFORM"
-          timeout 300s docker commit "$runtime_container" "$runtime_image"
-          docker rm --force "$runtime_container"
-
-          timeout --signal=TERM --kill-after=30s 900s docker run --rm \
-            --network none \
-            --volume "$RUNNER_TEMP/nvim2-output/$PLATFORM:/artifact:ro" \
-            "$runtime_image" \
-            bash /usr/local/bin/nvim2-release verify "$PLATFORM" /artifact
-
-      - name: Create release asset
-        id: asset
-        env:
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          set -euo pipefail
-          artifact="$RUNNER_TEMP/nvim2-output/$PLATFORM"
-          archive="$RUNNER_TEMP/nvim2-offline-$PLATFORM.tar.gz"
-          timeout 600s tar -C "$artifact" -czf "$archive" .
+          archive="$RUNNER_TEMP/dotfiles-output/$RELEASE_TAG-$PLATFORM.tar.gz"
           size=$(stat --format=%s "$archive")
           ((size < 2147483648)) || {
-            printf '%s\n' \
-              "Release asset is $size bytes; GitHub limit is below 2 GiB." \
-              >&2
+            printf 'Release asset is %s bytes; GitHub limit is below 2 GiB.\n' \
+              "$size" >&2
             exit 1
           }
           digest=$(sha256sum "$archive" | cut -d ' ' -f 1)
@@ -295,19 +293,23 @@ jobs:
             printf -- '- SHA-256: %s\n' "$digest"
           } >>"$GITHUB_STEP_SUMMARY"
 
-      - name: Upload release asset
+      - name: Preserve qualification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: dotfiles-qualification-${{ matrix.platform }}
+          path: ${{ runner.temp }}/dotfiles-evidence/${{ matrix.platform }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload qualified release asset
         env:
           ARCHIVE: ${{ steps.asset.outputs.archive }}
-          FORCE: ${{ needs.preflight.outputs.force }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
         run: |
           set -euo pipefail
-          options=()
-          [[ $FORCE == true ]] && options+=(--clobber)
           timeout 300s gh release upload \
             --repo "$REPOSITORY" \
             "$RELEASE_TAG" \
-            "$ARCHIVE" \
-            "${options[@]}"
+            "$ARCHIVE"
