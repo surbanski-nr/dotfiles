@@ -37,6 +37,12 @@ remaining conflict, including a foreign symlink.
 files. `setup-asdf` installs the project runtimes in `versions.env`, pins each
 plugin checkout and selects the first version in each list as the home default.
 A project `.tool-versions` file continues to override those defaults.
+An installation made by the immediately preceding `setup-asdf` layout can be
+adopted only when its relative `asdf-VERSION` link is the current pin and its
+executable is byte-for-byte equal to the executable extracted from the
+checksum-verified official archive. Provider conflicts are checked before any
+ownership state is written. Similar names, version output alone and modified
+binaries are rejected without changing them.
 
 ## Complete offline release
 
@@ -127,7 +133,9 @@ bash scripts/dotfiles-release verify debian-13-x86_64 \
 Releases are retained under `~/dotfiles-releases/dotfiles-COMMIT12`.
 `current` controls new processes and `previous` supports whole-unit rollback.
 The first install records every managed entry and backs up an accepted prior
-file, link or provider tree under the private `.state` directory. A conflicting
+file, link or provider tree beside that entry as a private
+`.dotfiles-release-backup-SHA256` path. Keeping the backup on the destination
+filesystem avoids relying on a cross-filesystem rename. A conflicting
 foreign link, a symlink parent or unproven tool/provider stops the install
 before activation. Existing `setup-tools`, `bstow`, historical Nvim release and
 clean pinned tmux plugin installations are migrated only when their records and
@@ -155,26 +163,39 @@ ownership or terminate applications. Run the retained
 `dotfiles-COMMIT12/bin/dotfiles-release` directly after restoring a baseline
 that did not contain the public manager link.
 
-All mutating operations share a non-blocking lock. A pending record lets the
-next mutating invocation recover an interrupted import, selection or baseline
-restore. Retry the same command after recovery. Do not edit `current`,
-`previous`, `.state`, installed files or the generated local manifests by hand.
-Drift is reported instead of repaired. Change configuration or pins in the
-source checkout and build a new complete release.
+All manager operations share a non-blocking lock. A pending record lets the
+next invocation recover an interrupted import, selection or baseline restore
+before continuing the command that was requested. Recovery restores both
+selection links and each recorded projection entry, verifies the saved
+baseline identity and removes the journal only after the state is coherent.
+If a user changed a managed path or an old four-column journal no longer has
+its backup, the manager preserves the journal, backup and user data and reports
+the exact conflicting path. Inspect that path and its adjacent backup, restore
+the expected managed link or move the foreign data aside, then retry the same
+manager command. Do not edit `current`, `previous`, `pending.env`, installed
+files or generated manifests by hand, and do not use `sudo` to move a venv.
 
 Stable public links contain `current` literally. The Nvim and tmux launchers
 resolve one physical release when each process starts. After a switch, reload
 Bash with `source "$HOME/.bashrc" && hash -r`; new shells and applications use
 the new release, while an existing Nvim process and tmux server remain on their
-old physical configuration and plugins. Finish or safely stop a tmux server
-before expecting it to use a newly selected release.
+old physical configuration and plugins. `prefix` + `Shift-R` reloads that
+server's physical config through `source-file -F`; it does not switch an A
+server to B. Finish or safely stop the old server before expecting a new one to
+use the newly selected release.
 
 Mutable Nvim state, including ShaDa, undo, project marks, Mini Visits and
 Telescope history, stays under `XDG_STATE_HOME` or `~/.local/state/nvim2`.
 The first activation copies legacy Mini Visits and Telescope files only when
 the new destination is absent and preserves the source. zoxide data,
 tmux-resurrect sessions, caches, kubeconfig and credentials also remain outside
-the immutable payload.
+the immutable payload. The Nvim launcher remembers the user's original
+`XDG_CONFIG_HOME` and `XDG_DATA_HOME` before selecting physical release data.
+An interactive terminal Bash restores those values before integrations start.
+Direct Nvim jobs use an explicit `_ZO_DATA_DIR`, defaulting to the user's
+original data home, so zoxide never writes into retained release data. Explicit
+`_ZO_DATA_DIR`, paths with spaces, nested launches and another `NVIM_APPNAME`
+remain supported.
 
 The release does not own `~/bin/python`, `~/bin/python3`, Helm or kubectl.
 `helm-ls` works through its embedded Helm libraries. Basic kubectx and kubens

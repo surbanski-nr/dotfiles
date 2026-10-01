@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+die() {
+  printf 'update-offline-python-locks: %s\n' "$*" >&2
+  return 1
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if [[ -n ${work:-} && -d $work ]]; then find "$work" -depth -delete; fi
+  exit "$status"
+}
+trap cleanup EXIT
+
+repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=setup-lib
+source "$repo_dir/scripts/setup-lib"
+# shellcheck source=../versions.env
+source "$repo_dir/versions.env"
+SETUP_PROGRAM=update-offline-python-locks
+setup_validate_versions
+
+for command_name in curl find mktemp mv sha256sum tar timeout; do
+  setup_need "$command_name"
+done
+
+work=$(mktemp -d)
+generator_home=$work/home
+inventory=$work/inventory.tsv
+nvim_bin=${NVIM_BIN:-nvim}
+[[ -x $nvim_bin ]] || command -v "$nvim_bin" >/dev/null 2>&1 ||
+  die "Neovim executable is missing: $nvim_bin"
+mkdir -p "$generator_home/.cache" "$generator_home/.local/share" \
+  "$generator_home/.local/state"
+
+if [[ -n ${DOTFILES_PYTHON_RECEIPTS:-} ]]; then
+  packages_dir=$DOTFILES_PYTHON_RECEIPTS
+  [[ -d $packages_dir ]] || die "Mason packages directory is missing: $packages_dir"
+else
+  HOME=$generator_home \
+    XDG_CONFIG_HOME="$repo_dir/nvim2/.config" \
+    XDG_DATA_HOME="$generator_home/.local/share" \
+    XDG_STATE_HOME="$generator_home/.local/state" \
+    XDG_CACHE_HOME="$generator_home/.cache" \
+    NVIM_APPNAME=nvim2 \
+    timeout 2400s "$nvim_bin" --headless '+Nvim2ToolsInstallSync' '+qa!'
+  packages_dir=$generator_home/.local/share/nvim2/mason/packages
+fi
+
+DOTFILES_NVIM_CONFIG="$repo_dir/nvim2/.config/nvim2" \
+  DOTFILES_MASON_PACKAGES="$packages_dir" \
+  DOTFILES_PYTHON_INVENTORY_OUTPUT="$inventory" \
+  "$nvim_bin" --headless -u NONE \
+  "+lua vim.opt.runtimepath:prepend(vim.env.DOTFILES_NVIM_CONFIG); local f=assert(io.open(vim.env.DOTFILES_PYTHON_INVENTORY_OUTPUT, 'wb')); for _, p in ipairs(require('custom.lsp').python_inventory(vim.env.DOTFILES_MASON_PACKAGES)) do f:write(p.name, '\t', p.version, '\t', table.concat(p.entry_points, ','), '\n') end; assert(f:close())" \
+  '+qa!'
+[[ -s $inventory ]] || die 'Python-backed Mason inventory is empty'
+
+setup_artifact_spec python "${PYTHON_VERSIONS[0]}"
+archive=$work/$SPEC_ASSET
+setup_download "$SPEC_URL" "$archive"
+setup_verify_sha256 "$archive" "$SPEC_DIGEST"
+setup_prepare_artifact python "${PYTHON_VERSIONS[0]}" "$archive" "$work/python"
+python=$work/python/${SPEC_DESTS[0]}/bin/python3
+"$python" -I -m venv "$work/pip-tools"
+env -u PIP_NO_INDEX -u PIP_FIND_LINKS HOME="$generator_home" \
+  PIP_CACHE_DIR="$work/pip-cache" PIP_CONFIG_FILE=/dev/null \
+  PIP_INDEX_URL=https://pypi.org/simple \
+  "$work/pip-tools/bin/python" -I -m pip install --disable-pip-version-check \
+  "pip-tools==$PIP_TOOLS_VERSION"
+
+while IFS=$'\t' read -r package version entry_points extra; do
+  [[ -z $extra && $package =~ ^[a-z0-9][a-z0-9-]*$ &&
+    $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ &&
+    $entry_points =~ ^[a-z0-9,-]+$ ]] || die 'invalid Python inventory row'
+  printf '# Generated from custom.lsp M.tools and its Mason receipt.\n%s==%s\n' \
+    "$package" "$version" >"$work/$package.in"
+  (
+    cd "$repo_dir"
+    env -u PIP_NO_INDEX -u PIP_FIND_LINKS HOME="$generator_home" \
+      PIP_CACHE_DIR="$work/pip-cache" PIP_CONFIG_FILE=/dev/null \
+      PIP_INDEX_URL=https://pypi.org/simple \
+      CUSTOM_COMPILE_COMMAND='task update:python-locks' \
+      "$work/pip-tools/bin/python" -I -m piptools compile --quiet --rebuild \
+      --generate-hashes --strip-extras \
+      --output-file="$work/$package.lock" "$work/$package.in"
+  )
+  mv -T -- "$work/$package.in" "$repo_dir/offline/$package.in"
+  mv -T -- "$work/$package.lock" "$repo_dir/offline/$package.lock"
+done <"$inventory"
+
+printf 'update-offline-python-locks: regenerated inputs and locks with pip-tools %s\n' \
+  "$PIP_TOOLS_VERSION"

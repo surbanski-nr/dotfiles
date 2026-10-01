@@ -68,8 +68,13 @@ archived profile and is not installed by the normal setup.
 ## Updates and rollback
 
 [TOOL_UPDATES.md](TOOL_UPDATES.md) describes disposable upgrade candidates,
-health evidence, retained version rollback and prompt behavior. Release
-publication remains a separate explicit action.
+Python lock regeneration, health evidence, retained version rollback and
+prompt behavior. Release publication remains a separate explicit action.
+
+Complete offline releases recover interrupted install, selection and baseline
+restore operations automatically when the next manager command starts. Do not
+edit the recovery journal, selection links or adjacent baseline backups by
+hand. See the offline runbook before resolving a reported ownership conflict.
 
 ## Validation
 

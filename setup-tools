@@ -44,8 +44,22 @@ main() {
     setup_die '--from requires at least one tool name'
   fi
   if ((${#requested[@]} == 0)); then
-    requested=(gh kyverno task trivy k9s kubeconform shellcheck oh-my-posh
-      kubectx kubens rg zoxide uv nvim)
+    requested=(
+      gh
+      kyverno
+      task
+      trivy
+      k9s
+      kubeconform
+      shellcheck
+      oh-my-posh
+      kubectx
+      kubens
+      rg
+      zoxide
+      uv
+      nvim
+    )
   fi
 
   load_setup_config

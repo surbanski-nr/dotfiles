@@ -24,7 +24,14 @@ main() {
     esac
   done
   if ((${#requested[@]} == 0)); then
-    requested=(terraform kubectl helm python nodejs terragrunt)
+    requested=(
+      terraform
+      kubectl
+      helm
+      python
+      nodejs
+      terragrunt
+    )
   fi
 
   load_config
@@ -49,7 +56,7 @@ load_config() {
 validate_host() {
   [[ $(uname -s) == Linux ]] || setup_die 'only Linux is supported'
   [[ $(uname -m) == x86_64 ]] || setup_die 'only Linux x86-64 is supported'
-  for command_name in awk curl find git sha256sum tar mktemp mv ln readlink; do
+  for command_name in awk cmp curl find git sha256sum tar mktemp mv ln readlink; do
     setup_need "$command_name"
   done
 }
@@ -114,7 +121,19 @@ preflight_asdf_link() {
 
   if [[ -L $link ]]; then
     target=$(readlink -- "$link")
-    [[ -f $state && ! -L $state ]] || setup_die "asdf link has no ownership state: $link"
+    if [[ ! -e $state && ! -L $state ]]; then
+      [[ $target == "asdf-$ASDF_VERSION" ]] ||
+        setup_die "legacy asdf target is not the current pinned version: $link -> $target"
+      [[ -f $BIN_DIR/$target && -x $BIN_DIR/$target && ! -L $BIN_DIR/$target ]] ||
+        setup_die "invalid legacy asdf target: $BIN_DIR/$target"
+      output=$("$BIN_DIR/$target" version 2>&1) ||
+        setup_die "legacy asdf target failed: $BIN_DIR/$target"
+      [[ $output == *"$ASDF_VERSION"* ]] ||
+        setup_die "legacy asdf target did not report $ASDF_VERSION"
+      LEGACY_ASDF_TARGET=$target
+      return
+    fi
+    [[ -f $state && ! -L $state ]] || setup_die "invalid asdf ownership state: $state"
     IFS=$'\t' read -r recorded extra <"$state" || setup_die "empty asdf state: $state"
     [[ -z $extra && $recorded =~ ^asdf-v?[0-9]+([.][0-9]+){1,3}$ ]] ||
       setup_die "invalid asdf state: $state"
@@ -145,11 +164,13 @@ preflight_asdf_link() {
       ! -L $BIN_DIR/asdf-$ASDF_VERSION ]] ||
       setup_die "invalid asdf installation: $BIN_DIR/asdf-$ASDF_VERSION"
     install_state=$STATE_DIR/installations/asdf-$ASDF_VERSION.sha256
-    [[ -f $install_state && ! -L $install_state ]] ||
-      setup_die "refusing unmanaged asdf installation: $BIN_DIR/asdf-$ASDF_VERSION"
-    actual=$(sha256sum "$BIN_DIR/asdf-$ASDF_VERSION" | awk '{print $1}')
-    [[ $(<"$install_state") == "$actual" ]] ||
-      setup_die "managed asdf installation was modified: $BIN_DIR/asdf-$ASDF_VERSION"
+    if [[ $LEGACY_ASDF_TARGET != "asdf-$ASDF_VERSION" ]]; then
+      [[ -f $install_state && ! -L $install_state ]] ||
+        setup_die "refusing unmanaged asdf installation: $BIN_DIR/asdf-$ASDF_VERSION"
+      actual=$(sha256sum "$BIN_DIR/asdf-$ASDF_VERSION" | awk '{print $1}')
+      [[ $(<"$install_state") == "$actual" ]] ||
+        setup_die "managed asdf installation was modified: $BIN_DIR/asdf-$ASDF_VERSION"
+    fi
   fi
 }
 
@@ -219,7 +240,7 @@ install_asdf() {
   local install_state="$STATE_DIR/installations/asdf-$ASDF_VERSION.sha256"
   local state_temporary digest
 
-  if [[ -f $destination ]]; then
+  if [[ -f $destination && -z $LEGACY_ASDF_TARGET ]]; then
     output=$("$destination" version 2>&1)
     [[ $output == *"$ASDF_VERSION"* ]] ||
       setup_die "existing asdf binary did not report $ASDF_VERSION"
@@ -235,7 +256,12 @@ install_asdf() {
     output=$("$executable" version 2>&1)
     [[ $output == *"$ASDF_VERSION"* ]] ||
       setup_die "downloaded asdf did not report $ASDF_VERSION"
-    mv -- "$executable" "$destination"
+    if [[ -n $LEGACY_ASDF_TARGET ]]; then
+      cmp -s "$executable" "$destination" ||
+        setup_die 'legacy asdf binary does not match the verified upstream archive'
+    else
+      mv -- "$executable" "$destination"
+    fi
     mkdir -p "$STATE_DIR/installations"
     digest=$(sha256sum "$destination" | awk '{print $1}')
     state_temporary=$(mktemp "$STATE_DIR/installations/.asdf-install.XXXXXX")
@@ -243,7 +269,11 @@ install_asdf() {
     printf '%s\n' "$digest" >"$state_temporary"
     chmod 0600 "$state_temporary"
     mv -T -- "$state_temporary" "$install_state"
-    printf 'setup-asdf: installed asdf %s\n' "$ASDF_VERSION"
+    if [[ -n $LEGACY_ASDF_TARGET ]]; then
+      printf 'setup-asdf: adopted verified legacy asdf %s\n' "$ASDF_VERSION"
+    else
+      printf 'setup-asdf: installed asdf %s\n' "$ASDF_VERSION"
+    fi
   fi
   temporary_link="$BIN_DIR/.asdf.link.$$"
   state_temporary=$(mktemp "$STATE_DIR/.asdf-state.XXXXXX")
@@ -334,6 +364,7 @@ declare -a TEMP_PATHS=()
 BIN_DIR=
 STATE_DIR=
 LOCK_DIR=
+LEGACY_ASDF_TARGET=
 PLUGIN_REPO=
 PLUGIN_COMMIT=
 declare -a TOOL_VERSIONS=()

@@ -7,6 +7,10 @@ test_root=$(mktemp -d)
 os_release=$test_root/os-release
 
 cleanup() {
+  if [[ -n ${lock_holder_pid:-} ]]; then
+    kill "$lock_holder_pid" 2>/dev/null || true
+    wait "$lock_holder_pid" 2>/dev/null || true
+  fi
   find "$test_root" -depth -delete
 }
 trap cleanup EXIT
@@ -149,8 +153,13 @@ make_artifact() {
   done
   printf '%s\n' "$marker" >"$release/dotfiles/k9s/.config/k9s/skins/skin.yaml"
   mkdir -p "$release/python-locks"
-  printf 'fixture lock\n' >"$release/python-locks/ansible-lint.lock"
-  printf 'fixture lock\n' >"$release/python-locks/yamllint.lock"
+  printf 'ansible-lint==26.1.1\n' >"$release/python-locks/ansible-lint.in"
+  printf 'ansible-lint==26.1.1 --hash=sha256:fixture\n' \
+    >"$release/python-locks/ansible-lint.lock"
+  printf 'yamllint==1.38.0\n' >"$release/python-locks/yamllint.in"
+  printf 'yamllint==1.38.0 --hash=sha256:fixture\n' >"$release/python-locks/yamllint.lock"
+  printf 'ansible-lint\t26.1.1\tansible-lint\nyamllint\t1.38.0\tyamllint\n' \
+    >"$release/python-locks/inventory.tsv"
   printf 'fixture wheel\n' >"$release/python-wheelhouse/fixture.whl"
   printf '%s\n' \
     'FORMAT_VERSION=1' \
@@ -204,6 +213,539 @@ artifact_three=$test_root/three.tar.gz
 make_artifact "$commit_one" one "$artifact_one"
 make_artifact "$commit_two" two "$artifact_two"
 make_artifact "$commit_three" three "$artifact_three"
+
+reserved_root=$test_root/reserved-paths
+mkdir -p "$reserved_root"
+
+test_home=$reserved_root/lock-home
+private_lock_target=$reserved_root/private-lock-target
+mkdir -p "$test_home/dotfiles-releases/.state"
+printf 'private lock target\n' >"$private_lock_target"
+chmod 0640 "$private_lock_target"
+private_lock_digest=$(sha256sum "$private_lock_target")
+private_lock_mode=$(stat -c %a "$private_lock_target")
+ln -s "$private_lock_target" "$test_home/dotfiles-releases/.state/lock"
+set +e
+reserved_output=$(run_manager list 2>&1)
+reserved_status=$?
+set -e
+[[ $reserved_status -ne 0 && $reserved_output == *'invalid reserved state path'* ]] ||
+  fail 'foreign lock symlink was accepted'
+[[ $(sha256sum "$private_lock_target") == "$private_lock_digest" &&
+  $(stat -c %a "$private_lock_target") == "$private_lock_mode" ]] ||
+  fail 'foreign lock symlink target was modified'
+assert_link "$test_home/dotfiles-releases/.state/lock" "$private_lock_target"
+
+test_home=$reserved_root/broken-lock-home
+mkdir -p "$test_home/dotfiles-releases/.state"
+ln -s "$reserved_root/missing-lock-target" "$test_home/dotfiles-releases/.state/lock"
+set +e
+run_manager list >/dev/null 2>&1
+reserved_status=$?
+set -e
+[[ $reserved_status -ne 0 ]] || fail 'broken lock symlink was accepted'
+assert_link "$test_home/dotfiles-releases/.state/lock" "$reserved_root/missing-lock-target"
+
+for selection in current previous; do
+  test_home=$reserved_root/regular-$selection-home
+  mkdir -p "$test_home/dotfiles-releases"
+  printf 'private selection\n' >"$test_home/dotfiles-releases/$selection"
+  selection_digest=$(sha256sum "$test_home/dotfiles-releases/$selection")
+  set +e
+  run_manager list >/dev/null 2>&1
+  reserved_status=$?
+  set -e
+  [[ $reserved_status -ne 0 ]] || fail "regular $selection was accepted"
+  [[ $(sha256sum "$test_home/dotfiles-releases/$selection") == "$selection_digest" ]] ||
+    fail "regular $selection was modified"
+  [[ ! -e $test_home/dotfiles-releases/.state ]] ||
+    fail "regular $selection was rejected only after a state write"
+done
+
+test_home=$reserved_root/broken-selection-home
+mkdir -p "$test_home/dotfiles-releases"
+ln -s dotfiles-aaaaaaaaaaaa "$test_home/dotfiles-releases/current"
+set +e
+run_manager list >/dev/null 2>&1
+reserved_status=$?
+set -e
+[[ $reserved_status -ne 0 ]] || fail 'broken current selection was accepted'
+assert_link "$test_home/dotfiles-releases/current" dotfiles-aaaaaaaaaaaa
+[[ ! -e $test_home/dotfiles-releases/.state ]] ||
+  fail 'broken current selection was rejected only after a state write'
+
+test_home=$reserved_root/release-root-home
+outside_release_root=$reserved_root/outside-release-root
+mkdir -p "$test_home" "$outside_release_root"
+printf 'outside marker\n' >"$outside_release_root/marker"
+outside_release_digest=$(sha256sum "$outside_release_root/marker")
+ln -s "$outside_release_root" "$test_home/dotfiles-releases"
+set +e
+run_manager list >/dev/null 2>&1
+reserved_status=$?
+set -e
+[[ $reserved_status -ne 0 ]] || fail 'symlink release root was accepted'
+[[ $(sha256sum "$outside_release_root/marker") == "$outside_release_digest" ]] ||
+  fail 'symlink release root target was modified'
+
+test_home=$reserved_root/state-home
+outside_state=$reserved_root/outside-state
+mkdir -p "$test_home/dotfiles-releases" "$outside_state"
+printf 'outside state marker\n' >"$outside_state/marker"
+outside_state_digest=$(sha256sum "$outside_state/marker")
+ln -s "$outside_state" "$test_home/dotfiles-releases/.state"
+set +e
+run_manager list >/dev/null 2>&1
+reserved_status=$?
+set -e
+[[ $reserved_status -ne 0 ]] || fail 'symlink state directory was accepted'
+[[ $(sha256sum "$outside_state/marker") == "$outside_state_digest" ]] ||
+  fail 'symlink state target was modified'
+
+test_home=$reserved_root/ownership-home
+mkdir -p "$test_home/dotfiles-releases/.state/ownership.tsv"
+set +e
+run_manager list >/dev/null 2>&1
+reserved_status=$?
+set -e
+[[ $reserved_status -ne 0 && -d $test_home/dotfiles-releases/.state/ownership.tsv ]] ||
+  fail 'directory ownership record was accepted or replaced'
+
+test_home=$reserved_root/parent-link-home
+outside_bin=$reserved_root/outside-bin
+mkdir -p "$test_home" "$outside_bin"
+printf 'outside bin marker\n' >"$outside_bin/marker"
+outside_bin_digest=$(sha256sum "$outside_bin/marker")
+ln -s "$outside_bin" "$test_home/bin"
+set +e
+parent_output=$(run_manager install "$artifact_one" 2>&1)
+parent_status=$?
+set -e
+[[ $parent_status -ne 0 && $parent_output == *'symlink parent'* ]] ||
+  fail 'managed path with a symlink parent was accepted'
+[[ $(sha256sum "$outside_bin/marker") == "$outside_bin_digest" ]] ||
+  fail 'managed symlink parent target was modified'
+[[ ! -e $test_home/dotfiles-releases/current &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env &&
+  ! -e $test_home/dotfiles-releases/$id_one ]] ||
+  fail 'parent-link conflict retained partial release state'
+
+failure_bin=$test_root/failure-bin
+mkdir -p "$failure_bin"
+
+test_home=$test_root/ownership-write-failure-home
+mkdir -p "$test_home"
+printf 'ownership baseline\n' >"$test_home/.bashrc"
+cat >"$failure_bin/mv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+destination=${!#}
+if [[ $destination == */.state/ownership.tsv ]]; then exit 91; fi
+exec /usr/bin/mv "$@"
+EOF
+chmod 0755 "$failure_bin/mv"
+set +e
+ownership_failure_output=$(PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_one" 2>&1)
+ownership_failure_status=$?
+set -e
+[[ $ownership_failure_status -ne 0 && $ownership_failure_output != *': installed '* ]] ||
+  fail 'ownership write failure reported installation success'
+[[ $(<"$test_home/.bashrc") == 'ownership baseline' &&
+  ! -e $test_home/dotfiles-releases/current &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env &&
+  ! -e $test_home/dotfiles-releases/$id_one ]] ||
+  fail 'ownership write failure did not restore the first-install baseline'
+rm "$failure_bin/mv"
+run_manager install "$artifact_one" >/dev/null
+run_manager uninstall >/dev/null
+
+test_home=$test_root/link-failure-home
+mkdir -p "$test_home"
+printf 'link baseline\n' >"$test_home/.bashrc"
+cat >"$failure_bin/ln" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+destination=${!#}
+if [[ $destination == */.dotfiles-release-link.* ]]; then exit 92; fi
+exec /usr/bin/ln "$@"
+EOF
+chmod 0755 "$failure_bin/ln"
+set +e
+link_failure_output=$(PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_one" 2>&1)
+link_failure_status=$?
+set -e
+[[ $link_failure_status -ne 0 && $link_failure_output != *': installed '* ]] ||
+  fail 'managed-link failure reported installation success'
+[[ $(<"$test_home/.bashrc") == 'link baseline' &&
+  ! -e $test_home/dotfiles-releases/current &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env &&
+  ! -e $test_home/dotfiles-releases/$id_one ]] ||
+  fail 'managed-link failure did not restore the first-install baseline'
+rm "$failure_bin/ln"
+run_manager install "$artifact_one" >/dev/null
+run_manager uninstall >/dev/null
+
+test_home=$test_root/selection-failure-home
+mkdir -p "$test_home"
+printf 'selection baseline\n' >"$test_home/.bashrc"
+run_manager install "$artifact_one" >/dev/null
+cat >"$failure_bin/mv" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+destination=\${!#}
+if [[ \$destination == '$test_home/dotfiles-releases/current' ]]; then exit 93; fi
+exec /usr/bin/mv "\$@"
+EOF
+chmod 0755 "$failure_bin/mv"
+set +e
+selection_failure_output=$(PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_two" 2>&1)
+selection_failure_status=$?
+set -e
+[[ $selection_failure_status -ne 0 && $selection_failure_output != *': installed '* ]] ||
+  fail 'current selection failure reported installation success'
+assert_link "$test_home/dotfiles-releases/current" "$id_one"
+[[ ! -e $test_home/dotfiles-releases/previous &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env &&
+  ! -e $test_home/dotfiles-releases/$id_two ]] ||
+  fail 'current selection failure did not restore the A selection pair'
+rm "$failure_bin/mv"
+run_manager install "$artifact_two" >/dev/null
+assert_link "$test_home/dotfiles-releases/current" "$id_two"
+run_manager uninstall >/dev/null
+
+test_home=$test_root/recovery-failure-home
+mkdir -p "$test_home"
+printf 'recovery baseline\n' >"$test_home/.bashrc"
+run_manager install "$artifact_one" >/dev/null
+cat >"$failure_bin/mv" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+destination=\${!#}
+if [[ \$destination == '$test_home/dotfiles-releases/current' ]]; then exit 95; fi
+exec /usr/bin/mv "\$@"
+EOF
+cat >"$failure_bin/unlink" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ \${!#} == '$test_home/dotfiles-releases/previous' ]]; then exit 96; fi
+exec /usr/bin/unlink "\$@"
+EOF
+chmod 0755 "$failure_bin/mv" "$failure_bin/unlink"
+set +e
+recovery_failure_output=$(PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_two" 2>&1)
+recovery_failure_status=$?
+set -e
+[[ $recovery_failure_status -ne 0 &&
+  $recovery_failure_output == *'automatic recovery also failed'* &&
+  $recovery_failure_output != *': installed '* ]] ||
+  fail 'activation plus recovery failure was not reported'
+assert_link "$test_home/dotfiles-releases/current" "$id_one"
+[[ -f $test_home/dotfiles-releases/.state/pending.env &&
+  -d $test_home/dotfiles-releases/$id_two ]] ||
+  fail 'failed automatic recovery discarded its journal or retained payload'
+rm "$failure_bin/mv" "$failure_bin/unlink"
+run_manager install "$artifact_two" >/dev/null
+assert_link "$test_home/dotfiles-releases/current" "$id_two"
+[[ ! -e $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'retry did not clear the recovered activation journal'
+run_manager uninstall >/dev/null
+
+test_home=$test_root/kill-after-backup-home
+mkdir -p "$test_home"
+printf 'kill backup baseline\n' >"$test_home/.bashrc"
+chmod 0640 "$test_home/.bashrc"
+kill_backup_digest=$(sha256sum "$test_home/.bashrc")
+kill_backup_mode=$(stat -c %a "$test_home/.bashrc")
+cat >"$failure_bin/mv" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source_path=\${@: -2:1}
+destination=\${!#}
+/usr/bin/mv "\$@"
+if [[ \$source_path == '$test_home/.bashrc' &&
+  \$destination == '$test_home/.dotfiles-release-backup-'* ]]; then
+  kill -KILL "\$PPID"
+fi
+EOF
+chmod 0755 "$failure_bin/mv"
+set +e
+PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_one" >/dev/null 2>&1
+kill_backup_status=$?
+set -e
+[[ $kill_backup_status -ne 0 &&
+  -f $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'SIGKILL after backup move did not leave a recovery journal'
+rm "$failure_bin/mv"
+run_manager install "$artifact_one" >/dev/null
+run_manager uninstall >/dev/null
+[[ $(sha256sum "$test_home/.bashrc") == "$kill_backup_digest" &&
+  $(stat -c %a "$test_home/.bashrc") == "$kill_backup_mode" ]] ||
+  fail 'retry after backup SIGKILL did not restore baseline bytes and mode'
+[[ -z $(find "$test_home" -name '.dotfiles-release-backup-*' -print -quit) ]] ||
+  fail 'retry after backup SIGKILL left an orphaned backup'
+
+test_home=$test_root/kill-after-link-home
+mkdir -p "$test_home"
+printf 'kill link baseline\n' >"$test_home/.bashrc"
+kill_link_digest=$(sha256sum "$test_home/.bashrc")
+cat >"$failure_bin/mv" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source_path=\${@: -2:1}
+destination=\${!#}
+/usr/bin/mv "\$@"
+if [[ \$source_path == '$test_home/.dotfiles-release-link.'* &&
+  \$destination == '$test_home/.bashrc' ]]; then
+  kill -KILL "\$PPID"
+fi
+EOF
+chmod 0755 "$failure_bin/mv"
+set +e
+PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_one" >/dev/null 2>&1
+kill_link_status=$?
+set -e
+[[ $kill_link_status -ne 0 && -L $test_home/.bashrc &&
+  -f $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'SIGKILL after managed-link rename did not preserve a recoverable state'
+rm "$failure_bin/mv"
+run_manager install "$artifact_one" >/dev/null
+run_manager uninstall >/dev/null
+[[ $(sha256sum "$test_home/.bashrc") == "$kill_link_digest" ]] ||
+  fail 'retry after managed-link SIGKILL did not restore baseline bytes'
+
+test_home=$test_root/kill-after-created-link-home
+mkdir -p "$test_home"
+cat >"$failure_bin/mv" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source_path=\${@: -2:1}
+destination=\${!#}
+/usr/bin/mv "\$@"
+if [[ \$source_path == '$test_home/bin/.dotfiles-release-link.'* &&
+  \$destination == '$test_home/bin/dotfiles-release' ]]; then
+  kill -KILL "\$PPID"
+fi
+EOF
+chmod 0755 "$failure_bin/mv"
+set +e
+PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_one" >/dev/null 2>&1
+kill_created_status=$?
+set -e
+[[ $kill_created_status -ne 0 && -L $test_home/bin/dotfiles-release &&
+  -f $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'SIGKILL after created-link rename did not preserve a recoverable state'
+rm "$failure_bin/mv"
+run_manager install "$artifact_one" >/dev/null
+run_manager uninstall >/dev/null
+[[ ! -e $test_home/bin/dotfiles-release &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'retry after created-link SIGKILL did not restore absence'
+
+test_home=$test_root/kill-provider-home
+mkdir -p "$test_home/bin" "$test_home/.local/state/dotfiles/setup-tools"
+printf 'provider baseline\n' >"$test_home/.bashrc"
+write_fake_tool "$test_home/bin/rg-0.9"
+ln -s rg-0.9 "$test_home/bin/rg"
+provider_content=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+  -C "$test_home/bin" -cf - -- rg-0.9 | sha256sum | awk '{print $1}')
+printf 'complete\t%s\t%s\n' \
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  "$provider_content" >"$test_home/.local/state/dotfiles/setup-tools/rg-0.9.state"
+cat >"$failure_bin/mv" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source_path=\${@: -2:1}
+destination=\${!#}
+/usr/bin/mv "\$@"
+if [[ \$source_path == '$test_home/bin/rg' &&
+  \$destination == '$test_home/bin/.dotfiles-release-backup-'* ]]; then
+  kill -KILL "\$PPID"
+fi
+EOF
+chmod 0755 "$failure_bin/mv"
+set +e
+PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_one" >/dev/null 2>&1
+kill_provider_status=$?
+set -e
+[[ $kill_provider_status -ne 0 &&
+  -f $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'SIGKILL while migrating an owned provider link left no journal'
+rm "$failure_bin/mv"
+run_manager install "$artifact_one" >/dev/null
+run_manager uninstall >/dev/null
+assert_link "$test_home/bin/rg" rg-0.9
+[[ -x $test_home/bin/rg-0.9 ]] ||
+  fail 'retry after provider-link SIGKILL did not restore its payload'
+
+test_home=$test_root/kill-selection-home
+mkdir -p "$test_home"
+printf 'kill selection baseline\n' >"$test_home/.bashrc"
+run_manager install "$artifact_one" >/dev/null
+cat >"$failure_bin/mv" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+destination=\${!#}
+/usr/bin/mv "\$@"
+if [[ \$destination == '$test_home/dotfiles-releases/current' ]]; then
+  kill -KILL "\$PPID"
+fi
+EOF
+chmod 0755 "$failure_bin/mv"
+set +e
+PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_two" >/dev/null 2>&1
+kill_selection_status=$?
+set -e
+[[ $kill_selection_status -ne 0 &&
+  -f $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'SIGKILL after current rename did not preserve a recovery journal'
+assert_link "$test_home/dotfiles-releases/current" "$id_two"
+assert_link "$test_home/dotfiles-releases/previous" "$id_one"
+rm "$failure_bin/mv"
+run_manager install "$artifact_two" >/dev/null
+assert_link "$test_home/dotfiles-releases/current" "$id_two"
+assert_link "$test_home/dotfiles-releases/previous" "$id_one"
+[[ ! -e $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'retry after selection SIGKILL retained its journal'
+run_manager uninstall >/dev/null
+
+test_home=$test_root/kill-restore-home
+mkdir -p "$test_home"
+printf 'kill restore baseline\n' >"$test_home/.bashrc"
+chmod 0640 "$test_home/.bashrc"
+kill_restore_digest=$(sha256sum "$test_home/.bashrc")
+kill_restore_mode=$(stat -c %a "$test_home/.bashrc")
+run_manager install "$artifact_one" >/dev/null
+cat >"$failure_bin/mv" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source_path=\${@: -2:1}
+destination=\${!#}
+/usr/bin/mv "\$@"
+if [[ \$source_path == '$test_home/.dotfiles-release-backup-'* &&
+  \$destination == '$test_home/.bashrc' ]]; then
+  kill -KILL "\$PPID"
+fi
+EOF
+chmod 0755 "$failure_bin/mv"
+set +e
+PATH="$failure_bin:/usr/bin:/bin" run_manager uninstall >/dev/null 2>&1
+kill_restore_status=$?
+set -e
+[[ $kill_restore_status -ne 0 &&
+  -f $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'SIGKILL after backup restore did not preserve its journal'
+rm "$failure_bin/mv"
+restore_retry_output=$(run_manager uninstall)
+[[ $restore_retry_output == *'recovery already restored the pre-release baseline'* ]] ||
+  fail 'retry uninstall did not report recovered baseline success'
+[[ $(sha256sum "$test_home/.bashrc") == "$kill_restore_digest" &&
+  $(stat -c %a "$test_home/.bashrc") == "$kill_restore_mode" ]] ||
+  fail 'retry after restore SIGKILL did not preserve baseline bytes and mode'
+[[ ! -e $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'retry after restore SIGKILL retained its journal'
+
+test_home=$test_root/kill-created-restore-home
+mkdir -p "$test_home"
+printf 'created restore baseline\n' >"$test_home/.bashrc"
+run_manager install "$artifact_one" >/dev/null
+cat >"$failure_bin/unlink" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+path=\${!#}
+/usr/bin/unlink "\$@"
+if [[ \$path == '$test_home/.bash_profile' ]]; then
+  kill -KILL "\$PPID"
+fi
+EOF
+chmod 0755 "$failure_bin/unlink"
+set +e
+PATH="$failure_bin:/usr/bin:/bin" run_manager uninstall >/dev/null 2>&1
+kill_created_restore_status=$?
+set -e
+[[ $kill_created_restore_status -ne 0 && ! -e $test_home/.bash_profile &&
+  -f $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'SIGKILL after removing a created path left no recoverable state'
+rm "$failure_bin/unlink"
+run_manager uninstall >/dev/null
+[[ ! -e $test_home/.bash_profile &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'retry after created-path restore SIGKILL did not converge'
+
+test_home=$test_root/foreign-restore-home
+mkdir -p "$test_home"
+printf 'foreign restore baseline\n' >"$test_home/.bashrc"
+run_manager install "$artifact_one" >/dev/null
+unlink "$test_home/.bashrc"
+printf 'foreign user edit\n' >"$test_home/.bashrc"
+foreign_restore_digest=$(sha256sum "$test_home/.bashrc")
+set +e
+foreign_restore_output=$(run_manager uninstall 2>&1)
+foreign_restore_status=$?
+set -e
+[[ $foreign_restore_status -ne 0 &&
+  $foreign_restore_output == *'refusing to replace modified managed path'* ]] ||
+  fail 'foreign edit during restore was not rejected'
+[[ $(sha256sum "$test_home/.bashrc") == "$foreign_restore_digest" &&
+  -f $test_home/dotfiles-releases/.state/pending.env &&
+  -n $(find "$test_home" -maxdepth 1 -name '.dotfiles-release-backup-*' -print -quit) ]] ||
+  fail 'restore conflict changed foreign data or discarded recovery state'
+unlink "$test_home/.bashrc"
+ln -s "$test_home/dotfiles-releases/current/dotfiles/bash/.bashrc" "$test_home/.bashrc"
+run_manager uninstall >/dev/null
+[[ $(<"$test_home/.bashrc") == 'foreign restore baseline' ]] ||
+  fail 'retry after repairing restore conflict did not restore baseline'
+
+health_commit=4444444444444444444444444444444444444444
+health_id=dotfiles-${health_commit:0:12}
+health_artifact=$test_root/health-failure.tar.gz
+make_artifact "$health_commit" health-failure "$health_artifact"
+printf '#!/usr/bin/env bash\nexit 94\n' >"$test_root/stage-health-failure/$health_id/tools/bin/node"
+chmod 0755 "$test_root/stage-health-failure/$health_id/tools/bin/node"
+(
+  cd "$test_root/stage-health-failure/$health_id"
+  find . -type f ! -name SHA256SUMS -print0 | sort -z |
+    xargs -0 sha256sum >"$test_root/health-SHA256SUMS"
+  mv "$test_root/health-SHA256SUMS" SHA256SUMS
+)
+tar -C "$test_root/stage-health-failure" -czf "$health_artifact" "$health_id"
+test_home=$test_root/health-failure-home
+mkdir -p "$test_home"
+set +e
+health_failure_output=$(run_manager install "$health_artifact" 2>&1)
+health_failure_status=$?
+set -e
+[[ $health_failure_status -ne 0 && $health_failure_output != *': installed '* ]] ||
+  fail 'required final health failure reported installation success'
+[[ ! -e $test_home/dotfiles-releases/current &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env &&
+  ! -e $test_home/dotfiles-releases/$health_id ]] ||
+  fail 'required final health failure retained partial installation state'
+
+inventory_commit=5555555555555555555555555555555555555555
+inventory_id=dotfiles-${inventory_commit:0:12}
+inventory_artifact=$test_root/inventory-mismatch.tar.gz
+make_artifact "$inventory_commit" inventory "$inventory_artifact"
+printf 'ansible-lint\t99.0.0\tansible-lint\nyamllint\t1.38.0\tyamllint\n' \
+  >"$test_root/stage-inventory/$inventory_id/python-locks/inventory.tsv"
+(
+  cd "$test_root/stage-inventory/$inventory_id"
+  find . -type f ! -name SHA256SUMS -print0 | sort -z |
+    xargs -0 sha256sum >"$test_root/inventory-SHA256SUMS"
+  mv "$test_root/inventory-SHA256SUMS" SHA256SUMS
+)
+tar -C "$test_root/stage-inventory" -czf "$inventory_artifact" "$inventory_id"
+test_home=$test_root/inventory-mismatch-home
+mkdir -p "$test_home"
+set +e
+inventory_output=$(run_manager install "$inventory_artifact" 2>&1)
+inventory_status=$?
+set -e
+[[ $inventory_status -ne 0 && $inventory_output == *'does not match Mason inventory'* ]] ||
+  fail 'Python inventory/lock mismatch was accepted'
+[[ ! -e $test_home/dotfiles-releases/current &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env &&
+  ! -e $test_home/dotfiles-releases/$inventory_id ]] ||
+  fail 'Python inventory mismatch retained partial installation state'
 
 test_home="$test_root/nonstandard home"
 mkdir -p "$test_home/.config/k9s" "$test_home/bin"
@@ -351,16 +893,30 @@ set -e
 unlink "$release_link"
 ln -s 'target file' "$release_link"
 
-exec {lock_fd}>"$test_home/dotfiles-releases/.state/lock"
-flock -x "$lock_fd"
+lock_ready=$test_root/lock-ready
+(
+  exec {lock_fd}<"$test_home/dotfiles-releases/.state"
+  flock -x "$lock_fd"
+  : >"$lock_ready"
+  sleep 60
+) &
+lock_holder_pid=$!
+while [[ ! -e $lock_ready ]]; do sleep 0.01; done
 set +e
 lock_output=$(run_manager install "$artifact_one" 2>&1)
 lock_status=$?
+rollback_lock_output=$(run_manager rollback 2>&1)
+rollback_lock_status=$?
 set -e
 [[ $lock_status -ne 0 && $lock_output == *'another release operation is running'* ]] ||
   fail 'concurrent install was accepted'
-flock -u "$lock_fd"
-exec {lock_fd}>&-
+[[ $rollback_lock_status -ne 0 &&
+  $rollback_lock_output == *'another release operation is running'* ]] ||
+  fail 'second concurrent mutation was accepted'
+kill -KILL "$lock_holder_pid"
+wait "$lock_holder_pid" 2>/dev/null || true
+lock_holder_pid=
+run_manager install "$artifact_one" >/dev/null
 
 malicious_root=$test_root/malicious
 mkdir -p "$malicious_root/dotfiles-aaaaaaaaaaaa"
@@ -409,6 +965,26 @@ run_manager uninstall "$id_one" >/dev/null 2>&1
 selected_status=$?
 set -e
 [[ $selected_status -ne 0 ]] || fail 'selected release was removed'
+ownership_file=$test_home/dotfiles-releases/.state/ownership.tsv
+awk -F '\t' 'BEGIN { OFS="\t" } { print $2, $3, $4, $5 }' \
+  "$ownership_file" >"$ownership_file.legacy"
+mv -T "$ownership_file.legacy" "$ownership_file"
+legacy_bash_target=$(awk -F '\t' -v path="$test_home/.bashrc" '$2 == path { print $3 }' "$ownership_file")
+legacy_bash_backup=$(awk -F '\t' -v path="$test_home/.bashrc" '$2 == path { print $4 }' "$ownership_file")
+unlink "$test_home/.bashrc"
+mv -T "$legacy_bash_backup" "$test_home/.bashrc"
+set +e
+legacy_orphan_output=$(run_manager uninstall 2>&1)
+legacy_orphan_status=$?
+set -e
+[[ $legacy_orphan_status -ne 0 &&
+  $legacy_orphan_output == *'legacy managed backup is missing and cannot be verified'* ]] ||
+  fail 'legacy journal guessed ownership after its backup disappeared'
+[[ $(<"$test_home/.bashrc") == 'original bashrc' &&
+  -f $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'legacy restore conflict changed baseline or discarded its journal'
+mv -T "$test_home/.bashrc" "$legacy_bash_backup"
+ln -s "$legacy_bash_target" "$test_home/.bashrc"
 run_manager uninstall
 [[ $(<"$test_home/.bashrc") == 'original bashrc' ]] || fail 'uninstall did not restore the original bashrc'
 assert_link "$test_home/bin/rg" rg-0.9

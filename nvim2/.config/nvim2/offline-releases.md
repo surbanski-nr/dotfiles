@@ -28,6 +28,14 @@ explicit different `NVIM_APPNAME` is passed through without those overrides.
 Therefore a Nvim process started from release A keeps configuration, plugins
 and tools from A after `current` changes to B. A new process uses B.
 
+Before applying those overrides, the launcher records whether the user's
+`XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `_ZO_DATA_DIR` were set and preserves
+their exact values. It also sets zoxide's data directory from the original user
+data home for direct jobs. A Bash terminal sourced inside Nvim restores the
+original environment before initializing zoxide and the other integrations.
+The markers survive nested Nvim launches without replacing the first user
+values and are consumed only by the release Bash startup.
+
 ## Mutable data
 
 The immutable payload never owns ShaDa, undo files, project marks, Mini Visits
@@ -41,6 +49,12 @@ Cache and logs also stay outside the payload. In particular,
 lua-language-server writes its log below the Nvim2 state directory. Health uses
 a disposable HOME, state and cache, so it does not modify the operator's
 history, kubeconfig or editor data.
+
+The offline tmux launcher records its physical config in `@dotfiles-config`.
+The connected config records its own loaded path. In both cases `prefix` +
+`Shift-R` invokes `source-file -F '#{@dotfiles-config}'`. An existing server A
+therefore reloads A after `current` selects B; a newly started server uses B.
+An explicit `tmux -f FILE` remains authoritative.
 
 ## Offline health
 

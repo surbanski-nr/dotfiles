@@ -136,6 +136,29 @@ The Kubernetes segment starts toggled off in each shell session. Run `kp` to
 toggle it. This uses Oh My Posh's segment toggle, so the disabled segment is
 skipped before it reads or parses kubeconfig files.
 
+The Python-backed Mason packages in a complete release are derived from
+`custom.lsp` and the actual Mason receipts. Change a direct version only in
+`nvim2/.config/nvim2/lua/custom/lsp.lua`, then regenerate both input and lock
+files on a connected machine:
+
+```bash
+bash scripts/install-validation-tool task
+.cache/validation-tools/bin/task update:python-locks
+git diff -- offline versions.env nvim2/.config/nvim2/lua/custom/lsp.lua
+```
+
+The generator creates an empty HOME, installs the pinned `PIP_TOOLS_VERSION`
+into a venv made with the pinned standalone Python, reads fresh Mason receipts
+through Neovim/Lua, and resolves against `https://pypi.org/simple`. It writes
+the checked-in `.in` and hashed `.lock` files. For a preinstalled receipt tree,
+set `DOTFILES_PYTHON_RECEIPTS` and `NVIM_BIN` explicitly. This is still a
+connected operation unless every pip-tools and target dependency is supplied
+through an explicitly complete index or `--find-links` workflow. Normal builds
+do not resolve dependencies again. The target installs only the locked binary
+wheels with `--no-index --require-hashes --only-binary=:all:` and runs
+`pip check`; the standalone interpreter alone does not contain ansible-core,
+ansible-lint or yamllint.
+
 ## Project runtime rollback
 
 Project runtimes remain under asdf. Put the earlier version first in the
@@ -170,6 +193,14 @@ without deleting tmux-resurrect data. Complete offline releases load sensible,
 resurrect and continuum directly from their physical release and do not bundle
 TPM. Use Krew's supported manager install or downgrade process so its plugin
 inventory is retained.
+
+The current `setup-asdf` can adopt only the exact historical
+`~/bin/asdf-VERSION` plus relative `~/bin/asdf` layout for the current pin. It
+downloads and verifies the official archive, compares the extracted executable
+byte-for-byte, and records ownership only after all requested provider and
+plugin preflight checks pass. A conflicting direct launcher, modified binary,
+different target or older unverified pin is left untouched and must be resolved
+explicitly before retrying.
 
 ## Nvim2 candidate and health evidence
 

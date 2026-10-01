@@ -102,6 +102,50 @@ case $TEST_SCENARIO in
     eval cddot
     printf 'dotfiles=%s pwd=%s\n' "$DOTFILES" "$PWD"
     ;;
+  root-transition)
+    unset DOTFILES DOTFILES_AUTO_ROOT
+    source "$TEST_CONNECTED_ROOT/bash/.bashrc"
+    printf 'connected=%s:%s:%s\n' "$DOTFILES" \
+      "${DOTFILES_SNAPSHOT_ROOT:-unset}" "$(snapshot-marker)"
+    source "$TEST_RELEASE_A/dotfiles/bash/.bashrc"
+    printf 'release-a=%s:%s:%s\n' "$DOTFILES" \
+      "$DOTFILES_SNAPSHOT_ROOT" "$(snapshot-marker)"
+    source "$TEST_RELEASE_B/dotfiles/bash/.bashrc"
+    printf 'release-b=%s:%s:%s\n' "$DOTFILES" \
+      "$DOTFILES_SNAPSHOT_ROOT" "$(snapshot-marker)"
+    source "$TEST_RELEASE_A/dotfiles/bash/.bashrc"
+    printf 'rollback-a=%s:%s:%s\n' "$DOTFILES" \
+      "$DOTFILES_SNAPSHOT_ROOT" "$(snapshot-marker)"
+    source "$TEST_CONNECTED_ROOT/bash/.bashrc"
+    printf 'baseline=%s:%s:%s\n' "$DOTFILES" \
+      "${DOTFILES_SNAPSHOT_ROOT:-unset}" "$(snapshot-marker)"
+    ;;
+  root-override)
+    unset DOTFILES DOTFILES_AUTO_ROOT
+    source "$TEST_CONNECTED_ROOT/bash/.bashrc"
+    DOTFILES=$TEST_CUSTOM_ROOT
+    export DOTFILES
+    source "$TEST_RELEASE_A/dotfiles/bash/.bashrc"
+    printf 'override-before=%s:%s\n' "$DOTFILES" "${DOTFILES_AUTO_ROOT:-unset}"
+    DOTFILES=$TEST_SECOND_CUSTOM_ROOT
+    export DOTFILES
+    source "$TEST_RELEASE_B/dotfiles/bash/.bashrc"
+    printf 'override-during=%s:%s\n' "$DOTFILES" "${DOTFILES_AUTO_ROOT:-unset}"
+    DOTFILES=$TEST_RELEASE_A/dotfiles
+    unset DOTFILES_AUTO_ROOT
+    source "$TEST_CONNECTED_ROOT/bash/.bashrc"
+    printf 'legacy-before-reset=%s\n' "$DOTFILES"
+    unset DOTFILES DOTFILES_AUTO_ROOT
+    source "$TEST_CONNECTED_ROOT/bash/.bashrc"
+    printf 'legacy-after-reset=%s\n' "$DOTFILES"
+    ;;
+  launcher-environment)
+    load_bashrc
+    printf 'xdg-config=%s xdg-data=%s zoxide=%s markers=%s\n' \
+      "${XDG_CONFIG_HOME:-unset}" "${XDG_DATA_HOME:-unset}" \
+      "${_ZO_DATA_DIR:-unset}" \
+      "${DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET:-}${DOTFILES_LAUNCHER_XDG_DATA_HOME_SET:-}${DOTFILES_LAUNCHER_ZO_DATA_DIR_SET:-}"
+    ;;
   path-order)
     load_bashrc
     load_bashrc

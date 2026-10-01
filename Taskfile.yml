@@ -67,6 +67,11 @@ tasks:
     cmds:
       - bash scripts/validate workflows
 
+  update:python-locks:
+    desc: Regenerate Python-backed Mason inputs and hashed locks
+    cmds:
+      - bash scripts/update-offline-python-locks
+
   tools:actionlint:
     internal: true
     run: once

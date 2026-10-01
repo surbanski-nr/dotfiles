@@ -42,9 +42,28 @@ add_to_path() {
   export PATH
 }
 
+_dotfiles_restore_launcher_environment() {
+  local name marker value
+
+  for name in XDG_CONFIG_HOME XDG_DATA_HOME _ZO_DATA_DIR; do
+    marker=DOTFILES_LAUNCHER_${name#_}_SET
+    value=DOTFILES_LAUNCHER_${name#_}
+    if [[ ${!marker:-} == 1 ]]; then
+      printf -v "$name" '%s' "${!value}"
+      export "${name?}"
+    elif [[ ${!marker:-} == 0 ]]; then
+      unset "$name"
+    fi
+    unset "$marker" "$value"
+  done
+}
+
+_dotfiles_restore_launcher_environment
+
 _dotfiles_source=$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null ||
   printf '%s\n' "${BASH_SOURCE[0]}")
 _dotfiles_source_root=$(CDPATH='' cd -- "$(dirname -- "$_dotfiles_source")/.." && pwd)
+_dotfiles_previous_auto_root=${DOTFILES_AUTO_ROOT:-}
 export GITUSER="${GITUSER:-surbanski}"
 export GHREPOS="${GHREPOS:-$HOME/github.com/$GITUSER}"
 export LAB="${LAB:-$GHREPOS/lab}"
@@ -52,12 +71,16 @@ export NOTES="${NOTES:-$GHREPOS/notes-md}"
 if [[ $_dotfiles_source_root =~ /dotfiles-releases/dotfiles-[0-9a-f]{12}/dotfiles$ &&
   -f ${_dotfiles_source_root%/dotfiles}/release.env ]]; then
   _dotfiles_release_mode=true
-  export DOTFILES=$_dotfiles_source_root
   export DOTFILES_SNAPSHOT_ROOT=${_dotfiles_source_root%/dotfiles}
 else
   _dotfiles_release_mode=false
-  export DOTFILES="${DOTFILES:-$_dotfiles_source_root}"
   unset DOTFILES_SNAPSHOT_ROOT
+fi
+if [[ ! -v DOTFILES || (-n $_dotfiles_previous_auto_root && $DOTFILES == "$_dotfiles_previous_auto_root") ]]; then
+  export DOTFILES=$_dotfiles_source_root
+  export DOTFILES_AUTO_ROOT=$_dotfiles_source_root
+else
+  unset DOTFILES_AUTO_ROOT
 fi
 export WORK="${WORK:-$HOME/work}"
 # Keep virtual environment activation from modifying the prompt.
@@ -71,17 +94,22 @@ _dotfiles_clean_path=
 for _dotfiles_path_entry in "${_dotfiles_path_entries[@]}"; do
   case $_dotfiles_path_entry in
   "$HOME"/dotfiles-releases/dotfiles-*/bin | \
+    "$HOME"/dotfiles-releases/dotfiles-*/dotfiles/scripts | \
     "$HOME"/dotfiles-releases/dotfiles-*/share/nvim2/mason/bin | \
     "$HOME"/dotfiles-releases/dotfiles-*/share/nvim2/mason/packages/ansible-lint/venv/bin)
     continue
     ;;
   esac
+  if [[ -n $_dotfiles_previous_auto_root &&
+    $_dotfiles_path_entry == "$_dotfiles_previous_auto_root/scripts" ]]; then
+    continue
+  fi
   [[ -n $_dotfiles_path_entry ]] || continue
   _dotfiles_clean_path+="${_dotfiles_clean_path:+:}$_dotfiles_path_entry"
 done
 PATH=$_dotfiles_clean_path
 export PATH
-unset _dotfiles_path_entries _dotfiles_path_entry _dotfiles_clean_path
+unset _dotfiles_path_entries _dotfiles_path_entry _dotfiles_clean_path _dotfiles_previous_auto_root
 
 if $_dotfiles_release_mode; then
   add_to_path "$HOME/.asdf/shims"

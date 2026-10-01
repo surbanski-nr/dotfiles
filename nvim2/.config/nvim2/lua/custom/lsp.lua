@@ -117,6 +117,34 @@ M.tool_probes = {
   { 'yamllint', '--version' },
 }
 
+function M.python_inventory(packages_root)
+  local inventory = {}
+
+  for _, tool in ipairs(M.tools) do
+    local name = tool[1]
+    local receipt_path = packages_root .. '/' .. name .. '/mason-receipt.json'
+    local receipt_file = io.open(receipt_path, 'rb')
+    if receipt_file then
+      local receipt = vim.json.decode(receipt_file:read '*a')
+      receipt_file:close()
+      local package, version = receipt.source.id:match '^pkg:pypi/([^@]+)@(.+)$'
+      if package then
+        assert(receipt.name == name, 'Mason receipt name mismatch for ' .. name)
+        assert(tool.version == version, 'Mason receipt version mismatch for ' .. name)
+        local entry_points = vim.tbl_keys(receipt.links.bin or {})
+        table.sort(entry_points)
+        table.insert(inventory, {
+          name = package,
+          version = version,
+          entry_points = entry_points,
+        })
+      end
+    end
+  end
+
+  return inventory
+end
+
 function M.setup_tools()
   require('mason-tool-installer').setup {
     ensure_installed = vim.deepcopy(M.tools),

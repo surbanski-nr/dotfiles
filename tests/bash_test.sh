@@ -204,6 +204,88 @@ custom_output=$(
 )
 assert_contains "$custom_output" "dotfiles=$checkout_with_spaces pwd=$checkout_with_spaces"
 
+transition_home="$test_root/transition home"
+transition_connected="$test_root/connected checkout/dotfiles"
+transition_a="$transition_home/dotfiles-releases/dotfiles-aaaaaaaaaaaa"
+transition_b="$transition_home/dotfiles-releases/dotfiles-bbbbbbbbbbbb"
+for root in "$transition_connected" "$transition_a/dotfiles" "$transition_b/dotfiles"; do
+  mkdir -p "$root/bash" "$root/scripts"
+  cp "$repo_dir/bash/.bashrc" "$root/bash/.bashrc"
+done
+printf 'RELEASE_ID=dotfiles-aaaaaaaaaaaa\n' >"$transition_a/release.env"
+printf 'RELEASE_ID=dotfiles-bbbbbbbbbbbb\n' >"$transition_b/release.env"
+printf '#!/usr/bin/env bash\nprintf "connected\\n"\n' \
+  >"$transition_connected/scripts/snapshot-marker"
+printf '#!/usr/bin/env bash\nprintf "release-a\\n"\n' \
+  >"$transition_a/dotfiles/scripts/snapshot-marker"
+printf '#!/usr/bin/env bash\nprintf "release-b\\n"\n' \
+  >"$transition_b/dotfiles/scripts/snapshot-marker"
+chmod 0755 "$transition_connected/scripts/snapshot-marker" \
+  "$transition_a/dotfiles/scripts/snapshot-marker" \
+  "$transition_b/dotfiles/scripts/snapshot-marker"
+transition_output=$(
+  run_scenario root-transition \
+    env HOME="$transition_home" PATH="$test_root/bin:$original_path" \
+    TERM=xterm-256color TEST_CONNECTED_ROOT="$transition_connected" \
+    TEST_RELEASE_A="$transition_a" TEST_RELEASE_B="$transition_b" \
+    bash --noprofile --norc -i
+)
+assert_contains "$transition_output" \
+  "connected=$transition_connected:unset:connected"
+assert_contains "$transition_output" \
+  "release-a=$transition_a/dotfiles:$transition_a:release-a"
+assert_contains "$transition_output" \
+  "release-b=$transition_b/dotfiles:$transition_b:release-b"
+assert_contains "$transition_output" \
+  "rollback-a=$transition_a/dotfiles:$transition_a:release-a"
+assert_contains "$transition_output" \
+  "baseline=$transition_connected:unset:connected"
+
+custom_root="$test_root/custom root"
+second_custom_root="$test_root/second custom root"
+mkdir -p "$custom_root/scripts" "$second_custom_root/scripts"
+override_output=$(
+  run_scenario root-override \
+    env HOME="$transition_home" PATH="$test_root/bin:$original_path" \
+    TERM=xterm-256color TEST_CONNECTED_ROOT="$transition_connected" \
+    TEST_RELEASE_A="$transition_a" TEST_RELEASE_B="$transition_b" \
+    TEST_CUSTOM_ROOT="$custom_root" TEST_SECOND_CUSTOM_ROOT="$second_custom_root" \
+    bash --noprofile --norc -i
+)
+assert_contains "$override_output" "override-before=$custom_root:unset"
+assert_contains "$override_output" "override-during=$second_custom_root:unset"
+assert_contains "$override_output" "legacy-before-reset=$transition_a/dotfiles"
+assert_contains "$override_output" "legacy-after-reset=$transition_connected"
+
+launcher_environment_output=$(
+  run_scenario launcher-environment \
+    env HOME="$transition_home" PATH="$test_root/bin:$original_path" \
+    TERM=xterm-256color \
+    XDG_CONFIG_HOME="$transition_a/config" XDG_DATA_HOME="$transition_a/share" \
+    _ZO_DATA_DIR="$test_root/user data/zoxide" \
+    DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET=1 \
+    DOTFILES_LAUNCHER_XDG_CONFIG_HOME="$test_root/user config" \
+    DOTFILES_LAUNCHER_XDG_DATA_HOME_SET=1 \
+    DOTFILES_LAUNCHER_XDG_DATA_HOME="$test_root/user data" \
+    DOTFILES_LAUNCHER_ZO_DATA_DIR_SET=0 \
+    bash --noprofile --norc -i
+)
+assert_contains "$launcher_environment_output" \
+  "xdg-config=$test_root/user config xdg-data=$test_root/user data zoxide=unset markers="
+
+launcher_unset_output=$(
+  run_scenario launcher-environment \
+    env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u _ZO_DATA_DIR \
+    HOME="$transition_home" PATH="$test_root/bin:$original_path" \
+    TERM=xterm-256color \
+    DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET=0 \
+    DOTFILES_LAUNCHER_XDG_DATA_HOME_SET=0 \
+    DOTFILES_LAUNCHER_ZO_DATA_DIR_SET=0 \
+    bash --noprofile --norc -i
+)
+assert_contains "$launcher_unset_output" \
+  'xdg-config=unset xdg-data=unset zoxide=unset markers='
+
 path_home=$test_root/path-home
 mkdir -p "$path_home/.venv/bin" "$path_home/.asdf/shims" "$path_home/bin"
 ln -s "$command_fixture" "$path_home/.venv/bin/python"
