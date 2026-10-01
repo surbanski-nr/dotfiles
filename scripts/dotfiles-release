@@ -829,7 +829,7 @@ acquire_lock() {
     sync -f "$LOCK_FILE" || return
     sync -f "$STATE_DIR" || return
   fi
-  exec {LOCK_FD}<"$STATE_DIR" || return
+  exec {LOCK_FD}<"$LOCK_FILE" || return
   if [[ $mode == shared ]]; then
     flock -s -n "$LOCK_FD" || { die 'another release operation is running'; return 1; }
   else

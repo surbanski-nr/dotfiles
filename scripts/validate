@@ -161,7 +161,13 @@ validate_scripts() {
 
   check_shell_syntax bash "${bash_files[@]}"
   check_shell_syntax sh "${posix_files[@]}"
-  shellcheck --external-sources --source-path=SCRIPTDIR "${files[@]}"
+  for file in "${files[@]}"; do
+    if [[ $file == tests/fixtures/bash/scenario ]]; then
+      shellcheck --exclude=SC1091 "$file"
+    else
+      shellcheck --external-sources --source-path=SCRIPTDIR "$file"
+    fi
+  done
   timeout 120s bash tests/bstow_test.sh
   timeout 30s bash tests/install_validation_tool_test.sh
   timeout 300s bash tests/dotfiles_release_test.sh

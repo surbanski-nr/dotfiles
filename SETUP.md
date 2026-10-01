@@ -205,8 +205,9 @@ still require the corresponding host tools and services. Do not run the
 release Node/Terraform provider and an asdf provider for those same public
 commands in one HOME.
 
-The 2026-10-01 qualification of source commit
-`d4536234f5730fdb0e1f43335f9e0d5c0e79e935` measured:
+The historical 2026-10-01 qualification of source commit
+`d4536234f5730fdb0e1f43335f9e0d5c0e79e935` measured the following apparent
+sizes with `du -sb`. It did not measure allocated filesystem blocks:
 
 | Platform | Outer archive | Retained `du -sb` | Regular-file bytes |
 | --- | ---: | ---: | ---: |
@@ -215,16 +216,43 @@ The 2026-10-01 qualification of source commit
 | Ubuntu 26.04 | 483,173,129 B (460.79 MiB) | 1,628,365,783 B (1.517 GiB) | 1,628,349,396 B |
 | Amazon Linux 2023 | 479,423,683 B (457.21 MiB) | 1,642,467,571 B (1.530 GiB) | 1,613,590,766 B |
 
-For the Debian A/B upgrade, the two complete retained releases used
-3,256,448,240 B (3.033 GiB). Sampling the release store during the upgrade
-recorded a 3,276,595,409 B (3.052 GiB) peak. The two read-only input archives
-were another 966,198,014 B (921.44 MiB), outside the release store, for a
-combined capacity requirement of 4,242,793,423 B (3.951 GiB). Existing legacy
-installations are additional. The archive result is within the original
-435-475 MiB estimate. The retained result is below the 1.65-1.90 GiB estimate
-because verified input archives and the Python wheelhouse are removed from a
-completed retained release. Refresh these measurements for a new source
-revision or changed payload.
+The post-review qualification of source commit
+`57d5a1aaad3878e964825f43d9342da946f475ce`, tree
+`507f7bc0e8f64362013703a6bd90380dca13e778`, measured both apparent size and
+allocated blocks on the Docker overlay filesystem:
+
+| Platform | Outer A archive | Regular-file bytes | Apparent size | Allocated blocks |
+| --- | ---: | ---: | ---: | ---: |
+| Debian 13 | 483,131,912 B (460.75 MiB) | 1,628,324,530 B | 1,628,340,927 B (1.517 GiB) | 1,818,140,672 B (1.693 GiB) |
+| Ubuntu 24.04 | 483,121,613 B (460.74 MiB) | 1,628,225,590 B | 1,628,241,979 B (1.516 GiB) | 1,818,042,368 B (1.693 GiB) |
+| Ubuntu 26.04 | 483,213,756 B (460.83 MiB) | 1,628,458,552 B | 1,628,474,941 B (1.517 GiB) | 1,818,165,248 B (1.693 GiB) |
+| Amazon Linux 2023 | 479,465,185 B (457.25 MiB) | 1,613,691,294 B | 1,642,568,099 B (1.530 GiB) | 1,803,411,456 B (1.680 GiB) |
+
+After retaining both complete A and B releases, the corresponding release
+store measurements were:
+
+| Platform | Regular-file bytes | Apparent size | Allocated blocks |
+| --- | ---: | ---: | ---: |
+| Debian 13 | 3,256,654,783 B | 3,256,687,619 B (3.033 GiB) | 3,636,289,536 B (3.387 GiB) |
+| Ubuntu 24.04 | 3,256,458,021 B | 3,256,490,841 B (3.033 GiB) | 3,636,097,024 B (3.386 GiB) |
+| Ubuntu 26.04 | 3,257,018,226 B | 3,257,051,046 B (3.033 GiB) | 3,636,461,568 B (3.387 GiB) |
+| Amazon Linux 2023 | 3,227,487,917 B | 3,285,253,857 B (3.060 GiB) | 3,606,958,080 B (3.359 GiB) |
+
+On Debian, sampling every 0.2 seconds during the A to B upgrade observed a
+peak of 3,276,613,163 apparent bytes (3.052 GiB) and 3,657,785,344 allocated
+bytes (3.406 GiB). The two read-only input archives occupy another 966,274,252
+bytes (921.51 MiB) outside the release store. Combining those inputs with the
+measured allocated peak gives 4,624,059,596 bytes (4.306 GiB). Import staging
+is created under the measured release store, so it is included when sampled
+and must not be added a second time; no staging entry remained after success.
+The fresh qualification had no retained legacy installation, which would be
+an additional cost on an upgraded host.
+
+The approximately 460 MiB archive is the whole offline release, not the
+standalone Python archive. Archive sizes remain within the original 435-475
+MiB estimate. Allocated retained sizes, unlike the earlier apparent-only
+figures, are within the original 1.65-1.90 GiB estimate per release. Refresh
+these measurements for a new source revision or changed payload.
 
 The [Nvim2 offline notes](nvim2/.config/nvim2/offline-releases.md) describe the
 editor-specific runtime, health checks and state behavior. `TOOL_UPDATES.md`

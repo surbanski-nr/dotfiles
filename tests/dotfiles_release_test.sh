@@ -359,6 +359,32 @@ rm "$failure_bin/mv"
 run_manager install "$artifact_one" >/dev/null
 run_manager uninstall >/dev/null
 
+test_home=$test_root/pending-write-failure-home
+mkdir -p "$test_home"
+printf 'pending baseline\n' >"$test_home/.bashrc"
+cat >"$failure_bin/mv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+destination=${!#}
+if [[ $destination == */.state/pending.env ]]; then exit 97; fi
+exec /usr/bin/mv "$@"
+EOF
+chmod 0755 "$failure_bin/mv"
+set +e
+pending_failure_output=$(PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_one" 2>&1)
+pending_failure_status=$?
+set -e
+[[ $pending_failure_status -ne 0 && $pending_failure_output != *': installed '* ]] ||
+  fail 'pending write failure reported installation success'
+[[ $(<"$test_home/.bashrc") == 'pending baseline' &&
+  ! -e $test_home/dotfiles-releases/current &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env &&
+  ! -e $test_home/dotfiles-releases/$id_one ]] ||
+  fail 'pending write failure changed the first-install baseline'
+rm "$failure_bin/mv"
+run_manager install "$artifact_one" >/dev/null
+run_manager uninstall >/dev/null
+
 test_home=$test_root/link-failure-home
 mkdir -p "$test_home"
 printf 'link baseline\n' >"$test_home/.bashrc"
@@ -411,6 +437,33 @@ assert_link "$test_home/dotfiles-releases/current" "$id_one"
 rm "$failure_bin/mv"
 run_manager install "$artifact_two" >/dev/null
 assert_link "$test_home/dotfiles-releases/current" "$id_two"
+run_manager uninstall >/dev/null
+
+test_home=$test_root/previous-selection-failure-home
+mkdir -p "$test_home"
+printf 'previous selection baseline\n' >"$test_home/.bashrc"
+run_manager install "$artifact_one" >/dev/null
+cat >"$failure_bin/mv" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+destination=\${!#}
+if [[ \$destination == '$test_home/dotfiles-releases/previous' ]]; then exit 98; fi
+exec /usr/bin/mv "\$@"
+EOF
+chmod 0755 "$failure_bin/mv"
+set +e
+previous_failure_output=$(PATH="$failure_bin:/usr/bin:/bin" run_manager install "$artifact_two" 2>&1)
+previous_failure_status=$?
+set -e
+[[ $previous_failure_status -ne 0 && $previous_failure_output != *': installed '* ]] ||
+  fail 'previous selection failure reported installation success'
+assert_link "$test_home/dotfiles-releases/current" "$id_one"
+[[ ! -e $test_home/dotfiles-releases/previous &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env &&
+  ! -e $test_home/dotfiles-releases/$id_two ]] ||
+  fail 'previous selection failure did not restore the A selection pair'
+rm "$failure_bin/mv"
+run_manager install "$artifact_two" >/dev/null
 run_manager uninstall >/dev/null
 
 test_home=$test_root/recovery-failure-home
@@ -615,6 +668,7 @@ chmod 0640 "$test_home/.bashrc"
 kill_restore_digest=$(sha256sum "$test_home/.bashrc")
 kill_restore_mode=$(stat -c %a "$test_home/.bashrc")
 run_manager install "$artifact_one" >/dev/null
+restore_phase=$test_root/restore-recovery-phase
 cat >"$failure_bin/mv" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -623,6 +677,12 @@ destination=\${!#}
 /usr/bin/mv "\$@"
 if [[ \$source_path == '$test_home/.dotfiles-release-backup-'* &&
   \$destination == '$test_home/.bashrc' ]]; then
+  printf 'restored\n' >'$restore_phase'
+  kill -KILL "\$PPID"
+fi
+if [[ \$destination == '$test_home/dotfiles-releases/.state/ownership.tsv' &&
+  -f '$restore_phase' && \$(<'$restore_phase') == restored ]]; then
+  printf 'recorded\n' >'$restore_phase'
   kill -KILL "\$PPID"
 fi
 EOF
@@ -634,6 +694,14 @@ set -e
 [[ $kill_restore_status -ne 0 &&
   -f $test_home/dotfiles-releases/.state/pending.env ]] ||
   fail 'SIGKILL after backup restore did not preserve its journal'
+set +e
+PATH="$failure_bin:/usr/bin:/bin" run_manager uninstall >/dev/null 2>&1
+kill_recovery_status=$?
+set -e
+[[ $kill_recovery_status -ne 0 &&
+  $(<"$restore_phase") == recorded &&
+  -f $test_home/dotfiles-releases/.state/pending.env ]] ||
+  fail 'SIGKILL during repeated recovery did not preserve its journal'
 rm "$failure_bin/mv"
 restore_retry_output=$(run_manager uninstall)
 [[ $restore_retry_output == *'recovery already restored the pre-release baseline'* ]] ||
@@ -895,7 +963,7 @@ ln -s 'target file' "$release_link"
 
 lock_ready=$test_root/lock-ready
 (
-  exec {lock_fd}<"$test_home/dotfiles-releases/.state"
+  exec {lock_fd}<"$test_home/dotfiles-releases/.state/lock"
   flock -x "$lock_fd"
   : >"$lock_ready"
   sleep 60
@@ -907,12 +975,22 @@ lock_output=$(run_manager install "$artifact_one" 2>&1)
 lock_status=$?
 rollback_lock_output=$(run_manager rollback 2>&1)
 rollback_lock_status=$?
+list_lock_output=$(run_manager list 2>&1)
+list_lock_status=$?
+health_lock_output=$(run_manager health 2>&1)
+health_lock_status=$?
 set -e
 [[ $lock_status -ne 0 && $lock_output == *'another release operation is running'* ]] ||
   fail 'concurrent install was accepted'
 [[ $rollback_lock_status -ne 0 &&
   $rollback_lock_output == *'another release operation is running'* ]] ||
   fail 'second concurrent mutation was accepted'
+[[ $list_lock_status -ne 0 &&
+  $list_lock_output == *'another release operation is running'* ]] ||
+  fail 'concurrent list was accepted'
+[[ $health_lock_status -ne 0 &&
+  $health_lock_output == *'another release operation is running'* ]] ||
+  fail 'concurrent health was accepted'
 kill -KILL "$lock_holder_pid"
 wait "$lock_holder_pid" 2>/dev/null || true
 lock_holder_pid=

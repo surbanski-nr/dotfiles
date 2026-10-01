@@ -26,13 +26,19 @@ local function run()
     'Lua Language Server did not attach to init.lua'
   )
   local symbol_client = vim.iter(vim.lsp.get_clients { bufnr = 0 }):find(function(client) return client.name == 'lua_ls' end)
-  local symbol_response = symbol_client:request_sync(
-    'textDocument/documentSymbol',
-    { textDocument = vim.lsp.util.make_text_document_params(0) },
-    10000,
-    vim.api.nvim_get_current_buf()
+  local symbol_response
+  assert(
+    vim.wait(60000, function()
+      symbol_response = symbol_client:request_sync(
+        'textDocument/documentSymbol',
+        { textDocument = vim.lsp.util.make_text_document_params(0) },
+        5000,
+        vim.api.nvim_get_current_buf()
+      )
+      return symbol_response and symbol_response.result and #symbol_response.result > 0
+    end, 100),
+    'Lua Language Server returned no document symbols'
   )
-  assert(symbol_response and symbol_response.result and #symbol_response.result > 0, 'Lua Language Server returned no document symbols')
   local symbol_source = vim.api.nvim_get_current_buf()
   local symbol_map = vim.fn.maparg('<leader>so', 'n', false, true)
   assert(type(symbol_map.callback) == 'function', 'document-symbol Telescope mapping is unavailable')
