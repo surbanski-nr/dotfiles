@@ -406,13 +406,16 @@ do
   --
   -- Examples:
   --  - va)  - [V]isually select [A]round [)]paren
-  --  - yiiq - [Y]ank [I]nside [I]+1 [Q]uote
+  --  - yiNq - [Y]ank [I]nside [N]ext [Q]uote
   --  - ci'  - [C]hange [I]nside [']quote
   require('mini.ai').setup {
-    -- NOTE: Avoid conflicts with the built-in incremental selection mappings on Neovim>=0.12 (see `:help treesitter-incremental-selection`)
+    -- Keep native an/in selection and Mini's aa argument object available.
     mappings = {
-      around_next = 'aa',
-      inside_next = 'ii',
+      around_next = 'aN',
+      inside_next = 'iN',
+    },
+    custom_textobjects = {
+      I = require('mini.extra').gen_ai_spec.indent(),
     },
     n_lines = 500,
   }

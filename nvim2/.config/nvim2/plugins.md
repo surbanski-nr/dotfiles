@@ -11,7 +11,7 @@ with the Kickstart template, not that the plugin comes with Neovim.
 
 | Plugin                      | Configuration source                                 | Purpose in this profile                                                                                          |
 | --------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `blink.cmp`                 | Main `init.lua`                                      | Provide completion from LSP and filesystem paths, then expand LSP snippets with Neovim's built-in snippet engine |
+| `blink.cmp`                 | Main `init.lua`                                      | Complete from `lsp`, `path` and `snippets` with the Lua matcher and Neovim's native snippet engine |
 | `conform.nvim`              | `lua/custom/conform.lua`                             | Format manually and on save, including Ruff formatting for Python                                                |
 | `fidget.nvim`               | Main `init.lua`                                      | Show language-server progress without a permanent UI panel                                                       |
 | `gitsigns.nvim`             | Kickstart module enabled by the custom loader        | Show Git changes and provide hunk, blame and diff actions                                                        |
@@ -20,7 +20,7 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `mason-lspconfig.nvim`      | Main `init.lua`                                      | Connect Mason-installed servers to Neovim's LSP configuration names                                              |
 | `mason-tool-installer.nvim` | Main `init.lua` plus `lua/custom/lsp.lua`            | Install pinned servers, formatters and linters only when explicitly requested                                    |
 | `mason.nvim`                | Main `init.lua`                                      | Provide the external-tool registry, installer and `:Mason` interface                                             |
-| `mini.nvim`                 | Main `init.lua` plus custom module                   | Supply text objects, surroundings, alignment, split/join, visible-character jumps, visits, statusline and buffer removal |
+| `mini.nvim`                 | Main `init.lua` plus custom module                   | Supply nine independent module roles and one helper-only indentation generator, detailed below |
 | `neo-tree.nvim`             | Kickstart module enabled by the custom loader        | Provide the sidebar filesystem browser and file operations                                                       |
 | `nvim-lint`                 | Custom module                                        | Publish Actionlint, ESLint, Hadolint, TFLint and yamllint results as diagnostics                                 |
 | `nvim-lspconfig`            | Main `init.lua`                                      | Supply default commands, filetypes and root detection for language servers                                       |
@@ -31,7 +31,7 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `telescope-ui-select.nvim`  | `lua/custom/telescope.lua`                           | Display `vim.ui.select` choices in a Telescope dropdown                                                          |
 | `telescope.nvim`            | Main `init.lua` plus custom search module            | Search files, text, buffers, commands, symbols and diagnostics, including non-ignored dotfiles                   |
 | `todo-comments.nvim`        | Main `init.lua`                                      | Highlight and search TODO-style comments                                                                         |
-| `which-key.nvim`            | Main `init.lua` plus the Mini Visits key group       | Show available mappings after a key prefix                                                                       |
+| `which-key.nvim`            | Main `init.lua` plus the Mini Visits key group       | Discover configured prefixes, marks, registers and spelling choices; not a popup after every native key |
 
 Neovim itself supplies `vim.pack`, the LSP client, the Treesitter runtime,
 diagnostic APIs, netrw and the default colorscheme. In particular,
@@ -82,7 +82,7 @@ isolated real-repository regressions for the failure paths.
 | `project_marks.lua`        | Store and navigate persistent named positions scoped to canonical Git roots                        | No                                               |
 | `scroll_marker.lua`        | Show an experimental one-cell marker for the current position at the right edge                   | No                                               |
 | `search_lens.lua`          | Show one bounded native search count in the active window                                          | No                                               |
-| `treesitter_selection.lua` | Add simple keys for Neovim's built-in syntax-aware selection expansion                            | No                                               |
+| `treesitter_selection.lua` | Three remapped aliases to native `van`/`an`/`in`, preserving parser-first and capable LSP fallback | No                                               |
 | `toggle_values.lua`        | Add `<leader>tv` for boolean-like values without `nvim-toggler`                                   | No                                               |
 | `snippets.lua`             | Add five global delimiter pairs and six Markdown expansions with Neovim's built-in snippet engine | No                                               |
 
@@ -93,12 +93,41 @@ need a daily key sequence:
 | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `guess-indent.nvim`                                                   | Detects indentation when a buffer opens; use `:GuessIndent` to run it again and `:setlocal shiftwidth? tabstop? expandtab?` to inspect the result |
 | `indent-blankline.nvim`                                               | Draws narrow grey `▏` guides and a white `▏` for the current scope; toggle them with `<leader>ti` or `:IBLToggle`                                 |
-| `fidget.nvim`                                                         | Shows LSP progress in a temporary notification; use `:Fidget history` to inspect earlier messages                                                 |
+| `fidget.nvim`                                                         | Shows transient LSP progress; `:Fidget history` contains retained Fidget notifications, not default progress or all editor messages |
 | `mason-lspconfig.nvim`, `mason-tool-installer.nvim`, `nvim-lspconfig` | Connect configured language servers; inspect them with `:Mason` and install pinned versions with `:Nvim2ToolsInstallSync`                         |
 | `nvim-treesitter`                                                     | Supplies parsing, highlighting, indentation and injections automatically for installed languages                                                  |
-| `nvim-lint`                                                           | Runs configured linters after save and publishes their results through the diagnostic workflow below                                              |
+| `nvim-lint`                                                           | Runs configured linters after save; publishes diagnostics with filetype/project restrictions |
 | `nui.nvim`, `plenary.nvim`                                            | Runtime libraries for Neo-tree and Telescope; there is nothing to invoke directly                                                                 |
 | `telescope-ui-select.nvim`                                            | Shows `vim.ui.select` prompts, including Mini Visits choices, in a Telescope dropdown                                                             |
+
+Fidget keeps its defaults: `progress.display.skip_history=true` excludes
+progress from retained history, and `notification.override_vim_notify=false`
+does not route all editor notifications through it. Use `:messages` for
+ordinary editor message history.
+
+### Mini module ownership
+
+The locked Mini checkout supplies nine existing roles. Setup is not needed
+for every library API, and Icons is conditional:
+
+| Module | Enabled use |
+| --- | --- |
+| `mini.ai` | Enhanced textual objects, `aN`/`iN` next prefixes, native `an`/`in` preserved, and custom `I` indentation object |
+| `mini.surround` | `sa`/`sd`/`sr`, bracket/quote/call/tag surroundings, direction/count/repeat support |
+| `mini.align` | `ga`/`gA` local delimiter alignment and preview modifiers |
+| `mini.splitjoin` | `gS` comma-separated list split/join |
+| `mini.jump2d` | Guarded Normal-only visible-character jump in the current ordinary pane |
+| `mini.visits` | Effective-cwd/global frecent files and file labels, stored at `stdpath('state')/mini-visits-index` |
+| `mini.bufremove` | API-only current/other-buffer removal without `setup()`, retaining local safety guards |
+| `mini.statusline` | Automatic Git/diff, diagnostics, LSP/search and location sections; Gitsigns supplies existing Git/diff fallback |
+| `mini.icons` | Conditional Nerd Font setup and web-devicons mock, no action key |
+
+Separately, `mini.extra` is used only as a library for
+`gen_ai_spec.indent()` inside Mini.ai's setup. It is not set up wholesale;
+Mini Pick/Indentscope/Move/Jump/Operators/Pairs/Git/Diff/Bracketed are not
+enabled. Native `f/F/t/T`, `gr*`, `gx` and tag-list `[t`/`]t` retain their
+existing roles. See the [Mini recipes](guide.md#mini-editing-modules) and
+[native selection/clipboard flow](guide.md#expand-or-shrink-a-selection-and-copy-it-to-another-application).
 
 Mini Jump2d is an enabled submodule of the already locked `mini.nvim`
 checkout. `<leader>j` starts its single-character flow only in the current
@@ -107,6 +136,13 @@ Project marks, the search lens, tab-out and Matrix are local modules and add no
 dependency or plugin-lock entry. The local `pairs.lua` helper only shares
 Treesitter delimiter discovery between tab-out and the enclosing-pair
 highlighter.
+
+Neo-tree's existing `filesystem.bind_to_cwd=true` couples its sidebar root
+with tab-local cwd. Root navigation can therefore change lowercase Telescope
+and Visits scope; a window-local cwd can override the tab. Uppercase Git-root
+searches and canonical project marks remain independent. The
+[Neo-tree guide](guide.md#neo-tree) documents this policy and the existing
+buffer/Git-status views without adding a cwd abstraction.
 
 The active colorscheme is Neovim's built-in `default` with its dark
 `NvimDark*` palette and a small set of local overrides in `lua/custom/plugins/default_colors.lua`.

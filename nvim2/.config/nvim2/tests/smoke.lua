@@ -309,11 +309,14 @@ local function run()
   assert(type(loclist_picker.callback) == 'function', 'Telescope location-list mapping is unavailable')
   assert(type(jumplist_picker.callback) == 'function', 'Telescope jump-list mapping is unavailable')
 
+  local quickfix_source = vim.api.nvim_get_current_buf()
   quickfix_picker.callback()
   assert(vim.wait(2000, function() return vim.bo.filetype == 'TelescopePrompt' end), 'Telescope quickfix picker did not open')
   local prompt_buffer = vim.api.nvim_get_current_buf()
   assert(require('telescope.actions.state').get_current_picker(prompt_buffer).previewer, 'Telescope quickfix picker has no preview')
-  require('telescope.actions').close(prompt_buffer)
+  -- Consume Telescope's queued Insert-mode input before leaving the picker.
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-c>', true, false, true), 'xt', false)
+  assert(vim.wait(2000, function() return vim.api.nvim_get_current_buf() == quickfix_source end), 'Telescope quickfix picker did not return to its source')
 
   local telescope = require 'custom.telescope'
   local init_path = vim.fs.joinpath(vim.fn.stdpath 'config', 'init.lua')
@@ -566,13 +569,10 @@ local function run()
   vim.bo.filetype = 'lua'
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'local result = call(value)' })
   vim.treesitter.start(0, 'lua')
+  vim.treesitter.get_parser(0, 'lua'):parse(true)
   vim.api.nvim_win_set_cursor(0, { 1, 20 })
-  local selection_start = vim.fn.maparg('<C-Space>', 'n', false, true)
-  local selection_expand = vim.fn.maparg('<C-Space>', 'x', false, true)
-  local selection_shrink = vim.fn.maparg('<BS>', 'x', false, true)
-  assert(type(selection_start.callback) == 'function', 'Treesitter selection start callback is unavailable')
-  assert(type(selection_expand.callback) == 'function', 'Treesitter selection expand callback is unavailable')
-  assert(type(selection_shrink.callback) == 'function', 'Treesitter selection shrink callback is unavailable')
+
+  local function selection_keys(keys) vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), 'xt', false) end
 
   local function selection_range()
     local anchor = vim.fn.getpos 'v'
@@ -580,15 +580,20 @@ local function run()
     return { anchor[2], anchor[3], cursor[2], cursor[3] }
   end
 
-  selection_start.callback()
-  assert(vim.fn.mode() == 'v', 'Treesitter selection did not enter visual mode')
+  selection_keys '<C-Space>'
+  assert(vim.fn.mode() == 'v', 'native selection alias did not enter visual mode')
   local first_selection = selection_range()
-  selection_expand.callback()
-  local expanded_selection = selection_range()
-  assert(not vim.deep_equal(expanded_selection, first_selection), 'Treesitter selection did not expand')
-  selection_shrink.callback()
-  assert(vim.deep_equal(selection_range(), first_selection), 'Treesitter selection did not shrink to the previous node')
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'xt', false)
+  assert(vim.deep_equal(first_selection, { 1, 21, 1, 25 }), 'native selection did not select value')
+  selection_keys '<C-Space>'
+  assert(vim.deep_equal(selection_range(), { 1, 20, 1, 26 }), 'native selection did not expand to (value)')
+  selection_keys '<BS>'
+  assert(vim.deep_equal(selection_range(), first_selection), 'native selection did not shrink to the previous node')
+  local selection_clipboard = vim.o.clipboard
+  vim.o.clipboard = ''
+  selection_keys 'y'
+  local selection_yank, selection_type = vim.fn.getreg '"', vim.fn.getregtype '"'
+  vim.o.clipboard = selection_clipboard
+  assert(selection_yank == 'value' and selection_type == 'v', 'native selection alias did not yank the selected node')
 
   vim.cmd.enew()
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'true' })

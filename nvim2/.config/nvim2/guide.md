@@ -25,8 +25,14 @@ incomplete:
 | Search configured mappings          | `<leader>sk`                         |
 | Inspect a normal-mode mapping       | `:verbose nmap <keys>`               |
 | Inspect an insert-mode mapping      | `:verbose imap <keys>`               |
+| Inspect selection/operator mappings | `:verbose xmap an`, `:verbose omap an` |
 | Read help for a key                 | `:help <keys>`                       |
 | List commands                       | `<leader>sc`                         |
+
+Which-key also helps discover marks after `'` or a backtick, registers after
+`"`, spelling after `z=`, and configured native prefixes such as `g`, `[` and
+`]`. Not every native key opens a popup. Use `<leader>sk` and verbose mapping
+inspection to distinguish global mappings from buffer-local LSP/picker keys.
 
 Notation used below:
 
@@ -64,6 +70,7 @@ Notation used below:
 | ---------------------------------------- | ------------------------------------- |
 | Move left, down, up, right               | `h`, `j`, `k`, `l`                    |
 | Next or previous word                    | `w`, `b`                              |
+| Next or previous whitespace-separated WORD | `W`, `B`                            |
 | End of word                              | `e`                                   |
 | Start, first text, or end of line        | `0`, `^`, `$`                         |
 | First or last line                       | `gg`, `G`                             |
@@ -82,6 +89,7 @@ Notation used below:
 | Jump to a visible character in this pane | `<leader>j`, then character and label |
 | Clear search highlighting                | `<Esc>`                               |
 | Jump backward or forward in jump list    | `<C-o>`, `<C-i>`                      |
+| Previous or next edit location           | `g;`, `g,` or `:changes`              |
 | Browse and open a jump-list location     | `<leader>sj`, select, then `<Enter>`  |
 | Toggle relative or absolute line numbers | `<leader>tl`                          |
 | Toggle the right-edge position marker    | `<leader>ts` or `:ScrollMarkerToggle` |
@@ -105,11 +113,23 @@ anywhere in the buffer, use `/text<CR>` or `?text<CR>` and repeat with `n` or
 `N`. Prefix a literal search with `\V`, for example `/\Vkey[value]<CR>`, so
 regular-expression punctuation is treated as text.
 
-`<leader>j` starts Mini Jump2d for the current ordinary editing pane. Type the
-desired character, then its displayed label when more than one visible target
+`<leader>j` starts Mini Jump2d from Normal mode in the current ordinary editing
+pane. Mini Jump is not enabled, and Jump2d's default Enter mapping is disabled.
+Type the desired character, then its displayed label when more than one visible target
 matches. A single target is selected immediately. `Esc` cancels without moving.
 Labels cover visible, unfolded lines only; use native `/` or `?` for the whole
 buffer. Neo-tree, pickers, special buffers and other panes are excluded.
+
+`w`/`iw` stop at punctuation, while `W`/`iW` use non-whitespace WORDs. On
+`--dry-run` or `/etc/app/config.yaml`, `yiW` copies the whole token, including
+punctuation. For wrapped text, `gj`/`gk` move by displayed lines and `g0`/`g$`
+reach their displayed edges. `g;`/`g,` revisit edits, unlike the jump list's
+navigation locations. Use `q:` or `q/` to edit command or search history in a
+normal buffer, then Enter to execute the selected line.
+
+Bundled Matchit extends `%` to supported block keywords, for example Bash
+`if`/`else`/`fi`. Its filetype rules are not a universal structural parser;
+see `:help matchit`.
 
 ### Marks and a small Harpoon-like shortlist
 
@@ -218,6 +238,7 @@ for frecency and cwd-scoped groups of files.
 | Character, line, or block selection                             | `v`, `V`, `<C-v>`                       |
 | Start, expand or shrink syntax selection                        | `<C-Space>`, then `<C-Space>` or `<BS>` |
 | Reselect last visual selection                                  | `gv`                                    |
+| Adjust the other end of a selection                             | `o` in Visual mode                      |
 | Indent or unindent selection                                    | `>`, `<`                                |
 | Join current line with next                                     | `J`                                     |
 | Toggle boolean-like value under cursor                          | `<leader>tv`                            |
@@ -292,6 +313,37 @@ a macro with `q{register}`, perform a repeated multi-step edit, stop with `q`,
 and replay with `@{register}` when the change is textual rather than semantic.
 See `:help visual-block`, `:help :substitute`, and `:help recording`.
 
+#### Small native editing toolbox
+
+For repeated reviewed text changes, search `/\Vold.name<CR>`, use `cgn`, type
+the replacement, and press Esc. Move with `n` when needed and use `.` on the
+next intended match. `gn`/`gN` select the next/previous search match, including
+the current one when the cursor is inside it. This is textual replacement;
+`grn` is a capable LSP server's semantic rename. The profile's black-hole
+`c` mapping keeps your earlier yank available.
+
+Use a macro for several operations per target: record with `qa`, stop with
+`q`, replay with `@a`, repeat with `@@`, or replay three times with `3@a`.
+Check the first replay before applying a count.
+
+These occasional operations need no extra movement/operator plugin:
+
+| Task | Native flow |
+| --- | --- |
+| Move selected complete lines down one line | `:'<,'>move '>+1` |
+| Move selected complete lines up one line | `:'<,'>move '<-2` |
+| Sort an unordered selected list | `:'<,'>sort`, or `:'<,'>sort u` for unique lines |
+| Increment a number | Normal `<C-a>` |
+| Make an increasing sequence from selected numbers | Visual `g<C-a>` |
+| Reflow a prose paragraph locally | Set an intentional `textwidth`, then `gwip` |
+
+The move destination must exist. Do not sort ordered Ansible tasks, firewall
+rules or arbitrary configuration. Normal `<C-x>` removes a buffer in this
+profile, not decrements a number. `gw` reflows text without invoking
+`formatprg` or `formatexpr`; `gq` can delegate to those options, including an
+attached LSP. Check `:setlocal textwidth? formatexpr? formatprg?` and keep
+[Conform's formatting policy](#formatting-linting-and-tools) in mind.
+
 #### Expand or shrink a selection and copy it to another application
 
 For Wildfire-like syntax-aware expansion:
@@ -305,14 +357,31 @@ For Wildfire-like syntax-aware expansion:
 4. Move to the email or other local application and paste with its normal
    shortcut, usually `Ctrl+V`.
 
-The profile maps these keys to Neovim 0.12's built-in Treesitter selector, so
-they do not require an LSP server. The native visual-mode `an` and `in`
-mappings remain available as alternatives. If the current filetype has no
-parser, Neovim can fall back to an attached LSP selection-range provider. For
-delimiter-based selection, use `vi{` or `va{` for braces, `vi(` or `va(` for
-parentheses, and `vi[` or `va[` for brackets. `i` excludes delimiters and `a`
-includes them. For arbitrary whole lines, press `V`, extend with `j` or `k`,
-then `"+y`.
+These are remapped aliases to native Neovim `van`, `an` and `in`, not a
+separate selector engine. An installed parser needs no LSP. Without a parser,
+fallback requires an attached server supporting `textDocument/selectionRange`;
+without either provider there is no useful syntax expansion.
+
+Native `an`/`in` work in Visual and operator-pending modes, not as standalone
+Normal motions. They select parent/child nodes, not simply punctuation in/out.
+With the Lua parser and the cursor on `image` in
+`deploy(image, namespace, timeout)`, `yan` yanks `image` and `y2an` yanks
+`(image, namespace, timeout)`. Shrinking uses native history when still valid,
+not an arbitrary earlier selection. In Visual mode, `]n`/`[n` select the
+next/previous sibling, and `]N`/`[N` grow across a sibling. Sibling navigation
+is Treesitter-only, not an LSP fallback feature.
+
+For counts, use `y2an`, `v2an`, or a count on Visual `<C-Space>` after starting
+selection. Avoid counting the initial Normal `<C-Space>`: its `van` alias also
+counts `v`, which can reuse the size of a previous Visual selection.
+
+For delimiter-based selection, use `vi{`/`va{`, `vi(`/`va(`, or `vi[`/`va[`.
+Counts such as `v2i)` and repeating `i)` in Visual mode expand through nested
+parentheses even in stock Neovim. Mini changes some whitespace semantics;
+see [Text objects](#text-objects). Use `o` to adjust the other selection end
+and `gv` to reselect after leaving Visual mode. For complete lines, use `V`,
+extend with `j`/`k`, then `"+y`; for an indentation body, see
+[Indentation bodies](#indentation-bodies).
 
 Over SSH, Nvim2 sends the `+` clipboard through OSC 52. Kitty, a compatible
 local terminal, and tmux must permit OSC 52 for the final paste to work.
@@ -368,6 +437,10 @@ showing a buffer; it does not reliably remove that buffer from `:ls`. Use
 `<C-x>` when the buffer itself should be removed while preserving the window
 layout.
 
+Mini Bufremove is used through its API without `setup()`. Current-buffer
+removal prompts when unsaved changes or a running terminal need attention;
+cancel to keep them. Forced removal can discard edits or stop a job.
+
 `<leader>xo` and `:DeleteOtherBuffers` remove every other listed buffer while
 keeping the current buffer and window layout. They refuse to remove anything
 when another buffer has unsaved changes or is a terminal. Save or close those
@@ -389,6 +462,11 @@ directly without opening Telescope.
 | Move split to far left, bottom, top, right | `<C-w>H`, `<C-w>J`, `<C-w>K`, `<C-w>L` |
 
 Splits are automatically resized evenly when the terminal size changes.
+
+For two-text review, open each text in its intended split and run `:diffthis`
+in both windows. Use `]c`/`[c` to navigate differences, `:diffupdate` after
+edits, and `:diffoff!` to leave diff mode in all windows. This is native diff,
+separate from [Gitsigns' Git comparisons](#git-and-gitsigns).
 
 ### Restart and Matrix
 
@@ -463,8 +541,15 @@ Common keys inside a Telescope picker:
 | Open in vertical split          | `<C-v>`          | `<C-v>`          |
 | Open in a tab                   | `<C-t>`          | `<C-t>`          |
 | Scroll preview                  | `<C-d>`, `<C-u>` | `<C-d>`, `<C-u>` |
-| Close picker                    | `<Esc>`          | `q`              |
+| Switch to picker Normal mode    | `<Esc>`          | Not applicable   |
+| Close picker                    | `<C-c>`          | `<Esc>`          |
 | Show picker mappings            | `<C-/>`          | `?`              |
+
+Normal `q` is not a picker-close mapping. Use the picker mapping help for
+picker-specific actions. `<leader>ss` also discovers less frequent builtins:
+`registers`, `command_history` and `search_history`. In `registers`, accepting
+an entry pastes it and `<C-e>` edits it. This differs from `<leader>sy`, which
+only promotes a yank-ring entry and leaves the buffer unchanged.
 
 `<leader>/` searches only the current buffer, so it never searches an entire
 workspace. `<leader>sf`, `<leader>sg` and `<leader>sw` use the current working
@@ -472,6 +557,10 @@ directory shown by `:pwd`. `<leader>sF` and `<leader>sG` walk upward from the
 current file to the nearest `.git` directory and search only that repository;
 they fall back to `:pwd` outside Git. This is useful when one Neovim workspace
 contains several repositories.
+
+Neo-tree root changes also affect the tab's cwd under the existing
+[cwd binding](#neo-tree). A window-local `:lcd` can override it. Uppercase
+Git-root searches and canonical project marks keep their independent scope.
 
 The file and text searches under `<leader>sf`, `<leader>sg`, `<leader>sF` and
 `<leader>sG` include hidden files such as `.bashrc`, `.env`, `.github/` and
@@ -606,11 +695,20 @@ Using the resulting quickfix list:
 | Last or first entry                                           | `]Q`, `[Q` or `:clast`, `:cfirst`          |
 | Remove the entry under the cursor from this list              | `dd` in the quickfix window                |
 | Run an Ex command for every entry                             | `:cdo {command}`                           |
+| Older or newer quickfix list                                  | `:colder`, `:cnewer`                        |
 
 `dd` only removes the selected location from the current quickfix list. It
 does not delete a file, change source code or affect a window-local location
 list. Diagnostic `<leader>q` uses a location list instead; open and close that
 with `:lopen` and `:lclose`, and navigate it with `]l` and `[l`.
+
+To triage captured incident/task output already in quickfix, load the bundled
+filter once with `:packadd cfilter`, then use `:Cfilter /ERROR/` to retain
+matches or `:Cfilter! /DEBUG/` to exclude them. Filtering creates another list;
+`:colder` restores the original and `:cnewer` revisits the filtered list.
+This is an opt-in bundled command, not a new installed/startup plugin. Native
+`:make` can collect trusted command output when `makeprg` and `errorformat`
+match that tool; see `:help quickfix` before adapting a log format.
 
 ### Review selected files without returning to quickfix
 
@@ -705,13 +803,13 @@ preserving completion and navigation for this configuration and Neovim APIs.
 | Signature help in insert mode     | `<C-s>` or `<C-k>`             |
 | Document symbols in Telescope     | `<leader>so`                   |
 
-Treesitter provides syntax highlighting, indentation, injections, folds and
-the `<C-Space>`/`<BS>` selection flow documented above. Native `an` and `in`
-only act while already in visual mode; typing normal-mode `a` enters insert
-mode. Mini.ai uses `aa` and `ii` for its next-textobject variants. Those are
-prefixes rather than standalone normal-mode mappings; for example, `vaa)`
-selects around the next parenthesized text and `dii)` deletes inside the next
-parenthesized text.
+Treesitter provides syntax highlighting, indentation, injections and folds.
+The `<C-Space>`/`<BS>` selection aliases use native parser/LSP selection.
+Native `an`/`in` work in Visual and operator-pending modes; typing Normal `a`
+enters Insert mode. Mini.ai reserves `aN`/`iN` for next-object prefixes,
+preserving native `an`/`in` and ordinary `aa` arguments. For example, `vaN)`
+previews the next parentheses and `diN)` deletes their contents. Preview
+uncertain textual matches before destructive edits.
 
 The complete expansion, fallback text-object and external-clipboard workflow is
 documented under
@@ -740,6 +838,13 @@ buffer when the target is not an LSP symbol.
 
 The diagnostic float opens automatically after jumping with `[d` or `]d`.
 
+Fidget displays transient LSP progress. With current defaults,
+`progress.display.skip_history=true` and
+`notification.override_vim_notify=false`: `:Fidget history` shows only
+notifications actually retained by Fidget, not earlier progress or all editor
+messages. Use `:messages` for ordinary message history. No notification routing
+or progress-history settings are changed here.
+
 ### Completion and snippets
 
 | Action                                          | Keys                       |
@@ -751,7 +856,11 @@ The diagnostic float opens automatically after jumping with `[d` or `]d`.
 | Toggle signature help                           | `<C-k>`                    |
 | Move through snippet fields or out of a syntax pair | `<Tab>`, `<S-Tab>`      |
 
-Blink supplies completion from LSP and paths. LSP-provided snippets can be
+Blink's configured sources are `lsp`, `path` and `snippets`, with its portable
+Lua matcher. There is no Blink buffer-word source. Native Insert completion
+is available separately: `<C-x><C-n>` completes current-buffer words and
+`<C-x><C-l>` completes whole lines. These Insert prefixes are unrelated to
+Normal `<C-x>` buffer removal. LSP-provided snippets can be
 accepted with `<C-y>` and are expanded by Neovim's built-in `vim.snippet`
 engine. LuaSnip is not installed. The local pairs expand as soon as their
 opening delimiter is typed.
@@ -826,6 +935,12 @@ CLI linters after saving; it has no manual mapping. Actionlint runs only for
 YAML files under `.github/workflows/`, while yamllint continues to check other
 YAML.
 
+GuessIndent detects options, indentation guides only display them, and
+Conform actually formats text. To rerun detection use `:GuessIndent`, then
+inspect `:setlocal shiftwidth? tabstop? expandtab?`. A project's EditorConfig
+settings remain authoritative; detection does not replace formatting or
+language validation.
+
 Every managed Mason package has an exact version in `lua/custom/lsp.lua`.
 `mason-tool-installer.nvim` has both automatic updates and startup installation
 disabled. Change a version intentionally, then run `:Nvim2ToolsInstallSync` on
@@ -899,19 +1014,92 @@ then `<leader>hp` to preview it. Repeat `]c` and `<leader>hp` through the file;
 use `[c` to return to the previous hunk. Use `<leader>hq` when you want every
 hunk in the current file listed together instead.
 
+For repository review, run `:Gitsigns diff`, inspect the file panel, and press
+`g?` for its mappings. `]f`/`[f` move between reviewed files without returning
+focus to the panel. `:Gitsigns show_commit HEAD` reviews the last commit's
+changes; `:Gitsigns blame` opens a whole-file blame view. These are already
+available commands, not extra mappings or a second Git UI.
+
+Reset (`<leader>hr`/`<leader>hR`) changes working-tree text; unstage changes the
+index, not that text. In the diff panel, `s` stages a saved file and `u`
+unstages it; directory actions affect listed descendants. Save intended edits
+first because panel file-level staging uses saved content. At a hunk,
+`stage_hunk` prefers unstaged changes and only unstages a staged hunk when no
+unstaged hunk overlaps. The deprecated `undo_stage_hunk` only tracks stages
+from this session, so it is not a general unstage recipe.
+
+Treat `<leader>hd` and other index-buffer views carefully: index buffers can
+be editable, and writing one changes staging. Revision buffers are read-only;
+regular working-tree files remain editable. Read panel help before staging or
+resetting, and close a comparison without writing when only reviewing.
+
 ## Mini editing modules
 
 ### Text objects
 
-Mini.ai extends normal `a` and `i` text objects and searches up to 500 lines.
-Examples:
+Mini.ai extends operator/Visual `a` and `i` text objects. `i` selects inside;
+`a` includes a surrounding region. The next-object prefixes are `iN`/`aN`,
+leaving native `in`/`an` untouched. Previous-object prefixes remain `il`/`al`.
 
-| Action                                       | Keys                       |
-| -------------------------------------------- | -------------------------- |
-| Select around parentheses                    | `va)`                      |
-| Change inside quotes                         | `ci'`                      |
-| Yank inside the next quote                   | `yiiq`                     |
-| Go to left or right edge of an around-object | `g[<object>`, `g]<object>` |
+| Task | Keys |
+| --- | --- |
+| Copy an argument or its comma-aware around region | `yia`, `yaa` |
+| Copy call contents or the whole call | `yif`, `yaf` |
+| Copy inside/around any ordinary quote | `yiq`, `yaq`; specific quote: `yi'` |
+| Copy inside/around any `()`, `[]` or `{}` pair | `yib`, `yab` |
+| Preview a specific bracket region | `vi]`, `va)`, `vi}` |
+| Copy tag contents or contents plus tags | `yit`, `yat` |
+| Copy the next quote or previous argument | `yiNq`, `yila` |
+| Preview around the next/previous bracket object | `vaN)`, `val)` |
+| Go to left/right edge of an around-object | `g[<object>`, `g]<object>` |
+
+At `image` in `deploy(image, namespace, timeout)`, `yia` copies `image`,
+`yaa` copies `image,`, `yiNa` copies `namespace`, and `yaNa` copies
+`, namespace`. At `namespace`, `yila` copies `image`. Use `gS` to
+[split/join the same call](#splitjoin), and native
+[selection expansion](#expand-or-shrink-a-selection-and-copy-it-to-another-application)
+when syntax nodes are a better fit.
+
+These enhancements are not identical to every native delimiter object. On
+`(  inner  )`, Mini `yi(` copies `inner`, while `yi)` keeps the edge spaces.
+Mini `ib` includes square/curly pairs; stock `ib` is parentheses-only. Mini
+`aq` selects the quotes themselves, without stock around-quote whitespace.
+Ordinary native objects such as `iw`/`iW` and `ip` still work.
+
+`f` means a function call, not a function definition/body. Most matching is
+textual/pattern-based, not query-backed syntax understanding; `n_lines=500`
+is a search bound. The default `cover_or_next` search may pick a following
+object when none covers the cursor. Preview uncertain regions with `v` before
+`d`/`c`. See `:help MiniAi-builtin-textobjects` and `:help MiniAi.config`.
+
+### Indentation bodies
+
+The only additional Mini Extra use is its indentation generator, exposed as
+`iI`/`aI` through Mini.ai. It needs no parser, Extra setup, picker or indentation
+renderer. Normal `I` and paragraph `ip` keep their meanings.
+
+With the cursor at `api`:
+
+```yaml
+service:
+  name: api
+  replicas: 2
+other:
+  name: worker
+```
+
+Start with `ViIy` to copy the two complete body lines, including indentation,
+as a linewise yank. `yiI` is characterwise: it starts with `name: api`
+without that first line's two leading spaces; the second line retains them.
+`vaI` previews both borders: it includes `service:` and the following
+`other:` line. Therefore `daI` is not a safe "delete only this YAML mapping"
+shortcut. For an inspected body, `ViI` then `"_d` removes complete body lines
+without deleting the sibling header or replacing your yank; `u` restores them.
+
+The helper uses indentation/dedents, not YAML, Python or Ansible semantics.
+Blank lines may be included at scope edges; an unclosed scope at end-of-buffer
+can be absent, and `cover_or_next` can find a later scope. Inspect every block
+before moving/deleting it. See `:help MiniExtra.gen_ai_spec.indent()`.
 
 ### Surroundings
 
@@ -923,6 +1111,14 @@ Examples:
 | Replace surroundings              | `sr<old><new>`, for example `sr)'`      |
 | Find surrounding to right or left | `sf<char>`, `sF<char>`                  |
 | Highlight surrounding             | `sh<char>`                              |
+
+At `image`, type `saiwf`, enter `wrap`, and press Enter to get `wrap(image)`;
+`sdf` unwraps it. `saiwt`, then `job<CR>`, produces `<job>image</job>`.
+`saiw(` gives `( image )`, while `saiw)` gives `(image)`. For nested calls,
+`2sdf` removes the second enclosing call; `sdnf` targets the next call.
+After an ordinary surround change, `.` repeats it elsewhere. For occasional
+custom left/right strings, use `?` and its prompts, for example
+`saiw?[[<CR>]]<CR>`. See `:help MiniSurround-builtin-surroundings`.
 
 ### Alignment
 
@@ -961,6 +1157,13 @@ Use `ga=` instead when the preview is not needed. This is useful for small
 assignment tables, Markdown-style text tables, CSV-like text and other local
 column layouts. See `:help MiniAlign` for filters and advanced modifiers.
 
+For a pipe table, select `name|status` and `api|ready` with `V`, then type
+`ga|`; the built-in pipe preset trims fields and aligns columns. In `gA`
+preview, `t` trims field whitespace and `i` ignores common unwanted splits
+inside quotes/brackets. Inspect the preview rather than treating it as a
+language-aware parser. Conform on save can reformat a hand-aligned layout;
+use [format controls](#formatting-linting-and-tools) intentionally.
+
 ### Split/join
 
 | Action                                                     | Keys or flow                                     |
@@ -979,8 +1182,19 @@ It becomes a multiline argument list. Press `gS` again while inside the same
 brackets to join it. The default detection handles comma-separated content in
 `()`, `[]` and `{}` and excludes nested brackets and quoted strings. It is
 pattern-based rather than syntax-aware, so unusual language constructs can
-still need manual formatting. See `:help MiniSplitjoin` for its detection
-rules.
+still need manual formatting. Visual `gS` limits the operation to that region;
+dot-repeat applies the previous split/join operation elsewhere, not arbitrary
+semantic restructuring. See `:help MiniSplitjoin` for its detection rules.
+
+### Automatic statusline and icons
+
+Mini Statusline supplies Git/diff, diagnostics, LSP and search sections plus
+the custom `current/total:column position` location. Gitsigns provides the
+existing Git/diff fallback; Mini Git and Mini Diff are not enabled. Narrow
+panes shorten or omit sections, so missing text is not necessarily missing
+functionality. Mini Icons is enabled only when the Nerd Font flag is set and
+supplies a web-devicons compatibility mock for consumers such as Telescope.
+Neither automatic module needs an action key.
 
 ### Buffer removal and visited files
 
@@ -1007,8 +1221,12 @@ workspace directory, open each important file, press `<leader>va` and give each
 the same label, such as `core`. After restarting Neovim from that directory,
 press `<leader>vl`, select `core`, then select a file. `<leader>vr` removes a
 label from the current file. Visit history and labels are written to
-`~/.local/share/nvim2/mini-visits-index` when Neovim exits. Changing `:pwd`
-with `:cd` also changes the scope used by the lowercase pickers.
+`stdpath('state')/mini-visits-index` when Neovim exits, usually
+`~/.local/state/nvim2/mini-visits-index` on Linux unless XDG state is overridden.
+Changing effective cwd with `:cd`, `:tcd`, `:lcd` or Neo-tree's bound root
+changes lowercase picker scope. Labels group files, not named cursor
+positions; use [project or native marks](#marks-and-a-small-harpoon-like-shortlist)
+for those.
 
 ## Markdown, colors and TODO comments
 
@@ -1020,6 +1238,12 @@ with `:cd` also changes the scope used by the lowercase pickers.
 | Preview the Mermaid fence under the cursor as text | `<leader>pm` or `:MermaidAsciiPreview` |
 | Search TODO comments                               | `:TodoTelescope`                       |
 | Put TODO comments in quickfix                      | `:TodoQuickFix`                        |
+
+Markdown rendering decorates the buffer without changing its source. The
+current cursor line is exposed by anti-conceal in Normal mode, while Insert
+and Visual editing show source rather than the usual Normal rendering. Use
+`buf_toggle` for a plain-source buffer view. Optional render-markdown completion
+integrations remain disabled; Blink and native snippets own completion.
 
 Neovim 0.12 automatically previews color values when an attached language
 server supports LSP document colors. The configured Lua, CSS and HTML servers
@@ -1064,11 +1288,9 @@ binary is statically linked, so no service or runtime package is required.
 Run `source ~/.bashrc` before starting Nvim2 if the current shell was opened
 before `~/bin` existed.
 
-The old TODO mappings (`]t`, `[t`, `<leader>ft`) have not been restored, and
-`<leader>tq` now toggles the quickfix window. Adding TODO mappings requires no
-new plugin because `todo-comments.nvim` is already installed. Prefer
-`<leader>tn` and `<leader>tp` for TODO navigation: `[t`/`]t` and `[T`/`]T` are
-Neovim's built-in tag-list mappings.
+Use `:TodoTelescope` or `:TodoQuickFix` for comments. `[t`/`]t` and `[T`/`]T`
+retain Neovim's native tag-list mappings; no TODO-navigation keys or Mini
+Bracketed module are added. `<leader>tq` toggles quickfix.
 
 ## Neo-tree
 
@@ -1086,6 +1308,7 @@ are:
 | Reveal current file or focus tree                  | `\`                               |
 | Open file or expand directory                      | `<CR>` or `<Space>`               |
 | Preview file                                       | `P`                               |
+| Show file details                                  | `i`                               |
 | Open in horizontal split, vertical split or tab    | `S`, `s`, `t`                     |
 | Close directory or all directories                 | `C`, `z`                          |
 | Toggle hidden, dot and Git-ignored items           | `H`                               |
@@ -1118,3 +1341,52 @@ Press `H` when a dotfile or Git-ignored item is missing. Use `/` for a quick
 fuzzy jump, or `f` when the tree should stay narrowed until `<C-x>` clears the
 filter. Neo-tree refreshes after file operations. Press `?` inside the tree if
 a less common action or current mapping is needed.
+
+The existing `filesystem.bind_to_cwd=true` is a two-way binding between the
+sidebar root and the tab-local cwd. Using `.` or `<BS>` changes that root/cwd;
+check `:pwd` back in the editing window before a lowercase Telescope or Visits
+search. A window-local `:lcd` can override the tab's cwd. Uppercase
+`<leader>sF`/`<leader>sG` still use the current file's nearest Git root (or
+effective cwd outside Git), and project marks remain canonical Git-root scoped.
+This documents the current policy; it does not decouple or override Neo-tree.
+
+For existing alternative views, use `:Neotree source=buffers` or
+`:Neotree source=git_status`, then `?` for that source's actions. These views
+do not require another browser plugin.
+
+## Day-to-day development and DevOps recipes
+
+Reuse [format controls and tool ownership](#formatting-linting-and-tools) and
+[diagnostics](#diagnostics) with these existing stacks. Exact declarations and
+provisioning live in [lua/custom/lsp.lua](lua/custom/lsp.lua),
+[lua/custom/conform.lua](lua/custom/conform.lua) and the
+[language checks](tests/language_checks.lua), not a second version inventory.
+
+| Workflow | Existing support | Boundary to remember |
+| --- | --- | --- |
+| YAML, Compose and Helm values | YAML parser/LSP, yamlfmt, yamllint, native/indent selection | Inspect indentation and selected borders before moving blocks |
+| Ansible | `yaml.ansible`, AnsibleLS, YAML parser/format/lint | Wider operations need host Ansible commands |
+| Helm templates | HelmLS, Helm parser and filetype detection | Templates are not automatically plain-YAML formatting cases |
+| Terraform and tfvars | TerraformLS/parser, `terraform fmt`, TFLint | Host Terraform and project context matter |
+| Dockerfile | Docker Language Server/parser and Hadolint | No separately configured Dockerfile formatter |
+| GitHub Actions | YAML support plus Actionlint under `.github/workflows/` | Actionlint does not run on every YAML file |
+| Bash/POSIX shell | BashLS/parser, shfmt, ShellCheck, Matchit | Quote/WORD objects are textual, not safe shell refactoring |
+| Markdown runbooks | Rendering, spelling, prose editing, snippets and configured LSP | Rendering is not document conversion |
+
+Useful short flows:
+
+- Copy an expression to a runbook: native `<C-Space>`, expand/shrink to the
+  intended node, then `"+y`; see the [clipboard recipe](#expand-or-shrink-a-selection-and-copy-it-to-another-application).
+- Edit a call or Terraform expression: preview `via`/`vib` or native nodes,
+  change only the intended region, and use `gS` for a comma-separated list.
+  Inspect [format selection](#formatting-linting-and-tools) and diagnostics.
+- Copy a YAML/Ansible body: `ViI`, inspect the complete selected lines, then
+  `y`. Check both source/destination indentation before pasting or moving;
+  `aI` includes a following border, not just the owning header.
+- Refine a shell flag: `yiW` copies `--dry-run`; `viq` previews a quoted
+  value before `c`. ShellCheck and diagnostics still matter after textual edits.
+- Triage incident output: search in the buffer or scoped Telescope, export
+  chosen locations, and use [quickfix filtering/history](#quickfix-list).
+  Review each retained location before `:cdo` edits.
+- Review a deployment change: `]c` and `<leader>hp`, then `:Gitsigns diff`
+  and panel `g?`; see the [staging/reset warnings](#git-and-gitsigns).

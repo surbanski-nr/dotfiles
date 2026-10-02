@@ -22,6 +22,299 @@ local function make_repository(path)
   command { 'git', '-C', path, 'commit', '-qm', 'fixture' }
 end
 
+do
+  vim.wait(20)
+  local clipboard = vim.o.clipboard
+  local notify = vim.notify
+  local source_buffer = vim.api.nvim_get_current_buf()
+  local buffers, clients, notifications, registers = {}, {}, {}, {}
+  for _, register in ipairs { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', 'a', '"' } do
+    registers[register] = vim.fn.getreginfo(register)
+  end
+  vim.o.clipboard = ''
+  vim.notify = function(message) notifications[#notifications + 1] = message end
+
+  local function feed(keys) vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), 'xt', false) end
+
+  local function fixture(lines, cursor, filetype, parser)
+    feed '<Esc>'
+    local buffer = vim.api.nvim_create_buf(true, true)
+    buffers[#buffers + 1] = buffer
+    vim.api.nvim_set_current_buf(buffer)
+    vim.bo.bufhidden = 'wipe'
+    vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
+    vim.bo.filetype = filetype or 'text'
+    if parser then
+      vim.treesitter.start(buffer, parser)
+      vim.treesitter.get_parser(buffer, parser):parse(true)
+    end
+    vim.api.nvim_win_set_cursor(0, cursor)
+    vim.fn.setreg('"', 'saved yank', 'v')
+    return buffer
+  end
+
+  local function selection(expected)
+    local mode = vim.fn.mode()
+    assert(mode == 'v' or mode == 'V', 'selection did not enter Visual mode: ' .. mode)
+    local actual = vim.fn.getregion(vim.fn.getpos 'v', vim.fn.getpos '.', { type = mode })
+    assert(vim.deep_equal(actual, expected), ('selected %s instead of %s'):format(vim.inspect(actual), vim.inspect(expected)))
+  end
+
+  local function yank(keys, expected, register_type)
+    feed(keys)
+    local actual = vim.fn.getreg '"'
+    assert(actual == expected, ('%s yanked %q instead of %q'):format(keys, actual, expected))
+    assert(vim.fn.getregtype '"' == (register_type or 'v'), keys .. ' used the wrong register type')
+  end
+
+  local ok, error_message = xpcall(function()
+    local call = { 'local result = deploy(image, namespace, timeout)' }
+    for _, case in ipairs {
+      { 'yia', 'image' },
+      { 'yaa', 'image,' },
+      { 'yiNa', 'namespace' },
+      { 'yaNa', ', namespace' },
+      { 'yif', 'image, namespace, timeout' },
+      { 'yaf', 'deploy(image, namespace, timeout)' },
+      { 'yan', 'image' },
+      { 'yin', 'image' },
+      { 'y2an', '(image, namespace, timeout)' },
+    } do
+      fixture(call, { 1, 22 }, 'lua', 'lua')
+      yank(case[1], case[2])
+    end
+    fixture(call, { 1, 30 }, 'lua', 'lua')
+    yank('yila', 'image')
+
+    fixture(call, { 1, 22 }, 'lua', 'lua')
+    local before_tick, before_undo = vim.b.changedtick, vim.fn.undotree().seq_cur
+    feed '<C-Space>'
+    selection { 'image' }
+    feed '<C-Space>'
+    selection { '(image, namespace, timeout)' }
+    feed '<BS>'
+    selection { 'image' }
+    feed '2<C-Space>'
+    selection { 'deploy(image, namespace, timeout)' }
+    assert(vim.b.changedtick == before_tick and vim.fn.undotree().seq_cur == before_undo, 'parser selection changed undo history')
+    assert(vim.fn.getreg '"' == 'saved yank', 'parser selection changed a register')
+    yank('y', 'deploy(image, namespace, timeout)')
+
+    fixture(call, { 1, 22 }, 'lua', 'lua')
+    feed 'v2an'
+    selection { '(image, namespace, timeout)' }
+    feed 'in'
+    selection { 'image' }
+    feed ']n'
+    selection { 'namespace' }
+    feed '[N'
+    selection { 'image, namespace' }
+    feed ']N'
+    selection { 'image, namespace, timeout' }
+    yank('y', 'image, namespace, timeout')
+
+    for _, case in ipairs {
+      { { '"one" and "two"' }, { 1, 2 }, 'yiq', 'one' },
+      { { '"one" and "two"' }, { 1, 2 }, 'yiNq', 'two' },
+      { { '"one" and "two"' }, { 1, 11 }, 'yilq', 'one' },
+      { { '"one"  next' }, { 1, 2 }, 'yaq', '"one"' },
+      { { '(outer(inner))' }, { 1, 8 }, 'y2i)', 'outer(inner)' },
+      { { '(  inner  )' }, { 1, 4 }, 'yi(', 'inner' },
+      { { '(  inner  )' }, { 1, 4 }, 'yi)', '  inner  ' },
+      { { '[item]' }, { 1, 2 }, 'yib', 'item' },
+      { { '{item}' }, { 1, 2 }, 'yab', '{item}' },
+      { { '<job>image</job>' }, { 1, 6 }, 'yit', 'image' },
+      { { '<job>image</job>' }, { 1, 6 }, 'yat', '<job>image</job>' },
+      { { 'first-word' }, { 1, 2 }, 'yiw', 'first' },
+      { { 'first line', 'second line', '', 'next paragraph' }, { 1, 2 }, 'yip', 'first line\nsecond line\n', 'V' },
+    } do
+      fixture(case[1], case[2])
+      yank(case[3], case[4], case[5])
+    end
+    fixture({ '(outer(inner))' }, { 1, 8 })
+    feed 'vi)'
+    selection { 'inner' }
+    feed 'i)'
+    selection { 'outer(inner)' }
+
+    fixture({ 'deploy(image)', 'deploy(namespace)' }, { 1, 7 })
+    vim.fn.setreg('a', 'saved named yank', 'v')
+    feed 'ciapackage<Esc>'
+    assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), { 'deploy(package)', 'deploy(namespace)' }), 'argument change edited the wrong region')
+    vim.api.nvim_win_set_cursor(0, { 2, 7 })
+    feed '.'
+    assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), { 'deploy(package)', 'deploy(package)' }), 'argument change did not dot-repeat')
+    assert(vim.fn.getreg '"' == 'saved yank', 'black-hole change replaced the yank')
+    assert(vim.fn.getreg 'a' == 'saved named yank', 'argument change replaced a named register')
+    feed 'u'
+    assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), { 'deploy(package)', 'deploy(namespace)' }), 'undo did not revert only the repeat')
+    feed 'u'
+    assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), { 'deploy(image)', 'deploy(namespace)' }), 'undo did not restore the original argument')
+
+    fixture({ 'no object here' }, { 1, 2 })
+    before_tick, before_undo = vim.b.changedtick, vim.fn.undotree().seq_cur
+    feed 'viq<Esc>yiN<Esc>'
+    assert(vim.api.nvim_get_current_line() == 'no object here', 'missing or cancelled object edited text')
+    assert(vim.b.changedtick == before_tick and vim.fn.undotree().seq_cur == before_undo, 'cancelled object changed undo history')
+    assert(vim.fn.getreg '"' == 'saved yank', 'cancelled object replaced the yank')
+
+    local yaml = { 'service:', '  name: api', '  replicas: 2', 'other:', '  name: worker' }
+    for _, case in ipairs {
+      { 'yiI', 'name: api\n  replicas: 2', 'v' },
+      { 'ViIy', '  name: api\n  replicas: 2\n', 'V' },
+      { 'yaI', 'service:\n  name: api\n  replicas: 2\nother:\n', 'v' },
+    } do
+      fixture(yaml, { 2, 8 }, 'yaml')
+      yank(case[1], case[2], case[3])
+    end
+    for _, case in ipairs {
+      { 'yaml', { 'root:', '  child:', '    one: 1', '    two: 2', '  peer: 3', 'next:' }, { 3, 5 }, '    one: 1\n    two: 2\n' },
+      {
+        'python',
+        { 'def deploy():', '    if ready:', '        run()', '        wait()', '    done()', 'next()' },
+        { 3, 9 },
+        '        run()\n        wait()\n',
+      },
+      {
+        'yaml.ansible',
+        { '- hosts: all', '  tasks:', '    - name: deploy', '      debug:', '        msg: ok', '    - name: next', '- hosts: other' },
+        { 5, 10 },
+        '        msg: ok\n',
+      },
+      { 'text', { 'root:', '', '  one: 1', '', '  two: 2', '', 'next:' }, { 3, 5 }, '\n  one: 1\n\n  two: 2\n' },
+      { 'text', { 'before', 'root:', '  one: 1', 'next:' }, { 1, 1 }, '  one: 1\n' },
+    } do
+      fixture(case[2], case[3], case[1])
+      yank('ViIy', case[4], 'V')
+    end
+    fixture({ 'root:', '\tone: 1', '\ttwo: 2', 'next:' }, { 2, 3 })
+    vim.bo.tabstop = 4
+    yank('ViIy', '\tone: 1\n\ttwo: 2\n', 'V')
+
+    for _, case in ipairs {
+      { { 'root:', '  one: 1' }, { 2, 2 } },
+      { { 'flat', 'text' }, { 1, 0 } },
+    } do
+      fixture(case[1], case[2])
+      before_tick, before_undo = vim.b.changedtick, vim.fn.undotree().seq_cur
+      feed 'viI'
+      assert(vim.fn.mode() == 'n', 'missing indent object unexpectedly selected a region')
+      assert(vim.deep_equal(vim.api.nvim_win_get_cursor(0), case[2]), 'missing indent object moved the cursor')
+      feed '<Esc>'
+      assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), case[1]), 'unclosed or missing indent scope changed text')
+      assert(vim.b.changedtick == before_tick and vim.fn.undotree().seq_cur == before_undo, 'missing indent scope changed undo history')
+      assert(vim.fn.getreg '"' == 'saved yank', 'missing Visual indent scope replaced the yank')
+    end
+    fixture(yaml, { 2, 8 }, 'yaml')
+    feed 'ViI"_d'
+    assert(
+      vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), { 'service:', 'other:', '  name: worker' }),
+      'inner linewise delete removed a sibling border'
+    )
+    assert(vim.fn.getreg '"' == 'saved yank', 'black-hole indent delete replaced the yank')
+    feed 'u'
+    assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), yaml), 'indent body delete did not undo')
+    fixture({ '  value' }, { 1, 5 })
+    feed 'Iprefix <Esc>'
+    assert(vim.api.nvim_get_current_line() == '  prefix value', 'indent object replaced native Normal I')
+
+    local lsp_lines = { 'prefix Ωmega', '  next value', 'tail' }
+    local buffer = fixture(lsp_lines, { 1, 7 }, 'workflow_selection')
+    local closing, request_id = false, 0
+    local client_id = assert(vim.lsp.start {
+      name = 'nvim2-selection-fixture',
+      cmd = function(dispatchers)
+        local function terminate()
+          if closing then return end
+          closing = true
+          dispatchers.on_exit(0, 0)
+        end
+        return {
+          request = function(method, _, callback)
+            request_id = request_id + 1
+            local id = request_id
+            vim.schedule(function()
+              if closing then return end
+              if method == 'initialize' then
+                callback(nil, { capabilities = { selectionRangeProvider = true, positionEncoding = 'utf-16' } })
+              elseif method == 'textDocument/selectionRange' then
+                callback(nil, {
+                  {
+                    range = { start = { line = 0, character = 7 }, ['end'] = { line = 0, character = 12 } },
+                    parent = { range = { start = { line = 0, character = 7 }, ['end'] = { line = 1, character = 12 } } },
+                  },
+                })
+              else
+                callback(nil, nil)
+              end
+            end)
+            return true, id
+          end,
+          notify = function(method)
+            if method == 'exit' then terminate() end
+            return true
+          end,
+          is_closing = function() return closing end,
+          terminate = terminate,
+        }
+      end,
+    })
+    local client = assert(vim.lsp.get_client_by_id(client_id))
+    clients[#clients + 1] = client
+    assert(vim.wait(1000, function() return client.initialized and vim.lsp.buf_is_attached(buffer, client_id) end), 'selection provider did not attach')
+    assert(not vim.treesitter.get_parser(buffer, nil, { error = false }), 'LSP fixture unexpectedly has a parser')
+    before_tick, before_undo = vim.b.changedtick, vim.fn.undotree().seq_cur
+    feed '<C-Space>'
+    selection { 'Ωmega' }
+    feed '<C-Space>'
+    selection { 'Ωmega', '  next value' }
+    feed '<BS>'
+    selection { 'Ωmega' }
+    assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), lsp_lines), 'LSP selection changed text')
+    assert(vim.b.changedtick == before_tick and vim.fn.undotree().seq_cur == before_undo, 'LSP selection changed undo history')
+    assert(vim.fn.getreg '"' == 'saved yank', 'LSP selection changed a register')
+    yank('y', 'Ωmega')
+    vim.fn.setreg('"', 'saved yank', 'v')
+    yank('yan', 'Ωmega')
+    client:stop(true)
+    assert(vim.wait(1000, function() return vim.lsp.get_client_by_id(client_id) == nil end), 'selection provider did not stop')
+
+    fixture(lsp_lines, { 1, 7 }, 'workflow_selection')
+    before_tick, before_undo = vim.b.changedtick, vim.fn.undotree().seq_cur
+    local notification_count = #notifications
+    feed '<C-Space>'
+    selection { 'Ω' }
+    feed '<Esc>'
+    assert(
+      #notifications > notification_count and notifications[#notifications]:find('selectionRange', 1, true),
+      'no-provider selection did not retain native warning'
+    )
+    assert(vim.fn.getreg '"' == 'saved yank', 'no-provider selection changed a register')
+    assert(vim.b.changedtick == before_tick and vim.fn.undotree().seq_cur == before_undo, 'no-provider selection changed undo history')
+    assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), lsp_lines), 'no-provider selection changed text')
+  end, debug.traceback)
+
+  feed '<Esc>'
+  for _, client in ipairs(clients) do
+    client:stop(true)
+  end
+  local stopped = vim.wait(1000, function()
+    return vim.iter(clients):all(function(client) return vim.lsp.get_client_by_id(client.id) == nil end)
+  end)
+  vim.api.nvim_set_current_buf(source_buffer)
+  for _, buffer in ipairs(buffers) do
+    if vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
+  end
+  for register, value in pairs(registers) do
+    if register ~= '"' then vim.fn.setreg(register, value) end
+  end
+  vim.fn.setreg('"', registers['"'])
+  vim.notify = notify
+  vim.o.clipboard = clipboard
+  assert(ok, error_message)
+  assert(stopped, 'editing fixtures leaked an LSP client')
+end
+
 local temporary = vim.fn.tempname()
 vim.fn.mkdir(temporary, 'p')
 local repository_a = vim.fs.joinpath(temporary, 'repository-a')
