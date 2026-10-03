@@ -1,15 +1,22 @@
-# Dark skin matching the Nvim2 surb palette.
-foreground: &foreground '#e0e2ea'
-background: &background '#282c34'
-currentLine: &currentLine '#343842'
-muted: &muted '#7b8496'
-completed: &completed '#9aa2b3'
-green: &green '#8fcf84'
-cyan: &cyan '#6fb8d9'
+# Stock Calm with restrained Neovim default accents.
+foreground: &foreground '#b8bbc2'
+strong: &strong '#d7dae1'
+bright: &bright '#eef1f8'
+# Preserve the terminal background. The configured Kitty background is #22272e.
+background: &background default
+selectedText: &selectedText '#22272e'
+surface: &surface '#2c2e33'
+selection: &selection '#004c73'
+# K9s also uses status colors as active-row backgrounds.
+tableRow: &tableRow '#b3f6c0'
+completed: &completed '#898c93'
+muted: &muted '#4f5258'
+green: &green '#b3f6c0'
+cyan: &cyan '#8cf8f7'
 orange: &orange '#ff9e64'
-yellow: &yellow '#d3b66f'
-purple: &purple '#c993c9'
-red: &red '#e06c75'
+yellow: &yellow '#fce094'
+purple: &purple '#ffcaff'
+red: &red '#ff5f5f'
 
 k9s:
   body:
@@ -18,60 +25,63 @@ k9s:
     logoColor: *cyan
   prompt:
     fgColor: *foreground
-    bgColor: *currentLine
+    bgColor: *surface
     suggestColor: *green
   help:
     fgColor: *foreground
     bgColor: *background
     sectionColor: *green
     keyColor: *cyan
-    numKeyColor: *orange
+    numKeyColor: *green
   frame:
     title:
       fgColor: *cyan
       bgColor: *background
       highlightColor: *orange
-      counterColor: *cyan
-      filterColor: *green
+      counterColor: *green
+      filterColor: *cyan
     border:
       fgColor: *muted
       focusColor: *cyan
     menu:
-      fgColor: *foreground
-      keyColor: *green
-      numKeyColor: *orange
+      fgColor: *strong
+      fgStyle: normal  # K9s stock uses dim here.
+      keyColor: *cyan
+      numKeyColor: *green
     crumbs:
-      fgColor: *background
-      bgColor: *green
-      activeColor: *orange
+      fgColor: *foreground
+      bgColor: *surface
+      activeColor: *selection
     status:
-      newColor: *foreground
-      modifyColor: *orange
+      newColor: *tableRow
+      modifyColor: *cyan
       addColor: *green
       pendingColor: *yellow
       errorColor: *red
-      highlightColor: *yellow
+      # Current/active resources can become the selected-row background.
+      highlightColor: *orange
       killColor: *red
       completedColor: *completed
   info:
     fgColor: *cyan
-    sectionColor: *foreground
+    sectionColor: *strong
   views:
     table:
       fgColor: *foreground
       bgColor: *background
-      cursorFgColor: *background
-      cursorBgColor: *currentLine
+      cursorFgColor: *selectedText
+      cursorBgColor: *selection
       markColor: *green
       header:
-        fgColor: *cyan
-        bgColor: *background
-        sorterColor: *orange
+        fgColor: *strong
+        bgColor: *surface
+        sorterColor: *green
+        selectedSortColumnColor: *cyan
     xray:
       fgColor: *foreground
       bgColor: *background
-      cursorColor: *currentLine
-      cursorTextColor: *foreground
+      cursorColor: *selection
+      cursorTextColor: *strong
       graphicColor: *green
     charts:
       bgColor: *background
@@ -86,28 +96,28 @@ k9s:
       resourceColors:
         cpu:
           - *green
-          - *orange
+          - *yellow
         mem:
           - *cyan
           - *purple
     yaml:
       keyColor: *cyan
-      valueColor: *foreground
+      valueColor: *bright
       colonColor: *muted
     logs:
-      fgColor: *foreground
+      fgColor: *bright
       bgColor: *background
       indicator:
-        fgColor: *foreground
-        bgColor: *currentLine
+        fgColor: *bright
+        bgColor: *selection
         toggleOnColor: *green
         toggleOffColor: *muted
   dialog:
     fgColor: *foreground
-    bgColor: *currentLine
-    buttonFgColor: *background
-    buttonBgColor: *green
-    buttonFocusFgColor: *background
-    buttonFocusBgColor: *orange
+    bgColor: *surface
+    buttonFgColor: *strong
+    buttonBgColor: *selection
+    buttonFocusFgColor: *selectedText
+    buttonFocusBgColor: *cyan
     labelFgColor: *green
-    fieldFgColor: *foreground
+    fieldFgColor: *strong
