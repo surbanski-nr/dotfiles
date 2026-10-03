@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+tmux set-option -g @validation-tpm-command "$0"

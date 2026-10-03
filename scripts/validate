@@ -267,6 +267,8 @@ validate_configs() {
   tpm_root=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv @dotfiles-tpm-root)
   [[ $tpm_root == "$temporary_home/.tmux/plugins/tpm" ]] ||
     die "tmux default TPM root is incorrect: $tpm_root"
+  mkdir -p "$temporary_home/custom-plugins/tpm"
+  cp tests/fixtures/validation/tpm "$temporary_home/custom-plugins/tpm/tpm"
   HOME="$temporary_home" tmux -L "$socket" set-environment -g \
     TMUX_PLUGIN_MANAGER_PATH "$temporary_home/custom-plugins"
   HOME="$temporary_home" tmux -L "$socket" set-option -g status-position bottom
@@ -290,9 +292,13 @@ validate_configs() {
   reloaded_value=
   for _ in {1..50}; do
     reloaded_value=$(HOME="$temporary_home" tmux -L "$socket" \
-      show-options -gv status-position 2>/dev/null || true)
-    [[ $reloaded_value == top ]] && break
+      show-options -gqv @validation-tpm-command 2>/dev/null || true)
+    [[ $reloaded_value == "$temporary_home/custom-plugins/tpm/tpm" ]] && break
+    sleep 0.02
   done
+  [[ $reloaded_value == "$temporary_home/custom-plugins/tpm/tpm" ]] ||
+    die 'tmux Shift-R did not run the custom TPM command'
+  reloaded_value=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv status-position)
   [[ $reloaded_value == top ]] || die 'tmux Shift-R did not apply the configured file'
   tpm_root=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv @dotfiles-tpm-root)
   [[ $tpm_root == "$temporary_home/custom-plugins/tpm" ]] ||

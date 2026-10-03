@@ -487,8 +487,13 @@ private configuration, and opens them with Nvim2.
 TPM and its plugin checkouts use the commits in `versions.env`. This section is
 only for the connected setup. Complete offline releases do not bundle or run
 TPM; their tmux config loads sensible, resurrect and continuum directly from
-the physical release. On a connected machine, reconcile the managed checkouts
-with:
+the physical release. TPM reads plugin declarations from
+`${XDG_CONFIG_HOME:-$HOME/.config}/tmux/tmux.conf` when it exists, otherwise
+from `~/.tmux.conf`, even if tmux starts with `-f FILE`. Keep the connected
+config in the default location, as in the setup above. For a custom
+`TMUX_PLUGIN_MANAGER_PATH`, use an absolute path without whitespace.
+
+On a connected machine, reconcile the managed checkouts with:
 
 ```bash
 set -euo pipefail

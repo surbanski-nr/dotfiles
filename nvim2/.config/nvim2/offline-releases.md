@@ -55,6 +55,8 @@ The connected config records its own loaded path. In both cases `prefix` +
 `Shift-R` invokes `source-file -F '#{@dotfiles-config}'`. An existing server A
 therefore reloads A after `current` selects B; a newly started server uses B.
 An explicit `tmux -f FILE` remains authoritative.
+Connected TPM still reads plugin declarations from the default config location,
+not `FILE`; see [TPM and Krew](../../../SETUP.md#tpm-and-krew).
 
 ## Offline health
 
