@@ -135,6 +135,7 @@ reload_output=$(
 assert_contains "$reload_output" 'settings=100000:100000:3:on:on:on'
 assert_contains "$reload_output" 'venv_disable_prompt=1'
 
+link_command zoxide
 broken_output=$(
   timeout 15 env HOME="$reload_home" PATH="$test_root/bin:$original_path" \
     TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=broken-integration \

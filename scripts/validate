@@ -354,7 +354,7 @@ validate_repo() {
     [[ $image =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
       die "$variable is not pinned to a SHA-256 digest"
   done
-  if rg -uu --quiet --pcre2 \
+  if grep -qP \
     'nvim2-release(?!-rollback[.]env)|NVIM2_RELEASE|TARGET_(USER|UID|HOME)' \
     scripts/dotfiles-release dotfiles-release.env .github/workflows/dotfiles-release.yml; then
     die 'offline release files retain a legacy name or baked target identity'

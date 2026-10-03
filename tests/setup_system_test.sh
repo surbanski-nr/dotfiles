@@ -61,6 +61,10 @@ printf '\n' >>"$TEST_PACKAGE_LOG"
 EOF
 chmod 0755 "$fixture_bin/sudo" "$fixture_bin/apt-get"
 
+for command_name in curl file gpg gpg-agent htop jq make mc python3 tmux vi vim; do
+  ln -s /bin/true "$fixture_bin/$command_name"
+done
+
 for _ in 1 2; do
   PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \
     "$repo_dir/setup-system" --runtime >/dev/null
