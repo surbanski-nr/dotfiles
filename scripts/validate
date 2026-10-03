@@ -221,6 +221,7 @@ validate_configs() {
   local socket="dotfiles-validate-$$"
   local client configured_path reloaded_value tmux_config temporary_home
   local client_input client_stderr
+  local plugin tpm_root
   local yaml_files=()
 
   while IFS= read -r -d '' file; do
@@ -242,19 +243,32 @@ validate_configs() {
   done
 
   git config --file git/.gitconfig --null --list >/dev/null
+  for plugin in tpm tmux-sensible tmux-resurrect tmux-continuum; do
+    git grep -q -e "^set -g @plugin 'tmux-plugins/$plugin'$" -- tmux/.tmux.conf ||
+      die "tmux plugin is not declared at top level: $plugin"
+  done
+
   temporary_home=$(mktemp -d)
   cleanup_paths+=("$temporary_home")
   cleanup_tmux_home=$temporary_home
   cleanup_tmux_socket=$socket
   tmux_config=$temporary_home/explicit.tmux.conf
   cp "$repo_dir/tmux/.tmux.conf" "$tmux_config"
-  HOME="$temporary_home" timeout 10s tmux -L "$socket" \
-    -f "$tmux_config" new-session -d
+  (
+    unset TMUX TMUX_OFFLINE_RELEASE_ROOT TMUX_PLUGIN_MANAGER_PATH
+    HOME="$temporary_home" timeout 10s tmux -L "$socket" \
+      -f "$tmux_config" new-session -d
+  )
   HOME="$temporary_home" tmux -L "$socket" show-options -gv prefix >/dev/null
   HOME="$temporary_home" tmux -L "$socket" show-options -gv status-right >/dev/null
   configured_path=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv @dotfiles-config)
   [[ $configured_path == "$tmux_config" ]] ||
     die "tmux reload path does not preserve explicit -f config: $configured_path"
+  tpm_root=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv @dotfiles-tpm-root)
+  [[ $tpm_root == "$temporary_home/.tmux/plugins/tpm" ]] ||
+    die "tmux default TPM root is incorrect: $tpm_root"
+  HOME="$temporary_home" tmux -L "$socket" set-environment -g \
+    TMUX_PLUGIN_MANAGER_PATH "$temporary_home/custom-plugins"
   HOME="$temporary_home" tmux -L "$socket" set-option -g status-position bottom
   client_input=$temporary_home/client-input
   client_stderr=$temporary_home/client-stderr
@@ -280,6 +294,9 @@ validate_configs() {
     [[ $reloaded_value == top ]] && break
   done
   [[ $reloaded_value == top ]] || die 'tmux Shift-R did not apply the configured file'
+  tpm_root=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv @dotfiles-tpm-root)
+  [[ $tpm_root == "$temporary_home/custom-plugins/tpm" ]] ||
+    die "tmux custom TPM root is incorrect after reload: $tpm_root"
   [[ ! -s $client_stderr ]] || die 'tmux reload client wrote to stderr'
   HOME="$temporary_home" tmux -L "$socket" detach-client -t "$client"
   exec {client_input_fd}>&-
