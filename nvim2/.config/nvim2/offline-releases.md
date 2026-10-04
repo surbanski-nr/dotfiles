@@ -37,6 +37,12 @@ terminal Bash restores them so user data stays outside the immutable release.
 Therefore a Nvim process started from release A keeps configuration, plugins
 and tools from A after `current` changes to B. A new process uses B.
 
+The physical release tool path includes all bundled kubectl and Helm versions.
+Jobs that invoke their canonical commands inherit `KUBECTL_VERSION` and
+`HELM_VERSION`. No asdf shims are needed; embedded libraries in programs such
+as helm-ls are independent of this client selection. Terminal Bash returns to
+the public commands from `current`, as it does for other release tools.
+
 Before applying those overrides, the launcher records whether the user's
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `_ZO_DATA_DIR` were set and preserves
 their exact values. It also sets zoxide's data directory from the original user

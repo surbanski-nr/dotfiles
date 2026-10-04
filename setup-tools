@@ -4,12 +4,10 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage:
-  setup-tools [NAME ...]
-  setup-tools --from DIR NAME ...
+Usage: setup-tools [NAME ...]
 
-Install selected Linux x86-64 release files under ~/bin. With --from, read
-only DIR/NAME/VERSION/UPSTREAM_ASSET and require at least one NAME.
+Download and install selected Linux x86-64 tools under ~/bin.
+For offline deployment, use the complete dotfiles release instead.
 EOF
   printf 'Names:'
   printf ' %s' "${DAILY_TOOLS[@]}" "${OPTIONAL_TOOLS[@]}"
@@ -17,20 +15,10 @@ EOF
 }
 
 main() {
-  local from_dir=
-  local from_requested=0
   local -a requested=()
 
   while (($#)); do
     case $1 in
-      --from)
-        (($# >= 2)) || report_error '--from requires a directory'
-        ((from_requested == 0)) || report_error '--from may be supplied only once'
-        [[ -n $2 ]] || report_error '--from requires a nonempty directory'
-        from_requested=1
-        from_dir=$2
-        shift 2
-        ;;
       -h | --help)
         usage
         return 0
@@ -40,17 +28,14 @@ main() {
     esac
   done
 
-  if ((from_requested == 1 && ${#requested[@]} == 0)); then
-    report_error '--from requires at least one tool name'
-  fi
   load_setup_config
   if ((${#requested[@]} == 0)); then
     requested=("${DAILY_TOOLS[@]}")
   fi
   validate_host
   normalize_requested "${requested[@]}"
-  preflight "$from_dir" "${NORMALIZED_TOOLS[@]}"
-  install_requested "$from_dir" "${NORMALIZED_TOOLS[@]}"
+  preflight "${NORMALIZED_TOOLS[@]}"
+  install_requested "${NORMALIZED_TOOLS[@]}"
 }
 
 load_setup_config() {
@@ -67,6 +52,7 @@ load_setup_config() {
 validate_host() {
   [[ $(uname -s) == Linux ]] || report_error 'only Linux is supported'
   [[ $(uname -m) == x86_64 ]] || report_error 'only Linux x86-64 is supported'
+  require_command curl
   require_command sha256sum
   require_command tar
   require_command mktemp
@@ -251,12 +237,10 @@ preflight_link() {
 }
 
 preflight() {
-  local from_dir=$1
   local name
   local version
   local status
   local entry
-  local input
 
   if [[ -e $BIN_DIR || -L $BIN_DIR ]]; then
     [[ -d $BIN_DIR && ! -L $BIN_DIR ]] || report_error "invalid bin directory: $BIN_DIR"
@@ -264,9 +248,7 @@ preflight() {
   if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
     [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || report_error "invalid state directory: $STATE_DIR"
   fi
-  [[ -n $from_dir ]] || require_command curl
-
-  for name in "${@:2}"; do
+  for name in "$@"; do
     load_tool_versions "$name"
     for version in "${TOOL_VERSIONS[@]}"; do
       load_tool_release "$name" "$version"
@@ -276,14 +258,7 @@ preflight() {
         status=$?
       fi
       case $status in
-        0 | 11) ;;
-        10 | 12)
-          if [[ -n $from_dir ]]; then
-            input="$from_dir/$name/$version/$SPEC_ASSET"
-            [[ -f $input && ! -L $input && -r $input ]] ||
-              report_error "missing input: $input"
-          fi
-          ;;
+        0 | 10 | 11 | 12) ;;
         *) return "$status" ;;
       esac
     done
@@ -371,9 +346,8 @@ verify_staged() {
 }
 
 install_version() {
-  local from_dir=$1
-  local name=$2
-  local version=$3
+  local name=$1
+  local version=$2
   local status
   local input
   local content
@@ -400,12 +374,8 @@ install_version() {
 
   STAGE_DIR=$(mktemp -d "$BIN_DIR/.setup-tools.XXXXXX")
   TEMP_PATHS+=("$STAGE_DIR")
-  if [[ -n $from_dir ]]; then
-    input="$from_dir/$name/$version/$SPEC_ASSET"
-  else
-    input="$STAGE_DIR/$SPEC_ASSET"
-    download_file "$RELEASE_URL" "$input"
-  fi
+  input="$STAGE_DIR/$SPEC_ASSET"
+  download_file "$RELEASE_URL" "$input"
   verify_sha256 "$input" "$RELEASE_SHA256"
   extract_artifact "$input" "$STAGE_DIR"
   verify_staged "$name" "$version"
@@ -474,17 +444,16 @@ activate_links() {
 }
 
 install_requested() {
-  local from_dir=$1
   local name
   local version
   local selected
 
-  for name in "${@:2}"; do
+  for name in "$@"; do
     acquire_lock "$name"
     load_tool_versions "$name"
     selected=${TOOL_VERSIONS[0]}
     for version in "${TOOL_VERSIONS[@]}"; do
-      install_version "$from_dir" "$name" "$version"
+      install_version "$name" "$version"
     done
     load_tool_release "$name" "$selected"
     activate_links "$name" "${SPEC_LINKS[@]}"

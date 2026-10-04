@@ -12,6 +12,7 @@ Clone the repository, then run:
 cd "$HOME/github.com/surbanski/dotfiles"
 ./setup-system
 ./setup-tools
+# Optional online project runtimes:
 ./setup-asdf
 
 for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
@@ -40,9 +41,11 @@ record. `validation.env` uses the same record format in
 `VALIDATION_RELEASES`; Task exists only there. Daily ShellCheck, validation
 ShellCheck and Mason ShellCheck remain independent pins.
 
-`setup-tools` installs the selected daily tools from these exact official
-release records. `setup-asdf` reads runtime versions from the same catalog,
-but plugin repository and commit data from `ASDF_PLUGINS`; plugin downloads and
+`setup-tools` downloads and installs the selected daily tools from these exact
+official release records. It supports only connected installation; offline
+deployment uses the complete release described below. Optional online
+`setup-asdf` reads runtime versions from the same catalog, but plugin repository
+and commit data from `ASDF_PLUGINS`; plugin downloads and
 verification remain asdf's responsibility. It selects the first version for
 each runtime as the home default. A project `.tool-versions` file continues to
 override those defaults.
@@ -53,13 +56,33 @@ checksum-verified official archive. Provider conflicts are checked before any
 ownership state is written. Similar names, version output alone and modified
 binaries are rejected without changing them.
 
+The direct kubectl and Helm route is an online alternative for machines where
+asdf is not appropriate. Do not install both providers in the same home:
+
+```bash
+./setup-tools kubectl helm
+"$HOME/bin/kubectl-1.27.11" version --client
+"$HOME/bin/helm-3.22.0" version --short
+```
+
+Versioned installations remain in `~/bin`. Canonical command links are
+relative, so an older retained installation can be selected again by running
+the setup command from the matching reviewed repository revision. An intact
+retained installation is reused without downloading it again.
+Terraform and Terragrunt use optional `setup-asdf` in this connected flow.
+`htop` remains an operating-system package, and Go is not a setup dependency.
+
 ## Complete offline release
 
-For a restricted host, prefer the complete platform artifact over assembling
-individual tool archives. It contains one immutable dotfiles snapshot together
+For a restricted host, use the complete platform artifact. This is the only
+supported offline installation route; `setup-tools` and `setup-asdf` are not
+used. The artifact contains one immutable dotfiles snapshot together
 with Neovim and its complete profile, Node.js, private standalone Python,
 ripgrep, tmux and plugins, Oh My Posh, k9s, zoxide, kubectx, kubens, Task, fzf
-and Terraform. Helm and kubectl deliberately remain separate setup choices.
+and Terraform, plus every kubectl and Helm version listed in `versions.env`.
+Each release owns its complete tool payload, even when another retained release
+contains the same versions. Asdf, its plugins and its shims are not part of the
+offline package. Optional online `setup-asdf` remains available independently.
 
 The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
 `ubuntu-26.04-x86_64` and `amzn-2023-x86_64`. Build from a clean committed
@@ -113,8 +136,12 @@ available, then transfer the matching artifact. From the matching reviewed
 dotfiles snapshot:
 
 ```bash
-./setup-system --runtime
+./setup-system --offline-release
 ```
+
+This flag installs only the release's system prerequisites, not its bundled
+tools. It still needs access to apt/dnf repositories. The default invocation
+without a flag prepares a connected setup instead.
 
 After disconnecting external networking, run the installer as the intended
 ordinary user. It derives identity from that account and does not require a
@@ -188,8 +215,8 @@ the expected managed link or move the foreign data aside, then retry the same
 manager command. Do not edit `current`, `previous`, `pending.env`, installed
 files or generated manifests by hand, and do not use `sudo` to move a venv.
 
-Stable public links contain `current` literally. The Nvim and tmux launchers
-resolve one physical release when each process starts. After a switch, reload
+Stable public links contain `current` literally. The Nvim, tmux and Kubernetes
+client launchers resolve one physical release when each process starts. After a switch, reload
 Bash with `source "$HOME/.bashrc" && hash -r`; new shells and applications use
 the new release, while an existing Nvim process and tmux server remain on their
 old physical configuration and plugins. `prefix` + `Shift-R` reloads that
@@ -210,13 +237,53 @@ original data home, so zoxide never writes into retained release data. Explicit
 `_ZO_DATA_DIR`, paths with spaces, nested launches and another `NVIM_APPNAME`
 remain supported.
 
-The release does not own `~/bin/python`, `~/bin/python3`, Helm or kubectl.
-`helm-ls` works through its embedded Helm libraries. Basic kubectx and kubens
-operations work against a local kubeconfig, while cluster operations, external
-authentication executables, `kubectx --shell` and the optional k9s helpers
-still require the corresponding host tools and services. Do not run the
-release Node/Terraform provider and an asdf provider for those same public
-commands in one HOME.
+The release does not own `~/bin/python` or `~/bin/python3`; standalone Python
+is private to its tool payload. kubectl and Helm are public release commands.
+Cluster access still needs the appropriate network, kubeconfig, credentials
+and any external authentication executables. Krew plugins and optional k9s
+helpers are not automatically bundled.
+
+### Selecting a bundled Kubernetes client
+
+The first kubectl or Helm record in `versions.env` is the default. The builder
+includes every record for those two tools; other tools use only their default.
+Launchers resolve one physical release and run its client without using asdf,
+searching `.tool-versions`, downloading tools or detecting the cluster version.
+
+```bash
+kubectl version --client
+helm version --short
+
+# Select an exact version for one command:
+KUBECTL_VERSION=1.34.12 kubectl get nodes
+HELM_VERSION=3.22.0 helm list
+
+# Select versions for this shell and commands started from it:
+export KUBECTL_VERSION=1.34.12 HELM_VERSION=3.22.0
+kubectl get pods
+helm list
+
+# Return to defaults from the active release:
+unset KUBECTL_VERSION HELM_VERSION
+```
+
+Unset or empty variables select the default. An invalid version or a version
+not in the active release fails clearly, without falling back to another tool
+provider. Explicit binaries such as `current/bin/kubectl-1.34.12` also work;
+only the two canonical client launchers are projected into `~/bin`.
+`release.env` records ordered `KUBECTL_VERSIONS` and `HELM_VERSIONS` lists.
+Health verifies every version and the default independently of the caller's
+selection, reads an isolated kubeconfig and renders a local chart offline.
+
+Client selection is inherited by subprocesses that invoke `kubectl` or `helm`
+through these launchers. It does not change Kubernetes/Helm libraries embedded
+inside other programs. kubectl must be within one minor version of the cluster
+API server, as described in the upstream version-skew policy.
+
+Offline Bash does not add asdf shims and removes inherited shim paths from
+`PATH`, without modifying asdf's files or settings. Connected Bash continues
+to use asdf. Avoid overlapping providers for the same public commands in one
+HOME; there is no automatic fallback between them.
 
 The historical 2026-10-01 qualification of source commit
 `d4536234f5730fdb0e1f43335f9e0d5c0e79e935` measured the following apparent
@@ -261,114 +328,16 @@ and must not be added a second time; no staging entry remained after success.
 The fresh qualification had no retained legacy installation, which would be
 an additional cost on an upgraded host.
 
-The approximately 460 MiB archive is the whole offline release, not the
+The historical approximately 460 MiB archive is the whole offline release, not the
 standalone Python archive. Archive sizes remain within the original 435-475
 MiB estimate. Allocated retained sizes, unlike the earlier apparent-only
-figures, are within the original 1.65-1.90 GiB estimate per release. Refresh
-these measurements for a new source revision or changed payload.
+figures, are within the original 1.65-1.90 GiB estimate per release. These
+measurements predate bundled kubectl and Helm; refresh them for the new payload.
 
 The [Nvim2 offline notes](nvim2/.config/nvim2/offline-releases.md) describe the
 editor-specific runtime, health checks and state behavior. `TOOL_UPDATES.md`
 describes how a new source revision becomes a separately qualified immutable
 release.
-
-The direct kubectl and Helm route is an alternative for machines where asdf is
-not appropriate. Do not install both providers in the same home:
-
-```bash
-./setup-tools kubectl helm
-"$HOME/bin/kubectl-1.27.11" version --client
-"$HOME/bin/helm-3.22.0" version --short
-```
-
-Versioned installations remain in `~/bin`. Canonical command links are
-relative, so an older retained installation can be selected again by running
-the setup command from the matching reviewed repository revision. The input
-archive is not needed when its verified installation is already retained.
-
-## Preparing files for a restricted machine
-
-Run this on a connected Linux x86-64 machine from the repository root. It
-downloads the exact files selected by `versions.env` and `validation.env` into
-the layout consumed by `setup-tools --from`.
-
-```bash
-set -euo pipefail
-source scripts/setup-lib
-source versions.env
-source validation.env
-validate_tool_config
-validate_validator_config
-archive_root=${1:-"$HOME/tool-archives"}
-
-download_release() {
-  catalog=$1
-  name=$2
-  version=$3
-  select_release "$catalog" "$name" "$version"
-  [[ $RELEASE_URL != - ]] || {
-    printf 'No direct artifact for %s %s\n' "$name" "$version" >&2
-    return 1
-  }
-  artifact_layout "$name" "$version" "$RELEASE_ASSET"
-  destination="$archive_root/$name/$version/$SPEC_ASSET"
-  mkdir -p "$(dirname -- "$destination")"
-  if [[ ! -f $destination ]]; then
-    download_file "$RELEASE_URL" "$destination"
-  fi
-  verify_sha256 "$destination" "$RELEASE_SHA256"
-}
-
-for profile in DAILY_TOOLS OPTIONAL_TOOLS; do
-  declare -n tools=$profile
-  for name in "${tools[@]}"; do
-    catalog=TOOL_RELEASES
-    [[ $name != task ]] || catalog=VALIDATION_RELEASES
-    release_versions "$catalog" "$name"
-    for version in "${RELEASE_VERSIONS[@]}"; do
-      download_release "$catalog" "$name" "$version"
-    done
-  done
-  unset -n tools
-done
-```
-
-Copy the directory without extracting or repacking its files. On the target,
-install system packages while the approved repositories are reachable. After
-external access is disabled, import the copied files:
-
-```bash
-cd "$HOME/github.com/surbanski/dotfiles"
-./setup-system
-
-./setup-tools --from "$HOME/tool-archives" \
-  gh kyverno task trivy k9s kubeconform shellcheck oh-my-posh \
-  kubectx kubens rg zoxide uv nvim kubectl helm
-
-for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
-  if [[ -f $file && ! -L $file && ! -e $file.before-dotfiles && ! -L $file.before-dotfiles ]]; then
-    mv -- "$file" "$file.before-dotfiles"
-  fi
-done
-./bstow --dry-run -v -t "$HOME" stow \
-  git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
-./bstow -v -t "$HOME" stow \
-  git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
-source "$HOME/.bashrc"
-hash -r
-dotfiles-check
-```
-
-This importer does not use `curl`, package managers, asdf or source builds.
-Missing files are reported as
-`DIR/NAME/VERSION/UPSTREAM_ASSET`. It installs the complete Neovim runtime tree,
-but it does not include the Nvim2 plugins, Mason packages, parsers or Node
-runtime. Use the complete dotfiles release procedure for an offline editor.
-
-Terraform and Terragrunt remain asdf-managed. A restricted machine can install
-them only when the pinned plugins and their real release sources are reachable.
-No generic offline asdf transport is provided. `htop` remains an operating
-system package, and Go is not a setup dependency.
 
 ## Prepared runtime data
 
@@ -518,10 +487,9 @@ install_tmux_plugin tmux-continuum \
 ```
 
 This resets only the four managed plugin checkouts. Session data under
-`~/.tmux/resurrect` remains intact. On a restricted machine, transfer the
-complete pinned directories under `~/.tmux/plugins` before starting tmux.
+`~/.tmux/resurrect` remains intact.
 
-Krew remains separate from the binary importer. Read its first release record,
+Krew remains separate from `setup-tools`. Read its first release record,
 download and verify `krew-linux_amd64.tar.gz`, extract `krew-linux_amd64`, then
 install the manager:
 

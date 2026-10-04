@@ -69,6 +69,14 @@ make_test_repo() {
   cp "$repo_dir/validation.env" "$destination/validation.env"
 }
 
+run_setup() {
+  local target_home=$1 repository=$2 archives=$3
+  shift 3
+
+  HOME="$target_home" TEST_TOOL_ARCHIVES="$archives" PATH="$test_root/shim:$PATH" \
+    "$repository/setup-tools" "$@"
+}
+
 make_archives() {
   local repository=$1
   local archive_root=$2
@@ -84,19 +92,19 @@ make_archives() {
     "gh_${GH_VERSION}_linux_amd64"
   digest=$(sha256sum "$archive_root/gh/$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz" | awk '{print $1}')
   append_release "$repository/versions.env" TOOL_RELEASES gh "$GH_VERSION" \
-    "https://example.invalid/gh_${GH_VERSION}_linux_amd64.tar.gz" "$digest"
+    "https://example.invalid/gh/$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz" "$digest"
 
   write_fake "$work/k9s" k9s "$K9S_VERSION"
   mkdir -p "$archive_root/k9s/$K9S_VERSION"
   tar -C "$work" -czf "$archive_root/k9s/$K9S_VERSION/k9s_Linux_amd64.tar.gz" k9s
   digest=$(sha256sum "$archive_root/k9s/$K9S_VERSION/k9s_Linux_amd64.tar.gz" | awk '{print $1}')
   append_release "$repository/versions.env" TOOL_RELEASES k9s "$K9S_VERSION" \
-    https://example.invalid/k9s_Linux_amd64.tar.gz "$digest"
+    "https://example.invalid/k9s/$K9S_VERSION/k9s_Linux_amd64.tar.gz" "$digest"
 
   write_fake "$archive_root/oh-my-posh/$OMP_VERSION/posh-linux-amd64" oh-my-posh "$OMP_VERSION"
   digest=$(sha256sum "$archive_root/oh-my-posh/$OMP_VERSION/posh-linux-amd64" | awk '{print $1}')
   append_release "$repository/versions.env" TOOL_RELEASES oh-my-posh "$OMP_VERSION" \
-    https://example.invalid/posh-linux-amd64 "$digest"
+    "https://example.invalid/oh-my-posh/$OMP_VERSION/posh-linux-amd64" "$digest"
 
   write_fake "$work/uv-x86_64-unknown-linux-gnu/uv" uv "$UV_VERSION"
   write_fake "$work/uv-x86_64-unknown-linux-gnu/uvx" uvx "$UV_VERSION"
@@ -105,7 +113,7 @@ make_archives() {
     uv-x86_64-unknown-linux-gnu
   digest=$(sha256sum "$archive_root/uv/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" | awk '{print $1}')
   append_release "$repository/versions.env" TOOL_RELEASES uv "$UV_VERSION" \
-    https://example.invalid/uv-x86_64-unknown-linux-gnu.tar.gz "$digest"
+    "https://example.invalid/uv/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$digest"
 
   write_fake "$work/nvim-linux-x86_64/bin/nvim" nvim "$NVIM_VERSION"
   mkdir -p "$work/nvim-linux-x86_64/share/nvim/runtime/syntax"
@@ -115,7 +123,7 @@ make_archives() {
     nvim-linux-x86_64
   digest=$(sha256sum "$archive_root/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" | awk '{print $1}')
   append_release "$repository/versions.env" TOOL_RELEASES nvim "$NVIM_VERSION" \
-    https://example.invalid/nvim-linux-x86_64.tar.gz "$digest"
+    "https://example.invalid/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" "$digest"
 }
 
 test_repository="$test_root/repository"
@@ -127,8 +135,20 @@ make_archives "$test_repository" "$archive_root"
 mkdir -p "$test_root/shim"
 cat >"$test_root/shim/curl" <<'EOF'
 #!/usr/bin/env bash
-printf 'curl must not run during local import\n' >&2
-exit 99
+set -euo pipefail
+destination=
+url=
+while (($#)); do
+  case $1 in
+    --output) destination=$2; shift 2 ;;
+    https://example.invalid/*) url=$1; shift ;;
+    *) shift ;;
+  esac
+done
+[[ -n $destination && -n $url ]] || exit 99
+source_file=$TEST_TOOL_ARCHIVES/${url#https://example.invalid/}
+[[ -f $source_file ]] || { printf 'download failed: %s\n' "$url" >&2; exit 22; }
+cp -- "$source_file" "$destination"
 EOF
 chmod 0755 "$test_root/shim/curl"
 
@@ -140,11 +160,10 @@ cp "$test_home/kube-log-prefixes.txt" "$test_root/kube-prefix-before"
 test_xdg=$test_root/'xdg elsewhere'
 
 before=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
-HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" PATH="$test_root/shim:$PATH" \
-  "$test_repository/setup-tools" --from "$archive_root" \
+XDG_CONFIG_HOME="$test_xdg" run_setup "$test_home" "$test_repository" "$archive_root" \
   k9s gh oh-my-posh uv nvim
 after=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
-[[ $before == "$after" ]] || fail 'local import changed an input file'
+[[ $before == "$after" ]] || fail 'setup-tools changed a download fixture'
 cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
   fail 'setup-tools changed kube-backup-contexts.txt'
 cmp "$test_root/kube-prefix-before" "$test_home/kube-log-prefixes.txt" ||
@@ -166,34 +185,21 @@ assert_link "$test_home/bin/nvim" "nvim-$NVIM_VERSION/bin/nvim"
 "$test_home/bin/uvx" --version | grep -F "$UV_VERSION" >/dev/null
 
 set +e
-empty_from_output=$(HOME="$test_root/empty-from-home" PATH="$test_root/shim:$PATH" \
-  "$test_repository/setup-tools" --from '' k9s 2>&1)
-empty_from_status=$?
+retired_from_output=$(run_setup "$test_root/retired-from-home" "$test_repository" \
+  "$archive_root" --from "$archive_root" k9s 2>&1)
+retired_from_status=$?
 set -e
-[[ $empty_from_status -ne 0 ]] || fail 'empty --from directory was accepted'
-[[ $empty_from_output == *'--from requires a nonempty directory'* ]] ||
-  fail 'empty --from directory did not report an argument error'
-[[ $empty_from_output != *'curl must not run'* ]] || fail 'empty --from attempted a download'
-[[ ! -e $test_root/empty-from-home/bin && ! -e $test_root/empty-from-home/.local ]] ||
-  fail 'empty --from changed the target home'
-
-set +e
-repeated_from_output=$(HOME="$test_root/repeated-from-home" PATH="$test_root/shim:$PATH" \
-  "$test_repository/setup-tools" --from "$archive_root" --from "$archive_root" k9s 2>&1)
-repeated_from_status=$?
-set -e
-[[ $repeated_from_status -ne 0 ]] || fail 'repeated --from option was accepted'
-[[ $repeated_from_output == *'--from may be supplied only once'* ]] ||
-  fail 'repeated --from option did not report an argument error'
-[[ ! -e $test_root/repeated-from-home/bin && ! -e $test_root/repeated-from-home/.local ]] ||
-  fail 'repeated --from changed the target home'
+[[ $retired_from_status -ne 0 && $retired_from_output == *'unknown option: --from'* ]] ||
+  fail 'setup-tools accepted the retired --from option'
+[[ ! -e $test_root/retired-from-home/bin && ! -e $test_root/retired-from-home/.local ]] ||
+  fail 'retired --from option changed the target home'
 
 unsupported_repository=$test_root/unsupported-repository
 unsupported_home=$test_root/unsupported-home
 make_test_repo "$unsupported_repository"
 printf 'DAILY_TOOLS+=(fzf)\n' >>"$unsupported_repository/versions.env"
-if HOME="$unsupported_home" "$unsupported_repository/setup-tools" \
-  --from "$archive_root" k9s >"$test_root/unsupported-profile.log" 2>&1; then
+if run_setup "$unsupported_home" "$unsupported_repository" "$archive_root" \
+  k9s >"$test_root/unsupported-profile.log" 2>&1; then
   fail 'setup-tools accepted a profile tool without a command adapter'
 fi
 [[ ! -e $unsupported_home/bin && ! -e $unsupported_home/.local ]] ||
@@ -205,8 +211,7 @@ write_fake "$foreign_home/bin/k9s-manual" k9s manual
 ln -s k9s-manual "$foreign_home/bin/k9s"
 foreign_hash=$(sha256sum "$foreign_home/bin/k9s-manual")
 set +e
-foreign_output=$(HOME="$foreign_home" "$test_repository/setup-tools" \
-  --from "$archive_root" k9s 2>&1)
+foreign_output=$(run_setup "$foreign_home" "$test_repository" "$archive_root" k9s 2>&1)
 foreign_status=$?
 set -e
 [[ $foreign_status -ne 0 ]] || fail 'foreign version-like link was accepted'
@@ -221,8 +226,7 @@ write_fake "$foreign_nvim_home/bin/nvim-v999/bin/nvim" nvim v999
 ln -s nvim-v999/bin/nvim "$foreign_nvim_home/bin/nvim"
 foreign_nvim_hash=$(sha256sum "$foreign_nvim_home/bin/nvim-v999/bin/nvim")
 set +e
-foreign_nvim_output=$(HOME="$foreign_nvim_home" "$test_repository/setup-tools" \
-  --from "$archive_root" nvim 2>&1)
+foreign_nvim_output=$(run_setup "$foreign_nvim_home" "$test_repository" "$archive_root" nvim 2>&1)
 foreign_nvim_status=$?
 set -e
 [[ $foreign_nvim_status -ne 0 ]] || fail 'foreign nvim-v* link was accepted'
@@ -245,10 +249,9 @@ tar -C "$unsafe_work" -czf \
 unsafe_digest=$(sha256sum \
   "$unsafe_archives/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" | awk '{print $1}')
 append_release "$unsafe_repository/versions.env" TOOL_RELEASES nvim "$NVIM_VERSION" \
-  https://example.invalid/nvim-linux-x86_64.tar.gz "$unsafe_digest"
+  "https://example.invalid/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" "$unsafe_digest"
 set +e
-unsafe_output=$(HOME="$unsafe_home" "$unsafe_repository/setup-tools" \
-  --from "$unsafe_archives" nvim 2>&1)
+unsafe_output=$(run_setup "$unsafe_home" "$unsafe_repository" "$unsafe_archives" nvim 2>&1)
 unsafe_status=$?
 set -e
 [[ $unsafe_status -ne 0 && $unsafe_output == *'archive link escapes its root'* ]] ||
@@ -310,13 +313,13 @@ daily_shellcheck_digest=$(sha256sum \
 daily_shellcheck_digest=${daily_shellcheck_digest%% *}
 append_release "$pin_repository/versions.env" TOOL_RELEASES shellcheck \
   "$daily_shellcheck" \
-  "https://example.invalid/shellcheck-v$daily_shellcheck.linux.x86_64.tar.xz" \
+  "https://example.invalid/shellcheck/$daily_shellcheck/shellcheck-v$daily_shellcheck.linux.x86_64.tar.xz" \
   "$daily_shellcheck_digest"
 append_release "$pin_repository/validation.env" VALIDATION_RELEASES shellcheck \
   "$validation_shellcheck" \
   "https://example.invalid/shellcheck-v$validation_shellcheck.linux.x86_64.tar.xz" \
   "$(printf '%064d' 0)"
-HOME="$pin_home" "$pin_repository/setup-tools" --from "$pin_archives" shellcheck
+run_setup "$pin_home" "$pin_repository" "$pin_archives" shellcheck
 assert_link "$pin_home/bin/shellcheck" "shellcheck-$daily_shellcheck"
 "$pin_home/bin/shellcheck" --version | grep -F "$daily_shellcheck" >/dev/null
 
@@ -331,9 +334,8 @@ load_test_versions "$upgrade_repository"
 upgrade_a_version=$K9S_VERSION
 upgrade_a_archive=$upgrade_archives/k9s/$upgrade_a_version/k9s_Linux_amd64.tar.gz
 upgrade_a_digest=$(sha256sum "$upgrade_a_archive" | awk '{print $1}')
-HOME="$upgrade_home" "$upgrade_repository/setup-tools" --from "$upgrade_archives" k9s
-HOME="$modified_upgrade_home" "$upgrade_repository/setup-tools" \
-  --from "$upgrade_archives" k9s
+run_setup "$upgrade_home" "$upgrade_repository" "$upgrade_archives" k9s
+run_setup "$modified_upgrade_home" "$upgrade_repository" "$upgrade_archives" k9s
 
 upgrade_b_version=0.51.1
 write_fake "$upgrade_work/k9s" k9s "$upgrade_b_version"
@@ -343,16 +345,16 @@ tar -C "$upgrade_work" -czf \
 upgrade_b_digest=$(sha256sum \
   "$upgrade_archives/k9s/$upgrade_b_version/k9s_Linux_amd64.tar.gz" | awk '{print $1}')
 append_release "$upgrade_repository/versions.env" TOOL_RELEASES k9s "$upgrade_b_version" \
-  https://example.invalid/k9s_Linux_amd64.tar.gz "$upgrade_b_digest"
-HOME="$upgrade_home" "$upgrade_repository/setup-tools" --from "$upgrade_archives" k9s
+  "https://example.invalid/k9s/$upgrade_b_version/k9s_Linux_amd64.tar.gz" "$upgrade_b_digest"
+run_setup "$upgrade_home" "$upgrade_repository" "$upgrade_archives" k9s
 assert_link "$upgrade_home/bin/k9s" "k9s-$upgrade_b_version"
 [[ -x $upgrade_home/bin/k9s-$upgrade_a_version ]] ||
   fail 'upgrade removed the retained A installation'
 
 printf '# modified A\n' >>"$modified_upgrade_home/bin/k9s-$upgrade_a_version"
 set +e
-modified_upgrade_output=$(HOME="$modified_upgrade_home" \
-  "$upgrade_repository/setup-tools" --from "$upgrade_archives" k9s 2>&1)
+modified_upgrade_output=$(run_setup "$modified_upgrade_home" \
+  "$upgrade_repository" "$upgrade_archives" k9s 2>&1)
 modified_upgrade_status=$?
 set -e
 [[ $modified_upgrade_status -ne 0 &&
@@ -361,9 +363,9 @@ set -e
 assert_link "$modified_upgrade_home/bin/k9s" "k9s-$upgrade_a_version"
 
 append_release "$upgrade_repository/versions.env" TOOL_RELEASES k9s "$upgrade_a_version" \
-  "https://example.invalid/k9s_Linux_amd64.tar.gz" "$upgrade_a_digest"
+  "https://example.invalid/k9s/$upgrade_a_version/k9s_Linux_amd64.tar.gz" "$upgrade_a_digest"
 find "$upgrade_archives" -depth -delete
-HOME="$upgrade_home" "$upgrade_repository/setup-tools" --from "$upgrade_archives" k9s
+run_setup "$upgrade_home" "$upgrade_repository" "$upgrade_archives" k9s
 assert_link "$upgrade_home/bin/k9s" "k9s-$upgrade_a_version"
 
 missing_default_repository=$test_root/missing-default-repository
@@ -375,8 +377,8 @@ printf 'TOOL_RELEASES[k9s]=%q\n' \
   $'\n0.51.1|-|-\n0.51.0|https://example.invalid/k9s_Linux_amd64.tar.gz|c3752ad51a5a4015a113819c4eeb6e55a4d0e4b8e652494797532f6fc8161dd7\n' \
   >>"$missing_default_repository/versions.env"
 set +e
-missing_default_output=$(HOME="$missing_default_home" \
-  "$missing_default_repository/setup-tools" --from "$missing_default_archives" k9s 2>&1)
+missing_default_output=$(run_setup "$missing_default_home" \
+  "$missing_default_repository" "$missing_default_archives" k9s 2>&1)
 missing_default_status=$?
 set -e
 [[ $missing_default_status -ne 0 &&
@@ -394,8 +396,7 @@ for invalid_list in '' '   '; do
   printf 'TOOL_RELEASES[terraform]=%q\n' "$invalid_list" \
     >>"$list_repository/versions.env"
   set +e
-  list_output=$(HOME="$list_home" "$list_repository/setup-tools" \
-    --from "$list_archives" k9s 2>&1)
+  list_output=$(run_setup "$list_home" "$list_repository" "$list_archives" k9s 2>&1)
   list_status=$?
   set -e
   [[ $list_status -ne 0 ]] || fail 'empty project version list was accepted'
@@ -413,39 +414,42 @@ make_archives "$single_repository" "$single_archives"
 append_release "$single_repository/versions.env" TOOL_RELEASES terraform \
   1.16.4 https://example.invalid/terraform.zip \
   dc94af0eef1147718ad7c8daea792ed199e3e0492eec180d0adafa2a65a879df
-HOME="$single_home" "$single_repository/setup-tools" --from "$single_archives" k9s
+run_setup "$single_home" "$single_repository" "$single_archives" k9s
 assert_link "$single_home/bin/k9s" "k9s-$K9S_VERSION"
 
 find "$archive_root" -depth -delete
-HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" PATH="$test_root/shim:$PATH" \
-  "$test_repository/setup-tools" --from "$archive_root" k9s gh uv nvim
+XDG_CONFIG_HOME="$test_xdg" run_setup "$test_home" "$test_repository" "$archive_root" \
+  k9s gh uv nvim
 cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
   fail 'setup-tools reconciliation changed kube-backup-contexts.txt'
 cmp "$test_root/kube-prefix-before" "$test_home/kube-log-prefixes.txt" ||
   fail 'setup-tools reconciliation changed kube-log-prefixes.txt'
 
 set +e
-missing_output=$(HOME="$test_root/missing-home" "$test_repository/setup-tools" \
-  --from "$test_root/missing archive" k9s 2>&1)
+missing_output=$(run_setup "$test_root/missing-home" "$test_repository" \
+  "$test_root/missing archive" k9s 2>&1)
 missing_status=$?
 set -e
-[[ $missing_status -ne 0 ]] || fail 'missing local archive was accepted'
-[[ $missing_output == *"$test_root/missing archive/k9s/$K9S_VERSION/k9s_Linux_amd64.tar.gz"* ]] ||
-  fail 'missing local archive did not report its exact path'
+[[ $missing_status -eq 22 &&
+  $missing_output == *"download failed: https://example.invalid/k9s/$K9S_VERSION/k9s_Linux_amd64.tar.gz"* ]] ||
+  fail 'setup-tools hid the failed download'
+[[ ! -e $test_root/missing-home/bin/k9s && ! -L $test_root/missing-home/bin/k9s &&
+  ! -e $test_root/missing-home/bin/k9s-$K9S_VERSION ]] ||
+  fail 'failed download installed or selected a tool'
 
 failure_repo="$test_root/failure-repository"
 failure_archives="$test_root/failure-archives"
 failure_home="$test_root/failure-home"
 make_test_repo "$failure_repo"
 make_archives "$failure_repo" "$failure_archives"
-HOME="$failure_home" "$failure_repo/setup-tools" --from "$failure_archives" k9s
+run_setup "$failure_home" "$failure_repo" "$failure_archives" k9s
 old_target=$(readlink -- "$failure_home/bin/k9s")
 write_fake "$failure_archives/k9s/0.51.1/k9s_Linux_amd64.tar.gz" k9s 0.51.1
 append_release "$failure_repo/versions.env" TOOL_RELEASES k9s 0.51.1 \
-  https://example.invalid/k9s_Linux_amd64.tar.gz \
+  https://example.invalid/k9s/0.51.1/k9s_Linux_amd64.tar.gz \
   0000000000000000000000000000000000000000000000000000000000000000
 set +e
-HOME="$failure_home" "$failure_repo/setup-tools" --from "$failure_archives" k9s >/dev/null 2>&1
+run_setup "$failure_home" "$failure_repo" "$failure_archives" k9s >/dev/null 2>&1
 checksum_status=$?
 set -e
 [[ $checksum_status -ne 0 ]] || fail 'bad checksum was accepted'
@@ -477,17 +481,16 @@ EOF
 chmod 0755 "$test_root/fail-bin/mv"
 real_mv=$(command -v mv)
 set +e
-HOME="$recovery_home" PATH="$test_root/fail-bin:$PATH" \
-  TEST_REAL_MV="$real_mv" TEST_MV_MARKER="$test_root/mv-failed" \
-  "$recovery_repo/setup-tools" --from "$recovery_archives" k9s >/dev/null 2>&1
+PATH="$test_root/fail-bin:$PATH" TEST_REAL_MV="$real_mv" \
+  TEST_MV_MARKER="$test_root/mv-failed" \
+  run_setup "$recovery_home" "$recovery_repo" "$recovery_archives" k9s >/dev/null 2>&1
 publish_status=$?
 set -e
 [[ $publish_status -eq 73 ]] || fail 'state publication fixture returned an unexpected status'
 [[ -f $recovery_home/bin/k9s-$K9S_VERSION ]] || fail 'failed publication lost installed content'
 [[ ! -L $recovery_home/bin/k9s ]] || fail 'failed publication changed the selection'
 find "$recovery_archives" -depth -delete
-HOME="$recovery_home" "$recovery_repo/setup-tools" \
-  --from "$recovery_archives" k9s
+run_setup "$recovery_home" "$recovery_repo" "$recovery_archives" k9s
 assert_link "$recovery_home/bin/k9s" "k9s-$K9S_VERSION"
 
 pair_repo="$test_root/pair-repository"
@@ -496,7 +499,7 @@ pair_home="$test_root/pair-home"
 pair_work="$test_root/pair-work"
 make_test_repo "$pair_repo"
 make_archives "$pair_repo" "$pair_archives"
-HOME="$pair_home" "$pair_repo/setup-tools" --from "$pair_archives" uv
+run_setup "$pair_home" "$pair_repo" "$pair_archives" uv
 old_uv_target=$(readlink -- "$pair_home/bin/uv")
 old_uvx_target=$(readlink -- "$pair_home/bin/uvx")
 new_uv_version=0.12.20
@@ -509,7 +512,7 @@ tar -C "$pair_work" -czf \
 new_uv_digest=$(sha256sum \
   "$pair_archives/uv/$new_uv_version/uv-x86_64-unknown-linux-gnu.tar.gz" | awk '{print $1}')
 append_release "$pair_repo/versions.env" TOOL_RELEASES uv "$new_uv_version" \
-  https://example.invalid/uv-x86_64-unknown-linux-gnu.tar.gz "$new_uv_digest"
+  "https://example.invalid/uv/$new_uv_version/uv-x86_64-unknown-linux-gnu.tar.gz" "$new_uv_digest"
 mkdir -p "$test_root/activation-fail-bin"
 cat >"$test_root/activation-fail-bin/mv" <<'EOF'
 #!/usr/bin/env bash
@@ -530,9 +533,9 @@ exec "$TEST_REAL_MV" "$@"
 EOF
 chmod 0755 "$test_root/activation-fail-bin/mv"
 set +e
-HOME="$pair_home" PATH="$test_root/activation-fail-bin:$PATH" \
-  TEST_REAL_MV="$real_mv" TEST_MV_MARKER="$test_root/activation-mv-failed" \
-  "$pair_repo/setup-tools" --from "$pair_archives" uv >/dev/null 2>&1
+PATH="$test_root/activation-fail-bin:$PATH" TEST_REAL_MV="$real_mv" \
+  TEST_MV_MARKER="$test_root/activation-mv-failed" \
+  run_setup "$pair_home" "$pair_repo" "$pair_archives" uv >/dev/null 2>&1
 activation_status=$?
 set -e
 [[ $activation_status -eq 74 ]] || fail 'activation fixture returned an unexpected status'
@@ -541,8 +544,7 @@ assert_link "$pair_home/bin/uvx" "$old_uvx_target"
 
 mkdir -p "$failure_home/.local/state/dotfiles/setup-tools/locks/k9s.lock"
 set +e
-lock_output=$(HOME="$failure_home" "$failure_repo/setup-tools" \
-  --from "$failure_archives" k9s 2>&1)
+lock_output=$(run_setup "$failure_home" "$failure_repo" "$failure_archives" k9s 2>&1)
 lock_status=$?
 set -e
 [[ $lock_status -ne 0 ]] || fail 'concurrent setup lock was ignored'
@@ -551,8 +553,7 @@ set -e
 
 printf 'changed\n' >>"$recovery_home/bin/k9s-$K9S_VERSION"
 set +e
-modified_output=$(HOME="$recovery_home" "$recovery_repo/setup-tools" \
-  --from "$recovery_archives" k9s 2>&1)
+modified_output=$(run_setup "$recovery_home" "$recovery_repo" "$recovery_archives" k9s 2>&1)
 modified_status=$?
 set -e
 [[ $modified_status -ne 0 ]] || fail 'modified retained installation was accepted'

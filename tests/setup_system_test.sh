@@ -78,6 +78,16 @@ EOF
 chmod 0755 "$fixture_bin/sudo" "$fixture_bin/apt-get" "$fixture_bin/dnf" \
   "$fixture_bin/rpm"
 
+if PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \
+  "$repo_dir/setup-system" --runtime >"$test_root/retired-flag.log" 2>&1; then
+  fail 'setup-system accepted the retired --runtime flag'
+fi
+if PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \
+  "$repo_dir/setup-system" --offline-release extra >"$test_root/extra-argument.log" 2>&1; then
+  fail 'setup-system accepted an argument after --offline-release'
+fi
+[[ ! -e $package_log ]] || fail 'invalid arguments reached the package manager'
+
 for command_name in curl file gpg gpg-agent htop jq make mc python3 tmux vi vim; do
   ln -s /bin/true "$fixture_bin/$command_name"
 done
@@ -85,16 +95,16 @@ done
 for _ in 1 2; do
   PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \
     SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
-    "$repo_dir/setup-system" --runtime >/dev/null
+    "$repo_dir/setup-system" --offline-release >/dev/null
 done
 [[ $(grep -c $'^apt-get\tupdate$' "$package_log") -eq 2 ]] ||
-  fail 'runtime setup did not repeat the package index refresh'
+  fail 'offline-release setup did not repeat the package index refresh'
 [[ $(grep -c 'libevent-core-2.1-7t64' "$package_log") -eq 2 ]] ||
-  fail 'runtime setup omitted libevent runtime'
+  fail 'offline-release setup omitted libevent runtime'
 [[ $(grep -c 'diffutils' "$package_log") -eq 2 ]] ||
-  fail 'runtime setup omitted cmp runtime'
+  fail 'offline-release setup omitted cmp runtime'
 if grep $'^apt-get\tinstall' "$package_log" | grep -Eq $'\t(python3|tmux|build-essential)(\t|$)'; then
-  fail 'runtime setup included a connected-only package'
+  fail 'offline-release setup included a connected-only package'
 fi
 
 : >"$package_log"
@@ -149,11 +159,11 @@ fi
 set +e
 PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \
   TEST_PACKAGE_FAIL=apt-get:update SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
-  "$repo_dir/setup-system" --runtime >/dev/null 2>&1
+  "$repo_dir/setup-system" --offline-release >/dev/null 2>&1
 apt_failure=$?
 PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" TEST_RPM_MINIMAL=0 \
   TEST_PACKAGE_FAIL=dnf:install SETUP_SYSTEM_OS_RELEASE_FILE="$amazon_release" \
-  "$repo_dir/setup-system" --runtime >/dev/null 2>&1
+  "$repo_dir/setup-system" --offline-release >/dev/null 2>&1
 dnf_failure=$?
 set -e
 [[ $apt_failure -eq 71 ]] || fail 'apt failure was hidden'

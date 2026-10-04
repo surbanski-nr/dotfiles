@@ -6,8 +6,17 @@ Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2023.
 
 ## Setup
 
-The complete connected and restricted procedures, exact tool ownership,
-archive layout and private input files are in [SETUP.md](SETUP.md).
+The complete connected and offline-release procedures, exact tool ownership
+and private input files are in [SETUP.md](SETUP.md).
+
+The preferred deployment is a complete offline release, built on a connected
+machine and installed without network access. Each release contains its own
+tools, including every pinned kubectl and Helm version. `KUBECTL_VERSION` and
+`HELM_VERSION` select a bundled client; unset or empty selects the first catalog
+record. No asdf installation or shims are needed for this route.
+Prepare the target's system prerequisites with `./setup-system --offline-release`
+while its package repositories are reachable, then install the complete archive
+with `dotfiles-release`. Do not run `setup-tools` or `setup-asdf` for this route.
 
 On a connected machine, run the reviewed entry points as the intended ordinary
 user. Only `setup-system` uses `sudo`:
@@ -15,6 +24,7 @@ user. Only `setup-system` uses `sudo`:
 ```bash
 ./setup-system
 ./setup-tools
+# Optional online project runtimes, including .tool-versions support:
 ./setup-asdf
 
 for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
@@ -49,6 +59,7 @@ Release data is explicit: `versions.env` contains ordered
 `validation.env` owns validator records, including the only Task pin. The
 first record is the default. `ASDF_PLUGINS` separately pins plugin repositories
 and commits; asdf keeps responsibility for fetching and verifying its plugins.
+Asdf remains an optional online provider, independent of offline releases.
 The tmux plugin `*_REPO` and `*_COMMIT` pairs also live in `versions.env`.
 
 The Kubernetes prompt segment is disabled by default. Run `kp` to toggle it

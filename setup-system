@@ -4,12 +4,13 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: setup-system [--runtime]
+Usage: setup-system [--offline-release]
 
 Install the approved operating-system packages on Debian 13, Ubuntu 24.04,
 Ubuntu 26.04 or Amazon Linux 2023. This is the only setup entry point that
-uses root privileges. --runtime installs only prerequisites for a prepared
-offline release.
+uses root privileges. With no flag, install packages for connected setup.
+--offline-release installs only system prerequisites for a prepared release.
+Both modes need access to the operating-system package repositories.
 EOF
 }
 
@@ -17,7 +18,10 @@ main() {
   MODE=connected
   case ${1:-} in
     '') ;;
-    --runtime) (($# == 1)) || report_error '--runtime takes no arguments'; MODE=runtime ;;
+    --offline-release)
+      (($# == 1)) || report_error '--offline-release takes no arguments'
+      MODE=runtime
+      ;;
     -h | --help) (($# == 1)) || report_error 'help takes no arguments'; usage; return 0 ;;
     *) report_error "unexpected argument: $1" ;;
   esac
@@ -62,8 +66,10 @@ verify_packages() {
       command -v "$command_name" >/dev/null 2>&1 ||
         report_error "package installation did not provide $command_name"
     done
+    printf 'setup-system: connected packages ready on %s\n' "$PLATFORM"
+  else
+    printf 'setup-system: offline-release prerequisites ready on %s\n' "$PLATFORM"
   fi
-  printf 'setup-system: %s packages ready on %s\n' "$MODE" "$PLATFORM"
 }
 
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)

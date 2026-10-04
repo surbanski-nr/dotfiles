@@ -42,7 +42,7 @@ RELEASE_METADATA_FIELDS=(
   NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION
   PYTHON_VERSION PYTHON_BUILD TMUX_VERSION RG_VERSION FZF_VERSION
   ZOXIDE_VERSION K9S_VERSION KUBECTX_VERSION OMP_VERSION TASK_VERSION
-  TERRAFORM_VERSION OFFLINE_TOOLS PAYLOAD_PATHS
+  TERRAFORM_VERSION KUBECTL_VERSIONS HELM_VERSIONS OFFLINE_TOOLS PAYLOAD_PATHS
 )
 
 die() {
@@ -142,7 +142,8 @@ metadata_value() {
 }
 
 read_release_metadata() {
-  local file=$1 map_name=$2 line key value required allowed
+  local file=$1 map_name=$2 line key value required allowed version seen
+  local -a versions=()
   local -n parsed=$map_name
 
   [[ -f $file && ! -L $file ]] || { die "invalid release metadata file: $file"; return 1; }
@@ -183,10 +184,22 @@ read_release_metadata() {
     [[ ${parsed[$key]} =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] ||
       { die "invalid release tool version: $key"; return 1; }
   done
+  for key in KUBECTL_VERSIONS HELM_VERSIONS; do
+    value=${parsed[$key]}
+    [[ $value != *, ]] || { die "invalid release version list: $key"; return 1; }
+    IFS=, read -r -a versions <<<"$value"
+    seen=' '
+    for version in "${versions[@]}"; do
+      [[ $version =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ &&
+        $seen != *" $version "* ]] ||
+        { die "invalid release version list: $key"; return 1; }
+      seen+="$version "
+    done
+  done
   [[ ${parsed[PYTHON_BUILD]} =~ ^[0-9]{8}$ ]] ||
     { die 'invalid standalone Python build'; return 1; }
   [[ ${parsed[OFFLINE_TOOLS]} == \
-    nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform ]] ||
+    nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm ]] ||
     { die 'release metadata has an invalid offline tool profile'; return 1; }
   [[ ${parsed[PAYLOAD_PATHS]} == \
     bin,config,dotfiles,python-locks,python-wheelhouse,share,tools ]] ||
@@ -540,7 +553,7 @@ managed_path_target_valid() {
       command_name=${path##*/}
       case $command_name in
         dotfiles-release | nvim | tmux | node | npm | npx | corepack | rg | zoxide | \
-          k9s | kubectx | kubens | oh-my-posh | task | fzf | terraform) ;;
+          k9s | kubectx | kubens | oh-my-posh | task | fzf | terraform | kubectl | helm) ;;
         *) return 1 ;;
       esac
       [[ $target == "../dotfiles-releases/current/bin/$command_name" ]]
@@ -1267,7 +1280,7 @@ PY
 }
 
 health_cli_operations() {
-  local release=$1 health_home=$2 work output
+  local release=$1 health_home=$2 work output versions version
   work=$health_home/cli
 
   mkdir -p "$work/project" || return
@@ -1309,10 +1322,19 @@ health_cli_operations() {
   printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' \
     '  name: {{ .Release.Name }}' >"$work/chart/templates/config.yaml" || return
   (cd "$work/chart" && "$release/share/nvim2/mason/bin/helm_ls" lint) || return
+  versions=$(metadata_value "$release/release.env" HELM_VERSIONS) || return
+  for version in ${versions//,/ }; do
+    output=$(HELM_VERSION="$version" HELM_CONFIG_HOME="$health_home/helm/config" \
+      HELM_CACHE_HOME="$health_home/helm/cache" HELM_DATA_HOME="$health_home/helm/data" \
+      "$release/bin/helm" template offline-health "$work/chart") || return
+    printf '%s\n' "$output"
+    [[ $output == *'name: offline-health'* ]] ||
+      { die "Helm $version did not render the local chart"; return 1; }
+  done
 }
 
 health_kubernetes_tools() {
-  local release=$1 health_home=$2 kubeconfig output
+  local release=$1 health_home=$2 kubeconfig output versions version
   kubeconfig=$health_home/kubeconfig
 
   mkdir -p "$health_home/.config" || return
@@ -1334,6 +1356,14 @@ health_kubernetes_tools() {
     '- name: offline-b' \
     '  context: {cluster: offline-b, user: offline, namespace: default}' \
     'current-context: offline-a' >"$kubeconfig" || return
+
+  versions=$(metadata_value "$release/release.env" KUBECTL_VERSIONS) || return
+  for version in ${versions//,/ }; do
+    output=$(KUBECTL_VERSION="$version" KUBECONFIG="$kubeconfig" \
+      "$release/bin/kubectl" config current-context) || return
+    [[ $output == offline-a ]] ||
+      { die "kubectl $version did not read the isolated kubeconfig"; return 1; }
+  done
 
   output=$(KUBECONFIG="$kubeconfig" "$release/bin/kubectx" --current) || return
   printf 'kubectx-current=%s\n' "$output"
@@ -1424,7 +1454,7 @@ health_bash() {
 
   mkdir -p "$health_home/bin" || return
   for command_name in dotfiles-release nvim tmux node npm npx corepack rg zoxide \
-    k9s kubectx kubens oh-my-posh task fzf terraform; do
+    k9s kubectx kubens oh-my-posh task fzf terraform kubectl helm; do
     ln -s "$release/bin/$command_name" "$health_home/bin/$command_name" || return
   done
   ln -s "$release/dotfiles/bash/.bashrc" "$health_home/.bashrc" || return
@@ -1468,7 +1498,9 @@ health_version() {
 health_release() {
   local release_id=$1 mode=${2:-full} release command_name path check_script health_home
   local PATH output expected field arguments probe DOTFILES_OFFLINE_RELEASE_ROOT
-  local -a probe_args=()
+  local KUBECTL_VERSION='' HELM_VERSION=''
+  local tool version serialized
+  local -a probe_args=() versions=()
   local -A release_metadata=()
 
   [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
@@ -1476,6 +1508,7 @@ health_release() {
   release=$RELEASE_ROOT/$release_id
   DOTFILES_OFFLINE_RELEASE_ROOT=$release
   export DOTFILES_OFFLINE_RELEASE_ROOT
+  export KUBECTL_VERSION HELM_VERSION
   PATH="$release/bin:$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/share/nvim2/mason/bin:/usr/bin:/bin"
   export PATH
   validate_release_directory "$release" || return
@@ -1501,6 +1534,24 @@ health_release() {
     read -r -a probe_args <<<"$arguments"
     output=$("$release/bin/$command_name" "${probe_args[@]}") || return
     health_version "$command_name" "$expected" "$output" || return
+  done
+  for tool in kubectl helm; do
+    field=${tool^^}_VERSIONS
+    serialized=${release_metadata[$field]}
+    IFS=, read -r -a versions <<<"$serialized"
+    case $tool in
+      kubectl) probe_args=(version --client=true) ;;
+      helm) probe_args=(version --short) ;;
+    esac
+    output=$("$release/bin/$tool" "${probe_args[@]}") || return
+    health_version "$tool" "${versions[0]}" "$output" || return
+    for version in "${versions[@]}"; do
+      output=$(env "${tool^^}_VERSION=$version" \
+        "$release/bin/$tool" "${probe_args[@]}") || return
+      health_version "$tool" "$version" "$output" || return
+      output=$("$release/bin/$tool-$version" "${probe_args[@]}") || return
+      health_version "$tool-$version" "$version" "$output" || return
+    done
   done
   for command_name in tmux-sensible tmux-resurrect tmux-continuum; do
     [[ -d $release/share/tmux/plugins/$command_name/.git ]] ||

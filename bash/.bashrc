@@ -100,6 +100,11 @@ for _dotfiles_path_entry in "${_dotfiles_path_entries[@]}"; do
     continue
     ;;
   esac
+  if $_dotfiles_release_mode &&
+    [[ $_dotfiles_path_entry == "$HOME/.asdf/shims" ||
+      $_dotfiles_path_entry == "${ASDF_DATA_DIR:-$HOME/.asdf}/shims" ]]; then
+    continue
+  fi
   if [[ -n $_dotfiles_previous_auto_root &&
     $_dotfiles_path_entry == "$_dotfiles_previous_auto_root/scripts" ]]; then
     continue
@@ -112,7 +117,6 @@ export PATH
 unset _dotfiles_path_entries _dotfiles_path_entry _dotfiles_clean_path _dotfiles_previous_auto_root
 
 if $_dotfiles_release_mode; then
-  add_to_path "$HOME/.asdf/shims"
   add_to_path "$HOME/.krew/bin"
   add_to_path "$DOTFILES/scripts"
   add_to_path "$HOME/.local/bin"

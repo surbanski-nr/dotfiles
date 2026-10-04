@@ -51,6 +51,16 @@ release=${self%/tools/nvim/bin/nvim}
 [[ ${DOTFILES_OFFLINE_RELEASE_ROOT:-} == "$release" ]] || exit 96
 EOF
   fi
+  if [[ ${path##*/} == kubectl-* || ${path##*/} == helm-* ]]; then
+    cat >>"$path" <<'EOF'
+if [[ ${1:-} == fixture-args ]]; then
+  shift
+  printf '<%s>\n' "$@"
+elif [[ ${1:-} == fixture-fail ]]; then
+  exit 42
+fi
+EOF
+  fi
   chmod 0755 "$path"
 }
 
@@ -88,7 +98,7 @@ make_artifact() {
   local release_version=${4:-1.0}
   local id=dotfiles-${commit:0:12}
   local stage=$test_root/stage-$marker release=$test_root/stage-$marker/$id
-  local command_name plugin plugin_dir
+  local command_name plugin plugin_dir version
 
   mkdir -p "$release/bin" "$release/config/nvim2/tests" \
     "$release/dotfiles/bash" "$release/dotfiles/git" \
@@ -111,6 +121,14 @@ make_artifact() {
     oh-my-posh task fzf terraform; do
     write_fake_tool "$release/tools/bin/$command_name" "$release_version"
     ln -s "../tools/bin/$command_name" "$release/bin/$command_name"
+  done
+  for command_name in kubectl helm; do
+    for version in "$release_version" 0.9; do
+      write_fake_tool "$release/tools/bin/$command_name-$version" "$version"
+      ln -s "../tools/bin/$command_name-$version" "$release/bin/$command_name-$version"
+    done
+    ln -s "$command_name-$release_version" "$release/tools/bin/$command_name"
+    install -m 0755 "$repo_dir/scripts/offline-kubernetes-client" "$release/bin/$command_name"
   done
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python"
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python3"
@@ -200,7 +218,9 @@ make_artifact() {
     "OMP_VERSION=$release_version" \
     "TASK_VERSION=$release_version" \
     "TERRAFORM_VERSION=$release_version" \
-    'OFFLINE_TOOLS=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform' \
+    "KUBECTL_VERSIONS=$release_version,0.9" \
+    "HELM_VERSIONS=$release_version,0.9" \
+    'OFFLINE_TOOLS=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm' \
     'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
     >"$release/release.env"
   printf 'marker=%s\n' "$marker" >"$release/build-manifest.txt"
@@ -919,6 +939,28 @@ test_home="$test_root/nonstandard home"
 run_manager verify debian-13-x86_64 "$artifact_one"
 assert_link "$test_home/dotfiles-releases/current" "$id_one"
 assert_link "$test_home/bin/rg" '../dotfiles-releases/current/bin/rg'
+for client in kubectl helm; do
+  assert_link "$test_home/bin/$client" "../dotfiles-releases/current/bin/$client"
+  [[ $(env -u KUBECTL_VERSION -u HELM_VERSION "$test_home/bin/$client") == *'fixture 1.0'* ]] ||
+    fail "$client did not select the default version"
+  [[ $(env "${client^^}_VERSION=0.9" "$test_home/bin/$client") == *'fixture 0.9'* ]] ||
+    fail "$client did not select the requested version"
+  [[ $(env "${client^^}_VERSION=0.9" "$test_home/bin/$client" fixture-args \
+    'argument with spaces' '*' '--flag=value') == *$'<argument with spaces>\n<*>\n<--flag=value>' ]] ||
+    fail "$client changed its arguments"
+  set +e
+  env "${client^^}_VERSION=0.9" "$test_home/bin/$client" fixture-fail >/dev/null
+  client_status=$?
+  set -e
+  [[ $client_status -eq 42 ]] || fail "$client did not preserve its exit status"
+  for requested_version in 99.0 ../../bin/rg; do
+    if env "${client^^}_VERSION=$requested_version" "$test_home/bin/$client" \
+      >"$test_root/$client-error.log" 2>&1; then
+      fail "$client accepted an unavailable or invalid version"
+    fi
+  done
+done
+KUBECTL_VERSION=99.0 HELM_VERSION=99.0 run_manager health >/dev/null
 assert_link "$test_home/.config/k9s/config.yaml" \
   "$test_home/dotfiles-releases/current/dotfiles/k9s/.config/k9s/config.yaml"
 [[ $(<"$test_home/kube-backup-contexts.txt") == 'private contexts' ]] || fail 'private contexts changed'
@@ -952,6 +994,10 @@ run_manager install "$artifact_one"
 
 process_record=$test_root/process-record
 run_manager install "$artifact_two"
+[[ $("$test_home/bin/kubectl") == *'fixture 2.0'* &&
+  $("$test_home/bin/helm") == *'fixture 2.0'* &&
+  $(KUBECTL_VERSION=0.9 "$test_home/bin/kubectl") == *'fixture 0.9'* ]] ||
+  fail 'client launchers did not follow the active release'
 [[ $(sed -n 's/^NODE_VERSION=//p' "$test_home/dotfiles-releases/$id_one/release.env") == 1.0 &&
   $(sed -n 's/^NODE_VERSION=//p' "$test_home/dotfiles-releases/$id_two/release.env") == 2.0 ]] ||
   fail 'A/B fixtures do not carry distinct release versions'
@@ -968,6 +1014,9 @@ grep -F "$id_one/tools/nvim/bin/nvim" "$process_record" >/dev/null ||
   fail 'running process did not stay on its physical release'
 assert_link "$test_home/dotfiles-releases/current" "$id_one"
 assert_link "$test_home/dotfiles-releases/previous" "$id_two"
+[[ $("$test_home/bin/kubectl") == *'fixture 1.0'* &&
+  $("$test_home/bin/helm") == *'fixture 1.0'* ]] ||
+  fail 'client launchers did not follow rollback'
 
 set +e
 DOTFILES_RELEASE_TEST_FAIL_PHASE=after-publish run_manager install "$artifact_three" >/dev/null 2>&1
@@ -1177,6 +1226,9 @@ set -e
 mv -T "$ownership_file.current" "$ownership_file"
 run_manager uninstall
 [[ $(<"$test_home/.bashrc") == 'original bashrc' ]] || fail 'uninstall did not restore the original bashrc'
+[[ ! -e $test_home/bin/kubectl && ! -L $test_home/bin/kubectl &&
+  ! -e $test_home/bin/helm && ! -L $test_home/bin/helm ]] ||
+  fail 'baseline restore retained public offline client links'
 assert_link "$test_home/bin/rg" rg-0.9
 [[ -x $test_home/bin/rg-0.9 ]] || fail 'uninstall did not restore the setup-tools payload'
 [[ -d $test_home/.config/nvim2 && ! -L $test_home/.config/nvim2 ]] ||

@@ -285,7 +285,7 @@ write_asdf_fixture "$default_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
 ln -s "asdf-$ASDF_VERSION" "$default_home/bin/asdf"
 record_asdf_fixture "$default_home" "asdf-$ASDF_VERSION"
 HOME="$default_home" TEST_ASDF_LOG="$default_log" "$default_repo/setup-asdf"
-[[ $(grep -c '^install' "$default_log") -eq 9 ]] ||
+[[ $(grep -c '^install' "$default_log") -eq 10 ]] ||
   fail 'default setup-asdf did not install every catalog runtime version'
 [[ $(grep -c '^set' "$default_log") -eq 6 ]] ||
   fail 'default setup-asdf did not select every home default'

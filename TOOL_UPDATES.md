@@ -77,23 +77,9 @@ The checkout mounts are read-only and the candidate home is a disposable
 Delete a rejected candidate with `rm -rf -- "$candidate_root"`; it cannot have
 changed the normal selection.
 
-For a restricted candidate, prepare the exact upstream file in the layout
-documented in [SETUP.md](SETUP.md), mount it read-only, add `--network none`,
-and use a separate empty home:
-
-```bash
-docker run --rm --network none \
-  --tmpfs /home/candidate:exec,uid=1000,gid=1000 \
-  --mount "type=bind,src=$candidate_root/candidate,dst=/src,readonly" \
-  --mount "type=bind,src=$HOME/tool-archives,dst=/archives,readonly" \
-  "$image" sh -euxc '
-    useradd --uid 1000 --home-dir /home/candidate candidate
-    chown candidate:candidate /home/candidate
-    su candidate -s /bin/bash -c '\''set -euo pipefail
-      HOME=/home/candidate /src/setup-tools --from /archives k9s
-      "$HOME/bin/k9s" version --short'\''
-  '
-```
+For an offline candidate, build and verify a complete platform release using
+[SETUP.md](SETUP.md#complete-offline-release). Do not assemble or import
+individual tool archives with `setup-tools`; that script is connected-only.
 
 After the disposable trial, run the setup qualification on Debian 13, Ubuntu
 24.04, Ubuntu 26.04 and Amazon Linux 2023. A successful container trial alone
@@ -111,15 +97,14 @@ ls -l "$HOME/bin/k9s"*
 
 For a persistent rollback, put the earlier complete
 `version|full_URL|SHA256` record first for that tool in `TOOL_RELEASES`, then
-run one of these commands from that reviewed revision:
+run this command from that reviewed revision:
 
 ```bash
 ./setup-tools k9s
-./setup-tools --from "$HOME/tool-archives" k9s
 ```
 
-If the retained installation is intact, neither command needs its old source
-file. If it is absent, the restricted command reports the exact required path.
+If the retained installation is intact, the script reuses it without a new
+download. If it is absent, the script downloads the pinned release again.
 The same procedure applies to `gh`, `oh-my-posh`, `rg` and the complete
 `nvim-VERSION` executable tree. Change `validation.env` for Task's private
 validation bootstrap. A daily ShellCheck change belongs in `versions.env`;
@@ -180,9 +165,31 @@ ansible-lint or yamllint. The resulting venv executables remain below the
 Mason package tree; the release launcher puts the ansible-lint venv,
 `release/bin` and `mason/bin` on `PATH` in that order.
 
-## Project runtime rollback
+## Offline kubectl and Helm versions
 
-Project runtimes remain under asdf. Put the earlier release record first for
+Keep each needed exact client version in `versions.env` as a complete
+`version|full_URL|SHA256` record. The builder bundles every kubectl and Helm
+record into each release, with the first record as its default. To add a
+version, append a verified upstream record; to change the default, move the
+required record first. Remove an old record only when it is no longer needed.
+Do not change the launcher, regenerate Python locks or edit `release.env`.
+Run `task validate`, build the matching platform package and qualify its
+offline install and health before deploying.
+
+```bash
+KUBECTL_VERSION=1.34.12 kubectl version --client
+HELM_VERSION=3.22.0 helm version --short
+unset KUBECTL_VERSION HELM_VERSION
+```
+
+A missing selection fails rather than downloading or using asdf. Whole-release
+rollback selects the previous payload and its defaults; a shell override stays
+set until you unset it, so it must also exist in the selected release.
+
+## Online project runtime rollback
+
+Optional online project runtimes remain under asdf. Offline releases do not
+install or use asdf. Put the earlier release record first for
 the tool in `TOOL_RELEASES`, then reconcile it:
 
 ```bash
@@ -197,14 +204,14 @@ same-named launchers in `~/bin`. After changing Node.js or global npm tools,
 run `asdf reshim nodejs VERSION` and check both `node --version` and
 `npm --version`.
 
-Direct restricted kubectl and Helm installations are the sole multi-version
-case in `setup-tools`. Run a version-qualified executable temporarily, or put
-the required version first and rerun the importer:
+Outside complete releases, online direct kubectl and Helm installations are
+the multi-version case in `setup-tools`. Run a version-qualified executable
+temporarily, or put the required version first and rerun setup:
 
 ```bash
 "$HOME/bin/kubectl-1.27.11" version --client
 "$HOME/bin/helm-3.22.0" version --short
-./setup-tools --from "$HOME/tool-archives" kubectl helm
+./setup-tools kubectl helm
 ```
 
 To roll back asdf itself or a plugin, restore its executable version, digest

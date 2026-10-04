@@ -107,9 +107,12 @@ case $TEST_SCENARIO in
     source "$TEST_CONNECTED_ROOT/bash/.bashrc"
     printf 'connected=%s:%s:%s\n' "$DOTFILES" \
       "${DOTFILES_SNAPSHOT_ROOT:-unset}" "$(snapshot-marker)"
+    printf 'connected-asdf=%s\n' "$(command -v terragrunt)"
     source "$TEST_RELEASE_A/dotfiles/bash/.bashrc"
     printf 'release-a=%s:%s:%s\n' "$DOTFILES" \
       "$DOTFILES_SNAPSHOT_ROOT" "$(snapshot-marker)"
+    if command -v terragrunt >/dev/null; then exit 95; fi
+    printf 'offline-asdf=absent\n'
     source "$TEST_RELEASE_B/dotfiles/bash/.bashrc"
     printf 'release-b=%s:%s:%s\n' "$DOTFILES" \
       "$DOTFILES_SNAPSHOT_ROOT" "$(snapshot-marker)"
@@ -119,6 +122,7 @@ case $TEST_SCENARIO in
     source "$TEST_CONNECTED_ROOT/bash/.bashrc"
     printf 'baseline=%s:%s:%s\n' "$DOTFILES" \
       "${DOTFILES_SNAPSHOT_ROOT:-unset}" "$(snapshot-marker)"
+    printf 'baseline-asdf=%s\n' "$(command -v terragrunt)"
     ;;
   root-override)
     unset DOTFILES DOTFILES_AUTO_ROOT

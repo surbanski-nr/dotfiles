@@ -146,7 +146,7 @@ prepare_release_artifact() {
   [[ $RELEASE_URL != - ]] ||
     { die "$name $version has no direct artifact"; return 1; }
   artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
-  archive=$inputs/$RELEASE_ASSET
+  archive=$inputs/$name-$version-$RELEASE_ASSET
   download_file "$RELEASE_URL" "$archive" || return
   stage=$(mktemp -d) || return
   TEMP_PATHS+=("$stage")
@@ -155,7 +155,7 @@ prepare_release_artifact() {
 }
 
 write_launchers() {
-  local release=$1
+  local release=$1 tool
 
   cat >"$release/bin/nvim" <<'BASH' || return
 #!/usr/bin/env bash
@@ -204,6 +204,10 @@ done
 exec "$release/tools/tmux/bin/tmux" -f "$config" "$@"
 BASH
   chmod 0755 "$release/bin/nvim" "$release/bin/tmux" || return
+  for tool in kubectl helm; do
+    install -m 0755 "$release/dotfiles/scripts/offline-kubernetes-client" \
+      "$release/bin/$tool" || return
+  done
 }
 
 install_release_tools() {
@@ -240,6 +244,16 @@ install_release_tools() {
     version=${BUILD_VERSIONS[$tool]}
     prepare_release_artifact "$catalog" "$tool" "$version" "$inputs" || return
     install -m 0755 "$PREPARED_ARTIFACT" "$release/tools/bin/$tool" || return
+  done
+
+  for tool in kubectl helm; do
+    release_versions TOOL_RELEASES "$tool" || return
+    for version in "${RELEASE_VERSIONS[@]}"; do
+      prepare_release_artifact TOOL_RELEASES "$tool" "$version" "$inputs" || return
+      install -m 0755 "$PREPARED_ARTIFACT" "$release/tools/bin/$tool-$version" || return
+      ln -s "../tools/bin/$tool-$version" "$release/bin/$tool-$version" || return
+    done
+    ln -s "$tool-${BUILD_VERSIONS[$tool]}" "$release/tools/bin/$tool" || return
   done
 
   prepare_release_artifact TOOL_RELEASES tmux "${BUILD_VERSIONS[tmux]}" "$inputs" || return
@@ -467,6 +481,12 @@ write_release_metadata() {
     [[ -n $field ]] || continue
     printf '%s=%s\n' "$field" "${BUILD_VERSIONS[$tool]}" \
     >>"$release/release.env" || return
+  done
+  for tool in kubectl helm; do
+    release_versions TOOL_RELEASES "$tool" || return
+    printf '%s_VERSIONS=%s\n' "${tool^^}" \
+      "$(IFS=,; printf '%s' "${RELEASE_VERSIONS[*]}")" \
+      >>"$release/release.env" || return
   done
   printf '%s\n' \
     "OFFLINE_TOOLS=$(IFS=,; printf '%s' "${OFFLINE_TOOLS[*]}")" \

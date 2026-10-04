@@ -209,6 +209,8 @@ transition_home="$test_root/transition home"
 transition_connected="$test_root/connected checkout/dotfiles"
 transition_a="$transition_home/dotfiles-releases/dotfiles-aaaaaaaaaaaa"
 transition_b="$transition_home/dotfiles-releases/dotfiles-bbbbbbbbbbbb"
+mkdir -p "$transition_home/.asdf/shims"
+ln -s "$command_fixture" "$transition_home/.asdf/shims/terragrunt"
 for root in "$transition_connected" "$transition_a/dotfiles" "$transition_b/dotfiles"; do
   mkdir -p "$root/bash" "$root/scripts"
   cp "$repo_dir/bash/.bashrc" "$root/bash/.bashrc"
@@ -241,6 +243,11 @@ assert_contains "$transition_output" \
   "rollback-a=$transition_a/dotfiles:$transition_a:release-a"
 assert_contains "$transition_output" \
   "baseline=$transition_connected:unset:connected"
+assert_contains "$transition_output" \
+  "connected-asdf=$transition_home/.asdf/shims/terragrunt"
+assert_contains "$transition_output" 'offline-asdf=absent'
+assert_contains "$transition_output" \
+  "baseline-asdf=$transition_home/.asdf/shims/terragrunt"
 
 custom_root="$test_root/custom root"
 second_custom_root="$test_root/second custom root"
