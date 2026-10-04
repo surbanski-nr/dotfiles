@@ -45,6 +45,12 @@ if [[ \${1:-} == hold ]]; then
 fi
 printf '%s fixture $version\n' "\$(basename -- "\$0")"
 EOF
+  if [[ ${path##*/} == nvim ]]; then
+    cat >>"$path" <<'EOF'
+release=${self%/tools/nvim/bin/nvim}
+[[ ${DOTFILES_OFFLINE_RELEASE_ROOT:-} == "$release" ]] || exit 96
+EOF
+  fi
   chmod 0755 "$path"
 }
 
@@ -233,8 +239,6 @@ artifact_three=$test_root/three.tar.gz
 make_artifact "$commit_one" one "$artifact_one"
 make_artifact "$commit_two" two "$artifact_two" 2.0
 make_artifact "$commit_three" three "$artifact_three"
-sed -i '1iFORMAT_VERSION=1' "$test_root/stage-three/$id_three/release.env"
-repack_artifact three "$id_three" "$artifact_three"
 
 reserved_root=$test_root/reserved-paths
 mkdir -p "$reserved_root"
@@ -844,11 +848,13 @@ printf 'private contexts\n' >"$test_home/kube-backup-contexts.txt"
 printf 'private prefixes\n' >"$test_home/kube-log-prefixes.txt"
 
 legacy_source="$test_root/legacy bstow source"
-mkdir -p "$legacy_source/.config/nvim2" "$test_home/.config/nvim2" \
+legacy_data="$legacy_source/.local/share/nvim2"
+mkdir -p "$legacy_source/.config/nvim2" "$legacy_data" "$test_home/.config/nvim2" \
   "$test_home/.local/state/bstow" "$test_home/.local/state/dotfiles/setup-tools"
 printf 'legacy nvim config\n' >"$legacy_source/.config/nvim2/init.lua"
 ln -s "$legacy_source/.config/nvim2/init.lua" "$test_home/.config/nvim2/init.lua"
-printf '%s\0%s\0' "$legacy_source" '.config/nvim2/init.lua' \
+printf '%s\0%s\0%s\0' "$legacy_source" '.config/nvim2/init.lua' \
+  '.local/share/nvim2' \
   >"$test_home/.local/state/bstow/nvim2.links"
 
 write_fake_tool "$test_home/bin/rg-0.9"
@@ -859,16 +865,12 @@ printf 'complete\t%s\t%s\n' \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   "$legacy_rg_content" >"$test_home/.local/state/dotfiles/setup-tools/rg-0.9.state"
 
-legacy_data="$test_root/legacy nvim data"
-mkdir -p "$legacy_data" "$test_home/.local/share" "$test_home/.local/state/nvim2"
+mkdir -p "$test_home/.local/share" "$test_home/.local/state/nvim2"
 printf 'legacy visits\n' >"$legacy_data/mini-visits-index"
 printf 'legacy telescope\n' >"$legacy_data/telescope_history.sqlite3"
 printf 'legacy telescope prompts\n' >"$legacy_data/telescope_history"
 printf 'newer visits\n' >"$test_home/.local/state/nvim2/mini-visits-index"
 ln -s "$legacy_data" "$test_home/.local/share/nvim2"
-printf 'CURRENT_DATA=%q\n' "$legacy_data" \
-  >"$test_home/.local/state/nvim2-release-rollback.env"
-chmod 0600 "$test_home/.local/state/nvim2-release-rollback.env"
 mkdir -p "$test_home/.tmux/plugins"
 cp -a "$test_root/stage-one/$id_one/share/tmux/plugins/." "$test_home/.tmux/plugins/"
 
@@ -964,15 +966,15 @@ metadata_commit=6666666666666666666666666666666666666666
 metadata_id=dotfiles-${metadata_commit:0:12}
 metadata_artifact=$test_root/metadata-unknown.tar.gz
 make_artifact "$metadata_commit" metadata-unknown "$metadata_artifact"
-printf 'UNKNOWN_FIELD=value\n' >>"$test_root/stage-metadata-unknown/$metadata_id/release.env"
+printf 'FORMAT_VERSION=1\n' >>"$test_root/stage-metadata-unknown/$metadata_id/release.env"
 repack_artifact metadata-unknown "$metadata_id" "$metadata_artifact"
 set +e
 metadata_output=$(run_manager install "$metadata_artifact" 2>&1)
 metadata_status=$?
 set -e
 [[ $metadata_status -ne 0 &&
-  $metadata_output == *'unknown release metadata key: UNKNOWN_FIELD'* ]] ||
-  fail 'unknown release metadata field was accepted'
+  $metadata_output == *'unknown release metadata key: FORMAT_VERSION'* ]] ||
+  fail 'obsolete release metadata marker was accepted'
 assert_link "$test_home/dotfiles-releases/current" "$id_one"
 [[ ! -e $test_home/dotfiles-releases/$metadata_id ]] ||
   fail 'invalid metadata package was retained'
@@ -1123,25 +1125,21 @@ selected_status=$?
 set -e
 [[ $selected_status -ne 0 ]] || fail 'selected release was removed'
 ownership_file=$test_home/dotfiles-releases/.state/ownership.tsv
+cp "$ownership_file" "$ownership_file.current"
 awk -F '\t' 'BEGIN { OFS="\t" } { print $2, $3, $4, $5 }' \
   "$ownership_file" >"$ownership_file.legacy"
 mv -T "$ownership_file.legacy" "$ownership_file"
-legacy_bash_target=$(awk -F '\t' -v path="$test_home/.bashrc" '$2 == path { print $3 }' "$ownership_file")
-legacy_bash_backup=$(awk -F '\t' -v path="$test_home/.bashrc" '$2 == path { print $4 }' "$ownership_file")
-unlink "$test_home/.bashrc"
-mv -T "$legacy_bash_backup" "$test_home/.bashrc"
 set +e
 legacy_orphan_output=$(run_manager uninstall 2>&1)
 legacy_orphan_status=$?
 set -e
 [[ $legacy_orphan_status -ne 0 &&
-  $legacy_orphan_output == *'legacy managed backup is missing and cannot be verified'* ]] ||
-  fail 'legacy journal guessed ownership after its backup disappeared'
-[[ $(<"$test_home/.bashrc") == 'original bashrc' &&
+  $legacy_orphan_output == *'ownership record has an invalid field count'* ]] ||
+  fail 'obsolete four-column ownership state was accepted'
+[[ -L $test_home/.bashrc &&
   -f $test_home/dotfiles-releases/.state/pending.env ]] ||
-  fail 'legacy restore conflict changed baseline or discarded its journal'
-mv -T "$test_home/.bashrc" "$legacy_bash_backup"
-ln -s "$legacy_bash_target" "$test_home/.bashrc"
+  fail 'obsolete ownership state changed managed data or discarded its journal'
+mv -T "$ownership_file.current" "$ownership_file"
 run_manager uninstall
 [[ $(<"$test_home/.bashrc") == 'original bashrc' ]] || fail 'uninstall did not restore the original bashrc'
 assert_link "$test_home/bin/rg" rg-0.9

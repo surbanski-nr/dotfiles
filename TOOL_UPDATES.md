@@ -34,6 +34,13 @@ default and cannot fall back if its artifact is absent. Task belongs only to
 `VALIDATION_RELEASES`. `ASDF_PLUGINS` owns plugin repository and commit pins,
 while runtime versions still come from `TOOL_RELEASES`.
 
+For a normal dependency bump, edit only its first record in `versions.env`,
+or in `validation.env` for validation Task and the other validators. Run the
+focused setup in the disposable candidate, then `task validate` and the
+affected platform build and offline checks. To go back, restore the earlier
+record as the first record and rerun the same checks. Do not edit generated
+Python locks for an unrelated tool bump.
+
 For a daily tool, install the current selection first, record its version and
 canonical link, then run the candidate from the other read-only checkout. This
 tested example uses Debian 13 and an immutable image digest. Replace `TOOL` and
@@ -157,8 +164,9 @@ git diff -- versions.env nvim2/.config/nvim2/lua/custom/lsp.lua \
 ```
 
 The generator creates an empty HOME, installs the pinned `PIP_TOOLS_VERSION`
-into a venv made with the pinned standalone Python, reads fresh Mason receipts
-through Neovim/Lua, and resolves against `https://pypi.org/simple`. It writes
+into a venv made with the pinned standalone Python, and reads `M.tools` plus
+fresh Mason receipts through Neovim/Lua before resolving against
+`https://pypi.org/simple`. It writes
 the checked-in `.in` and hashed `.lock` files. For a preinstalled receipt tree,
 set `DOTFILES_PYTHON_RECEIPTS` and `NVIM_BIN` explicitly. This is still a
 connected operation unless every pip-tools and target dependency is supplied
@@ -166,7 +174,9 @@ through an explicitly complete index or `--find-links` workflow. Normal builds
 do not resolve dependencies again. The target installs only the locked binary
 wheels with `--no-index --require-hashes --only-binary=:all:` and runs
 `pip check`; the standalone interpreter alone does not contain ansible-core,
-ansible-lint or yamllint.
+ansible-lint or yamllint. The resulting venv executables remain below the
+Mason package tree; the release launcher puts the ansible-lint venv,
+`release/bin` and `mason/bin` on `PATH` in that order.
 
 ## Project runtime rollback
 

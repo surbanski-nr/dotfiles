@@ -216,7 +216,7 @@ jobs:
             --volume "$output:/out" \
             --env BUILDER_IMAGE="$BUILDER_IMAGE" \
             "$BUILDER_IMAGE" \
-            bash /workspace/scripts/dotfiles-release \
+            bash /workspace/scripts/build-dotfiles-release \
               build "$PLATFORM" /workspace /out 2>&1 | tee "$evidence/build.log"
 
       - name: Qualify install and health without network
@@ -237,13 +237,13 @@ jobs:
           trap cleanup EXIT
 
           docker run --detach --name "$container" "$BUILDER_IMAGE" sleep infinity
-          docker cp scripts/dotfiles-release \
-            "$container:/usr/local/bin/dotfiles-release"
+          docker cp scripts/build-dotfiles-release \
+            "$container:/usr/local/bin/build-dotfiles-release"
           docker exec "$container" mkdir -p /usr/local/lib/dotfiles
           docker cp scripts/setup-lib \
             "$container:/usr/local/lib/dotfiles/setup-lib"
           timeout --signal=TERM --kill-after=15s 900s docker exec "$container" \
-            bash /usr/local/bin/dotfiles-release prepare-runtime \
+            bash /usr/local/bin/build-dotfiles-release prepare-runtime \
               "$PLATFORM" offline-test "$TEST_UID" "$TEST_HOME"
           timeout 300s docker commit "$container" "$image"
           docker rm --force "$container"

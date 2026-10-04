@@ -94,7 +94,7 @@ _dotfiles_check_release_version() {
   local tool=$4
   shift 4
 
-  setup_release_first "$catalog" "$tool" || return 1
+  setup_select_default_release "$catalog" "$tool" || return 1
   _dotfiles_check_version "$label" "$command_name" "$RELEASE_VERSION" "$@"
 }
 
@@ -129,8 +129,8 @@ dotfiles-check() (
     # shellcheck source=../scripts/setup-lib
     source "$manifest_dir/scripts/setup-lib"
     SETUP_PROGRAM=dotfiles-check
-    setup_validate_versions || return
-    setup_validate_validation_versions || return
+    setup_validate_tool_config || return
+    setup_validate_validator_config || return
   fi
 
   printf 'Required:\n'

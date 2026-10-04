@@ -38,8 +38,8 @@ main() {
 load_config() {
   # shellcheck source=versions.env
   source "$REPO_DIR/versions.env"
-  setup_validate_versions
-  setup_release_first TOOL_RELEASES asdf
+  setup_validate_tool_config
+  setup_select_default_release TOOL_RELEASES asdf
   ASDF_VERSION=$RELEASE_VERSION
   BIN_DIR=${SETUP_ASDF_BIN_DIR:-$HOME/bin}
   ASDF_DATA_DIR=${ASDF_DATA_DIR:-$HOME/.asdf}
@@ -209,7 +209,7 @@ install_asdf() {
   local install_state="$STATE_DIR/installations/asdf-$ASDF_VERSION.sha256"
   local state_temporary digest
 
-  setup_release_record TOOL_RELEASES asdf "$ASDF_VERSION"
+  setup_select_release TOOL_RELEASES asdf "$ASDF_VERSION"
   setup_artifact_layout asdf "$ASDF_VERSION" "$RELEASE_ASSET"
 
   if [[ -f $destination && -z $LEGACY_ASDF_TARGET ]]; then

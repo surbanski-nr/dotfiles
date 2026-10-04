@@ -21,7 +21,7 @@ source "$repo_dir/scripts/setup-lib"
 # shellcheck source=../versions.env
 source "$repo_dir/versions.env"
 SETUP_PROGRAM=update-offline-python-locks
-setup_validate_versions
+setup_validate_tool_config
 
 for command_name in curl find mktemp mv sha256sum tar timeout; do
   setup_need "$command_name"
@@ -58,7 +58,7 @@ DOTFILES_NVIM_CONFIG="$repo_dir/nvim2/.config/nvim2" \
   '+qa!'
 [[ -s $inventory ]] || die 'Python-backed Mason inventory is empty'
 
-setup_release_first TOOL_RELEASES python
+setup_select_default_release TOOL_RELEASES python
 python_version=$RELEASE_VERSION
 setup_artifact_layout python "$python_version" "$RELEASE_ASSET"
 archive=$work/$RELEASE_ASSET

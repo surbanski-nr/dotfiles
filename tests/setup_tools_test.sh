@@ -51,12 +51,12 @@ load_test_versions() {
   source "$repository/versions.env"
   # shellcheck disable=SC1090
   source "$repository/scripts/setup-lib"
-  setup_release_first TOOL_RELEASES gh; GH_VERSION=$RELEASE_VERSION
-  setup_release_first TOOL_RELEASES k9s; K9S_VERSION=$RELEASE_VERSION
-  setup_release_first TOOL_RELEASES oh-my-posh; OMP_VERSION=$RELEASE_VERSION
-  setup_release_first TOOL_RELEASES uv; UV_VERSION=$RELEASE_VERSION
-  setup_release_first TOOL_RELEASES nvim; NVIM_VERSION=$RELEASE_VERSION
-  setup_release_first TOOL_RELEASES tmux; TMUX_VERSION=$RELEASE_VERSION
+  setup_select_default_release TOOL_RELEASES gh; GH_VERSION=$RELEASE_VERSION
+  setup_select_default_release TOOL_RELEASES k9s; K9S_VERSION=$RELEASE_VERSION
+  setup_select_default_release TOOL_RELEASES oh-my-posh; OMP_VERSION=$RELEASE_VERSION
+  setup_select_default_release TOOL_RELEASES uv; UV_VERSION=$RELEASE_VERSION
+  setup_select_default_release TOOL_RELEASES nvim; NVIM_VERSION=$RELEASE_VERSION
+  setup_select_default_release TOOL_RELEASES tmux; TMUX_VERSION=$RELEASE_VERSION
 }
 
 make_test_repo() {

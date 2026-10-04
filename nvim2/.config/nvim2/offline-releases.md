@@ -81,7 +81,9 @@ Terraform and tfvars continue to use `terraform fmt`. The local Helm chart test
 uses helm-ls without a Helm executable. No plugin, parser, language server or
 formatter is installed or updated by health. The release launcher uses the
 bundled Mason registry snapshot and disables registry refresh, so startup and
-health do not make network requests.
+health do not make network requests. The manager also passes the candidate's
+physical release root to the first health run, before `installed.sha256`
+exists, so that initial verification uses the same offline behavior.
 
 For qualification evidence, preserve the unfiltered manager output and the
 files produced by the normal Nvim checks, including messages, Mason, Conform

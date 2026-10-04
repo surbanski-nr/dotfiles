@@ -1,0 +1,596 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+PROGRAM=build-dotfiles-release
+TEMP_PATHS=()
+NODE_UPSTREAM_NPM_VERSION=
+declare -A BUILD_VERSIONS=()
+ORDINARY_TOOLS=(
+  'rg|rg|RG_VERSION|TOOL_RELEASES'
+  'zoxide|zoxide|ZOXIDE_VERSION|TOOL_RELEASES'
+  'k9s|k9s|K9S_VERSION|TOOL_RELEASES'
+  'kubectx|kubectx|KUBECTX_VERSION|TOOL_RELEASES'
+  'kubens|kubens||TOOL_RELEASES'
+  'oh-my-posh|oh-my-posh|OMP_VERSION|TOOL_RELEASES'
+  'task|task|TASK_VERSION|VALIDATION_RELEASES'
+  'fzf|fzf|FZF_VERSION|TOOL_RELEASES'
+  'terraform|terraform|TERRAFORM_VERSION|TOOL_RELEASES'
+)
+
+die() {
+  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  return 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  build-dotfiles-release build PLATFORM SOURCE_DIR OUTPUT_DIR
+  build-dotfiles-release prepare-runtime PLATFORM USER UID HOME
+
+Platforms: debian-13-x86_64, ubuntu-24.04-x86_64,
+           ubuntu-26.04-x86_64, amzn-2023-x86_64
+EOF
+}
+
+cleanup_path() {
+  local path=$1
+  if [[ -e $path || -L $path ]]; then find "$path" -depth -delete; fi
+}
+
+cleanup() {
+  local status=$?
+  local path
+
+  trap - EXIT
+  set +e
+  for path in "${TEMP_PATHS[@]:-}"; do cleanup_path "$path"; done
+  exit "$status"
+}
+trap cleanup EXIT
+
+validate_platform_name() {
+  case $1 in
+    debian-13-x86_64 | ubuntu-24.04-x86_64 | ubuntu-26.04-x86_64 | amzn-2023-x86_64) ;;
+    *) die "unsupported platform: $1" ;;
+  esac
+}
+
+validate_platform() {
+  local platform=$1
+  local expected_id expected_version
+  local os_release_file=${DOTFILES_OS_RELEASE_FILE:-/etc/os-release}
+
+  validate_platform_name "$platform" || return
+  case $platform in
+    debian-13-x86_64) expected_id=debian; expected_version=13 ;;
+    ubuntu-24.04-x86_64) expected_id=ubuntu; expected_version=24.04 ;;
+    ubuntu-26.04-x86_64) expected_id=ubuntu; expected_version=26.04 ;;
+    amzn-2023-x86_64) expected_id=amzn; expected_version=2023 ;;
+  esac
+  [[ -r $os_release_file ]] || { die "cannot read OS identity: $os_release_file"; return 1; }
+  unset ID VERSION_ID
+  # shellcheck disable=SC1090
+  source "$os_release_file" || return
+  [[ ${ID:-} == "$expected_id" ]] ||
+    { die "$platform requires OS ID $expected_id, found ${ID:-unknown}"; return 1; }
+  [[ ${VERSION_ID:-} == "$expected_version" ]] ||
+    { die "$platform requires OS version $expected_version, found ${VERSION_ID:-unknown}"; return 1; }
+  [[ $(uname -m) == x86_64 ]] || { die 'only Linux x86-64 is supported'; return 1; }
+}
+
+image_for_platform() {
+  case $1 in
+    debian-13-x86_64) printf '%s\n' "$DEBIAN_13_IMAGE" ;;
+    ubuntu-24.04-x86_64) printf '%s\n' "$UBUNTU_2404_IMAGE" ;;
+    ubuntu-26.04-x86_64) printf '%s\n' "$UBUNTU_2604_IMAGE" ;;
+    amzn-2023-x86_64) printf '%s\n' "$AMZN_2023_IMAGE" ;;
+  esac
+}
+
+load_build_config() {
+  local source_dir=$1
+
+  [[ -f $source_dir/versions.env ]] || { die "missing $source_dir/versions.env"; return 1; }
+  [[ -f $source_dir/dotfiles-release.env ]] ||
+    { die "missing $source_dir/dotfiles-release.env"; return 1; }
+  [[ -f $source_dir/validation.env ]] || { die "missing $source_dir/validation.env"; return 1; }
+  [[ -f $source_dir/scripts/setup-lib ]] ||
+    { die "missing $source_dir/scripts/setup-lib"; return 1; }
+  # shellcheck source=setup-lib
+  source "$source_dir/scripts/setup-lib" || return
+  SETUP_PROGRAM=$PROGRAM
+  # shellcheck source=../versions.env
+  source "$source_dir/versions.env" || return
+  setup_validate_tool_config || return
+  # shellcheck source=../validation.env
+  source "$source_dir/validation.env" || return
+  setup_validate_validator_config || return
+  local tool catalog
+  for tool in "${OFFLINE_TOOLS[@]}"; do
+    catalog=TOOL_RELEASES
+    [[ $tool != task ]] || catalog=VALIDATION_RELEASES
+    setup_select_default_release "$catalog" "$tool" || return
+    [[ $RELEASE_URL != - ]] ||
+      { die "offline default $tool $RELEASE_VERSION has no artifact"; return 1; }
+    BUILD_VERSIONS[$tool]=$RELEASE_VERSION
+  done
+  setup_select_default_release TOOL_RELEASES npm || return
+  BUILD_VERSIONS[npm]=$RELEASE_VERSION
+  # shellcheck source=../dotfiles-release.env
+  source "$source_dir/dotfiles-release.env" || return
+}
+
+install_build_packages() {
+  local platform=$1 role=$2
+  local -a root_command=()
+
+  if ! declare -F setup_system_package_list >/dev/null; then
+    local script_dir setup_library
+    script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+    setup_library=$script_dir/setup-lib
+    [[ -f $setup_library ]] || setup_library=/usr/local/lib/dotfiles/setup-lib
+    [[ -f $setup_library ]] || { die 'cannot find the trusted setup library'; return 1; }
+    # shellcheck disable=SC1090
+    source "$setup_library"
+  fi
+  declare -F setup_system_package_list >/dev/null ||
+    { die 'cannot load shared system package definitions'; return 1; }
+  setup_install_system_packages "$platform" "$role" true "${root_command[@]}"
+}
+
+prepare_release_artifact() {
+  local catalog=$1 name=$2 version=$3 inputs=$4
+  local archive stage
+
+  setup_select_release "$catalog" "$name" "$version" || return
+  [[ $RELEASE_URL != - ]] ||
+    { die "$name $version has no direct artifact"; return 1; }
+  setup_artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
+  archive=$inputs/$RELEASE_ASSET
+  setup_download "$RELEASE_URL" "$archive" || return
+  stage=$(mktemp -d) || return
+  TEMP_PATHS+=("$stage")
+  setup_prepare_artifact "$catalog" "$name" "$version" "$archive" "$stage" || return
+  PREPARED_ARTIFACT=$stage/${SPEC_DESTS[0]}
+}
+
+write_launchers() {
+  local release=$1
+
+  # The generated launchers intentionally expand these expressions at runtime.
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'self=$(readlink -f -- "$0")' \
+    'release=${self%/bin/nvim}' \
+    'export NVIM_APPNAME=${NVIM_APPNAME:-nvim2}' \
+    'if [[ $NVIM_APPNAME == nvim2 ]]; then' \
+    '  if [[ -f $release/installed.sha256 ]]; then export DOTFILES_OFFLINE_RELEASE_ROOT="$release"; fi' \
+    '  if [[ ! -v DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET ]]; then if [[ -v XDG_CONFIG_HOME ]]; then export DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET=1 DOTFILES_LAUNCHER_XDG_CONFIG_HOME=$XDG_CONFIG_HOME; else export DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET=0; fi; fi' \
+    '  if [[ ! -v DOTFILES_LAUNCHER_XDG_DATA_HOME_SET ]]; then if [[ -v XDG_DATA_HOME ]]; then export DOTFILES_LAUNCHER_XDG_DATA_HOME_SET=1 DOTFILES_LAUNCHER_XDG_DATA_HOME=$XDG_DATA_HOME; else export DOTFILES_LAUNCHER_XDG_DATA_HOME_SET=0; fi; fi' \
+    '  if [[ ! -v DOTFILES_LAUNCHER_ZO_DATA_DIR_SET ]]; then if [[ -v _ZO_DATA_DIR ]]; then export DOTFILES_LAUNCHER_ZO_DATA_DIR_SET=1 DOTFILES_LAUNCHER_ZO_DATA_DIR=$_ZO_DATA_DIR; else export DOTFILES_LAUNCHER_ZO_DATA_DIR_SET=0; export _ZO_DATA_DIR=${XDG_DATA_HOME:-$HOME/.local/share}/zoxide; fi; fi' \
+    '  export XDG_CONFIG_HOME="$release/config"' \
+    '  export XDG_DATA_HOME="$release/share"' \
+    '  ansible_bin="$release/share/nvim2/mason/packages/ansible-lint/venv/bin"' \
+    '  export PATH="$ansible_bin:$release/bin:$release/share/nvim2/mason/bin${PATH:+:$PATH}"' \
+    'fi' \
+    'exec "$release/tools/nvim/bin/nvim" "$@"' \
+    >"$release/bin/nvim" || return
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'self=$(readlink -f -- "$0")' \
+    'release=${self%/bin/tmux}' \
+    'config="$release/dotfiles/tmux/.tmux.conf"' \
+    'export TMUX_OFFLINE_RELEASE_ROOT="$release"' \
+    'export TMUX_OFFLINE_CONFIG="$config"' \
+    'for argument in "$@"; do' \
+    '  if [[ $argument == -f ]]; then exec "$release/tools/tmux/bin/tmux" "$@"; fi' \
+    'done' \
+    'exec "$release/tools/tmux/bin/tmux" -f "$config" "$@"' \
+    >"$release/bin/tmux" || return
+  chmod 0755 "$release/bin/nvim" "$release/bin/tmux" || return
+}
+
+install_release_tools() {
+  local release=$1 inputs=$2
+  local node_version=${BUILD_VERSIONS[nodejs]}
+  local python_version=${BUILD_VERSIONS[python]}
+  local command_name catalog tool version field record npm_archive
+
+  mkdir -p "$release/bin" "$release/tools/bin" "$inputs" || return
+
+  prepare_release_artifact TOOL_RELEASES nvim "${BUILD_VERSIONS[nvim]}" "$inputs" || return
+  mv -- "$PREPARED_ARTIFACT" "$release/tools/nvim" || return
+
+  prepare_release_artifact TOOL_RELEASES nodejs "$node_version" "$inputs" || return
+  mv -- "$PREPARED_ARTIFACT" "$release/tools/node" || return
+  NODE_UPSTREAM_NPM_VERSION=$(PATH="$release/tools/node/bin:$PATH" \
+    "$release/tools/node/bin/npm" --version) || return
+  setup_select_release TOOL_RELEASES npm "${BUILD_VERSIONS[npm]}" || return
+  npm_archive=$inputs/$RELEASE_ASSET
+  setup_download "$RELEASE_URL" "$npm_archive" || return
+  setup_verify_sha256 "$npm_archive" "$RELEASE_SHA256" || return
+  PATH="$release/tools/node/bin:$PATH" NPM_CONFIG_AUDIT=false \
+    npm install --global "$npm_archive" >/dev/null || return
+
+  prepare_release_artifact TOOL_RELEASES python "$python_version" "$inputs" || return
+  mv -- "$PREPARED_ARTIFACT" "$release/tools/python-$python_version" || return
+  ln -s "../tools/python-$python_version/bin/python3" "$release/bin/python" || return
+  ln -s "../tools/python-$python_version/bin/python3" "$release/bin/python3" || return
+
+  for record in "${ORDINARY_TOOLS[@]}"; do
+    IFS='|' read -r tool command_name field catalog <<<"$record"
+    version=${BUILD_VERSIONS[$tool]}
+    prepare_release_artifact "$catalog" "$tool" "$version" "$inputs" || return
+    install -m 0755 "$PREPARED_ARTIFACT" "$release/tools/bin/$command_name" || return
+  done
+
+  prepare_release_artifact TOOL_RELEASES tmux "${BUILD_VERSIONS[tmux]}" "$inputs" || return
+  (
+    cd "$PREPARED_ARTIFACT" || exit
+    ./configure --prefix="$release/tools/tmux" >/dev/null || exit
+    make -j"$(getconf _NPROCESSORS_ONLN)" >/dev/null || exit
+    make install >/dev/null || exit
+  ) || return
+
+  for command_name in node npm npx corepack; do
+    ln -s "../tools/node/bin/$command_name" "$release/bin/$command_name" || return
+  done
+  for record in "${ORDINARY_TOOLS[@]}"; do
+    IFS='|' read -r tool command_name field catalog <<<"$record"
+    ln -s "../tools/bin/$command_name" "$release/bin/$command_name" || return
+  done
+  write_launchers "$release" || return
+}
+
+clone_pinned() {
+  local url=$1 commit=$2 destination=$3
+
+  git clone --no-checkout "$url" "$destination" >/dev/null 2>&1 || return
+  git -C "$destination" checkout --detach "$commit" >/dev/null 2>&1 || return
+  [[ $(git -C "$destination" rev-parse HEAD) == "$commit" ]] ||
+    { die "failed to pin $url at $commit"; return 1; }
+}
+
+install_tmux_plugins() {
+  local release=$1
+  local root=$release/share/tmux/plugins
+
+  mkdir -p "$root" || return
+  clone_pinned https://github.com/tmux-plugins/tmux-sensible.git \
+    "$TMUX_SENSIBLE_COMMIT" "$root/tmux-sensible" || return
+  clone_pinned https://github.com/tmux-plugins/tmux-resurrect.git \
+    "$TMUX_RESURRECT_COMMIT" "$root/tmux-resurrect" || return
+  clone_pinned https://github.com/tmux-plugins/tmux-continuum.git \
+    "$TMUX_CONTINUUM_COMMIT" "$root/tmux-continuum" || return
+}
+
+write_python_inventory() {
+  local release=$1 inventory temporary
+  inventory=$release/python-locks/inventory.tsv
+
+  temporary=$(mktemp "$release/python-locks/.inventory.XXXXXX") || return
+  TEMP_PATHS+=("$temporary")
+  DOTFILES_NVIM_CONFIG="$release/config/nvim2" \
+    DOTFILES_MASON_PACKAGES="$release/share/nvim2/mason/packages" \
+    DOTFILES_PYTHON_INVENTORY_OUTPUT="$temporary" \
+    "$release/bin/nvim" --headless -u NONE \
+    "+lua vim.opt.runtimepath:prepend(vim.env.DOTFILES_NVIM_CONFIG); local f=assert(io.open(vim.env.DOTFILES_PYTHON_INVENTORY_OUTPUT, 'wb')); for _, p in ipairs(require('custom.lsp').python_inventory(vim.env.DOTFILES_MASON_PACKAGES)) do f:write(p.name, '\t', p.version, '\t', table.concat(p.entry_points, ','), '\n') end; assert(f:close())" \
+    '+qa!' || return
+  [[ -s $temporary ]] || { die 'Python-backed Mason inventory is empty'; return 1; }
+  mv -T -- "$temporary" "$inventory" || return
+}
+
+verify_python_inventory() {
+  local release=$1 inventory input_count lock_count
+  inventory=$release/python-locks/inventory.tsv
+  local package version entry_points extra requirement count=0
+
+  [[ -f $inventory && ! -L $inventory ]] ||
+    { die 'Python package inventory is missing'; return 1; }
+  while IFS=$'\t' read -r package version entry_points extra; do
+    [[ -z $extra && $package =~ ^[a-z0-9][a-z0-9-]*$ &&
+      $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ &&
+      $entry_points =~ ^[a-z0-9,-]+$ ]] || {
+      die 'Python package inventory contains invalid data'
+      return 1
+    }
+    requirement=$(awk '!/^#/ && NF { print; exit }' "$release/python-locks/$package.in") || return
+    [[ $requirement == "$package==$version" ]] || {
+      die "Python input does not match Mason inventory: $package==$version"
+      return 1
+    }
+    grep -F -- "$package==$version " "$release/python-locks/$package.lock" >/dev/null || {
+      die "Python lock does not match Mason inventory: $package==$version"
+      return 1
+    }
+    ((count += 1))
+  done <"$inventory"
+  [[ $count -gt 0 ]] || { die 'Python package inventory is empty'; return 1; }
+  input_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.in' -printf '.\n' |
+    wc -l) || return
+  lock_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.lock' -printf '.\n' |
+    wc -l) || return
+  [[ $input_count -eq $count && $lock_count -eq $count ]] || {
+    die 'Python lock set differs from the Mason inventory'
+    return 1
+  }
+}
+
+python_inventory_packages() {
+  local release=$1 package version entry_points extra
+
+  verify_python_inventory "$release" || return
+  while IFS=$'\t' read -r package version entry_points extra; do
+    printf '%s\n' "$package" || return
+  done <"$release/python-locks/inventory.tsv"
+}
+
+prepare_nvim_payload() {
+  local release=$1 build_home=$2 platform=$3
+  local python="$release/tools/python-${BUILD_VERSIONS[python]}/bin/python3"
+  local data=$release/share/nvim2
+  local package receipt link target relative lua_launcher command_name package_output link_list
+  local tree_sitter_version tree_sitter_root tree_sitter_binary
+
+  mkdir -p "$build_home/.cache" "$release/share" || return
+  export HOME=$build_home
+  export PATH="$release/bin:$release/tools/python-${BUILD_VERSIONS[python]}/bin:$release/tools/node/bin:$release/tools/bin:/usr/local/bin:/usr/bin:/bin"
+  export NVIM_APPNAME=nvim2
+  export XDG_CACHE_HOME=$build_home/.cache
+  if [[ $platform == amzn-2023-x86_64 ]]; then
+    timeout 2400s "$release/bin/nvim" --headless '+MasonToolsInstallSync' '+qa!' || return
+    tree_sitter_version=$("$release/bin/nvim" --headless \
+      "+lua for _, tool in ipairs(require('custom.lsp').tools) do if tool[1] == 'tree-sitter-cli' then io.write(tool.version) end end" \
+      '+qa!') || return
+    tree_sitter_version=${tree_sitter_version#v}
+    [[ -n $tree_sitter_version ]] || { die 'tree-sitter-cli version is empty'; return 1; }
+    tree_sitter_root=$build_home/.local/opt/tree-sitter-cli-$tree_sitter_version
+    tree_sitter_binary=$(readlink -f -- "$data/mason/bin/tree-sitter") || return
+    timeout 2400s cargo install tree-sitter-cli \
+      --version "$tree_sitter_version" --locked --root "$tree_sitter_root" || return
+    install -m 0755 "$tree_sitter_root/bin/tree-sitter" "$tree_sitter_binary" || return
+  fi
+  timeout 2400s nvim --headless '+Nvim2ToolsInstallSync' '+qa!' || return
+  write_python_inventory "$release" || return
+  verify_python_inventory "$release" || return
+  for command_name in ansible ansible-config ansible-playbook; do
+    ln -s "../packages/ansible-lint/venv/bin/$command_name" \
+      "$data/mason/bin/$command_name" || return
+  done
+  NVIM2_BENCHMARK_RUNS=3 timeout 1200s \
+    bash "$release/config/nvim2/tests/check.sh" || return
+  link_list=$(mktemp) || return
+  TEMP_PATHS+=("$link_list")
+  find "$release/share/nvim2" -type l -print0 >"$link_list" || return
+  while IFS= read -r -d '' link; do
+    target=$(readlink -- "$link") || return
+    [[ $target == /* ]] || continue
+    case $target in
+      "$release"/*) ;;
+      *)
+        die "generated Neovim link points outside its payload: $link -> $target"
+        return 1
+        ;;
+    esac
+    relative=$(realpath -m --relative-to="$(dirname -- "$link")" "$target") || return
+    unlink "$link" || return
+    ln -s "$relative" "$link" || return
+  done <"$link_list"
+
+  lua_launcher=$release/share/nvim2/mason/packages/lua-language-server/lua-language-server
+  [[ -x $lua_launcher &&
+    -x $release/share/nvim2/mason/packages/lua-language-server/libexec/bin/lua-language-server ]] ||
+    { die 'lua-language-server payload is incomplete'; return 1; }
+  # The generated launcher intentionally expands these expressions at runtime.
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'self=$(readlink -f -- "${BASH_SOURCE[0]}")' \
+    'package_dir=${self%/lua-language-server}' \
+    'state_home=${XDG_STATE_HOME:-$HOME/.local/state}' \
+    'log_dir=$state_home/nvim2/lua-language-server' \
+    'mkdir -p "$log_dir"' \
+    'exec "$package_dir/libexec/bin/lua-language-server" --logpath="$log_dir" "$@"' \
+    >"$lua_launcher" || return
+  chmod 0755 "$lua_launcher" || return
+  cleanup_path "$release/share/nvim2/mason/packages/lua-language-server/libexec/log" || return
+
+  package_output=$(python_inventory_packages "$release") || return
+  while IFS= read -r package; do
+    receipt="$release/share/nvim2/mason/packages/$package/mason-receipt.json"
+    [[ -f $receipt ]] || { die "Mason receipt is missing for $package"; return 1; }
+    cleanup_path "$release/share/nvim2/mason/packages/$package/venv" || return
+  done <<<"$package_output"
+
+  mkdir -p "$release/python-wheelhouse" || return
+  while IFS= read -r package; do
+    "$python" -I -m pip download --disable-pip-version-check --require-hashes \
+      --only-binary=:all: --dest "$release/python-wheelhouse" \
+      -r "$release/python-locks/$package.lock" || return
+  done <<<"$package_output"
+}
+
+verify_release_symlinks() {
+  local release=$1 link target resolved links
+
+  links=$(mktemp) || return
+  TEMP_PATHS+=("$links")
+  find "$release" -type l -print0 >"$links" || return
+  while IFS= read -r -d '' link; do
+    target=$(readlink -- "$link") || return
+    if [[ $target == /* ]]; then
+      resolved=$(readlink -m -- "$target")
+    else
+      resolved=$(readlink -m -- "$(dirname -- "$link")/$target")
+    fi
+    [[ $resolved == "$release" || $resolved == "$release"/* ]] ||
+      { die "release symlink escapes its root: $link -> $target"; return 1; }
+  done <"$links"
+}
+
+write_package_metadata() {
+  local release=$1 platform=$2 source_commit=$3 source_tree=$4 image=$5 inputs=$6
+  local release_id=${release##*/} field tool command_name catalog record
+  local manifest package origin plugin_commit value
+
+  printf '%s\n' \
+    "RELEASE_ID=$release_id" \
+    "PLATFORM_ID=$platform" \
+    "SOURCE_COMMIT=$source_commit" \
+    "SOURCE_TREE=$source_tree" \
+    "BUILDER_IMAGE=$image" \
+    "NVIM_VERSION=${BUILD_VERSIONS[nvim]}" \
+    "NODE_VERSION=${BUILD_VERSIONS[nodejs]}" \
+    "NPM_VERSION=${BUILD_VERSIONS[npm]}" \
+    "NODE_UPSTREAM_NPM_VERSION=$NODE_UPSTREAM_NPM_VERSION" \
+    "PYTHON_VERSION=${BUILD_VERSIONS[python]}" \
+    "PYTHON_BUILD=$PYTHON_STANDALONE_BUILD" \
+    "TMUX_VERSION=${BUILD_VERSIONS[tmux]}" \
+    >"$release/release.env" || return
+  for record in "${ORDINARY_TOOLS[@]}"; do
+    IFS='|' read -r tool command_name field catalog <<<"$record"
+    [[ -n $field ]] || continue
+    printf '%s=%s\n' "$field" "${BUILD_VERSIONS[$tool]}" \
+    >>"$release/release.env" || return
+  done
+  printf '%s\n' \
+    "OFFLINE_TOOLS=$(IFS=,; printf '%s' "${OFFLINE_TOOLS[*]}")" \
+    'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
+    >>"$release/release.env" || return
+
+  {
+    printf 'source_commit=%s\nsource_tree=%s\nplatform=%s\nbuilder_image=%s\n' \
+      "$source_commit" "$source_tree" "$platform" "$image"
+    value=$(date -u +%FT%TZ) || return
+    printf 'built_at_utc=%s\n' "$value" || return
+    value=$(getconf GNU_LIBC_VERSION) || return
+    printf 'glibc=%s\n' "$value" || return
+    "$release/bin/nvim" --version | head -n 3 || return
+    "$release/bin/node" --version || return
+    value=$("$release/bin/npm" --version) || return
+    printf 'npm_runtime=%s\n' "$value" || return
+    printf 'npm_upstream=%s\n' "$NODE_UPSTREAM_NPM_VERSION"
+    "$release/tools/python-${BUILD_VERSIONS[python]}/bin/python3" --version || return
+    "$release/bin/tmux" -V || return
+    printf 'tmux_configure=--prefix=tools/tmux\n'
+    ldd "$release/tools/tmux/bin/tmux" || return
+    "$release/bin/rg" --version | head -n 1 || return
+    printf 'builder_packages:\n'
+    printf '  %s\n' "${SETUP_SYSTEM_PACKAGES[@]}"
+    printf 'input_archives_sha256:\n'
+    (cd "$inputs" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) || return
+    printf 'python_locks_sha256:\n'
+    (cd "$release/python-locks" && sha256sum ./*.lock) || return
+    printf 'python_wheels_sha256:\n'
+    (cd "$release/python-wheelhouse" &&
+      find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) || return
+    value=$(sha256sum "$release/config/nvim2/nvim-pack-lock.json" | cut -d ' ' -f1) || return
+    printf 'nvim_pack_lock_sha256=%s\n' "$value" || return
+    for package in tmux-sensible tmux-resurrect tmux-continuum; do
+      origin=$(git -C "$release/share/tmux/plugins/$package" remote get-url origin) || return
+      plugin_commit=$(git -C "$release/share/tmux/plugins/$package" rev-parse HEAD) || return
+      printf '%s_origin=%s\n' "$package" "$origin" || return
+      printf '%s_commit=%s\n' "$package" "$plugin_commit" || return
+    done
+  } >"$release/build-manifest.txt" || return
+
+  (
+    cd "$release" || exit
+    manifest=$(mktemp "$release/.SHA256SUMS.XXXXXX") || exit
+    find . -type f ! -name SHA256SUMS ! -name '.SHA256SUMS.*' -print0 |
+      LC_ALL=C sort -z | xargs -0 sha256sum >"$manifest" || exit
+    mv "$manifest" SHA256SUMS || exit
+    sha256sum --check --strict SHA256SUMS >/dev/null || exit
+  ) || return
+}
+
+build_release() {
+  local platform=$1 source_dir=$2 output_dir=$3
+  local source_commit source_tree source_status release_id image work release inputs build_home archive
+
+  [[ $(id -u) -eq 0 ]] || { die 'build must run as root in a disposable builder'; return 1; }
+  validate_platform "$platform" || return
+  [[ -d $source_dir/.git ]] || { die "source is not a Git checkout: $source_dir"; return 1; }
+  load_build_config "$source_dir" || return
+  image=$(image_for_platform "$platform") || return
+  [[ ${BUILDER_IMAGE:-$image} == "$image" ]] ||
+    { die 'builder image does not match the configured digest'; return 1; }
+  install_build_packages "$platform" build || return
+  source_commit=$(git -c safe.directory="$source_dir" -C "$source_dir" rev-parse HEAD) || return
+  source_tree=$(git -c safe.directory="$source_dir" -C "$source_dir" rev-parse 'HEAD^{tree}') || return
+  source_status=$(git -c safe.directory="$source_dir" -C "$source_dir" \
+    status --porcelain --untracked-files=normal) || return
+  [[ -z $source_status ]] ||
+    { die 'build source must be clean'; return 1; }
+  release_id=dotfiles-${source_commit:0:12}
+
+  work=$(mktemp -d /tmp/dotfiles-release-build.XXXXXX) || return
+  TEMP_PATHS+=("$work")
+  release=$work/$release_id
+  inputs=$work/inputs
+  build_home=$work/build-home
+  mkdir -p "$release/config" "$release/dotfiles" "$release/share" "$build_home" || return
+  git -c safe.directory="$source_dir" -C "$source_dir" archive HEAD |
+    tar -x -C "$release/dotfiles" || return
+  cp -a "$release/dotfiles/nvim2/.config/nvim2" "$release/config/nvim2" || return
+  mkdir -p "$release/python-locks" || return
+  cp "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.in \
+    "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.lock \
+    "$release/python-locks/" || return
+  cp "$source_dir/scripts/dotfiles-release" "$release/dotfiles-release" || return
+  chmod 0755 "$release/dotfiles-release" || return
+  install_release_tools "$release" "$inputs" || return
+  ln -s ../dotfiles-release "$release/bin/dotfiles-release" || return
+  install_tmux_plugins "$release" || return
+  prepare_nvim_payload "$release" "$build_home" "$platform" || return
+  verify_release_symlinks "$release" || return
+  write_package_metadata "$release" "$platform" "$source_commit" "$source_tree" \
+    "$image" "$inputs" || return
+
+  mkdir -p "$output_dir" || return
+  archive=$output_dir/$release_id-$platform.tar.gz
+  tar -C "$work" -czf "$archive" "$release_id" || return
+  (cd "$output_dir" && sha256sum "${archive##*/}" >"${archive##*/}.sha256") || return
+  chmod -R a+rX "$output_dir" || return
+  printf '%s: built %s\n' "$PROGRAM" "$archive"
+}
+
+prepare_runtime() {
+  local platform=$1 user=$2 uid=$3 home=$4 group
+
+  [[ $(id -u) -eq 0 ]] || { die 'prepare-runtime must run as root'; return 1; }
+  [[ $user =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || { die "invalid user name: $user"; return 1; }
+  [[ $uid =~ ^[0-9]+$ ]] || { die "invalid UID: $uid"; return 1; }
+  [[ $home == /* && $home != / ]] || { die "invalid home: $home"; return 1; }
+  validate_platform "$platform" || return
+  install_build_packages "$platform" runtime || return
+  if ! id "$user" >/dev/null 2>&1; then
+    group=$user
+    getent group "$group" >/dev/null 2>&1 || groupadd --gid "$uid" "$group" || return
+    useradd --uid "$uid" --gid "$group" --home-dir "$home" --create-home \
+      --shell /bin/bash "$user" || return
+  fi
+  [[ $(id -u "$user") -eq $uid ]] || { die "$user does not have UID $uid"; return 1; }
+  mkdir -p "$home" || return
+  chown "$user:$(id -gn "$user")" "$home" || return
+}
+
+main() {
+  local command=${1:-}
+
+  case $command in
+    build) (($# == 4)) || { usage; return 2; }; build_release "$2" "$3" "$4" ;;
+    prepare-runtime) (($# == 5)) || { usage; return 2; }; prepare_runtime "$2" "$3" "$4" "$5" ;;
+    -h | --help) usage ;;
+    *) usage; return 2 ;;
+  esac
+}
+
+main "$@"

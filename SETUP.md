@@ -81,7 +81,7 @@ timeout --signal=TERM --kill-after=30s 5400s docker run --rm \
   --volume "$output:/out" \
   --env BUILDER_IMAGE="$image" \
   "$image" \
-  bash /workspace/scripts/dotfiles-release \
+  bash /workspace/scripts/build-dotfiles-release \
     build "$platform" /workspace /out
 ```
 
@@ -94,6 +94,11 @@ ansible-lint, yamllint or ansible-core. Separate generated hashed locks and a
 complete wheelhouse supply those dependencies. The target installer creates
 ordinary isolated venvs at their final retained paths using only those wheels.
 It does not need sudo, a distribution Python, a compiler or network access.
+
+`scripts/build-dotfiles-release` is the connected build and runtime-image
+preparation entry point. `scripts/dotfiles-release` is the standalone manager
+shipped inside each archive. The manager verifies, installs, lists, checks,
+rolls back and uninstalls releases without the builder or a Git checkout.
 
 The artifact contains a Git archive of the matching dotfiles commit, not the
 main repository history. It also contains the full Neovim runtime tree, pinned
@@ -146,10 +151,9 @@ file, link or provider tree beside that entry as a private
 `.dotfiles-release-backup-SHA256` path. Keeping the backup on the destination
 filesystem avoids relying on a cross-filesystem rename. A conflicting
 foreign link, a symlink parent or unproven tool/provider stops the install
-before activation. Existing `setup-tools`, `bstow`, historical Nvim release and
-clean pinned tmux plugin installations are migrated only when their records and
-content prove ownership. Private k9s files, kubeconfig inputs and unrelated
-tmux plugins are not touched.
+before activation. Existing `setup-tools`, `bstow` and clean pinned tmux plugin
+installations are migrated only when their records and content prove ownership.
+Private k9s files, kubeconfig inputs and unrelated tmux plugins are not touched.
 
 Use the manager for every selection change:
 
@@ -177,8 +181,8 @@ next invocation recover an interrupted import, selection or baseline restore
 before continuing the command that was requested. Recovery restores both
 selection links and each recorded projection entry, verifies the saved
 baseline identity and removes the journal only after the state is coherent.
-If a user changed a managed path or an old four-column journal no longer has
-its backup, the manager preserves the journal, backup and user data and reports
+If a user changed a managed path or a backup no longer matches its recorded
+identity, the manager preserves the journal, backup and user data and reports
 the exact conflicting path. Inspect that path and its adjacent backup, restore
 the expected managed link or move the foreign data aside, then retry the same
 manager command. Do not edit `current`, `previous`, `pending.env`, installed
@@ -291,18 +295,17 @@ the layout consumed by `setup-tools --from`.
 ```bash
 set -euo pipefail
 source scripts/setup-lib
-SETUP_PROGRAM=prepare-tool-archives
 source versions.env
 source validation.env
-setup_validate_versions
-setup_validate_validation_versions
+setup_validate_tool_config
+setup_validate_validator_config
 archive_root=${1:-"$HOME/tool-archives"}
 
 download_release() {
   catalog=$1
   name=$2
   version=$3
-  setup_release_record "$catalog" "$name" "$version"
+  setup_select_release "$catalog" "$name" "$version"
   [[ $RELEASE_URL != - ]] || {
     printf 'No direct artifact for %s %s\n' "$name" "$version" >&2
     return 1
@@ -316,14 +319,17 @@ download_release() {
   setup_verify_sha256 "$destination" "$RELEASE_SHA256"
 }
 
-for name in gh kyverno task trivy k9s kubeconform shellcheck oh-my-posh \
-  kubectx kubens rg zoxide uv nvim kubectl helm; do
-  catalog=TOOL_RELEASES
-  [[ $name != task ]] || catalog=VALIDATION_RELEASES
-  setup_release_versions "$catalog" "$name"
-  for version in "${RELEASE_VERSIONS[@]}"; do
-    download_release "$catalog" "$name" "$version"
+for profile in DAILY_TOOLS OPTIONAL_TOOLS; do
+  declare -n tools=$profile
+  for name in "${tools[@]}"; do
+    catalog=TOOL_RELEASES
+    [[ $name != task ]] || catalog=VALIDATION_RELEASES
+    setup_release_versions "$catalog" "$name"
+    for version in "${RELEASE_VERSIONS[@]}"; do
+      download_release "$catalog" "$name" "$version"
+    done
   done
+  unset -n tools
 done
 ```
 
@@ -522,10 +528,9 @@ install the manager:
 ```bash
 set -euo pipefail
 source scripts/setup-lib
-SETUP_PROGRAM=install-krew
 source versions.env
-setup_validate_versions
-setup_release_first TOOL_RELEASES krew
+setup_validate_tool_config
+setup_select_default_release TOOL_RELEASES krew
 archive=$(mktemp)
 work=$(mktemp -d)
 trap 'rm -f "$archive"; rm -rf "$work"' EXIT

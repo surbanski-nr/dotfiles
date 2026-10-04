@@ -31,10 +31,37 @@ setup_validate_commit() {
   [[ $value =~ ^[0-9a-f]{40}$ ]] || setup_die "$name is not a commit SHA"
 }
 
+# Release selectors set RELEASE_VERSION, RELEASE_URL, RELEASE_SHA256 and
+# RELEASE_ASSET. Callers must copy values they need before selecting again.
+
+_setup_parse_release_record() {
+  local catalog_name=$1 tool=$2 record=$3 separators
+
+  [[ $record != *[[:space:]]* ]] ||
+    setup_die "${catalog_name}[$tool] contains whitespace" || return
+  separators=${record//[^|]/}
+  [[ $separators == '||' ]] ||
+    setup_die "${catalog_name}[$tool] record must contain exactly three fields" || return
+  IFS='|' read -r RELEASE_VERSION RELEASE_URL RELEASE_SHA256 <<<"$record"
+  [[ -n $RELEASE_VERSION && -n $RELEASE_URL && -n $RELEASE_SHA256 ]] ||
+    setup_die "${catalog_name}[$tool] contains an empty field" || return
+  setup_validate_version "${catalog_name}[$tool]" "$RELEASE_VERSION" || return
+  if [[ $RELEASE_URL == - || $RELEASE_SHA256 == - ]]; then
+    [[ $RELEASE_URL == - && $RELEASE_SHA256 == - ]] ||
+      setup_die "${catalog_name}[$tool] must provide both URL and SHA256 or neither" || return
+  else
+    [[ $RELEASE_URL == https://* ]] ||
+      setup_die "${catalog_name}[$tool] URL must use HTTPS: $RELEASE_URL" || return
+    setup_validate_digest "${catalog_name}[$tool] digest" "$RELEASE_SHA256" || return
+  fi
+  RELEASE_ASSET=${RELEASE_URL##*/}
+  if [[ $tool == python && $RELEASE_URL != - ]]; then
+    RELEASE_ASSET="cpython-${RELEASE_VERSION}+${PYTHON_STANDALONE_BUILD}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+  fi
+}
+
 setup_release_versions() {
-  local catalog_name=$1
-  local tool=$2
-  local record version url digest separators previous
+  local catalog_name=$1 tool=$2 record previous
   local -n catalog=$catalog_name
 
   declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
@@ -43,101 +70,90 @@ setup_release_versions() {
   RELEASE_VERSIONS=()
   while IFS= read -r record || [[ -n $record ]]; do
     [[ -n $record ]] || continue
-    [[ $record != *[[:space:]]* ]] ||
-      setup_die "${catalog_name}[$tool] contains whitespace" || return
-    separators=${record//[^|]/}
-    [[ $separators == '||' ]] ||
-      setup_die "${catalog_name}[$tool] record must contain exactly three fields" || return
-    IFS='|' read -r version url digest <<<"$record"
-    [[ -n $version && -n $url && -n $digest ]] ||
-      setup_die "${catalog_name}[$tool] contains an empty field" || return
-    setup_validate_version "${catalog_name}[$tool]" "$version" || return
-    if [[ $url == - || $digest == - ]]; then
-      [[ $url == - && $digest == - ]] ||
-        setup_die "${catalog_name}[$tool] must provide both URL and SHA256 or neither" || return
-    else
-      [[ $url == https://* ]] ||
-        setup_die "${catalog_name}[$tool] URL must use HTTPS: $url" || return
-      setup_validate_digest "${catalog_name}[$tool] digest" "$digest" || return
-    fi
+    _setup_parse_release_record "$catalog_name" "$tool" "$record" || return
     for previous in "${RELEASE_VERSIONS[@]}"; do
-      [[ $previous != "$version" ]] ||
-        setup_die "${catalog_name}[$tool] contains duplicate $version" || return
+      [[ $previous != "$RELEASE_VERSION" ]] ||
+        setup_die "${catalog_name}[$tool] contains duplicate $RELEASE_VERSION" || return
     done
-    RELEASE_VERSIONS+=("$version")
+    RELEASE_VERSIONS+=("$RELEASE_VERSION")
   done <<<"${catalog[$tool]}"
-  ((${#RELEASE_VERSIONS[@]} > 0)) ||
-    setup_die "${catalog_name}[$tool] is empty" || return
+  ((${#RELEASE_VERSIONS[@]} > 0)) || setup_die "${catalog_name}[$tool] is empty"
 }
 
-setup_release_record() {
-  local catalog_name=$1
-  local tool=$2
-  local requested_version=$3
-  local record version url digest
-  local -n catalog=$catalog_name
-
-  setup_release_versions "$catalog_name" "$tool" || return
-  RELEASE_VERSION=
-  RELEASE_URL=
-  RELEASE_SHA256=
-  RELEASE_ASSET=
-  while IFS= read -r record || [[ -n $record ]]; do
-    [[ -n $record ]] || continue
-    IFS='|' read -r version url digest <<<"$record"
-    [[ $version == "$requested_version" ]] || continue
-    RELEASE_VERSION=$version
-    RELEASE_URL=$url
-    RELEASE_SHA256=$digest
-    RELEASE_ASSET=${url##*/}
-    if [[ $tool == python && $url != - ]]; then
-      RELEASE_ASSET="cpython-${version}+${PYTHON_STANDALONE_BUILD}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
-    fi
-    return 0
-  done <<<"${catalog[$tool]}"
-  setup_die "${catalog_name}[$tool] has no release $requested_version"
-}
-
-setup_release_first() {
-  local catalog_name=$1
-  local tool=$2
-
-  setup_release_versions "$catalog_name" "$tool" || return
-  setup_release_record "$catalog_name" "$tool" "${RELEASE_VERSIONS[0]}"
-}
-
-setup_validate_release_catalog() {
-  local catalog_name=$1
-  shift
-  local expected name
-  local seen=' '
+setup_select_release() {
+  local catalog_name=$1 tool=$2 requested_version=$3 record
   local -n catalog=$catalog_name
 
   declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
     setup_die "$catalog_name must be an associative array" || return
-  ((${#catalog[@]} == $#)) ||
-    setup_die "$catalog_name contains an unexpected number of tools" || return
-  for expected in "$@"; do
-    [[ -v catalog[$expected] ]] ||
-      setup_die "$catalog_name has no releases for $expected" || return
-    setup_release_versions "$catalog_name" "$expected" || return
-    seen+="$expected "
-  done
-  for name in "${!catalog[@]}"; do
-    [[ $name =~ ^[a-z0-9-]+$ && $seen == *" $name "* ]] ||
-      setup_die "$catalog_name contains unsupported tool $name" || return
+  [[ -v catalog[$tool] ]] || setup_die "$catalog_name has no releases for $tool" || return
+  while IFS= read -r record || [[ -n $record ]]; do
+    [[ -n $record ]] || continue
+    _setup_parse_release_record "$catalog_name" "$tool" "$record" || return
+    [[ $RELEASE_VERSION == "$requested_version" ]] && return 0
+  done <<<"${catalog[$tool]}"
+  setup_die "${catalog_name}[$tool] has no release $requested_version"
+}
+
+setup_select_default_release() {
+  local catalog_name=$1 tool=$2 record
+  local -n catalog=$catalog_name
+
+  declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
+    setup_die "$catalog_name must be an associative array" || return
+  [[ -v catalog[$tool] ]] || setup_die "$catalog_name has no releases for $tool" || return
+  while IFS= read -r record || [[ -n $record ]]; do
+    [[ -n $record ]] || continue
+    _setup_parse_release_record "$catalog_name" "$tool" "$record"
+    return
+  done <<<"${catalog[$tool]}"
+  setup_die "${catalog_name}[$tool] is empty"
+}
+
+validate_release_catalog() {
+  local catalog_name=$1 tool
+  local -n catalog=$catalog_name
+
+  declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
+    setup_die "$catalog_name must be an associative array" || return
+  for tool in "${!catalog[@]}"; do
+    [[ $tool =~ ^[a-z0-9-]+$ ]] ||
+      setup_die "$catalog_name contains invalid tool name $tool" || return
+    setup_release_versions "$catalog_name" "$tool" || return
   done
 }
 
-setup_validate_validation_versions() {
-  local tool version
+validate_profile() {
+  local profile_name=$1 tool seen=' '
+  local -n profile=$profile_name
 
-  setup_validate_release_catalog VALIDATION_RELEASES \
-    actionlint shellcheck stylua zizmor task || return
-  for tool in actionlint shellcheck stylua zizmor task; do
+  declare -p "$profile_name" 2>/dev/null | grep -q '^declare -a' ||
+    setup_die "$profile_name must be an indexed array" || return
+  ((${#profile[@]} > 0)) || setup_die "$profile_name is empty" || return
+  for tool in "${profile[@]}"; do
+    [[ $tool =~ ^[a-z0-9-]+$ ]] ||
+      setup_die "$profile_name contains invalid tool name $tool" || return
+    [[ $seen != *" $tool "* ]] ||
+      setup_die "$profile_name contains duplicate $tool" || return
+    seen+="$tool "
+  done
+}
+
+setup_validate_validator_config() {
+  local required tool version seen=' '
+
+  validate_release_catalog VALIDATION_RELEASES || return
+  for required in actionlint shellcheck stylua zizmor task; do
+    [[ -v VALIDATION_RELEASES[$required] ]] ||
+      setup_die "VALIDATION_RELEASES has no releases for $required" || return
+    seen+="$required "
+  done
+  for tool in "${!VALIDATION_RELEASES[@]}"; do
+    [[ $seen == *" $tool "* ]] ||
+      setup_die "VALIDATION_RELEASES contains unsupported tool $tool" || return
     setup_release_versions VALIDATION_RELEASES "$tool" || return
     for version in "${RELEASE_VERSIONS[@]}"; do
-      setup_release_record VALIDATION_RELEASES "$tool" "$version" || return
+      setup_select_release VALIDATION_RELEASES "$tool" "$version" || return
       [[ $RELEASE_URL != - ]] ||
         setup_die "validation release $tool $version requires an artifact" || return
     done
@@ -147,75 +163,73 @@ setup_validate_validation_versions() {
   done
 }
 
-setup_validate_versions() {
-  local plugin record repository commit tool version
+setup_validate_tool_config() {
+  local plugin record repository commit tool version profile seen=' '
 
-  declare -p OFFLINE_TOOLS 2>/dev/null | grep -q '^declare -a' ||
-    setup_die 'OFFLINE_TOOLS must be an indexed array' || return
-  local expected_tool tool
-  local seen_tools=' '
-  for tool in "${OFFLINE_TOOLS[@]}"; do
-    case $tool in
-      nvim | nodejs | python | rg | tmux | oh-my-posh | k9s | zoxide | \
-        kubectx | kubens | task | fzf | terraform) ;;
-      *) setup_die "OFFLINE_TOOLS contains unsupported tool $tool"; return ;;
-    esac
-    [[ $seen_tools != *" $tool "* ]] ||
-      setup_die "OFFLINE_TOOLS contains duplicate $tool" || return
-    seen_tools+="$tool "
+  validate_release_catalog TOOL_RELEASES || return
+  for profile in DAILY_TOOLS OPTIONAL_TOOLS OFFLINE_TOOLS ASDF_TOOLS; do
+    validate_profile "$profile" || return
   done
-  for expected_tool in nvim nodejs python rg tmux oh-my-posh k9s zoxide \
-    kubectx kubens task fzf terraform; do
-    [[ $seen_tools == *" $expected_tool "* ]] ||
-      setup_die "offline profile requires $expected_tool" || return
-  done
-  ((${#OFFLINE_TOOLS[@]} == 13)) ||
-    setup_die 'OFFLINE_TOOLS must contain only the required offline profile' || return
-
-  setup_validate_release_catalog TOOL_RELEASES \
-    asdf gh k9s trivy kyverno kubeconform shellcheck rg zoxide uv \
-    oh-my-posh kubectx kubens nvim npm python tmux fzf krew terraform \
-    kubectl helm nodejs terragrunt || return
-  setup_validate_version KUBECTX_VERSION "${KUBECTX_VERSION:-}" || return
-  for tool in kubectx kubens; do
-    setup_release_versions TOOL_RELEASES "$tool" || return
-    ((${#RELEASE_VERSIONS[@]} == 1)) ||
-      setup_die "$tool must have exactly one release" || return
-    [[ ${RELEASE_VERSIONS[0]} == "$KUBECTX_VERSION" ]] ||
-      setup_die "$tool must use KUBECTX_VERSION" || return
-  done
-  for tool in kubectl helm; do
-    setup_release_versions TOOL_RELEASES "$tool" || return
-    for version in "${RELEASE_VERSIONS[@]}"; do
-      setup_release_record TOOL_RELEASES "$tool" "$version" || return
-      [[ $RELEASE_URL != - ]] ||
-        setup_die "$tool $version requires a direct artifact" || return
+  for profile in DAILY_TOOLS OPTIONAL_TOOLS OFFLINE_TOOLS; do
+    local -n tools=$profile
+    for tool in "${tools[@]}"; do
+      if [[ $tool == task ]]; then
+        [[ $profile != OPTIONAL_TOOLS ]] ||
+          setup_die 'task is only supported in the daily and offline profiles' || return
+      else
+        [[ -v TOOL_RELEASES[$tool] ]] ||
+          setup_die "$profile references unknown tool $tool" || return
+      fi
     done
+    unset -n tools
   done
-  for tool in nvim nodejs python rg tmux oh-my-posh k9s zoxide kubectx \
-    kubens fzf terraform; do
-    setup_release_first TOOL_RELEASES "$tool" || return
+  [[ ! -v TOOL_RELEASES[task] ]] ||
+    setup_die 'task must be pinned only in validation.env' || return
+
+  for tool in "${OFFLINE_TOOLS[@]}"; do
+    [[ $tool == task ]] && continue
+    setup_select_default_release TOOL_RELEASES "$tool" || return
     [[ $RELEASE_URL != - ]] ||
       setup_die "offline default $tool $RELEASE_VERSION requires an artifact" || return
+    setup_artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
+  done
+  for profile in DAILY_TOOLS OPTIONAL_TOOLS; do
+    local -n tools=$profile
+    for tool in "${tools[@]}"; do
+      [[ $tool == task ]] && continue
+    setup_release_versions TOOL_RELEASES "$tool" || return
+      for version in "${RELEASE_VERSIONS[@]}"; do
+        setup_select_release TOOL_RELEASES "$tool" "$version" || return
+        [[ $RELEASE_URL != - ]] ||
+          setup_die "$profile release $tool $version requires an artifact" || return
+        setup_artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
+      done
+    done
+    unset -n tools
+  done
+  for tool in asdf npm; do
+    setup_select_default_release TOOL_RELEASES "$tool" || return
+    [[ $RELEASE_URL != - ]] || setup_die "$tool default requires an artifact" || return
+    setup_artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
+  done
+  setup_validate_version KUBECTX_VERSION "${KUBECTX_VERSION:-}" || return
+  for tool in kubectx kubens; do
+    setup_select_default_release TOOL_RELEASES "$tool" || return
+    [[ $RELEASE_VERSION == "$KUBECTX_VERSION" ]] ||
+      setup_die "$tool default must use KUBECTX_VERSION" || return
   done
   setup_validate_version PIP_TOOLS_VERSION "${PIP_TOOLS_VERSION:-}" || return
   [[ $PYTHON_STANDALONE_BUILD =~ ^[0-9]{8}$ ]] ||
     setup_die 'PYTHON_STANDALONE_BUILD must use YYYYMMDD' || return
-  declare -p ASDF_TOOLS 2>/dev/null | grep -q '^declare -a' ||
-    setup_die 'ASDF_TOOLS must be an indexed array' || return
+
   declare -p ASDF_PLUGINS 2>/dev/null | grep -q '^declare -A' ||
     setup_die 'ASDF_PLUGINS must be an associative array' || return
-  ((${#ASDF_TOOLS[@]} == 6 && ${#ASDF_PLUGINS[@]} == 6)) ||
-    setup_die 'ASDF tool and plugin profiles must contain six tools' || return
-  local asdf_seen=' '
   for tool in "${ASDF_TOOLS[@]}"; do
-    case $tool in terraform | kubectl | helm | python | nodejs | terragrunt) ;; *)
-      setup_die "ASDF_TOOLS contains unsupported tool $tool"; return ;; esac
-    [[ $asdf_seen != *" $tool "* ]] ||
-      setup_die "ASDF_TOOLS contains duplicate $tool" || return
-    asdf_seen+="$tool "
+    [[ -v TOOL_RELEASES[$tool] ]] ||
+      setup_die "ASDF_TOOLS references unknown tool $tool" || return
     [[ -v ASDF_PLUGINS[$tool] ]] ||
       setup_die "ASDF_PLUGINS has no entry for $tool" || return
+    seen+="$tool "
     record=${ASDF_PLUGINS[$tool]}
     [[ $record != *[[:space:]]* && ${record//[^|]/} == '|' ]] ||
       setup_die "ASDF_PLUGINS[$tool] must contain repository|commit" || return
@@ -225,7 +239,7 @@ setup_validate_versions() {
     setup_validate_commit "ASDF_PLUGINS[$tool] commit" "$commit" || return
   done
   for plugin in "${!ASDF_PLUGINS[@]}"; do
-    [[ $asdf_seen == *" $plugin "* ]] ||
+    [[ $seen == *" $plugin "* ]] ||
       setup_die "ASDF_PLUGINS contains unsupported plugin $plugin" || return
   done
   for commit in "$TPM_COMMIT" "$TMUX_SENSIBLE_COMMIT" \
@@ -504,7 +518,7 @@ setup_extract_artifact() {
 setup_prepare_artifact() {
   local catalog_name=$1 name=$2 version=$3 archive=$4 destination=$5
 
-  setup_release_record "$catalog_name" "$name" "$version" || return
+  setup_select_release "$catalog_name" "$name" "$version" || return
   [[ $RELEASE_URL != - ]] ||
     setup_die "$name $version has no direct artifact" || return
   setup_artifact_layout "$name" "$version" "$RELEASE_ASSET" || return

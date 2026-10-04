@@ -10,10 +10,10 @@ Usage:
 
 Install selected Linux x86-64 release files under ~/bin. With --from, read
 only DIR/NAME/VERSION/UPSTREAM_ASSET and require at least one NAME.
-
-Names: gh kyverno task trivy k9s kubeconform shellcheck oh-my-posh
-       kubectx kubens rg zoxide uv nvim kubectl helm
 EOF
+  printf 'Names:'
+  printf ' %s' "${DAILY_TOOLS[@]}" "${OPTIONAL_TOOLS[@]}"
+  printf '\n'
 }
 
 main() {
@@ -43,11 +43,10 @@ main() {
   if ((from_requested == 1 && ${#requested[@]} == 0)); then
     setup_die '--from requires at least one tool name'
   fi
+  load_setup_config
   if ((${#requested[@]} == 0)); then
     requested=("${DAILY_TOOLS[@]}")
   fi
-
-  load_setup_config
   validate_host
   normalize_requested "${requested[@]}"
   preflight "$from_dir" "${NORMALIZED_TOOLS[@]}"
@@ -58,11 +57,8 @@ load_setup_config() {
   # Task deliberately keeps its only editable pin in validation.env.
   # shellcheck source=validation.env
   source "$REPO_DIR/validation.env"
-  # Daily tools, including ShellCheck, are selected only by versions.env.
-  # shellcheck source=versions.env
-  source "$REPO_DIR/versions.env"
-  setup_validate_versions
-  setup_validate_validation_versions
+  setup_validate_tool_config
+  setup_validate_validator_config
 
   BIN_DIR=${SETUP_TOOLS_BIN_DIR:-$HOME/bin}
   STATE_DIR=${SETUP_TOOLS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup-tools}
@@ -100,12 +96,12 @@ normalize_requested() {
   done
 }
 
-tool_versions() {
+load_tool_versions() {
   local catalog=TOOL_RELEASES
 
   [[ $1 != task ]] || catalog=VALIDATION_RELEASES
   setup_release_versions "$catalog" "$1" || return
-  printf '%s\n' "${RELEASE_VERSIONS[@]}"
+  TOOL_VERSIONS=("${RELEASE_VERSIONS[@]}")
 }
 
 load_tool_release() {
@@ -114,7 +110,7 @@ load_tool_release() {
   local catalog=TOOL_RELEASES
 
   [[ $name != task ]] || catalog=VALIDATION_RELEASES
-  setup_release_record "$catalog" "$name" "$version" || return
+  setup_select_release "$catalog" "$name" "$version" || return
   [[ $RELEASE_URL != - ]] ||
     setup_die "$name $version has no direct artifact" || return
   setup_artifact_layout "$name" "$version" "$RELEASE_ASSET"
@@ -271,7 +267,8 @@ preflight() {
   [[ -n $from_dir ]] || setup_need curl
 
   for name in "${@:2}"; do
-    while IFS= read -r version; do
+    load_tool_versions "$name"
+    for version in "${TOOL_VERSIONS[@]}"; do
       load_tool_release "$name" "$version"
       if installation_status "$name" "$version" "$RELEASE_SHA256"; then
         status=0
@@ -289,8 +286,8 @@ preflight() {
           ;;
         *) return "$status" ;;
       esac
-    done < <(tool_versions "$name")
-    load_tool_release "$name" "$(tool_versions "$name" | head -n 1)"
+    done
+    load_tool_release "$name" "${TOOL_VERSIONS[0]}"
     for entry in "${SPEC_LINKS[@]}"; do preflight_link "$name" "$entry"; done
   done
   mkdir -p "$BIN_DIR" "$STATE_DIR/locks"
@@ -484,10 +481,11 @@ install_requested() {
 
   for name in "${@:2}"; do
     acquire_lock "$name"
-    selected=$(tool_versions "$name" | head -n 1)
-    while IFS= read -r version; do
+    load_tool_versions "$name"
+    selected=${TOOL_VERSIONS[0]}
+    for version in "${TOOL_VERSIONS[@]}"; do
       install_version "$from_dir" "$name" "$version"
-    done < <(tool_versions "$name")
+    done
     load_tool_release "$name" "$selected"
     activate_links "$name" "${SPEC_LINKS[@]}"
   done
@@ -511,13 +509,13 @@ cleanup() {
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/setup-lib
 source "$REPO_DIR/scripts/setup-lib"
+# Profiles are data needed by --help and by the default selection. Sourcing
+# this file does not download, install or validate anything.
+# shellcheck source=versions.env
+source "$REPO_DIR/versions.env"
 SETUP_PROGRAM=setup-tools
 declare -a NORMALIZED_TOOLS=()
-declare -a DAILY_TOOLS=(
-  gh kyverno task trivy k9s kubeconform shellcheck oh-my-posh kubectx kubens
-  rg zoxide uv nvim
-)
-declare -a OPTIONAL_TOOLS=(kubectl helm)
+declare -a TOOL_VERSIONS=()
 declare -a SPEC_DESTS=()
 declare -a SPEC_LINKS=()
 declare -a TEMP_PATHS=()

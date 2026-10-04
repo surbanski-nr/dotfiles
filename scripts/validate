@@ -336,6 +336,7 @@ validate_workflows() {
 
 validate_repo() {
   local base=${VALIDATE_BASE_SHA:-}
+  local grep_status
   local image
   local variable
 
@@ -347,16 +348,19 @@ validate_repo() {
   # shellcheck source=setup-lib
   source scripts/setup-lib
   SETUP_PROGRAM=validate
-  setup_validate_versions
-  setup_validate_validation_versions
+  setup_validate_tool_config
+  setup_validate_validator_config
   for file in nvim2/.config/nvim2/python-locks/{ansible-lint,yamllint}.{in,lock}; do
     [[ -f $file && ! -L $file ]] || die "Nvim2 Python lock source is missing: $file"
   done
   [[ ! -e offline ]] || die 'legacy offline source directory still exists'
-  if rg -uu --quiet \
+  if grep -Eq \
     '^(ASDF|GH|K9S|TRIVY|KYVERNO|KUBECONFORM|SHELLCHECK|RG|ZOXIDE|UV|OMP|NVIM|NPM|TMUX|FZF|KREW|ACTIONLINT|STYLUA|ZIZMOR|TASK)_(VERSION|SHA256)=' \
     versions.env validation.env; then
     die 'legacy editable release scalars remain in the catalogs'
+  else
+    grep_status=$?
+    ((grep_status == 1)) || die 'cannot inspect release catalogs for legacy scalars'
   fi
   # shellcheck source=../dotfiles-release.env
   source dotfiles-release.env
@@ -366,9 +370,10 @@ validate_repo() {
     [[ $image =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
       die "$variable is not pinned to a SHA-256 digest"
   done
-  if grep -qP \
-    'nvim2-release(?!-rollback[.]env)|NVIM2_RELEASE|TARGET_(USER|UID|HOME)' \
-    scripts/dotfiles-release dotfiles-release.env .github/workflows/dotfiles-release.yml; then
+  if grep -qE \
+    'nvim2-release|NVIM2_RELEASE|TARGET_(USER|UID|HOME)' \
+    scripts/dotfiles-release scripts/build-dotfiles-release dotfiles-release.env \
+    .github/workflows/dotfiles-release.yml; then
     die 'offline release files retain a legacy name or baked target identity'
   fi
 
