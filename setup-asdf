@@ -19,7 +19,7 @@ main() {
   while (($#)); do
     case $1 in
       -h | --help) usage; return 0 ;;
-      --*) setup_die "unknown option: $1" ;;
+      --*) report_error "unknown option: $1" ;;
       *) requested+=("$1"); shift ;;
     esac
   done
@@ -38,8 +38,8 @@ main() {
 load_config() {
   # shellcheck source=versions.env
   source "$REPO_DIR/versions.env"
-  setup_validate_tool_config
-  setup_select_default_release TOOL_RELEASES asdf
+  validate_tool_config
+  select_default_release TOOL_RELEASES asdf
   ASDF_VERSION=$RELEASE_VERSION
   BIN_DIR=${SETUP_ASDF_BIN_DIR:-$HOME/bin}
   ASDF_DATA_DIR=${ASDF_DATA_DIR:-$HOME/.asdf}
@@ -48,10 +48,10 @@ load_config() {
 }
 
 validate_host() {
-  [[ $(uname -s) == Linux ]] || setup_die 'only Linux is supported'
-  [[ $(uname -m) == x86_64 ]] || setup_die 'only Linux x86-64 is supported'
+  [[ $(uname -s) == Linux ]] || report_error 'only Linux is supported'
+  [[ $(uname -m) == x86_64 ]] || report_error 'only Linux x86-64 is supported'
   for command_name in awk cmp curl find git sha256sum tar mktemp mv ln readlink; do
-    setup_need "$command_name"
+    require_command "$command_name"
   done
 }
 
@@ -67,7 +67,7 @@ normalize_requested() {
     for allowed in "${ASDF_TOOLS[@]}"; do
       if [[ $name == "$allowed" ]]; then supported=1; break; fi
     done
-    ((supported == 1)) || setup_die "unknown project tool: $name"
+    ((supported == 1)) || report_error "unknown project tool: $name"
     if [[ $seen != *" $name "* ]]; then
       NORMALIZED_TOOLS+=("$name")
       seen+="$name "
@@ -79,9 +79,9 @@ plugin_spec() {
   local name=$1
 
   [[ -v ASDF_PLUGINS[$name] ]] ||
-    setup_die "missing asdf plugin mapping for $name" || return
+    report_error "missing asdf plugin mapping for $name" || return
   IFS='|' read -r PLUGIN_REPO PLUGIN_COMMIT <<<"${ASDF_PLUGINS[$name]}"
-  setup_release_versions TOOL_RELEASES "$name" || return
+  release_versions TOOL_RELEASES "$name" || return
   TOOL_VERSIONS=("${RELEASE_VERSIONS[@]}")
 }
 
@@ -94,53 +94,53 @@ preflight_asdf_link() {
     target=$(readlink -- "$link")
     if [[ ! -e $state && ! -L $state ]]; then
       [[ $target == "asdf-$ASDF_VERSION" ]] ||
-        setup_die "legacy asdf target is not the current pinned version: $link -> $target"
+        report_error "legacy asdf target is not the current pinned version: $link -> $target"
       [[ -f $BIN_DIR/$target && -x $BIN_DIR/$target && ! -L $BIN_DIR/$target ]] ||
-        setup_die "invalid legacy asdf target: $BIN_DIR/$target"
+        report_error "invalid legacy asdf target: $BIN_DIR/$target"
       output=$("$BIN_DIR/$target" version 2>&1) ||
-        setup_die "legacy asdf target failed: $BIN_DIR/$target"
+        report_error "legacy asdf target failed: $BIN_DIR/$target"
       [[ $output == *"$ASDF_VERSION"* ]] ||
-        setup_die "legacy asdf target did not report $ASDF_VERSION"
+        report_error "legacy asdf target did not report $ASDF_VERSION"
       LEGACY_ASDF_TARGET=$target
       return
     fi
-    [[ -f $state && ! -L $state ]] || setup_die "invalid asdf ownership state: $state"
-    IFS=$'\t' read -r recorded extra <"$state" || setup_die "empty asdf state: $state"
+    [[ -f $state && ! -L $state ]] || report_error "invalid asdf ownership state: $state"
+    IFS=$'\t' read -r recorded extra <"$state" || report_error "empty asdf state: $state"
     [[ -z $extra && $recorded =~ ^asdf-v?[0-9]+([.][0-9]+){1,3}$ ]] ||
-      setup_die "invalid asdf state: $state"
+      report_error "invalid asdf state: $state"
     [[ $recorded == "$target" ]] ||
-      setup_die "managed asdf link differs from recorded target: $link"
+      report_error "managed asdf link differs from recorded target: $link"
     [[ $target =~ ^asdf-v?([0-9]+([.][0-9]+){1,3})$ ]] ||
-      setup_die "refusing foreign link: $link -> $target"
+      report_error "refusing foreign link: $link -> $target"
     version=${BASH_REMATCH[1]}
     [[ -f $BIN_DIR/$target && -x $BIN_DIR/$target && ! -L $BIN_DIR/$target ]] ||
-      setup_die "invalid managed asdf target: $BIN_DIR/$target"
+      report_error "invalid managed asdf target: $BIN_DIR/$target"
     output=$("$BIN_DIR/$target" version 2>&1) ||
-      setup_die "managed asdf target failed: $BIN_DIR/$target"
+      report_error "managed asdf target failed: $BIN_DIR/$target"
     [[ $output == *"$version"* ]] ||
-      setup_die "managed asdf target did not report $version"
+      report_error "managed asdf target did not report $version"
     install_state=$STATE_DIR/installations/$target.sha256
     [[ -f $install_state && ! -L $install_state ]] ||
-      setup_die "asdf installation has no ownership state: $BIN_DIR/$target"
+      report_error "asdf installation has no ownership state: $BIN_DIR/$target"
     actual=$(sha256sum "$BIN_DIR/$target" | awk '{print $1}')
     [[ $(<"$install_state") == "$actual" ]] ||
-      setup_die "managed asdf target was modified: $BIN_DIR/$target"
+      report_error "managed asdf target was modified: $BIN_DIR/$target"
   elif [[ -e $link ]]; then
-    setup_die "refusing unmanaged path: $link"
+    report_error "refusing unmanaged path: $link"
   elif [[ -e $state || -L $state ]]; then
-    setup_die "asdf ownership state exists without its managed link: $state"
+    report_error "asdf ownership state exists without its managed link: $state"
   fi
   if [[ -e $BIN_DIR/asdf-$ASDF_VERSION || -L $BIN_DIR/asdf-$ASDF_VERSION ]]; then
     [[ -f $BIN_DIR/asdf-$ASDF_VERSION && -x $BIN_DIR/asdf-$ASDF_VERSION &&
       ! -L $BIN_DIR/asdf-$ASDF_VERSION ]] ||
-      setup_die "invalid asdf installation: $BIN_DIR/asdf-$ASDF_VERSION"
+      report_error "invalid asdf installation: $BIN_DIR/asdf-$ASDF_VERSION"
     install_state=$STATE_DIR/installations/asdf-$ASDF_VERSION.sha256
     if [[ $LEGACY_ASDF_TARGET != "asdf-$ASDF_VERSION" ]]; then
       [[ -f $install_state && ! -L $install_state ]] ||
-        setup_die "refusing unmanaged asdf installation: $BIN_DIR/asdf-$ASDF_VERSION"
+        report_error "refusing unmanaged asdf installation: $BIN_DIR/asdf-$ASDF_VERSION"
       actual=$(sha256sum "$BIN_DIR/asdf-$ASDF_VERSION" | awk '{print $1}')
       [[ $(<"$install_state") == "$actual" ]] ||
-        setup_die "managed asdf installation was modified: $BIN_DIR/asdf-$ASDF_VERSION"
+        report_error "managed asdf installation was modified: $BIN_DIR/asdf-$ASDF_VERSION"
     fi
   fi
 }
@@ -153,13 +153,13 @@ preflight_plugin() {
   plugin_spec "$name"
   if [[ -e $directory || -L $directory ]]; then
     [[ -d $directory/.git && ! -L $directory ]] ||
-      setup_die "asdf plugin is not a Git checkout: $directory"
+      report_error "asdf plugin is not a Git checkout: $directory"
     remote=$(git -C "$directory" remote get-url origin)
     [[ $remote == "$PLUGIN_REPO" || ${remote%.git} == "${PLUGIN_REPO%.git}" ]] ||
-      setup_die "$name plugin uses unexpected origin: $remote"
+      report_error "$name plugin uses unexpected origin: $remote"
     if ! git -C "$directory" diff --quiet --ignore-submodules -- ||
       ! git -C "$directory" diff --cached --quiet --ignore-submodules --; then
-      setup_die "$name plugin checkout has local changes"
+      report_error "$name plugin checkout has local changes"
     fi
   fi
 }
@@ -174,7 +174,7 @@ preflight_project_command() {
   esac
   path="$BIN_DIR/$command_name"
   if [[ -e $path || -L $path ]]; then
-    setup_die "$name conflicts with the direct launcher: $path"
+    report_error "$name conflicts with the direct launcher: $path"
   fi
 }
 
@@ -182,10 +182,10 @@ preflight() {
   local name
 
   if [[ -e $BIN_DIR || -L $BIN_DIR ]]; then
-    [[ -d $BIN_DIR && ! -L $BIN_DIR ]] || setup_die "invalid bin directory: $BIN_DIR"
+    [[ -d $BIN_DIR && ! -L $BIN_DIR ]] || report_error "invalid bin directory: $BIN_DIR"
   fi
   if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
-    [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || setup_die "invalid state directory: $STATE_DIR"
+    [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || report_error "invalid state directory: $STATE_DIR"
   fi
   preflight_asdf_link
   for name in "${NORMALIZED_TOOLS[@]}"; do
@@ -194,7 +194,7 @@ preflight() {
   done
   mkdir -p "$BIN_DIR" "$STATE_DIR"
   mkdir -- "$STATE_DIR/lock" 2>/dev/null ||
-    setup_die 'another setup-asdf process is running'
+    report_error 'another setup-asdf process is running'
   LOCK_DIR=$STATE_DIR/lock
 }
 
@@ -209,26 +209,26 @@ install_asdf() {
   local install_state="$STATE_DIR/installations/asdf-$ASDF_VERSION.sha256"
   local state_temporary digest
 
-  setup_select_release TOOL_RELEASES asdf "$ASDF_VERSION"
-  setup_artifact_layout asdf "$ASDF_VERSION" "$RELEASE_ASSET"
+  select_release TOOL_RELEASES asdf "$ASDF_VERSION"
+  artifact_layout asdf "$ASDF_VERSION" "$RELEASE_ASSET"
 
   if [[ -f $destination && -z $LEGACY_ASDF_TARGET ]]; then
     output=$("$destination" version 2>&1)
     [[ $output == *"$ASDF_VERSION"* ]] ||
-      setup_die "existing asdf binary did not report $ASDF_VERSION"
+      report_error "existing asdf binary did not report $ASDF_VERSION"
   else
     stage=$(mktemp -d "$BIN_DIR/.setup-asdf.XXXXXX")
     TEMP_PATHS+=("$stage")
     archive="$stage/$RELEASE_ASSET"
     executable="$stage/asdf-$ASDF_VERSION"
-    setup_download "$RELEASE_URL" "$archive"
-    setup_prepare_artifact TOOL_RELEASES asdf "$ASDF_VERSION" "$archive" "$stage"
+    download_file "$RELEASE_URL" "$archive"
+    prepare_artifact TOOL_RELEASES asdf "$ASDF_VERSION" "$archive" "$stage"
     output=$("$executable" version 2>&1)
     [[ $output == *"$ASDF_VERSION"* ]] ||
-      setup_die "downloaded asdf did not report $ASDF_VERSION"
+      report_error "downloaded asdf did not report $ASDF_VERSION"
     if [[ -n $LEGACY_ASDF_TARGET ]]; then
       cmp -s "$executable" "$destination" ||
-        setup_die 'legacy asdf binary does not match the verified upstream archive'
+        report_error 'legacy asdf binary does not match the verified upstream archive'
     else
       mv -- "$executable" "$destination"
     fi
@@ -271,7 +271,7 @@ pin_plugin() {
     git -C "$directory" checkout --detach "$PLUGIN_COMMIT"
   fi
   [[ $(git -C "$directory" rev-parse HEAD) == "$PLUGIN_COMMIT" ]] ||
-    setup_die "failed to pin $name plugin"
+    report_error "failed to pin $name plugin"
 }
 
 reconcile_tool() {
@@ -328,7 +328,7 @@ cleanup() {
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/setup-lib
 source "$REPO_DIR/scripts/setup-lib"
-SETUP_PROGRAM=setup-asdf
+PROGRAM=setup-asdf
 declare -a NORMALIZED_TOOLS=()
 declare -a TEMP_PATHS=()
 BIN_DIR=

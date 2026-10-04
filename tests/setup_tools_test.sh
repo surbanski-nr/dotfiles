@@ -51,12 +51,12 @@ load_test_versions() {
   source "$repository/versions.env"
   # shellcheck disable=SC1090
   source "$repository/scripts/setup-lib"
-  setup_select_default_release TOOL_RELEASES gh; GH_VERSION=$RELEASE_VERSION
-  setup_select_default_release TOOL_RELEASES k9s; K9S_VERSION=$RELEASE_VERSION
-  setup_select_default_release TOOL_RELEASES oh-my-posh; OMP_VERSION=$RELEASE_VERSION
-  setup_select_default_release TOOL_RELEASES uv; UV_VERSION=$RELEASE_VERSION
-  setup_select_default_release TOOL_RELEASES nvim; NVIM_VERSION=$RELEASE_VERSION
-  setup_select_default_release TOOL_RELEASES tmux; TMUX_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES gh; GH_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES k9s; K9S_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES oh-my-posh; OMP_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES uv; UV_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES nvim; NVIM_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES tmux; TMUX_VERSION=$RELEASE_VERSION
 }
 
 make_test_repo() {
@@ -188,6 +188,17 @@ set -e
 [[ ! -e $test_root/repeated-from-home/bin && ! -e $test_root/repeated-from-home/.local ]] ||
   fail 'repeated --from changed the target home'
 
+unsupported_repository=$test_root/unsupported-repository
+unsupported_home=$test_root/unsupported-home
+make_test_repo "$unsupported_repository"
+printf 'DAILY_TOOLS+=(fzf)\n' >>"$unsupported_repository/versions.env"
+if HOME="$unsupported_home" "$unsupported_repository/setup-tools" \
+  --from "$archive_root" k9s >"$test_root/unsupported-profile.log" 2>&1; then
+  fail 'setup-tools accepted a profile tool without a command adapter'
+fi
+[[ ! -e $unsupported_home/bin && ! -e $unsupported_home/.local ]] ||
+  fail 'invalid profile changed the target home'
+
 foreign_home=$test_root/foreign-home
 mkdir -p "$foreign_home/bin"
 write_fake "$foreign_home/bin/k9s-manual" k9s manual
@@ -253,13 +264,34 @@ tar -C "$tmux_work" -czf "$test_root/tmux.tar.gz" "tmux-$TMUX_VERSION"
 TMUX_SHA256=$(sha256sum "$test_root/tmux.tar.gz" | awk '{print $1}')
 # shellcheck source=../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
-SETUP_PROGRAM=setup-tools-test
-# Used through a nameref in setup_prepare_artifact.
+PROGRAM=setup-tools-test
+# Used through a nameref in prepare_artifact.
 # shellcheck disable=SC2034
 declare -A TEST_RELEASES=([tmux]=$'\n'"$TMUX_VERSION|https://example.invalid/tmux.tar.gz|$TMUX_SHA256"$'\n')
-setup_prepare_artifact TEST_RELEASES tmux "$TMUX_VERSION" "$test_root/tmux.tar.gz" "$tmux_destination"
+prepare_artifact TEST_RELEASES tmux "$TMUX_VERSION" "$test_root/tmux.tar.gz" "$tmux_destination"
 [[ -x $tmux_destination/tmux-$TMUX_VERSION/tmux ]] ||
   fail 'shared tree extractor did not preserve an equal source and destination name'
+
+bad_destination=$test_root/bad-checksum-destination
+# The shared library reads the catalog through a nameref.
+# shellcheck disable=SC2034
+TEST_RELEASES[tmux]="$TMUX_VERSION|https://example.invalid/tmux.tar.gz|$(printf '%064d' 0)"
+if prepare_artifact TEST_RELEASES tmux "$TMUX_VERSION" \
+  "$test_root/tmux.tar.gz" "$bad_destination" >"$test_root/bad-checksum.log" 2>&1; then
+  fail 'shared artifact preparation accepted an invalid checksum'
+fi
+[[ ! -e $bad_destination ]] || fail 'invalid checksum produced an extracted payload'
+
+bad_destination=$test_root/bad-archive-destination
+mkdir -p "$bad_destination"
+artifact_layout nvim "$NVIM_VERSION" nvim-linux-x86_64.tar.gz
+if extract_artifact \
+  "$unsafe_archives/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" \
+  "$bad_destination" >"$test_root/bad-archive.log" 2>&1; then
+  fail 'shared extractor accepted an escaping archive link'
+fi
+[[ -z $(find "$bad_destination" -mindepth 1 -print -quit) ]] ||
+  fail 'unsafe archive produced an extracted payload'
 
 pin_repository=$test_root/pin-repository
 pin_archives=$test_root/pin-archives

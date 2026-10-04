@@ -16,10 +16,10 @@ tool=$1
 
 # shellcheck source=setup-lib
 source "$repo_dir/scripts/setup-lib"
-SETUP_PROGRAM=install-validation-tool
+PROGRAM=install-validation-tool
 # shellcheck source=../validation.env
 source "$repo_dir/validation.env"
-setup_validate_validator_config
+validate_validator_config
 
 mkdir -p "$bin_dir"
 export PATH="$bin_dir:$PATH"
@@ -40,7 +40,7 @@ tool_version() {
 
 case $tool in
   actionlint | shellcheck | stylua | task | zizmor)
-    setup_select_default_release VALIDATION_RELEASES "$tool"
+    select_default_release VALIDATION_RELEASES "$tool"
     version=$RELEASE_VERSION
     url=$RELEASE_URL
     checksum=$RELEASE_SHA256

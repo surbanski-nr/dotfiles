@@ -60,6 +60,10 @@ write_fake_python() {
   cat >"$path" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ ${FIXTURE_FAIL_PYTHON_IMPORT:-} == 1 &&
+  ${1:-} == -I && ${2:-} == - && ${!#} == ansible-lint ]]; then
+  exit 95
+fi
 if [[ " $* " == *' -m venv '* ]]; then
   destination=${!#}
   mkdir -p "$destination/bin"
@@ -172,7 +176,7 @@ make_artifact() {
     >"$release/python-locks/ansible-lint.lock"
   printf 'yamllint==1.38.0\n' >"$release/python-locks/yamllint.in"
   printf 'yamllint==1.38.0 --hash=sha256:fixture\n' >"$release/python-locks/yamllint.lock"
-  printf 'ansible-lint\t26.1.1\tansible-lint\nyamllint\t1.38.0\tyamllint\n' \
+  printf 'ansible-lint\t26.1.1\nyamllint\t1.38.0\n' \
     >"$release/python-locks/inventory.tsv"
   printf 'fixture wheel\n' >"$release/python-wheelhouse/fixture.whl"
   printf '%s\n' \
@@ -819,7 +823,7 @@ inventory_commit=5555555555555555555555555555555555555555
 inventory_id=dotfiles-${inventory_commit:0:12}
 inventory_artifact=$test_root/inventory-mismatch.tar.gz
 make_artifact "$inventory_commit" inventory "$inventory_artifact"
-printf 'ansible-lint\t99.0.0\tansible-lint\nyamllint\t1.38.0\tyamllint\n' \
+printf 'ansible-lint\t99.0.0\nyamllint\t1.38.0\n' \
   >"$test_root/stage-inventory/$inventory_id/python-locks/inventory.tsv"
 (
   cd "$test_root/stage-inventory/$inventory_id"
@@ -840,6 +844,31 @@ set -e
   ! -e $test_home/dotfiles-releases/.state/pending.env &&
   ! -e $test_home/dotfiles-releases/$inventory_id ]] ||
   fail 'Python inventory mismatch retained partial installation state'
+
+printf 'ansible-lint\t26.1.1\nansible-lint\t26.1.1\n' \
+  >"$test_root/stage-inventory/$inventory_id/python-locks/inventory.tsv"
+repack_artifact inventory "$inventory_id" "$inventory_artifact"
+if run_manager install "$inventory_artifact" >"$test_root/duplicate-inventory.log" 2>&1; then
+  fail 'duplicate Python inventory packages were accepted'
+fi
+[[ ! -e $test_home/dotfiles-releases/current &&
+  ! -e $test_home/dotfiles-releases/.state/pending.env &&
+  ! -e $test_home/dotfiles-releases/$inventory_id ]] ||
+  fail 'duplicate Python inventory retained partial installation state'
+
+foreign_plugin_home=$test_root/foreign-plugin-home
+foreign_plugin=$foreign_plugin_home/.tmux/plugins/tmux-sensible
+mkdir -p "$(dirname -- "$foreign_plugin")"
+cp -a "$test_root/stage-one/$id_one/share/tmux/plugins/tmux-sensible" "$foreign_plugin"
+git -C "$foreign_plugin" remote set-url origin https://example.invalid/foreign.git
+test_home=$foreign_plugin_home
+if run_manager install "$artifact_one" >"$test_root/foreign-plugin.log" 2>&1; then
+  fail 'foreign tmux plugin checkout was adopted'
+fi
+[[ ! -L $foreign_plugin &&
+  $(git -C "$foreign_plugin" remote get-url origin) == https://example.invalid/foreign.git &&
+  ! -e $test_home/dotfiles-releases/current ]] ||
+  fail 'foreign tmux plugin checkout changed after rejected install'
 
 test_home="$test_root/nonstandard home"
 mkdir -p "$test_home/.config/k9s" "$test_home/bin"
@@ -908,6 +937,12 @@ assert_link "$test_home/.config/k9s/config.yaml" \
 [[ $(<"$legacy_data/mini-visits-index") == 'legacy visits' ]] ||
   fail 'state migration removed its source'
 run_manager health
+set +e
+FIXTURE_FAIL_PYTHON_IMPORT=1 run_manager health </dev/null >"$test_root/python-health.log" 2>&1
+python_health_status=$?
+set -e
+[[ $python_health_status -eq 95 ]] ||
+  fail 'health did not reject a broken Python package import'
 run_manager list | grep -F "$id_one" | grep -F current >/dev/null
 
 first_digest=$(sha256sum "$test_home/dotfiles-releases/$id_one/installed.sha256")

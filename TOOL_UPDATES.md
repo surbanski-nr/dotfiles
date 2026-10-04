@@ -33,6 +33,8 @@ store ordered `version|full_URL|SHA256` records. The first record is the
 default and cannot fall back if its artifact is absent. Task belongs only to
 `VALIDATION_RELEASES`. `ASDF_PLUGINS` owns plugin repository and commit pins,
 while runtime versions still come from `TOOL_RELEASES`.
+For a tmux plugin bump, change its `*_COMMIT` in `versions.env`; change the
+adjacent `*_REPO` only when deliberately moving to a different repository.
 
 For a normal dependency bump, edit only its first record in `versions.env`,
 or in `validation.env` for validation Task and the other validators. Run the

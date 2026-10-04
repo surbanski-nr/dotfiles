@@ -193,49 +193,46 @@ read_release_metadata() {
     { die 'release metadata has an invalid payload layout'; return 1; }
 }
 
-verify_python_inventory() {
+python_inventory_packages() {
   local release=$1 inventory input_count lock_count
   inventory=$release/python-locks/inventory.tsv
-  local package version entry_points extra requirement count=0
+  local package version extra requirement seen=' '
+  local -a packages=()
 
   [[ -f $inventory && ! -L $inventory ]] ||
     { die 'Python package inventory is missing'; return 1; }
-  while IFS=$'\t' read -r package version entry_points extra; do
+  while IFS=$'\t' read -r package version extra; do
     [[ -z $extra && $package =~ ^[a-z0-9][a-z0-9-]*$ &&
-      $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ &&
-      $entry_points =~ ^[a-z0-9,-]+$ ]] || {
+      $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] || {
       die 'Python package inventory contains invalid data'
       return 1
     }
+    [[ $seen != *" $package "* ]] ||
+      { die "duplicate Python package in inventory: $package"; return 1; }
+    seen+="$package "
     requirement=$(awk '!/^#/ && NF { print; exit }' "$release/python-locks/$package.in") || return
     [[ $requirement == "$package==$version" ]] || {
       die "Python input does not match Mason inventory: $package==$version"
       return 1
     }
-    grep -F -- "$package==$version " "$release/python-locks/$package.lock" >/dev/null || {
+    awk -v requirement="$package==$version" \
+      '$1 == requirement { found = 1 } END { exit !found }' \
+      "$release/python-locks/$package.lock" || {
       die "Python lock does not match Mason inventory: $package==$version"
       return 1
     }
-    ((count += 1))
+    packages+=("$package")
   done <"$inventory"
-  [[ $count -gt 0 ]] || { die 'Python package inventory is empty'; return 1; }
+  ((${#packages[@]} > 0)) || { die 'Python package inventory is empty'; return 1; }
   input_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.in' -printf '.\n' |
     wc -l) || return
   lock_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.lock' -printf '.\n' |
     wc -l) || return
-  [[ $input_count -eq $count && $lock_count -eq $count ]] || {
+  [[ $input_count -eq ${#packages[@]} && $lock_count -eq ${#packages[@]} ]] || {
     die 'Python lock set differs from the Mason inventory'
     return 1
   }
-}
-
-python_inventory_packages() {
-  local release=$1 package version entry_points extra
-
-  verify_python_inventory "$release" || return
-  while IFS=$'\t' read -r package version entry_points extra; do
-    printf '%s\n' "$package" || return
-  done <"$release/python-locks/inventory.tsv"
+  printf '%s\n' "${packages[@]}"
 }
 
 verify_release_symlinks() {
@@ -713,17 +710,16 @@ tmux_plugin_checkout_owned() {
 
   plugin=${path##*/}
   case $plugin in
-    tmux-sensible) expected_origin=https://github.com/tmux-plugins/tmux-sensible.git ;;
-    tmux-resurrect) expected_origin=https://github.com/tmux-plugins/tmux-resurrect.git ;;
-    tmux-continuum) expected_origin=https://github.com/tmux-plugins/tmux-continuum.git ;;
+    tmux-sensible | tmux-resurrect | tmux-continuum) ;;
     *) return 1 ;;
   esac
   [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] || return 1
   candidate=$RELEASE_ROOT/$release_id/share/tmux/plugins/$plugin
   [[ -d $path/.git && -d $candidate/.git && ! -L $path && ! -L $candidate ]] || return 1
+  expected_origin=$(git -C "$candidate" remote get-url origin 2>/dev/null) || return 1
+  [[ $expected_origin == https://*.git && $expected_origin != *[[:space:]]* ]] || return 1
   origin=$(git -C "$path" remote get-url origin 2>/dev/null) || return 1
   [[ $origin == "$expected_origin" &&
-    $(git -C "$candidate" remote get-url origin 2>/dev/null) == "$expected_origin" &&
     $(git -C "$path" rev-parse HEAD 2>/dev/null) == \
       "$(git -C "$candidate" rev-parse HEAD 2>/dev/null)" &&
     -z $(git -C "$path" status --porcelain --untracked-files=all 2>/dev/null) ]] || return 1
@@ -1260,7 +1256,7 @@ print('python-venv=' + sys.argv[2] + ':' + sys.prefix)
 PY
     env -u PYTHONHOME -u PYTHONPATH PIP_CONFIG_FILE=/dev/null PYTHONDONTWRITEBYTECODE=1 \
       "$venv/bin/python" -I -m pip check || return
-  done
+  done <<<"$package_output"
 
   PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
     "$release/share/nvim2/mason/bin/ansible-config" --version || return
@@ -1359,61 +1355,56 @@ health_kubernetes_tools() {
 }
 
 health_tmux() {
-  local release=$1 health_home=$2 socket=dotfiles-health-$$ plugin entry option command
+  local release=$1 health_home=$2 socket socket_dir plugin entry option command
   local client client_input client_stderr client_pid reload_value
   local tmux=$release/bin/tmux
 
-  mkdir -p "$health_home/tmux-tmp" "$health_home/.local/share/tmux/resurrect" || return
-  chmod 0700 "$health_home/tmux-tmp" || return
+  mkdir -p "$health_home/.local/share/tmux/resurrect" || return
   (
+    # Unix socket paths are short; a valid HOME may exceed their limit.
+    socket_dir=$(mktemp -d /tmp/dotfiles-tmux.XXXXXX) || exit
+    socket=$socket_dir/socket
+    unset TMUX
+    export HOME="$health_home"
     # shellcheck disable=SC2329
     cleanup_health_tmux() {
       # shellcheck disable=SC2317
-      env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-        "$tmux" -L "$socket" kill-server >/dev/null 2>&1 || true
+      "$tmux" -S "$socket" kill-server >/dev/null 2>&1 || true
+      cleanup_path "$socket_dir"
     }
     trap cleanup_health_tmux EXIT
-    env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-      "$tmux" -L "$socket" new-session -d -s health || exit
-    option=$(env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-      "$tmux" -L "$socket" show-options -gv prefix)
+    "$tmux" -S "$socket" new-session -d -s health || exit
+    option=$("$tmux" -S "$socket" show-options -gv prefix)
     [[ $option == C-a ]] || { die "tmux prefix is $option, expected C-a"; exit 1; }
-    option=$(env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-      "$tmux" -L "$socket" show-options -gv @dotfiles-config)
+    option=$("$tmux" -S "$socket" show-options -gv @dotfiles-config)
     [[ $option == "$release/dotfiles/tmux/.tmux.conf" ]] ||
       { die 'tmux did not retain its physical config'; exit 1; }
-    env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-      "$tmux" -L "$socket" set-option -g status-position bottom || exit
+    "$tmux" -S "$socket" set-option -g status-position bottom || exit
     client_input=$health_home/tmux-client-input
     client_stderr=$health_home/tmux-client-stderr
     mkfifo "$client_input" || exit
     exec {client_input_fd}<>"$client_input"
-    env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-      TERM=xterm-256color timeout 10s script -qefc \
-      "$(printf '%q ' "$tmux" -CC -L "$socket" attach-session -t health)" /dev/null \
+    TERM=xterm-256color timeout 10s script -qefc \
+      "$(printf '%q ' "$tmux" -S "$socket" attach-session -t health)" /dev/null \
       <"$client_input" >/dev/null 2>"$client_stderr" &
     client_pid=$!
     client=
     for _ in {1..50}; do
-      client=$(env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-        "$tmux" -L "$socket" list-clients -F '#{client_name}' 2>/dev/null | head -n 1)
+      client=$("$tmux" -S "$socket" list-clients -F '#{client_name}' 2>/dev/null | head -n 1)
       [[ -n $client ]] && break
       sleep 0.02
     done
     [[ -n $client ]] || { die 'tmux health client did not attach'; exit 1; }
-    env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-      "$tmux" -L "$socket" send-keys -K -c "$client" C-a R || exit
+    "$tmux" -S "$socket" send-keys -K -c "$client" C-a R || exit
     reload_value=
     for _ in {1..50}; do
-      reload_value=$(env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-        "$tmux" -L "$socket" show-options -gv status-position 2>/dev/null || true)
+      reload_value=$("$tmux" -S "$socket" show-options -gv status-position 2>/dev/null || true)
       [[ $reload_value == top ]] && break
       sleep 0.02
     done
     [[ $reload_value == top ]] || { die 'tmux Shift-R did not reload the physical offline config'; exit 1; }
     [[ ! -s $client_stderr ]] || { die 'tmux offline reload client wrote to stderr'; exit 1; }
-    env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-      "$tmux" -L "$socket" detach-client -t "$client" || exit
+    "$tmux" -S "$socket" detach-client -t "$client" || exit
     exec {client_input_fd}>&-
     wait "$client_pid" || exit
     for plugin in tmux-sensible tmux-resurrect tmux-continuum; do
@@ -1421,12 +1412,10 @@ health_tmux() {
       [[ $plugin != tmux-sensible ]] || entry=$release/share/tmux/plugins/$plugin/sensible.tmux
       [[ -x $entry || -f $entry ]] || { die "tmux plugin entry point is missing: $entry"; exit 1; }
       printf -v command 'exec %q' "$entry"
-      env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-        "$tmux" -L "$socket" run-shell "$command" || exit
+      "$tmux" -S "$socket" run-shell "$command" || exit
       printf 'tmux-plugin=%s exit=0\n' "$plugin"
     done
-    env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
-      "$tmux" -L "$socket" list-keys -T prefix C-s || exit
+    "$tmux" -S "$socket" list-keys -T prefix C-s || exit
   ) || return
 }
 

@@ -24,10 +24,16 @@ venvs at their final retained paths with `--no-index`, `--require-hashes` and
 `--only-binary=:all:`. It never moves a completed venv and does not use a host
 Python or site-packages.
 
+The generated `python-locks/inventory.tsv` contains just the Python package
+name and version, separated by a tab. It is build/install data, not a file
+automatically imported by Nvim.
+
 The release `nvim` launcher resolves its physical release root once. For the
 `nvim2` app it sets physical `XDG_CONFIG_HOME` and `XDG_DATA_HOME` plus a
 private tool path, while leaving `XDG_STATE_HOME` under user control. An
 explicit different `NVIM_APPNAME` is passed through without those overrides.
+The launcher saves the caller's XDG and zoxide settings before the overrides;
+terminal Bash restores them so user data stays outside the immutable release.
 Therefore a Nvim process started from release A keeps configuration, plugins
 and tools from A after `current` changes to B. A new process uses B.
 

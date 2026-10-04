@@ -347,9 +347,9 @@ validate_repo() {
   source validation.env
   # shellcheck source=setup-lib
   source scripts/setup-lib
-  SETUP_PROGRAM=validate
-  setup_validate_tool_config
-  setup_validate_validator_config
+  PROGRAM=validate
+  validate_tool_config
+  validate_validator_config
   for file in nvim2/.config/nvim2/python-locks/{ansible-lint,yamllint}.{in,lock}; do
     [[ -f $file && ! -L $file ]] || die "Nvim2 Python lock source is missing: $file"
   done

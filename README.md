@@ -49,6 +49,7 @@ Release data is explicit: `versions.env` contains ordered
 `validation.env` owns validator records, including the only Task pin. The
 first record is the default. `ASDF_PLUGINS` separately pins plugin repositories
 and commits; asdf keeps responsibility for fetching and verifying its plugins.
+The tmux plugin `*_REPO` and `*_COMMIT` pairs also live in `versions.env`.
 
 The Kubernetes prompt segment is disabled by default. Run `kp` to toggle it
 for the current shell session. While disabled, Oh My Posh does not read the

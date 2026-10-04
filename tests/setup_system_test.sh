@@ -133,13 +133,13 @@ grep -Fx $'dnf\tinstall\t-y\tgnupg2' "$package_log" >/dev/null ||
 
 # shellcheck source=../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
-SETUP_PROGRAM=setup-system-test
-setup_system_package_list amzn:2023 build
+PROGRAM=setup-system-test
+system_package_list amzn:2023 build
 printf '%s\n' "${SETUP_SYSTEM_PACKAGES[@]}" | grep -Fx cargo >/dev/null ||
   fail 'Amazon build omitted cargo'
 printf '%s\n' "${SETUP_SYSTEM_PACKAGES[@]}" | grep -Fx clang-devel >/dev/null ||
   fail 'Amazon build omitted clang-devel'
-setup_system_package_list amzn:2023 connected
+system_package_list amzn:2023 connected
 if printf '%s\n' "${SETUP_SYSTEM_PACKAGES[@]}" | grep -Eq '^(cargo|clang-devel)$'; then
   fail 'Amazon connected role contains a builder-only package'
 fi

@@ -19,8 +19,8 @@ fail() {
 source "$repo_dir/versions.env"
 # shellcheck source=../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
-SETUP_PROGRAM=setup-asdf-test
-setup_select_default_release TOOL_RELEASES asdf
+PROGRAM=setup-asdf-test
+select_default_release TOOL_RELEASES asdf
 ASDF_VERSION=$RELEASE_VERSION
 
 append_release() {

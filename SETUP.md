@@ -297,26 +297,26 @@ set -euo pipefail
 source scripts/setup-lib
 source versions.env
 source validation.env
-setup_validate_tool_config
-setup_validate_validator_config
+validate_tool_config
+validate_validator_config
 archive_root=${1:-"$HOME/tool-archives"}
 
 download_release() {
   catalog=$1
   name=$2
   version=$3
-  setup_select_release "$catalog" "$name" "$version"
+  select_release "$catalog" "$name" "$version"
   [[ $RELEASE_URL != - ]] || {
     printf 'No direct artifact for %s %s\n' "$name" "$version" >&2
     return 1
   }
-  setup_artifact_layout "$name" "$version" "$RELEASE_ASSET"
+  artifact_layout "$name" "$version" "$RELEASE_ASSET"
   destination="$archive_root/$name/$version/$SPEC_ASSET"
   mkdir -p "$(dirname -- "$destination")"
   if [[ ! -f $destination ]]; then
-    setup_download "$RELEASE_URL" "$destination"
+    download_file "$RELEASE_URL" "$destination"
   fi
-  setup_verify_sha256 "$destination" "$RELEASE_SHA256"
+  verify_sha256 "$destination" "$RELEASE_SHA256"
 }
 
 for profile in DAILY_TOOLS OPTIONAL_TOOLS; do
@@ -324,7 +324,7 @@ for profile in DAILY_TOOLS OPTIONAL_TOOLS; do
   for name in "${tools[@]}"; do
     catalog=TOOL_RELEASES
     [[ $name != task ]] || catalog=VALIDATION_RELEASES
-    setup_release_versions "$catalog" "$name"
+    release_versions "$catalog" "$name"
     for version in "${RELEASE_VERSIONS[@]}"; do
       download_release "$catalog" "$name" "$version"
     done
@@ -504,16 +504,16 @@ install_tmux_plugin() {
   [[ $(git -C "$destination" rev-parse HEAD) == "$commit" ]]
 }
 
-install_tmux_plugin tpm https://github.com/tmux-plugins/tpm.git \
+install_tmux_plugin tpm "$TPM_REPO" \
   "$TPM_COMMIT"
 install_tmux_plugin tmux-sensible \
-  https://github.com/tmux-plugins/tmux-sensible.git \
+  "$TMUX_SENSIBLE_REPO" \
   "$TMUX_SENSIBLE_COMMIT"
 install_tmux_plugin tmux-resurrect \
-  https://github.com/tmux-plugins/tmux-resurrect.git \
+  "$TMUX_RESURRECT_REPO" \
   "$TMUX_RESURRECT_COMMIT"
 install_tmux_plugin tmux-continuum \
-  https://github.com/tmux-plugins/tmux-continuum.git \
+  "$TMUX_CONTINUUM_REPO" \
   "$TMUX_CONTINUUM_COMMIT"
 ```
 
@@ -529,13 +529,13 @@ install the manager:
 set -euo pipefail
 source scripts/setup-lib
 source versions.env
-setup_validate_tool_config
-setup_select_default_release TOOL_RELEASES krew
+validate_tool_config
+select_default_release TOOL_RELEASES krew
 archive=$(mktemp)
 work=$(mktemp -d)
 trap 'rm -f "$archive"; rm -rf "$work"' EXIT
-setup_download "$RELEASE_URL" "$archive"
-setup_verify_sha256 "$archive" "$RELEASE_SHA256"
+download_file "$RELEASE_URL" "$archive"
+verify_sha256 "$archive" "$RELEASE_SHA256"
 tar -xzf "$archive" -C "$work"
 "$work/krew-linux_amd64" install krew
 "$HOME/.krew/bin/kubectl-krew" version

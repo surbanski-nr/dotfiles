@@ -1,58 +1,58 @@
 #!/usr/bin/env bash
 
-setup_die() {
-  printf '%s: %s\n' "${SETUP_PROGRAM:-setup}" "$*" >&2
+report_error() {
+  printf '%s: %s\n' "${PROGRAM:-setup}" "$*" >&2
   return 1
 }
 
-setup_need() {
-  command -v "$1" >/dev/null 2>&1 || setup_die "required command is missing: $1"
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || report_error "required command is missing: $1"
 }
 
-setup_validate_version() {
+validate_version() {
   local name=$1
   local value=$2
 
   [[ $value =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] ||
-    setup_die "$name has an invalid version: $value"
+    report_error "$name has an invalid version: $value"
 }
 
-setup_validate_digest() {
+validate_digest() {
   local name=$1
   local value=$2
 
-  [[ $value =~ ^[0-9a-f]{64}$ ]] || setup_die "$name is not a SHA-256 digest"
+  [[ $value =~ ^[0-9a-f]{64}$ ]] || report_error "$name is not a SHA-256 digest"
 }
 
-setup_validate_commit() {
+validate_commit() {
   local name=$1
   local value=$2
 
-  [[ $value =~ ^[0-9a-f]{40}$ ]] || setup_die "$name is not a commit SHA"
+  [[ $value =~ ^[0-9a-f]{40}$ ]] || report_error "$name is not a commit SHA"
 }
 
 # Release selectors set RELEASE_VERSION, RELEASE_URL, RELEASE_SHA256 and
 # RELEASE_ASSET. Callers must copy values they need before selecting again.
 
-_setup_parse_release_record() {
+parse_release_record() {
   local catalog_name=$1 tool=$2 record=$3 separators
 
   [[ $record != *[[:space:]]* ]] ||
-    setup_die "${catalog_name}[$tool] contains whitespace" || return
+    report_error "${catalog_name}[$tool] contains whitespace" || return
   separators=${record//[^|]/}
   [[ $separators == '||' ]] ||
-    setup_die "${catalog_name}[$tool] record must contain exactly three fields" || return
+    report_error "${catalog_name}[$tool] record must contain exactly three fields" || return
   IFS='|' read -r RELEASE_VERSION RELEASE_URL RELEASE_SHA256 <<<"$record"
   [[ -n $RELEASE_VERSION && -n $RELEASE_URL && -n $RELEASE_SHA256 ]] ||
-    setup_die "${catalog_name}[$tool] contains an empty field" || return
-  setup_validate_version "${catalog_name}[$tool]" "$RELEASE_VERSION" || return
+    report_error "${catalog_name}[$tool] contains an empty field" || return
+  validate_version "${catalog_name}[$tool]" "$RELEASE_VERSION" || return
   if [[ $RELEASE_URL == - || $RELEASE_SHA256 == - ]]; then
     [[ $RELEASE_URL == - && $RELEASE_SHA256 == - ]] ||
-      setup_die "${catalog_name}[$tool] must provide both URL and SHA256 or neither" || return
+      report_error "${catalog_name}[$tool] must provide both URL and SHA256 or neither" || return
   else
     [[ $RELEASE_URL == https://* ]] ||
-      setup_die "${catalog_name}[$tool] URL must use HTTPS: $RELEASE_URL" || return
-    setup_validate_digest "${catalog_name}[$tool] digest" "$RELEASE_SHA256" || return
+      report_error "${catalog_name}[$tool] URL must use HTTPS: $RELEASE_URL" || return
+    validate_digest "${catalog_name}[$tool] digest" "$RELEASE_SHA256" || return
   fi
   RELEASE_ASSET=${RELEASE_URL##*/}
   if [[ $tool == python && $RELEASE_URL != - ]]; then
@@ -60,54 +60,54 @@ _setup_parse_release_record() {
   fi
 }
 
-setup_release_versions() {
+release_versions() {
   local catalog_name=$1 tool=$2 record previous
   local -n catalog=$catalog_name
 
   declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
-    setup_die "$catalog_name must be an associative array" || return
-  [[ -v catalog[$tool] ]] || setup_die "$catalog_name has no releases for $tool" || return
+    report_error "$catalog_name must be an associative array" || return
+  [[ -v catalog[$tool] ]] || report_error "$catalog_name has no releases for $tool" || return
   RELEASE_VERSIONS=()
   while IFS= read -r record || [[ -n $record ]]; do
     [[ -n $record ]] || continue
-    _setup_parse_release_record "$catalog_name" "$tool" "$record" || return
+    parse_release_record "$catalog_name" "$tool" "$record" || return
     for previous in "${RELEASE_VERSIONS[@]}"; do
       [[ $previous != "$RELEASE_VERSION" ]] ||
-        setup_die "${catalog_name}[$tool] contains duplicate $RELEASE_VERSION" || return
+        report_error "${catalog_name}[$tool] contains duplicate $RELEASE_VERSION" || return
     done
     RELEASE_VERSIONS+=("$RELEASE_VERSION")
   done <<<"${catalog[$tool]}"
-  ((${#RELEASE_VERSIONS[@]} > 0)) || setup_die "${catalog_name}[$tool] is empty"
+  ((${#RELEASE_VERSIONS[@]} > 0)) || report_error "${catalog_name}[$tool] is empty"
 }
 
-setup_select_release() {
+select_release() {
   local catalog_name=$1 tool=$2 requested_version=$3 record
   local -n catalog=$catalog_name
 
   declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
-    setup_die "$catalog_name must be an associative array" || return
-  [[ -v catalog[$tool] ]] || setup_die "$catalog_name has no releases for $tool" || return
+    report_error "$catalog_name must be an associative array" || return
+  [[ -v catalog[$tool] ]] || report_error "$catalog_name has no releases for $tool" || return
   while IFS= read -r record || [[ -n $record ]]; do
     [[ -n $record ]] || continue
-    _setup_parse_release_record "$catalog_name" "$tool" "$record" || return
+    parse_release_record "$catalog_name" "$tool" "$record" || return
     [[ $RELEASE_VERSION == "$requested_version" ]] && return 0
   done <<<"${catalog[$tool]}"
-  setup_die "${catalog_name}[$tool] has no release $requested_version"
+  report_error "${catalog_name}[$tool] has no release $requested_version"
 }
 
-setup_select_default_release() {
+select_default_release() {
   local catalog_name=$1 tool=$2 record
   local -n catalog=$catalog_name
 
   declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
-    setup_die "$catalog_name must be an associative array" || return
-  [[ -v catalog[$tool] ]] || setup_die "$catalog_name has no releases for $tool" || return
+    report_error "$catalog_name must be an associative array" || return
+  [[ -v catalog[$tool] ]] || report_error "$catalog_name has no releases for $tool" || return
   while IFS= read -r record || [[ -n $record ]]; do
     [[ -n $record ]] || continue
-    _setup_parse_release_record "$catalog_name" "$tool" "$record"
+    parse_release_record "$catalog_name" "$tool" "$record"
     return
   done <<<"${catalog[$tool]}"
-  setup_die "${catalog_name}[$tool] is empty"
+  report_error "${catalog_name}[$tool] is empty"
 }
 
 validate_release_catalog() {
@@ -115,11 +115,11 @@ validate_release_catalog() {
   local -n catalog=$catalog_name
 
   declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
-    setup_die "$catalog_name must be an associative array" || return
+    report_error "$catalog_name must be an associative array" || return
   for tool in "${!catalog[@]}"; do
     [[ $tool =~ ^[a-z0-9-]+$ ]] ||
-      setup_die "$catalog_name contains invalid tool name $tool" || return
-    setup_release_versions "$catalog_name" "$tool" || return
+      report_error "$catalog_name contains invalid tool name $tool" || return
+    release_versions "$catalog_name" "$tool" || return
   done
 }
 
@@ -128,42 +128,42 @@ validate_profile() {
   local -n profile=$profile_name
 
   declare -p "$profile_name" 2>/dev/null | grep -q '^declare -a' ||
-    setup_die "$profile_name must be an indexed array" || return
-  ((${#profile[@]} > 0)) || setup_die "$profile_name is empty" || return
+    report_error "$profile_name must be an indexed array" || return
+  ((${#profile[@]} > 0)) || report_error "$profile_name is empty" || return
   for tool in "${profile[@]}"; do
     [[ $tool =~ ^[a-z0-9-]+$ ]] ||
-      setup_die "$profile_name contains invalid tool name $tool" || return
+      report_error "$profile_name contains invalid tool name $tool" || return
     [[ $seen != *" $tool "* ]] ||
-      setup_die "$profile_name contains duplicate $tool" || return
+      report_error "$profile_name contains duplicate $tool" || return
     seen+="$tool "
   done
 }
 
-setup_validate_validator_config() {
+validate_validator_config() {
   local required tool version seen=' '
 
   validate_release_catalog VALIDATION_RELEASES || return
   for required in actionlint shellcheck stylua zizmor task; do
     [[ -v VALIDATION_RELEASES[$required] ]] ||
-      setup_die "VALIDATION_RELEASES has no releases for $required" || return
+      report_error "VALIDATION_RELEASES has no releases for $required" || return
     seen+="$required "
   done
   for tool in "${!VALIDATION_RELEASES[@]}"; do
     [[ $seen == *" $tool "* ]] ||
-      setup_die "VALIDATION_RELEASES contains unsupported tool $tool" || return
-    setup_release_versions VALIDATION_RELEASES "$tool" || return
+      report_error "VALIDATION_RELEASES contains unsupported tool $tool" || return
+    release_versions VALIDATION_RELEASES "$tool" || return
     for version in "${RELEASE_VERSIONS[@]}"; do
-      setup_select_release VALIDATION_RELEASES "$tool" "$version" || return
+      select_release VALIDATION_RELEASES "$tool" "$version" || return
       [[ $RELEASE_URL != - ]] ||
-        setup_die "validation release $tool $version requires an artifact" || return
+        report_error "validation release $tool $version requires an artifact" || return
     done
   done
   for version in YAMLLINT_VERSION YAMLLINT_PATHSPEC_VERSION YAMLLINT_PYYAML_VERSION; do
-    setup_validate_version "$version" "${!version:-}" || return
+    validate_version "$version" "${!version:-}" || return
   done
 }
 
-setup_validate_tool_config() {
+validate_tool_config() {
   local plugin record repository commit tool version profile seen=' '
 
   validate_release_catalog TOOL_RELEASES || return
@@ -175,87 +175,94 @@ setup_validate_tool_config() {
     for tool in "${tools[@]}"; do
       if [[ $tool == task ]]; then
         [[ $profile != OPTIONAL_TOOLS ]] ||
-          setup_die 'task is only supported in the daily and offline profiles' || return
+          report_error 'task is only supported in the daily and offline profiles' || return
       else
         [[ -v TOOL_RELEASES[$tool] ]] ||
-          setup_die "$profile references unknown tool $tool" || return
+          report_error "$profile references unknown tool $tool" || return
       fi
     done
     unset -n tools
   done
   [[ ! -v TOOL_RELEASES[task] ]] ||
-    setup_die 'task must be pinned only in validation.env' || return
+    report_error 'task must be pinned only in validation.env' || return
 
   for tool in "${OFFLINE_TOOLS[@]}"; do
     [[ $tool == task ]] && continue
-    setup_select_default_release TOOL_RELEASES "$tool" || return
+    select_default_release TOOL_RELEASES "$tool" || return
     [[ $RELEASE_URL != - ]] ||
-      setup_die "offline default $tool $RELEASE_VERSION requires an artifact" || return
-    setup_artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
+      report_error "offline default $tool $RELEASE_VERSION requires an artifact" || return
+    artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   done
   for profile in DAILY_TOOLS OPTIONAL_TOOLS; do
     local -n tools=$profile
     for tool in "${tools[@]}"; do
       [[ $tool == task ]] && continue
-    setup_release_versions TOOL_RELEASES "$tool" || return
+      release_versions TOOL_RELEASES "$tool" || return
       for version in "${RELEASE_VERSIONS[@]}"; do
-        setup_select_release TOOL_RELEASES "$tool" "$version" || return
+        select_release TOOL_RELEASES "$tool" "$version" || return
         [[ $RELEASE_URL != - ]] ||
-          setup_die "$profile release $tool $version requires an artifact" || return
-        setup_artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
+          report_error "$profile release $tool $version requires an artifact" || return
+        artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
+        ((${#SPEC_LINKS[@]} > 0)) ||
+          report_error "$profile tool $tool is not supported by setup-tools" || return
       done
     done
     unset -n tools
   done
   for tool in asdf npm; do
-    setup_select_default_release TOOL_RELEASES "$tool" || return
-    [[ $RELEASE_URL != - ]] || setup_die "$tool default requires an artifact" || return
-    setup_artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
+    select_default_release TOOL_RELEASES "$tool" || return
+    [[ $RELEASE_URL != - ]] || report_error "$tool default requires an artifact" || return
+    artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   done
-  setup_validate_version KUBECTX_VERSION "${KUBECTX_VERSION:-}" || return
+  validate_version KUBECTX_VERSION "${KUBECTX_VERSION:-}" || return
   for tool in kubectx kubens; do
-    setup_select_default_release TOOL_RELEASES "$tool" || return
+    select_default_release TOOL_RELEASES "$tool" || return
     [[ $RELEASE_VERSION == "$KUBECTX_VERSION" ]] ||
-      setup_die "$tool default must use KUBECTX_VERSION" || return
+      report_error "$tool default must use KUBECTX_VERSION" || return
   done
-  setup_validate_version PIP_TOOLS_VERSION "${PIP_TOOLS_VERSION:-}" || return
+  validate_version PIP_TOOLS_VERSION "${PIP_TOOLS_VERSION:-}" || return
   [[ $PYTHON_STANDALONE_BUILD =~ ^[0-9]{8}$ ]] ||
-    setup_die 'PYTHON_STANDALONE_BUILD must use YYYYMMDD' || return
+    report_error 'PYTHON_STANDALONE_BUILD must use YYYYMMDD' || return
 
   declare -p ASDF_PLUGINS 2>/dev/null | grep -q '^declare -A' ||
-    setup_die 'ASDF_PLUGINS must be an associative array' || return
+    report_error 'ASDF_PLUGINS must be an associative array' || return
   for tool in "${ASDF_TOOLS[@]}"; do
     [[ -v TOOL_RELEASES[$tool] ]] ||
-      setup_die "ASDF_TOOLS references unknown tool $tool" || return
+      report_error "ASDF_TOOLS references unknown tool $tool" || return
     [[ -v ASDF_PLUGINS[$tool] ]] ||
-      setup_die "ASDF_PLUGINS has no entry for $tool" || return
+      report_error "ASDF_PLUGINS has no entry for $tool" || return
     seen+="$tool "
     record=${ASDF_PLUGINS[$tool]}
     [[ $record != *[[:space:]]* && ${record//[^|]/} == '|' ]] ||
-      setup_die "ASDF_PLUGINS[$tool] must contain repository|commit" || return
+      report_error "ASDF_PLUGINS[$tool] must contain repository|commit" || return
     IFS='|' read -r repository commit <<<"$record"
     [[ $repository == https://*.git ]] ||
-      setup_die "ASDF_PLUGINS[$tool] has an invalid repository" || return
-    setup_validate_commit "ASDF_PLUGINS[$tool] commit" "$commit" || return
+      report_error "ASDF_PLUGINS[$tool] has an invalid repository" || return
+    validate_commit "ASDF_PLUGINS[$tool] commit" "$commit" || return
   done
   for plugin in "${!ASDF_PLUGINS[@]}"; do
     [[ $seen == *" $plugin "* ]] ||
-      setup_die "ASDF_PLUGINS contains unsupported plugin $plugin" || return
+      report_error "ASDF_PLUGINS contains unsupported plugin $plugin" || return
   done
   for commit in "$TPM_COMMIT" "$TMUX_SENSIBLE_COMMIT" \
     "$TMUX_RESURRECT_COMMIT" "$TMUX_CONTINUUM_COMMIT"; do
-    setup_validate_commit 'tmux plugin commit' "$commit" || return
+    validate_commit 'tmux plugin commit' "$commit" || return
+  done
+  for repository in "$TPM_REPO" "$TMUX_SENSIBLE_REPO" \
+    "$TMUX_RESURRECT_REPO" "$TMUX_CONTINUUM_REPO"; do
+    [[ $repository == https://*.git && $repository != *[[:space:]]* ]] ||
+      report_error "invalid tmux plugin repository: $repository" || return
   done
 }
 
-setup_verify_sha256() {
+verify_sha256() {
   local path=$1
   local digest=$2
 
   printf '%s  %s\n' "$digest" "$path" | sha256sum --check --strict >/dev/null
 }
 
-setup_download() {
+download_file() {
   local url=$1
   local destination=$2
 
@@ -264,13 +271,13 @@ setup_download() {
     --output "$destination" "$url"
 }
 
-setup_artifact_layout() {
+artifact_layout() {
   local name=$1
   local version=$2
   local asset=$3
 
   [[ $asset =~ ^[0-9A-Za-z][0-9A-Za-z._+%-]*$ ]] ||
-    setup_die "unsafe artifact name for $name $version: $asset" || return
+    report_error "unsafe artifact name for $name $version: $asset" || return
   # Consumed by callers after sourcing this library.
   # shellcheck disable=SC2034
   SPEC_ASSET=$asset
@@ -278,11 +285,11 @@ setup_artifact_layout() {
   SPEC_LINKS=()
   SPEC_SECOND_MEMBER=
   case $name in
-    asdf)
+    asdf | kyverno | task | trivy | k9s | kubeconform | kubectx | kubens | zoxide)
       SPEC_FORMAT=gz-member
-      SPEC_MEMBER=asdf
-      SPEC_DESTS=("asdf-$version")
-      SPEC_LINKS=("asdf:asdf-$version")
+      SPEC_MEMBER=$name
+      SPEC_DESTS=("$name-$version")
+      SPEC_LINKS=("$name:$name-$version")
       ;;
     gh)
       SPEC_FORMAT=gz-member
@@ -290,51 +297,15 @@ setup_artifact_layout() {
       SPEC_DESTS=("gh-$version")
       SPEC_LINKS=("gh:gh-$version")
       ;;
-    kyverno)
-      SPEC_FORMAT=gz-member
-      SPEC_MEMBER=kyverno
-      SPEC_DESTS=("kyverno-$version")
-      SPEC_LINKS=("kyverno:kyverno-$version")
-      ;;
-    task)
-      SPEC_FORMAT=gz-member
-      SPEC_MEMBER=task
-      SPEC_DESTS=("task-$version")
-      SPEC_LINKS=("task:task-$version")
-      ;;
-    trivy)
-      SPEC_FORMAT=gz-member
-      SPEC_MEMBER=trivy
-      SPEC_DESTS=("trivy-$version")
-      SPEC_LINKS=("trivy:trivy-$version")
-      ;;
-    k9s)
-      SPEC_FORMAT=gz-member
-      SPEC_MEMBER=k9s
-      SPEC_DESTS=("k9s-$version")
-      SPEC_LINKS=("k9s:k9s-$version")
-      ;;
-    kubeconform)
-      SPEC_FORMAT=gz-member
-      SPEC_MEMBER=kubeconform
-      SPEC_DESTS=("kubeconform-$version")
-      SPEC_LINKS=("kubeconform:kubeconform-$version")
-      ;;
     shellcheck)
       SPEC_FORMAT=xz-member
       SPEC_MEMBER="shellcheck-v${version}/shellcheck"
       SPEC_DESTS=("shellcheck-$version")
       SPEC_LINKS=("shellcheck:shellcheck-$version")
       ;;
-    oh-my-posh)
+    oh-my-posh | kubectl)
       SPEC_FORMAT=raw
       SPEC_MEMBER=
-      SPEC_DESTS=("oh-my-posh-$version")
-      SPEC_LINKS=("oh-my-posh:oh-my-posh-$version")
-      ;;
-    kubectx | kubens)
-      SPEC_FORMAT=gz-member
-      SPEC_MEMBER=$name
       SPEC_DESTS=("$name-$version")
       SPEC_LINKS=("$name:$name-$version")
       ;;
@@ -343,12 +314,6 @@ setup_artifact_layout() {
       SPEC_MEMBER="ripgrep-${version}-x86_64-unknown-linux-musl/rg"
       SPEC_DESTS=("rg-$version")
       SPEC_LINKS=("rg:rg-$version")
-      ;;
-    zoxide)
-      SPEC_FORMAT=gz-member
-      SPEC_MEMBER=zoxide
-      SPEC_DESTS=("zoxide-$version")
-      SPEC_LINKS=("zoxide:zoxide-$version")
       ;;
     uv)
       SPEC_FORMAT=gz-pair
@@ -362,12 +327,6 @@ setup_artifact_layout() {
       SPEC_MEMBER=nvim-linux-x86_64
       SPEC_DESTS=("nvim-$version")
       SPEC_LINKS=("nvim:nvim-$version/bin/nvim")
-      ;;
-    kubectl)
-      SPEC_FORMAT=raw
-      SPEC_MEMBER=
-      SPEC_DESTS=("kubectl-$version")
-      SPEC_LINKS=("kubectl:kubectl-$version")
       ;;
     helm)
       SPEC_FORMAT=gz-member
@@ -413,11 +372,11 @@ setup_artifact_layout() {
       # shellcheck disable=SC2034
       SPEC_LINKS=()
       ;;
-    *) setup_die "missing artifact mapping for $name" ;;
+    *) report_error "missing artifact mapping for $name" ;;
   esac
 }
 
-setup_validate_tar_archive() {
+validate_tar_archive() {
   local archive=$1 compression=$2 subtree=${3:-}
   local member line type remainder name target resolved listing verbose
   local -a list_args=(-tf) verbose_args=(-tvf)
@@ -425,15 +384,15 @@ setup_validate_tar_archive() {
   case $compression in
     gz) list_args=(-tzf); verbose_args=(-tvzf) ;;
     xz) list_args=(-tJf); verbose_args=(-tvJf) ;;
-    *) setup_die "unsupported tar compression: $compression"; return ;;
+    *) report_error "unsupported tar compression: $compression"; return ;;
   esac
   listing=$(tar "${list_args[@]}" "$archive") || return
   while IFS= read -r member || [[ -n $member ]]; do
     [[ -n $member && $member != /* && $member != ../* && /$member/ != *'/../'* ]] ||
-      { setup_die "unsafe archive member: $member"; return 1; }
+      { report_error "unsafe archive member: $member"; return 1; }
     if [[ -n $subtree ]]; then
       [[ $member == "$subtree" || $member == "$subtree/"* ]] ||
-        { setup_die "unexpected archive member: $member"; return 1; }
+        { report_error "unexpected archive member: $member"; return 1; }
     fi
   done <<<"$listing"
   verbose=$(LC_ALL=C tar --numeric-owner --quoting-style=literal \
@@ -444,35 +403,35 @@ setup_validate_tar_archive() {
       - | d) ;;
       l)
         read -r _ _ _ _ _ remainder <<<"$line"
-        [[ $remainder == *' -> '* ]] || { setup_die "cannot parse archive link: $line"; return 1; }
+        [[ $remainder == *' -> '* ]] || { report_error "cannot parse archive link: $line"; return 1; }
         name=${remainder% -> *}
         target=${remainder##* -> }
-        [[ $target != /* ]] || { setup_die "absolute archive link: $name -> $target"; return 1; }
+        [[ $target != /* ]] || { report_error "absolute archive link: $name -> $target"; return 1; }
         resolved=$(readlink -m -- "/archive/$(dirname -- "$name")/$target")
-        [[ $resolved == /archive/* ]] || { setup_die "archive link escapes its root: $name -> $target"; return 1; }
+        [[ $resolved == /archive/* ]] || { report_error "archive link escapes its root: $name -> $target"; return 1; }
         if [[ -n $subtree ]]; then
           [[ $resolved == "/archive/$subtree" || $resolved == "/archive/$subtree/"* ]] ||
-            { setup_die "archive link escapes expected subtree: $name -> $target"; return 1; }
+            { report_error "archive link escapes expected subtree: $name -> $target"; return 1; }
         fi
         ;;
-      h) setup_die "archive hard links are not supported: $line"; return 1 ;;
-      *) setup_die "archive contains an unsupported member type: $line"; return 1 ;;
+      h) report_error "archive hard links are not supported: $line"; return 1 ;;
+      *) report_error "archive contains an unsupported member type: $line"; return 1 ;;
     esac
   done <<<"$verbose"
 }
 
-setup_archive_member_to_file() {
+archive_member_to_file() {
   local archive=$1 format=$2 member=$3 output=$4
 
   case $format in
-    gz-member | gz-pair) tar -xOzf "$archive" -- "$member" >"$output" ;;
-    xz-member) tar -xOJf "$archive" -- "$member" >"$output" ;;
-    *) setup_die "invalid member format: $format"; return ;;
+    gz-member | gz-pair) tar -xOzf "$archive" -- "$member" >"$output" || return ;;
+    xz-member) tar -xOJf "$archive" -- "$member" >"$output" || return ;;
+    *) report_error "invalid member format: $format"; return ;;
   esac
   chmod 0755 "$output"
 }
 
-setup_extract_artifact() {
+extract_artifact() {
   local archive=$1 destination=$2
 
   case $SPEC_FORMAT in
@@ -480,55 +439,55 @@ setup_extract_artifact() {
       install -m 0755 "$archive" "$destination/${SPEC_DESTS[0]}"
       ;;
     gz-member | xz-member)
-      setup_validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}"
-      setup_archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_MEMBER" \
+      validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" || return
+      archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_MEMBER" \
         "$destination/${SPEC_DESTS[0]}"
       ;;
     gz-pair)
-      setup_validate_tar_archive "$archive" gz
-      setup_archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_MEMBER" \
-        "$destination/${SPEC_DESTS[0]}"
-      setup_archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_SECOND_MEMBER" \
+      validate_tar_archive "$archive" gz || return
+      archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_MEMBER" \
+        "$destination/${SPEC_DESTS[0]}" || return
+      archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_SECOND_MEMBER" \
         "$destination/${SPEC_DESTS[1]}"
       ;;
     gz-tree)
-      setup_validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" "$SPEC_MEMBER"
+      validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" "$SPEC_MEMBER" || return
       tar -xzf "$archive" -C "$destination" \
-        --no-same-owner --no-same-permissions --keep-directory-symlink -- "$SPEC_MEMBER"
+        --no-same-owner --no-same-permissions --keep-directory-symlink -- "$SPEC_MEMBER" || return
       if [[ $SPEC_MEMBER != "${SPEC_DESTS[0]}" ]]; then
         mv -- "$destination/$SPEC_MEMBER" "$destination/${SPEC_DESTS[0]}"
       fi
       ;;
     xz-tree)
-      setup_validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" "$SPEC_MEMBER"
+      validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" "$SPEC_MEMBER" || return
       tar -xJf "$archive" -C "$destination" \
-        --no-same-owner --no-same-permissions --keep-directory-symlink -- "$SPEC_MEMBER"
+        --no-same-owner --no-same-permissions --keep-directory-symlink -- "$SPEC_MEMBER" || return
       if [[ $SPEC_MEMBER != "${SPEC_DESTS[0]}" ]]; then
         mv -- "$destination/$SPEC_MEMBER" "$destination/${SPEC_DESTS[0]}"
       fi
       ;;
     zip-member)
-      unzip -p "$archive" "$SPEC_MEMBER" >"$destination/${SPEC_DESTS[0]}"
+      unzip -p "$archive" "$SPEC_MEMBER" >"$destination/${SPEC_DESTS[0]}" || return
       chmod 0755 "$destination/${SPEC_DESTS[0]}"
       ;;
-    *) setup_die "invalid artifact format: $SPEC_FORMAT" ;;
+    *) report_error "invalid artifact format: $SPEC_FORMAT" ;;
   esac
 }
 
-setup_prepare_artifact() {
+prepare_artifact() {
   local catalog_name=$1 name=$2 version=$3 archive=$4 destination=$5
 
-  setup_select_release "$catalog_name" "$name" "$version" || return
+  select_release "$catalog_name" "$name" "$version" || return
   [[ $RELEASE_URL != - ]] ||
-    setup_die "$name $version has no direct artifact" || return
-  setup_artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
-  [[ -f $archive && ! -L $archive ]] || setup_die "missing artifact: $archive" || return
-  setup_verify_sha256 "$archive" "$RELEASE_SHA256"
-  mkdir -p "$destination"
-  setup_extract_artifact "$archive" "$destination"
+    report_error "$name $version has no direct artifact" || return
+  artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
+  [[ -f $archive && ! -L $archive ]] || report_error "missing artifact: $archive" || return
+  verify_sha256 "$archive" "$RELEASE_SHA256" || return
+  mkdir -p "$destination" || return
+  extract_artifact "$archive" "$destination"
 }
 
-setup_system_package_list() {
+system_package_list() {
   local platform=$1
   local role=$2
   local -a runtime_common=(
@@ -622,7 +581,7 @@ setup_system_package_list() {
             zlib1g-dev
           )
           ;;
-        *) setup_die "unknown system package role: $role"; return ;;
+        *) report_error "unknown system package role: $role"; return ;;
       esac
       ;;
     amzn:2023 | amzn-2023-x86_64)
@@ -668,10 +627,10 @@ setup_system_package_list() {
             zlib-devel
           )
           ;;
-        *) setup_die "unknown system package role: $role"; return ;;
+        *) report_error "unknown system package role: $role"; return ;;
       esac
       ;;
-    *) setup_die "unsupported system package platform: $platform"; return ;;
+    *) report_error "unsupported system package platform: $platform"; return ;;
   esac
   # Consumed by setup-system or dotfiles-release after sourcing this library.
   # shellcheck disable=SC2034
@@ -683,13 +642,13 @@ setup_system_package_list() {
   )
 }
 
-setup_install_system_packages() {
+install_system_packages() {
   local platform=$1 role=$2 no_recommends=$3
   shift 3
   local -a root_command=("$@")
   local -a install_args=(install -y)
 
-  setup_system_package_list "$platform" "$role" || return
+  system_package_list "$platform" "$role" || return
   case $platform in
     debian:* | ubuntu:* | debian-*-x86_64 | ubuntu-*-x86_64)
       [[ $no_recommends != true ]] || install_args+=(--no-install-recommends)
@@ -708,6 +667,6 @@ setup_install_system_packages() {
       "${root_command[@]}" dnf install -y --allowerasing \
         "${SETUP_SYSTEM_PACKAGES[@]}"
       ;;
-    *) setup_die "unsupported system package platform: $platform" ;;
+    *) report_error "unsupported system package platform: $platform" ;;
   esac
 }

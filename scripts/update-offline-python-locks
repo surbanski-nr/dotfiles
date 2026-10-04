@@ -20,11 +20,11 @@ repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$repo_dir/scripts/setup-lib"
 # shellcheck source=../versions.env
 source "$repo_dir/versions.env"
-SETUP_PROGRAM=update-offline-python-locks
-setup_validate_tool_config
+PROGRAM=update-offline-python-locks
+validate_tool_config
 
 for command_name in curl find mktemp mv sha256sum tar timeout; do
-  setup_need "$command_name"
+  require_command "$command_name"
 done
 
 work=$(mktemp -d)
@@ -53,18 +53,22 @@ fi
 DOTFILES_NVIM_CONFIG="$repo_dir/nvim2/.config/nvim2" \
   DOTFILES_MASON_PACKAGES="$packages_dir" \
   DOTFILES_PYTHON_INVENTORY_OUTPUT="$inventory" \
-  "$nvim_bin" --headless -u NONE \
-  "+lua vim.opt.runtimepath:prepend(vim.env.DOTFILES_NVIM_CONFIG); local f=assert(io.open(vim.env.DOTFILES_PYTHON_INVENTORY_OUTPUT, 'wb')); for _, p in ipairs(require('custom.lsp').python_inventory(vim.env.DOTFILES_MASON_PACKAGES)) do f:write(p.name, '\t', p.version, '\t', table.concat(p.entry_points, ','), '\n') end; assert(f:close())" \
-  '+qa!'
+  "$nvim_bin" --headless -u NONE -l /dev/stdin <<'LUA'
+vim.opt.runtimepath:prepend(vim.env.DOTFILES_NVIM_CONFIG)
+local lines = {}
+for _, package in ipairs(require('custom.lsp').python_inventory(vim.env.DOTFILES_MASON_PACKAGES)) do
+  table.insert(lines, package.name .. '\t' .. package.version)
+end
+assert(vim.fn.writefile(lines, vim.env.DOTFILES_PYTHON_INVENTORY_OUTPUT) == 0)
+LUA
 [[ -s $inventory ]] || die 'Python-backed Mason inventory is empty'
 
-setup_select_default_release TOOL_RELEASES python
+select_default_release TOOL_RELEASES python
 python_version=$RELEASE_VERSION
-setup_artifact_layout python "$python_version" "$RELEASE_ASSET"
+artifact_layout python "$python_version" "$RELEASE_ASSET"
 archive=$work/$RELEASE_ASSET
-setup_download "$RELEASE_URL" "$archive"
-setup_verify_sha256 "$archive" "$RELEASE_SHA256"
-setup_prepare_artifact TOOL_RELEASES python "$python_version" "$archive" "$work/python"
+download_file "$RELEASE_URL" "$archive"
+prepare_artifact TOOL_RELEASES python "$python_version" "$archive" "$work/python"
 python=$work/python/${SPEC_DESTS[0]}/bin/python3
 "$python" -I -m venv "$work/pip-tools"
 env -u PIP_NO_INDEX -u PIP_FIND_LINKS HOME="$generator_home" \
@@ -73,10 +77,10 @@ env -u PIP_NO_INDEX -u PIP_FIND_LINKS HOME="$generator_home" \
   "$work/pip-tools/bin/python" -I -m pip install --disable-pip-version-check \
   "pip-tools==$PIP_TOOLS_VERSION"
 
-while IFS=$'\t' read -r package version entry_points extra; do
+while IFS=$'\t' read -r package version extra; do
   [[ -z $extra && $package =~ ^[a-z0-9][a-z0-9-]*$ &&
-    $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ &&
-    $entry_points =~ ^[a-z0-9,-]+$ ]] || die 'invalid Python inventory row'
+    $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] ||
+    die 'invalid Python inventory row'
   printf '# Generated from custom.lsp M.tools and its Mason receipt.\n%s==%s\n' \
     "$package" "$version" >"$work/$package.in"
   (

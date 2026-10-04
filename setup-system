@@ -17,9 +17,9 @@ main() {
   MODE=connected
   case ${1:-} in
     '') ;;
-    --runtime) (($# == 1)) || setup_die '--runtime takes no arguments'; MODE=runtime ;;
-    -h | --help) (($# == 1)) || setup_die 'help takes no arguments'; usage; return 0 ;;
-    *) setup_die "unexpected argument: $1" ;;
+    --runtime) (($# == 1)) || report_error '--runtime takes no arguments'; MODE=runtime ;;
+    -h | --help) (($# == 1)) || report_error 'help takes no arguments'; usage; return 0 ;;
+    *) report_error "unexpected argument: $1" ;;
   esac
   validate_host
   install_packages
@@ -29,25 +29,25 @@ main() {
 validate_host() {
   local os_release_file=${SETUP_SYSTEM_OS_RELEASE_FILE:-/etc/os-release}
 
-  [[ $(uname -s) == Linux ]] || setup_die 'only Linux is supported'
-  [[ $(uname -m) == x86_64 ]] || setup_die 'only Linux x86-64 is supported'
-  [[ -r $os_release_file ]] || setup_die "cannot read $os_release_file"
+  [[ $(uname -s) == Linux ]] || report_error 'only Linux is supported'
+  [[ $(uname -m) == x86_64 ]] || report_error 'only Linux x86-64 is supported'
+  [[ -r $os_release_file ]] || report_error "cannot read $os_release_file"
   # shellcheck disable=SC1090
   source "$os_release_file"
   case "${ID:-}:${VERSION_ID:-}" in
     debian:13 | ubuntu:24.04 | ubuntu:26.04 | amzn:2023)
       PLATFORM="$ID:$VERSION_ID"
       ;;
-    *) setup_die "unsupported distribution: ${ID:-unknown} ${VERSION_ID:-unknown}" ;;
+    *) report_error "unsupported distribution: ${ID:-unknown} ${VERSION_ID:-unknown}" ;;
   esac
-  if ((EUID != 0)); then setup_need sudo; fi
+  if ((EUID != 0)); then require_command sudo; fi
 }
 
 install_packages() {
   local -a root_command=()
 
   if ((EUID != 0)); then root_command=(sudo --); fi
-  setup_install_system_packages "$PLATFORM" "$MODE" false "${root_command[@]}"
+  install_system_packages "$PLATFORM" "$MODE" false "${root_command[@]}"
 }
 
 verify_packages() {
@@ -55,12 +55,12 @@ verify_packages() {
 
   for command_name in bash cmp find flock git ip tar timeout unzip xz; do
     command -v "$command_name" >/dev/null 2>&1 ||
-      setup_die "package installation did not provide $command_name"
+      report_error "package installation did not provide $command_name"
   done
   if [[ $MODE == connected ]]; then
     for command_name in curl file gpg gpg-agent htop jq make mc python3 tmux vi vim; do
       command -v "$command_name" >/dev/null 2>&1 ||
-        setup_die "package installation did not provide $command_name"
+        report_error "package installation did not provide $command_name"
     done
   fi
   printf 'setup-system: %s packages ready on %s\n' "$MODE" "$PLATFORM"
@@ -69,7 +69,7 @@ verify_packages() {
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/setup-lib
 source "$REPO_DIR/scripts/setup-lib"
-SETUP_PROGRAM=setup-system
+PROGRAM=setup-system
 PLATFORM=
 MODE=
 declare -a SETUP_SYSTEM_PACKAGES=()

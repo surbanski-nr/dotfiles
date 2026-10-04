@@ -24,9 +24,9 @@ main() {
   while (($#)); do
     case $1 in
       --from)
-        (($# >= 2)) || setup_die '--from requires a directory'
-        ((from_requested == 0)) || setup_die '--from may be supplied only once'
-        [[ -n $2 ]] || setup_die '--from requires a nonempty directory'
+        (($# >= 2)) || report_error '--from requires a directory'
+        ((from_requested == 0)) || report_error '--from may be supplied only once'
+        [[ -n $2 ]] || report_error '--from requires a nonempty directory'
         from_requested=1
         from_dir=$2
         shift 2
@@ -35,13 +35,13 @@ main() {
         usage
         return 0
         ;;
-      --*) setup_die "unknown option: $1" ;;
+      --*) report_error "unknown option: $1" ;;
       *) requested+=("$1"); shift ;;
     esac
   done
 
   if ((from_requested == 1 && ${#requested[@]} == 0)); then
-    setup_die '--from requires at least one tool name'
+    report_error '--from requires at least one tool name'
   fi
   load_setup_config
   if ((${#requested[@]} == 0)); then
@@ -57,23 +57,23 @@ load_setup_config() {
   # Task deliberately keeps its only editable pin in validation.env.
   # shellcheck source=validation.env
   source "$REPO_DIR/validation.env"
-  setup_validate_tool_config
-  setup_validate_validator_config
+  validate_tool_config
+  validate_validator_config
 
   BIN_DIR=${SETUP_TOOLS_BIN_DIR:-$HOME/bin}
   STATE_DIR=${SETUP_TOOLS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup-tools}
 }
 
 validate_host() {
-  [[ $(uname -s) == Linux ]] || setup_die 'only Linux is supported'
-  [[ $(uname -m) == x86_64 ]] || setup_die 'only Linux x86-64 is supported'
-  setup_need sha256sum
-  setup_need tar
-  setup_need mktemp
-  setup_need find
-  setup_need mv
-  setup_need ln
-  setup_need readlink
+  [[ $(uname -s) == Linux ]] || report_error 'only Linux is supported'
+  [[ $(uname -m) == x86_64 ]] || report_error 'only Linux x86-64 is supported'
+  require_command sha256sum
+  require_command tar
+  require_command mktemp
+  require_command find
+  require_command mv
+  require_command ln
+  require_command readlink
 }
 
 normalize_requested() {
@@ -88,7 +88,7 @@ normalize_requested() {
     for allowed in "${DAILY_TOOLS[@]}" "${OPTIONAL_TOOLS[@]}"; do
       if [[ $name == "$allowed" ]]; then supported=1; break; fi
     done
-    ((supported == 1)) || setup_die "unknown tool: $name"
+    ((supported == 1)) || report_error "unknown tool: $name"
     if [[ $seen != *" $name "* ]]; then
       NORMALIZED_TOOLS+=("$name")
       seen+="$name "
@@ -100,7 +100,7 @@ load_tool_versions() {
   local catalog=TOOL_RELEASES
 
   [[ $1 != task ]] || catalog=VALIDATION_RELEASES
-  setup_release_versions "$catalog" "$1" || return
+  release_versions "$catalog" "$1" || return
   TOOL_VERSIONS=("${RELEASE_VERSIONS[@]}")
 }
 
@@ -110,10 +110,10 @@ load_tool_release() {
   local catalog=TOOL_RELEASES
 
   [[ $name != task ]] || catalog=VALIDATION_RELEASES
-  setup_select_release "$catalog" "$name" "$version" || return
+  select_release "$catalog" "$name" "$version" || return
   [[ $RELEASE_URL != - ]] ||
-    setup_die "$name $version has no direct artifact" || return
-  setup_artifact_layout "$name" "$version" "$RELEASE_ASSET"
+    report_error "$name $version has no direct artifact" || return
+  artifact_layout "$name" "$version" "$RELEASE_ASSET"
 }
 
 state_path() {
@@ -141,8 +141,8 @@ read_state() {
   [[ -f $path && ! -L $path ]] || return 1
   IFS=$'\t' read -r STATE_STATUS STATE_ARTIFACT STATE_CONTENT <"$path" || return 1
   [[ $STATE_STATUS == pending || $STATE_STATUS == complete ]] || return 1
-  setup_validate_digest state-artifact "$STATE_ARTIFACT" || return 1
-  setup_validate_digest state-content "$STATE_CONTENT" || return 1
+  validate_digest state-artifact "$STATE_ARTIFACT" || return 1
+  validate_digest state-content "$STATE_CONTENT" || return 1
 }
 
 destinations_exist() {
@@ -164,23 +164,23 @@ installation_status() {
   if ! read_state "$path"; then
     for destination in "${SPEC_DESTS[@]}"; do
       if [[ -e $BIN_DIR/$destination || -L $BIN_DIR/$destination ]]; then
-        setup_die "unmanaged versioned destination exists: $BIN_DIR/$destination"
+        report_error "unmanaged versioned destination exists: $BIN_DIR/$destination"
         return 1
       fi
     done
     return 10
   fi
   [[ $STATE_ARTIFACT == "$expected_artifact" ]] ||
-    setup_die "state digest differs for $name $version" || return
+    report_error "state digest differs for $name $version" || return
   if ! destinations_exist; then
     [[ $STATE_STATUS == pending ]] ||
-      setup_die "managed installation is incomplete: $name $version" || return
+      report_error "managed installation is incomplete: $name $version" || return
     return 12
   fi
   actual=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}")
   if [[ $actual != "$STATE_CONTENT" ]]; then
     [[ $STATE_STATUS == pending ]] ||
-      setup_die "managed installation was modified: $name $version" || return
+      report_error "managed installation was modified: $name $version" || return
     return 12
   fi
   [[ $STATE_STATUS == complete ]] && return 0
@@ -210,7 +210,7 @@ state_owns_link_target() {
   state=$(state_path "$name" "$version")
   read_state "$state" || return 1
   [[ $STATE_STATUS == complete ]] || return 1
-  setup_artifact_layout "$name" "$version" retained
+  artifact_layout "$name" "$version" retained
   for entry in "${SPEC_LINKS[@]}"; do
     [[ $entry == "$command_name:$target" ]] || continue
     destinations_exist || return 1
@@ -240,13 +240,13 @@ preflight_link() {
   if [[ -L $link ]]; then
     target=$(readlink -- "$link")
     managed_link_target "$name" "$command_name" "$target" ||
-      setup_die "refusing foreign link: $link -> $target"
+      report_error "refusing foreign link: $link -> $target"
   elif [[ -e $link ]]; then
-    setup_die "refusing unmanaged path: $link"
+    report_error "refusing unmanaged path: $link"
   elif provider=$(command -v "$command_name" 2>/dev/null) &&
     [[ $provider == "$HOME/.asdf/shims/"* || $provider == "$HOME/.krew/bin/"* ||
       $provider == "$HOME/.local/share/nvim2/mason/bin/"* ]]; then
-    setup_die "$command_name is already provided by $provider"
+    report_error "$command_name is already provided by $provider"
   fi
 }
 
@@ -259,12 +259,12 @@ preflight() {
   local input
 
   if [[ -e $BIN_DIR || -L $BIN_DIR ]]; then
-    [[ -d $BIN_DIR && ! -L $BIN_DIR ]] || setup_die "invalid bin directory: $BIN_DIR"
+    [[ -d $BIN_DIR && ! -L $BIN_DIR ]] || report_error "invalid bin directory: $BIN_DIR"
   fi
   if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
-    [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || setup_die "invalid state directory: $STATE_DIR"
+    [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || report_error "invalid state directory: $STATE_DIR"
   fi
-  [[ -n $from_dir ]] || setup_need curl
+  [[ -n $from_dir ]] || require_command curl
 
   for name in "${@:2}"; do
     load_tool_versions "$name"
@@ -281,7 +281,7 @@ preflight() {
           if [[ -n $from_dir ]]; then
             input="$from_dir/$name/$version/$SPEC_ASSET"
             [[ -f $input && ! -L $input && -r $input ]] ||
-              setup_die "missing input: $input"
+              report_error "missing input: $input"
           fi
           ;;
         *) return "$status" ;;
@@ -297,7 +297,7 @@ acquire_lock() {
   local name=$1
   local lock="$STATE_DIR/locks/$name.lock"
 
-  mkdir -- "$lock" 2>/dev/null || setup_die "another setup-tools process owns $name"
+  mkdir -- "$lock" 2>/dev/null || report_error "another setup-tools process owns $name"
   HELD_LOCKS+=("$lock")
 }
 
@@ -329,7 +329,7 @@ remove_pending_installation() {
       if [[ -L $BIN_DIR/$command_name ]]; then
         link_target=$(readlink -- "$BIN_DIR/$command_name")
         [[ $link_target != "$destination" && $link_target != "$destination/"* ]] ||
-          setup_die "pending installation is active: $destination" || return
+          report_error "pending installation is active: $destination" || return
       fi
     done
   done
@@ -352,7 +352,7 @@ verify_executable() {
   fi
   output=$("$executable" "${arguments[@]}" 2>&1)
   [[ $output == *"$version"* ]] ||
-    setup_die "$name executable did not report version $version: ${output%%$'\n'*}"
+    report_error "$name executable did not report version $version: ${output%%$'\n'*}"
 }
 
 verify_staged() {
@@ -404,10 +404,10 @@ install_version() {
     input="$from_dir/$name/$version/$SPEC_ASSET"
   else
     input="$STAGE_DIR/$SPEC_ASSET"
-    setup_download "$RELEASE_URL" "$input"
+    download_file "$RELEASE_URL" "$input"
   fi
-  setup_verify_sha256 "$input" "$RELEASE_SHA256"
-  setup_extract_artifact "$input" "$STAGE_DIR"
+  verify_sha256 "$input" "$RELEASE_SHA256"
+  extract_artifact "$input" "$STAGE_DIR"
   verify_staged "$name" "$version"
 
   content=$(content_digest "$STAGE_DIR" "${SPEC_DESTS[@]}")
@@ -436,7 +436,7 @@ activate_links() {
     command_name=${entry%%:*}
     target=${entry#*:}
     temporary="$BIN_DIR/.${command_name}.link.$$"
-    [[ ! -e $temporary && ! -L $temporary ]] || setup_die "temporary link exists: $temporary"
+    [[ ! -e $temporary && ! -L $temporary ]] || report_error "temporary link exists: $temporary"
     ln -s -- "$target" "$temporary"
     TEMP_PATHS+=("$temporary")
     commands+=("$command_name")
@@ -466,7 +466,7 @@ activate_links() {
           unlink -- "$BIN_DIR/$command_name" || true
         fi
       done
-      setup_die "failed to select $name; restored the previous selection" || true
+      report_error "failed to select $name; restored the previous selection" || true
       return "$status"
     fi
   done
@@ -513,7 +513,7 @@ source "$REPO_DIR/scripts/setup-lib"
 # this file does not download, install or validate anything.
 # shellcheck source=versions.env
 source "$REPO_DIR/versions.env"
-SETUP_PROGRAM=setup-tools
+PROGRAM=setup-tools
 declare -a NORMALIZED_TOOLS=()
 declare -a TOOL_VERSIONS=()
 declare -a SPEC_DESTS=()

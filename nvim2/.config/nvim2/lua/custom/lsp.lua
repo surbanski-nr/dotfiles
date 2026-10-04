@@ -134,12 +134,9 @@ function M.python_inventory(packages_root)
       if package then
         assert(receipt.name == name, 'Mason receipt name mismatch for ' .. name)
         assert(tool.version == version, 'Mason receipt version mismatch for ' .. name)
-        local entry_points = vim.tbl_keys(receipt.links.bin or {})
-        table.sort(entry_points)
         table.insert(inventory, {
           name = package,
           version = version,
-          entry_points = entry_points,
         })
       end
     end
