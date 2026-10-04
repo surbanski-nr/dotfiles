@@ -3,6 +3,9 @@ local M = {}
 M.mason = {
   -- CSS, HTML and JSON otherwise install the same npm package concurrently.
   max_concurrent_installers = 1,
+  registry_cache = {
+    refresh = vim.env.DOTFILES_OFFLINE_RELEASE_ROOT == nil,
+  },
 }
 
 ---@type table<string, vim.lsp.Config>
@@ -94,7 +97,7 @@ M.tools = {
 M.tool_probes = {
   { 'actionlint', '-version' },
   { 'ansible-language-server', '--version' },
-  { 'ansible-lint', '--version' },
+  { 'ansible-lint', '--offline', '--version' },
   { 'bash-language-server', '--version' },
   { 'docker-language-server', '--version' },
   { 'eslint_d', '--version' },

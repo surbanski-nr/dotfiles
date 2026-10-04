@@ -68,7 +68,7 @@ tasks:
       - bash scripts/validate workflows
 
   update:python-locks:
-    desc: Regenerate Python-backed Mason inputs and hashed locks
+    desc: Regenerate Python-backed Mason locks in the Nvim2 profile
     cmds:
       - bash scripts/update-offline-python-locks
 

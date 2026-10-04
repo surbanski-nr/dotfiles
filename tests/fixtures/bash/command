@@ -6,6 +6,12 @@ command_name=${0##*/}
 mode=${TEST_COMMAND_MODE:-ok}
 
 case "$command_name:$mode" in
+  zoxide:broken-integration)
+    exit 9
+    ;;
+  zoxide:invalid-integration)
+    printf 'if broken'
+    ;;
   nvim:editor)
     printf 'app=%s argc=%s first=%s\n' "$NVIM_APPNAME" "$#" "$1"
     ;;

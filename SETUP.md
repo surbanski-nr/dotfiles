@@ -33,10 +33,19 @@ The setup sequence moves regular distribution-provided Bash startup files
 aside without overwriting an existing backup. `bstow --dry-run` reports any
 remaining conflict, including a foreign symlink.
 
-`setup-tools` installs the selected daily tools from exact official release
-files. `setup-asdf` installs the project runtimes in `versions.env`, pins each
-plugin checkout and selects the first version in each list as the home default.
-A project `.tool-versions` file continues to override those defaults.
+`versions.env` stores direct releases in `TOOL_RELEASES`. Each tool has ordered
+`version|full_URL|SHA256` records, and the first record is the default. A
+required default without an artifact is an error, with no fallback to a later
+record. `validation.env` uses the same record format in
+`VALIDATION_RELEASES`; Task exists only there. Daily ShellCheck, validation
+ShellCheck and Mason ShellCheck remain independent pins.
+
+`setup-tools` installs the selected daily tools from these exact official
+release records. `setup-asdf` reads runtime versions from the same catalog,
+but plugin repository and commit data from `ASDF_PLUGINS`; plugin downloads and
+verification remain asdf's responsibility. It selects the first version for
+each runtime as the home default. A project `.tool-versions` file continues to
+override those defaults.
 An installation made by the immediately preceding `setup-asdf` layout can be
 adopted only when its relative `asdf-VERSION` link is the current pin and its
 executable is byte-for-byte equal to the executable extracted from the
@@ -281,67 +290,40 @@ the layout consumed by `setup-tools --from`.
 
 ```bash
 set -euo pipefail
-source validation.env
+source scripts/setup-lib
+SETUP_PROGRAM=prepare-tool-archives
 source versions.env
+source validation.env
+setup_validate_versions
+setup_validate_validation_versions
 archive_root=${1:-"$HOME/tool-archives"}
 
-download() {
-  name=$1
-  version=$2
-  asset=$3
-  url=$4
-  digest=$5
-  destination="$archive_root/$name/$version/$asset"
+download_release() {
+  catalog=$1
+  name=$2
+  version=$3
+  setup_release_record "$catalog" "$name" "$version"
+  [[ $RELEASE_URL != - ]] || {
+    printf 'No direct artifact for %s %s\n' "$name" "$version" >&2
+    return 1
+  }
+  setup_artifact_layout "$name" "$version" "$RELEASE_ASSET"
+  destination="$archive_root/$name/$version/$SPEC_ASSET"
   mkdir -p "$(dirname -- "$destination")"
   if [[ ! -f $destination ]]; then
-    temporary="$destination.part"
-    curl --fail --location --silent --show-error \
-      --connect-timeout 15 --max-time 300 --retry 2 \
-      --output "$temporary" "$url"
-    mv -- "$temporary" "$destination"
+    setup_download "$RELEASE_URL" "$destination"
   fi
-  printf '%s  %s\n' "$digest" "$destination" |
-    sha256sum --check --strict
+  setup_verify_sha256 "$destination" "$RELEASE_SHA256"
 }
 
-download gh "$GH_VERSION" "gh_${GH_VERSION}_linux_amd64.tar.gz" \
-  "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" "$GH_SHA256"
-download kyverno "$KYVERNO_VERSION" "kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz" \
-  "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz" "$KYVERNO_SHA256"
-download task "$TASK_VERSION" task_linux_amd64.tar.gz \
-  "https://github.com/go-task/task/releases/download/v${TASK_VERSION}/task_linux_amd64.tar.gz" "$TASK_SHA256"
-download trivy "$TRIVY_VERSION" "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
-  "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" "$TRIVY_SHA256"
-download k9s "$K9S_VERSION" k9s_Linux_amd64.tar.gz \
-  "https://github.com/derailed/k9s/releases/download/v${K9S_VERSION}/k9s_Linux_amd64.tar.gz" "$K9S_SHA256"
-download kubeconform "$KUBECONFORM_VERSION" kubeconform-linux-amd64.tar.gz \
-  "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" "$KUBECONFORM_SHA256"
-download shellcheck "$SHELLCHECK_VERSION" "shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
-  "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256"
-download oh-my-posh "$OMP_VERSION" posh-linux-amd64 \
-  "https://github.com/JanDeDobbeleer/oh-my-posh/releases/download/v${OMP_VERSION}/posh-linux-amd64" "$OMP_SHA256"
-download kubectx "$KUBECTX_VERSION" "kubectx_v${KUBECTX_VERSION}_linux_x86_64.tar.gz" \
-  "https://github.com/ahmetb/kubectx/releases/download/v${KUBECTX_VERSION}/kubectx_v${KUBECTX_VERSION}_linux_x86_64.tar.gz" "$KUBECTX_SHA256"
-download kubens "$KUBECTX_VERSION" "kubens_v${KUBECTX_VERSION}_linux_x86_64.tar.gz" \
-  "https://github.com/ahmetb/kubectx/releases/download/v${KUBECTX_VERSION}/kubens_v${KUBECTX_VERSION}_linux_x86_64.tar.gz" "$KUBENS_SHA256"
-download rg "$RG_VERSION" "ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
-  "https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl.tar.gz" "$RG_SHA256"
-download zoxide "$ZOXIDE_VERSION" "zoxide-${ZOXIDE_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
-  "https://github.com/ajeetdsouza/zoxide/releases/download/v${ZOXIDE_VERSION}/zoxide-${ZOXIDE_VERSION}-x86_64-unknown-linux-musl.tar.gz" "$ZOXIDE_SHA256"
-download uv "$UV_VERSION" uv-x86_64-unknown-linux-gnu.tar.gz \
-  "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256"
-download nvim "$NVIM_VERSION" nvim-linux-x86_64.tar.gz \
-  "https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.tar.gz" "$NVIM_SHA256"
-
-for version in "${KUBECTL_VERSIONS[@]}"; do
-  download kubectl "$version" kubectl \
-    "https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubectl" \
-    "${KUBECTL_SHA256_BY_VERSION[$version]}"
-done
-for version in "${HELM_VERSIONS[@]}"; do
-  download helm "$version" "helm-v${version}-linux-amd64.tar.gz" \
-    "https://get.helm.sh/helm-v${version}-linux-amd64.tar.gz" \
-    "${HELM_SHA256_BY_VERSION[$version]}"
+for name in gh kyverno task trivy k9s kubeconform shellcheck oh-my-posh \
+  kubectx kubens rg zoxide uv nvim kubectl helm; do
+  catalog=TOOL_RELEASES
+  [[ $name != task ]] || catalog=VALIDATION_RELEASES
+  setup_release_versions "$catalog" "$name"
+  for version in "${RELEASE_VERSIONS[@]}"; do
+    download_release "$catalog" "$name" "$version"
+  done
 done
 ```
 
@@ -533,20 +515,22 @@ This resets only the four managed plugin checkouts. Session data under
 `~/.tmux/resurrect` remains intact. On a restricted machine, transfer the
 complete pinned directories under `~/.tmux/plugins` before starting tmux.
 
-Krew remains separate from the binary importer. Download
-`krew-linux_amd64.tar.gz` for `KREW_VERSION`, verify `KREW_SHA256`, extract
-`krew-linux_amd64`, then install the manager:
+Krew remains separate from the binary importer. Read its first release record,
+download and verify `krew-linux_amd64.tar.gz`, extract `krew-linux_amd64`, then
+install the manager:
 
 ```bash
 set -euo pipefail
-. ./versions.env
+source scripts/setup-lib
+SETUP_PROGRAM=install-krew
+source versions.env
+setup_validate_versions
+setup_release_first TOOL_RELEASES krew
 archive=$(mktemp)
 work=$(mktemp -d)
 trap 'rm -f "$archive"; rm -rf "$work"' EXIT
-curl --fail --location --retry 3 --connect-timeout 15 \
-  --max-time 300 --output "$archive" \
-  "https://github.com/kubernetes-sigs/krew/releases/download/v${KREW_VERSION}/krew-linux_amd64.tar.gz"
-printf '%s  %s\n' "$KREW_SHA256" "$archive" | sha256sum -c -
+setup_download "$RELEASE_URL" "$archive"
+setup_verify_sha256 "$archive" "$RELEASE_SHA256"
 tar -xzf "$archive" -C "$work"
 "$work/krew-linux_amd64" install krew
 "$HOME/.krew/bin/kubectl-krew" version

@@ -31,18 +31,19 @@ printf 'ID=debian\nVERSION_ID=13\n' >"$os_release"
 
 write_fake_tool() {
   local path=$1
+  local version=${2:-1.0}
   mkdir -p "$(dirname -- "$path")"
-  cat >"$path" <<'EOF'
+  cat >"$path" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-self=$(readlink -f -- "$0")
-if [[ ${1:-} == hold ]]; then
-  printf 'before=%s\n' "$self" >"$2"
+ self=\$(readlink -f -- "\$0")
+if [[ \${1:-} == hold ]]; then
+  printf 'before=%s\n' "\$self" >"\$2"
   sleep 2
-  printf 'after=%s\n' "$self" >>"$2"
+  printf 'after=%s\n' "\$self" >>"\$2"
   exit 0
 fi
-printf '%s fixture 1.0\n' "$(basename -- "$0")"
+printf '%s fixture $version\n' "\$(basename -- "\$0")"
 EOF
   chmod 0755 "$path"
 }
@@ -59,7 +60,10 @@ if [[ " $* " == *' -m venv '* ]]; then
   printf 'home = fixture\n' >"$destination/pyvenv.cfg"
   cp "$0" "$destination/bin/python"
   for command_name in ansible ansible-config ansible-lint ansible-playbook yamllint; do
-    printf '#!/usr/bin/env bash\nprintf "%%s fixture 1.0\\n" "$(basename -- "$0")"\n' \
+    printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'if [[ $(basename -- "$0") == ansible-lint && " $* " != *" --offline "* ]]; then exit 97; fi' \
+      'printf "%s fixture 1.0\n" "$(basename -- "$0")"' \
       >"$destination/bin/$command_name"
     chmod 0755 "$destination/bin/$command_name"
   done
@@ -71,6 +75,7 @@ EOF
 
 make_artifact() {
   local commit=$1 marker=$2 destination=$3
+  local release_version=${4:-1.0}
   local id=dotfiles-${commit:0:12}
   local stage=$test_root/stage-$marker release=$test_root/stage-$marker/$id
   local command_name plugin plugin_dir
@@ -88,11 +93,13 @@ make_artifact() {
   cp "$repo_dir/scripts/dotfiles-release" "$release/dotfiles-release"
   chmod 0755 "$release/dotfiles-release"
   ln -s ../dotfiles-release "$release/bin/dotfiles-release"
-  for command_name in nvim tmux; do write_fake_tool "$release/tools/$command_name/bin/$command_name"; done
+  for command_name in nvim tmux; do
+    write_fake_tool "$release/tools/$command_name/bin/$command_name" "$release_version"
+  done
   write_fake_python "$release/tools/python-3.12.12/bin/python3"
   for command_name in node npm npx corepack rg zoxide k9s kubectx kubens \
     oh-my-posh task fzf terraform; do
-    write_fake_tool "$release/tools/bin/$command_name"
+    write_fake_tool "$release/tools/bin/$command_name" "$release_version"
     ln -s "../tools/bin/$command_name" "$release/bin/$command_name"
   done
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python"
@@ -105,6 +112,7 @@ make_artifact() {
     'self=$(readlink -f -- "$0")' \
     'release=${self%/bin/nvim}' \
     'export NVIM_APPNAME=${NVIM_APPNAME:-nvim2}' \
+    'if [[ -f $release/installed.sha256 ]]; then export DOTFILES_OFFLINE_RELEASE_ROOT="$release"; fi' \
     'exec "$release/tools/nvim/bin/nvim" "$@"' >"$release/bin/nvim"
   # shellcheck disable=SC2016
   printf '%s\n' \
@@ -162,27 +170,26 @@ make_artifact() {
     >"$release/python-locks/inventory.tsv"
   printf 'fixture wheel\n' >"$release/python-wheelhouse/fixture.whl"
   printf '%s\n' \
-    'FORMAT_VERSION=1' \
     "RELEASE_ID=$id" \
     'PLATFORM_ID=debian-13-x86_64' \
     "SOURCE_COMMIT=$commit" \
     'SOURCE_TREE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
     'BUILDER_IMAGE=fixture@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' \
-    'NVIM_VERSION=v1.0' \
-    'NODE_VERSION=1.0' \
-    'NPM_VERSION=1.0' \
-    'NODE_UPSTREAM_NPM_VERSION=1.0' \
+    "NVIM_VERSION=v$release_version" \
+    "NODE_VERSION=$release_version" \
+    "NPM_VERSION=$release_version" \
+    "NODE_UPSTREAM_NPM_VERSION=$release_version" \
     'PYTHON_VERSION=3.12.12' \
     'PYTHON_BUILD=20260127' \
-    'TMUX_VERSION=1.0' \
-    'RG_VERSION=1.0' \
-    'FZF_VERSION=1.0' \
-    'ZOXIDE_VERSION=1.0' \
-    'K9S_VERSION=1.0' \
-    'KUBECTX_VERSION=1.0' \
-    'OMP_VERSION=1.0' \
-    'TASK_VERSION=1.0' \
-    'TERRAFORM_VERSION=1.0' \
+    "TMUX_VERSION=$release_version" \
+    "RG_VERSION=$release_version" \
+    "FZF_VERSION=$release_version" \
+    "ZOXIDE_VERSION=$release_version" \
+    "K9S_VERSION=$release_version" \
+    "KUBECTX_VERSION=$release_version" \
+    "OMP_VERSION=$release_version" \
+    "TASK_VERSION=$release_version" \
+    "TERRAFORM_VERSION=$release_version" \
     'OFFLINE_TOOLS=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform' \
     'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
     >"$release/release.env"
@@ -194,6 +201,19 @@ make_artifact() {
     mv ../SHA256SUMS SHA256SUMS
   )
   tar -C "$stage" -czf "$destination" "$id"
+}
+
+repack_artifact() {
+  local marker=$1 id=$2 destination=$3 release
+  release=$test_root/stage-$marker/$id
+
+  (
+    cd "$release"
+    find . -type f ! -name SHA256SUMS -print0 | sort -z |
+      xargs -0 sha256sum >"$test_root/$marker-SHA256SUMS"
+    mv "$test_root/$marker-SHA256SUMS" SHA256SUMS
+  )
+  tar -C "$test_root/stage-$marker" -czf "$destination" "$id"
 }
 
 run_manager() {
@@ -211,8 +231,10 @@ artifact_one=$test_root/one.tar.gz
 artifact_two=$test_root/two.tar.gz
 artifact_three=$test_root/three.tar.gz
 make_artifact "$commit_one" one "$artifact_one"
-make_artifact "$commit_two" two "$artifact_two"
+make_artifact "$commit_two" two "$artifact_two" 2.0
 make_artifact "$commit_three" three "$artifact_three"
+sed -i '1iFORMAT_VERSION=1' "$test_root/stage-three/$id_three/release.env"
+repack_artifact three "$id_three" "$artifact_three"
 
 reserved_root=$test_root/reserved-paths
 mkdir -p "$reserved_root"
@@ -893,7 +915,13 @@ run_manager install "$artifact_one"
 
 process_record=$test_root/process-record
 run_manager install "$artifact_two"
-run_manager health "$id_one"
+[[ $(sed -n 's/^NODE_VERSION=//p' "$test_home/dotfiles-releases/$id_one/release.env") == 1.0 &&
+  $(sed -n 's/^NODE_VERSION=//p' "$test_home/dotfiles-releases/$id_two/release.env") == 2.0 ]] ||
+  fail 'A/B fixtures do not carry distinct release versions'
+standalone_manager=$test_root/standalone-dotfiles-release
+cp "$test_home/dotfiles-releases/$id_two/dotfiles-release" "$standalone_manager"
+HOME=$test_home DOTFILES_OS_RELEASE_FILE=$os_release DOTFILES_RELEASE_TEST_MODE=1 \
+  bash "$standalone_manager" health "$id_one"
 HOME=$test_home "$test_home/dotfiles-releases/$id_one/bin/nvim" hold "$process_record" &
 old_process=$!
 while [[ ! -s $process_record ]]; do sleep 0.05; done
@@ -931,6 +959,57 @@ collision_status=$?
 set -e
 [[ $collision_status -ne 0 && $collision_output == *'release ID collision'* ]] ||
   fail 'same-ID different-content collision was accepted'
+
+metadata_commit=6666666666666666666666666666666666666666
+metadata_id=dotfiles-${metadata_commit:0:12}
+metadata_artifact=$test_root/metadata-unknown.tar.gz
+make_artifact "$metadata_commit" metadata-unknown "$metadata_artifact"
+printf 'UNKNOWN_FIELD=value\n' >>"$test_root/stage-metadata-unknown/$metadata_id/release.env"
+repack_artifact metadata-unknown "$metadata_id" "$metadata_artifact"
+set +e
+metadata_output=$(run_manager install "$metadata_artifact" 2>&1)
+metadata_status=$?
+set -e
+[[ $metadata_status -ne 0 &&
+  $metadata_output == *'unknown release metadata key: UNKNOWN_FIELD'* ]] ||
+  fail 'unknown release metadata field was accepted'
+assert_link "$test_home/dotfiles-releases/current" "$id_one"
+[[ ! -e $test_home/dotfiles-releases/$metadata_id ]] ||
+  fail 'invalid metadata package was retained'
+
+duplicate_commit=7777777777777777777777777777777777777777
+duplicate_id=dotfiles-${duplicate_commit:0:12}
+duplicate_artifact=$test_root/metadata-duplicate.tar.gz
+make_artifact "$duplicate_commit" metadata-duplicate "$duplicate_artifact"
+printf 'TASK_VERSION=1.0\n' >>"$test_root/stage-metadata-duplicate/$duplicate_id/release.env"
+repack_artifact metadata-duplicate "$duplicate_id" "$duplicate_artifact"
+set +e
+duplicate_output=$(run_manager install "$duplicate_artifact" 2>&1)
+duplicate_status=$?
+set -e
+[[ $duplicate_status -ne 0 &&
+  $duplicate_output == *'duplicate release metadata key: TASK_VERSION'* ]] ||
+  fail 'duplicate release metadata field was accepted'
+assert_link "$test_home/dotfiles-releases/current" "$id_one"
+[[ ! -e $test_home/dotfiles-releases/$duplicate_id ]] ||
+  fail 'duplicate metadata package was retained'
+
+missing_commit=8888888888888888888888888888888888888888
+missing_id=dotfiles-${missing_commit:0:12}
+missing_artifact=$test_root/metadata-missing.tar.gz
+make_artifact "$missing_commit" metadata-missing "$missing_artifact"
+sed -i '/^TASK_VERSION=/d' "$test_root/stage-metadata-missing/$missing_id/release.env"
+repack_artifact metadata-missing "$missing_id" "$missing_artifact"
+set +e
+missing_metadata_output=$(run_manager install "$missing_artifact" 2>&1)
+missing_metadata_status=$?
+set -e
+[[ $missing_metadata_status -ne 0 &&
+  $missing_metadata_output == *'missing release metadata key: TASK_VERSION'* ]] ||
+  fail 'missing release metadata field was accepted'
+assert_link "$test_home/dotfiles-releases/current" "$id_one"
+[[ ! -e $test_home/dotfiles-releases/$missing_id ]] ||
+  fail 'missing metadata package was retained'
 
 tampered=$test_home/dotfiles-releases/$id_one/config/nvim2/init.lua
 original_mode=$(stat -c %a "$tampered")

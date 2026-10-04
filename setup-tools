@@ -44,22 +44,7 @@ main() {
     setup_die '--from requires at least one tool name'
   fi
   if ((${#requested[@]} == 0)); then
-    requested=(
-      gh
-      kyverno
-      task
-      trivy
-      k9s
-      kubeconform
-      shellcheck
-      oh-my-posh
-      kubectx
-      kubens
-      rg
-      zoxide
-      uv
-      nvim
-    )
+    requested=("${DAILY_TOOLS[@]}")
   fi
 
   load_setup_config
@@ -77,8 +62,7 @@ load_setup_config() {
   # shellcheck source=versions.env
   source "$REPO_DIR/versions.env"
   setup_validate_versions
-  setup_validate_version TASK_VERSION "$TASK_VERSION"
-  setup_validate_digest TASK_SHA256 "$TASK_SHA256"
+  setup_validate_validation_versions
 
   BIN_DIR=${SETUP_TOOLS_BIN_DIR:-$HOME/bin}
   STATE_DIR=${SETUP_TOOLS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup-tools}
@@ -98,16 +82,17 @@ validate_host() {
 
 normalize_requested() {
   local name
+  local allowed
+  local supported
   local seen=' '
 
   NORMALIZED_TOOLS=()
   for name in "$@"; do
-    case $name in
-      gh | kyverno | task | trivy | k9s | kubeconform | shellcheck | \
-        oh-my-posh | kubectx | kubens | rg | zoxide | uv | nvim | \
-        kubectl | helm) ;;
-      *) setup_die "unknown tool: $name" ;;
-    esac
+    supported=0
+    for allowed in "${DAILY_TOOLS[@]}" "${OPTIONAL_TOOLS[@]}"; do
+      if [[ $name == "$allowed" ]]; then supported=1; break; fi
+    done
+    ((supported == 1)) || setup_die "unknown tool: $name"
     if [[ $seen != *" $name "* ]]; then
       NORMALIZED_TOOLS+=("$name")
       seen+="$name "
@@ -116,32 +101,23 @@ normalize_requested() {
 }
 
 tool_versions() {
-  local -a versions=()
+  local catalog=TOOL_RELEASES
 
-  case $1 in
-    gh) printf '%s\n' "$GH_VERSION" ;;
-    kyverno) printf '%s\n' "$KYVERNO_VERSION" ;;
-    task) printf '%s\n' "$TASK_VERSION" ;;
-    trivy) printf '%s\n' "$TRIVY_VERSION" ;;
-    k9s) printf '%s\n' "$K9S_VERSION" ;;
-    kubeconform) printf '%s\n' "$KUBECONFORM_VERSION" ;;
-    shellcheck) printf '%s\n' "$SHELLCHECK_VERSION" ;;
-    oh-my-posh) printf '%s\n' "$OMP_VERSION" ;;
-    kubectx | kubens) printf '%s\n' "$KUBECTX_VERSION" ;;
-    rg) printf '%s\n' "$RG_VERSION" ;;
-    zoxide) printf '%s\n' "$ZOXIDE_VERSION" ;;
-    uv) printf '%s\n' "$UV_VERSION" ;;
-    nvim) printf '%s\n' "$NVIM_VERSION" ;;
-    kubectl)
-      versions=("${KUBECTL_VERSIONS[@]}")
-      printf '%s\n' "${versions[@]}"
-      ;;
-    helm)
-      versions=("${HELM_VERSIONS[@]}")
-      printf '%s\n' "${versions[@]}"
-      ;;
-    *) setup_die "missing version mapping for $1" ;;
-  esac
+  [[ $1 != task ]] || catalog=VALIDATION_RELEASES
+  setup_release_versions "$catalog" "$1" || return
+  printf '%s\n' "${RELEASE_VERSIONS[@]}"
+}
+
+load_tool_release() {
+  local name=$1
+  local version=$2
+  local catalog=TOOL_RELEASES
+
+  [[ $name != task ]] || catalog=VALIDATION_RELEASES
+  setup_release_record "$catalog" "$name" "$version" || return
+  [[ $RELEASE_URL != - ]] ||
+    setup_die "$name $version has no direct artifact" || return
+  setup_artifact_layout "$name" "$version" "$RELEASE_ASSET"
 }
 
 state_path() {
@@ -183,6 +159,7 @@ destinations_exist() {
 installation_status() {
   local name=$1
   local version=$2
+  local expected_artifact=$3
   local path
   local actual
   local destination
@@ -197,7 +174,7 @@ installation_status() {
     done
     return 10
   fi
-  [[ $STATE_ARTIFACT == "$SPEC_DIGEST" ]] ||
+  [[ $STATE_ARTIFACT == "$expected_artifact" ]] ||
     setup_die "state digest differs for $name $version" || return
   if ! destinations_exist; then
     [[ $STATE_STATUS == pending ]] ||
@@ -237,7 +214,7 @@ state_owns_link_target() {
   state=$(state_path "$name" "$version")
   read_state "$state" || return 1
   [[ $STATE_STATUS == complete ]] || return 1
-  setup_artifact_spec "$name" "$version"
+  setup_artifact_layout "$name" "$version" retained
   for entry in "${SPEC_LINKS[@]}"; do
     [[ $entry == "$command_name:$target" ]] || continue
     destinations_exist || return 1
@@ -295,9 +272,8 @@ preflight() {
 
   for name in "${@:2}"; do
     while IFS= read -r version; do
-      setup_artifact_spec "$name" "$version"
-      setup_validate_digest "$name $version digest" "$SPEC_DIGEST"
-      if installation_status "$name" "$version"; then
+      load_tool_release "$name" "$version"
+      if installation_status "$name" "$version" "$RELEASE_SHA256"; then
         status=0
       else
         status=$?
@@ -314,7 +290,7 @@ preflight() {
         *) return "$status" ;;
       esac
     done < <(tool_versions "$name")
-    setup_artifact_spec "$name" "$(tool_versions "$name" | head -n 1)"
+    load_tool_release "$name" "$(tool_versions "$name" | head -n 1)"
     for entry in "${SPEC_LINKS[@]}"; do preflight_link "$name" "$entry"; done
   done
   mkdir -p "$BIN_DIR" "$STATE_DIR/locks"
@@ -333,13 +309,14 @@ write_state() {
   local version=$2
   local status=$3
   local content=$4
+  local artifact_digest=$5
   local path
   local temporary
 
   path=$(state_path "$name" "$version")
   temporary=$(mktemp "$STATE_DIR/.state.XXXXXX")
   TEMP_PATHS+=("$temporary")
-  printf '%s\t%s\t%s\n' "$status" "$SPEC_DIGEST" "$content" >"$temporary"
+  printf '%s\t%s\t%s\n' "$status" "$artifact_digest" "$content" >"$temporary"
   mv -- "$temporary" "$path"
 }
 
@@ -371,17 +348,12 @@ verify_executable() {
   local executable=$2
   local version=${3#v}
   local output
+  local -a arguments=(--version)
 
-  case $name in
-    kubeconform) output=$("$executable" -v 2>&1) ;;
-    kyverno) output=$("$executable" version 2>&1) ;;
-    k9s) output=$("$executable" version --short 2>&1) ;;
-    kubectl) output=$("$executable" version --client 2>&1) ;;
-    helm) output=$("$executable" version --short 2>&1) ;;
-    nvim) output=$("$executable" --version 2>&1 | head -n 1) ;;
-    oh-my-posh) output=$("$executable" version 2>&1) ;;
-    *) output=$("$executable" --version 2>&1) ;;
-  esac
+  if [[ -v TOOL_PROBE_ARGS[$name] ]]; then
+    mapfile -t arguments <<<"${TOOL_PROBE_ARGS[$name]}"
+  fi
+  output=$("$executable" "${arguments[@]}" 2>&1)
   [[ $output == *"$version"* ]] ||
     setup_die "$name executable did not report version $version: ${output%%$'\n'*}"
 }
@@ -410,8 +382,8 @@ install_version() {
   local content
   local destination
 
-  setup_artifact_spec "$name" "$version"
-  if installation_status "$name" "$version"; then
+  load_tool_release "$name" "$version"
+  if installation_status "$name" "$version" "$RELEASE_SHA256"; then
     printf 'setup-tools: reuse %s %s\n' "$name" "$version"
     return
   else
@@ -419,7 +391,7 @@ install_version() {
   fi
   if [[ $status -eq 11 ]]; then
     content=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}")
-    write_state "$name" "$version" complete "$content"
+    write_state "$name" "$version" complete "$content" "$RELEASE_SHA256"
     printf 'setup-tools: recovered %s %s\n' "$name" "$version"
     return
   fi
@@ -435,18 +407,18 @@ install_version() {
     input="$from_dir/$name/$version/$SPEC_ASSET"
   else
     input="$STAGE_DIR/$SPEC_ASSET"
-    setup_download "$SPEC_URL" "$input"
+    setup_download "$RELEASE_URL" "$input"
   fi
-  setup_verify_sha256 "$input" "$SPEC_DIGEST"
+  setup_verify_sha256 "$input" "$RELEASE_SHA256"
   setup_extract_artifact "$input" "$STAGE_DIR"
   verify_staged "$name" "$version"
 
   content=$(content_digest "$STAGE_DIR" "${SPEC_DESTS[@]}")
-  write_state "$name" "$version" pending "$content"
+  write_state "$name" "$version" pending "$content" "$RELEASE_SHA256"
   for destination in "${SPEC_DESTS[@]}"; do
     mv -- "$STAGE_DIR/$destination" "$BIN_DIR/$destination"
   done
-  write_state "$name" "$version" complete "$content"
+  write_state "$name" "$version" complete "$content" "$RELEASE_SHA256"
   printf 'setup-tools: installed %s %s\n' "$name" "$version"
 }
 
@@ -516,7 +488,7 @@ install_requested() {
     while IFS= read -r version; do
       install_version "$from_dir" "$name" "$version"
     done < <(tool_versions "$name")
-    setup_artifact_spec "$name" "$selected"
+    load_tool_release "$name" "$selected"
     activate_links "$name" "${SPEC_LINKS[@]}"
   done
 }
@@ -541,6 +513,11 @@ REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$REPO_DIR/scripts/setup-lib"
 SETUP_PROGRAM=setup-tools
 declare -a NORMALIZED_TOOLS=()
+declare -a DAILY_TOOLS=(
+  gh kyverno task trivy k9s kubeconform shellcheck oh-my-posh kubectx kubens
+  rg zoxide uv nvim
+)
+declare -a OPTIONAL_TOOLS=(kubectl helm)
 declare -a SPEC_DESTS=()
 declare -a SPEC_LINKS=()
 declare -a TEMP_PATHS=()
@@ -549,10 +526,20 @@ BIN_DIR=
 STATE_DIR=
 STAGE_DIR=
 SPEC_ASSET=
-SPEC_URL=
-SPEC_DIGEST=
 SPEC_FORMAT=
 SPEC_MEMBER=
 SPEC_SECOND_MEMBER=
+RELEASE_VERSION=
+RELEASE_URL=
+RELEASE_SHA256=
+RELEASE_ASSET=
+declare -A TOOL_PROBE_ARGS=(
+  [kubeconform]='-v'
+  [kyverno]='version'
+  [k9s]=$'version\n--short'
+  [kubectl]=$'version\n--client'
+  [helm]=$'version\n--short'
+  [oh-my-posh]='version'
+)
 trap cleanup EXIT
 main "$@"

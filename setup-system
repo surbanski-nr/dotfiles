@@ -27,11 +27,13 @@ main() {
 }
 
 validate_host() {
+  local os_release_file=${SETUP_SYSTEM_OS_RELEASE_FILE:-/etc/os-release}
+
   [[ $(uname -s) == Linux ]] || setup_die 'only Linux is supported'
   [[ $(uname -m) == x86_64 ]] || setup_die 'only Linux x86-64 is supported'
-  [[ -r /etc/os-release ]] || setup_die 'cannot read /etc/os-release'
-  # shellcheck disable=SC1091
-  source /etc/os-release
+  [[ -r $os_release_file ]] || setup_die "cannot read $os_release_file"
+  # shellcheck disable=SC1090
+  source "$os_release_file"
   case "${ID:-}:${VERSION_ID:-}" in
     debian:13 | ubuntu:24.04 | ubuntu:26.04 | amzn:2023)
       PLATFORM="$ID:$VERSION_ID"
@@ -41,29 +43,11 @@ validate_host() {
   if ((EUID != 0)); then setup_need sudo; fi
 }
 
-as_root() {
-  if ((EUID == 0)); then "$@"; else sudo -- "$@"; fi
-}
-
 install_packages() {
-  setup_system_package_list "$PLATFORM" "$MODE"
-  case $PLATFORM in
-    debian:* | ubuntu:*)
-      as_root env DEBIAN_FRONTEND=noninteractive apt-get update
-      as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        "${SETUP_SYSTEM_PACKAGES[@]}"
-      ;;
-    amzn:2023)
-      if [[ $MODE == connected ]]; then
-        if rpm -q gnupg2-minimal >/dev/null 2>&1; then
-          as_root dnf swap -y gnupg2-minimal gnupg2
-        else
-          as_root dnf install -y gnupg2
-        fi
-      fi
-      as_root dnf install -y --allowerasing "${SETUP_SYSTEM_PACKAGES[@]}"
-      ;;
-  esac
+  local -a root_command=()
+
+  if ((EUID != 0)); then root_command=(sudo --); fi
+  setup_install_system_packages "$PLATFORM" "$MODE" false "${root_command[@]}"
 }
 
 verify_packages() {

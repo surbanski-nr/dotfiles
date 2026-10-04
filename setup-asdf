@@ -23,18 +23,10 @@ main() {
       *) requested+=("$1"); shift ;;
     esac
   done
-  if ((${#requested[@]} == 0)); then
-    requested=(
-      terraform
-      kubectl
-      helm
-      python
-      nodejs
-      terragrunt
-    )
-  fi
-
   load_config
+  if ((${#requested[@]} == 0)); then
+    requested=("${ASDF_TOOLS[@]}")
+  fi
   validate_host
   normalize_requested "${requested[@]}"
   preflight
@@ -47,6 +39,8 @@ load_config() {
   # shellcheck source=versions.env
   source "$REPO_DIR/versions.env"
   setup_validate_versions
+  setup_release_first TOOL_RELEASES asdf
+  ASDF_VERSION=$RELEASE_VERSION
   BIN_DIR=${SETUP_ASDF_BIN_DIR:-$HOME/bin}
   ASDF_DATA_DIR=${ASDF_DATA_DIR:-$HOME/.asdf}
   export ASDF_DATA_DIR
@@ -63,14 +57,17 @@ validate_host() {
 
 normalize_requested() {
   local name
+  local allowed
+  local supported
   local seen=' '
 
   NORMALIZED_TOOLS=()
   for name in "$@"; do
-    case $name in
-      terraform | kubectl | helm | python | nodejs | terragrunt) ;;
-      *) setup_die "unknown project tool: $name" ;;
-    esac
+    supported=0
+    for allowed in "${ASDF_TOOLS[@]}"; do
+      if [[ $name == "$allowed" ]]; then supported=1; break; fi
+    done
+    ((supported == 1)) || setup_die "unknown project tool: $name"
     if [[ $seen != *" $name "* ]]; then
       NORMALIZED_TOOLS+=("$name")
       seen+="$name "
@@ -79,39 +76,13 @@ normalize_requested() {
 }
 
 plugin_spec() {
-  case $1 in
-    terraform)
-      PLUGIN_REPO=$ASDF_TERRAFORM_PLUGIN_REPO
-      PLUGIN_COMMIT=$ASDF_TERRAFORM_PLUGIN_COMMIT
-      TOOL_VERSIONS=("${TERRAFORM_VERSIONS[@]}")
-      ;;
-    kubectl)
-      PLUGIN_REPO=$ASDF_KUBECTL_PLUGIN_REPO
-      PLUGIN_COMMIT=$ASDF_KUBECTL_PLUGIN_COMMIT
-      TOOL_VERSIONS=("${KUBECTL_VERSIONS[@]}")
-      ;;
-    helm)
-      PLUGIN_REPO=$ASDF_HELM_PLUGIN_REPO
-      PLUGIN_COMMIT=$ASDF_HELM_PLUGIN_COMMIT
-      TOOL_VERSIONS=("${HELM_VERSIONS[@]}")
-      ;;
-    python)
-      PLUGIN_REPO=$ASDF_PYTHON_PLUGIN_REPO
-      PLUGIN_COMMIT=$ASDF_PYTHON_PLUGIN_COMMIT
-      TOOL_VERSIONS=("${PYTHON_VERSIONS[@]}")
-      ;;
-    nodejs)
-      PLUGIN_REPO=$ASDF_NODEJS_PLUGIN_REPO
-      PLUGIN_COMMIT=$ASDF_NODEJS_PLUGIN_COMMIT
-      TOOL_VERSIONS=("${NODEJS_VERSIONS[@]}")
-      ;;
-    terragrunt)
-      PLUGIN_REPO=$ASDF_TERRAGRUNT_PLUGIN_REPO
-      PLUGIN_COMMIT=$ASDF_TERRAGRUNT_PLUGIN_COMMIT
-      TOOL_VERSIONS=("${TERRAGRUNT_VERSIONS[@]}")
-      ;;
-    *) setup_die "missing asdf plugin mapping for $1" ;;
-  esac
+  local name=$1
+
+  [[ -v ASDF_PLUGINS[$name] ]] ||
+    setup_die "missing asdf plugin mapping for $name" || return
+  IFS='|' read -r PLUGIN_REPO PLUGIN_COMMIT <<<"${ASDF_PLUGINS[$name]}"
+  setup_release_versions TOOL_RELEASES "$name" || return
+  TOOL_VERSIONS=("${RELEASE_VERSIONS[@]}")
 }
 
 preflight_asdf_link() {
@@ -230,8 +201,6 @@ preflight() {
 install_asdf() {
   local destination="$BIN_DIR/asdf-$ASDF_VERSION"
   local link="$BIN_DIR/asdf"
-  local asset="asdf-v${ASDF_VERSION}-linux-amd64.tar.gz"
-  local url="https://github.com/asdf-vm/asdf/releases/download/v${ASDF_VERSION}/$asset"
   local archive
   local executable
   local output
@@ -240,6 +209,9 @@ install_asdf() {
   local install_state="$STATE_DIR/installations/asdf-$ASDF_VERSION.sha256"
   local state_temporary digest
 
+  setup_release_record TOOL_RELEASES asdf "$ASDF_VERSION"
+  setup_artifact_layout asdf "$ASDF_VERSION" "$RELEASE_ASSET"
+
   if [[ -f $destination && -z $LEGACY_ASDF_TARGET ]]; then
     output=$("$destination" version 2>&1)
     [[ $output == *"$ASDF_VERSION"* ]] ||
@@ -247,12 +219,10 @@ install_asdf() {
   else
     stage=$(mktemp -d "$BIN_DIR/.setup-asdf.XXXXXX")
     TEMP_PATHS+=("$stage")
-    archive="$stage/$asset"
-    executable="$stage/asdf"
-    setup_download "$url" "$archive"
-    setup_verify_sha256 "$archive" "$ASDF_SHA256"
-    tar -xOzf "$archive" -- asdf >"$executable"
-    chmod 0755 "$executable"
+    archive="$stage/$RELEASE_ASSET"
+    executable="$stage/asdf-$ASDF_VERSION"
+    setup_download "$RELEASE_URL" "$archive"
+    setup_prepare_artifact TOOL_RELEASES asdf "$ASDF_VERSION" "$archive" "$stage"
     output=$("$executable" version 2>&1)
     [[ $output == *"$ASDF_VERSION"* ]] ||
       setup_die "downloaded asdf did not report $ASDF_VERSION"
@@ -369,5 +339,10 @@ PLUGIN_REPO=
 PLUGIN_COMMIT=
 declare -a TOOL_VERSIONS=()
 temporary_link=
+ASDF_VERSION=
+RELEASE_VERSION=
+RELEASE_URL=
+RELEASE_SHA256=
+RELEASE_ASSET=
 trap cleanup EXIT
 main "$@"

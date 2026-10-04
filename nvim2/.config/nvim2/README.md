@@ -120,15 +120,19 @@ history, ShaDa marks and registers, and persistent undo files:
 
 cd "$HOME/github.com/surbanski/dotfiles"
 timeout 1200s env NVIM_APPNAME=nvim2 \
+  nvim --headless '+qa!'
+timeout 1200s env NVIM_APPNAME=nvim2 \
   nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
 timeout 120s bash "$HOME/.config/nvim2/tests/check.sh"
 ```
 
 The first Nvim2 startup restores only plugins declared in the current config at
-revisions from `nvim-pack-lock.json`. `Nvim2ToolsInstallSync` then installs the
-pinned Mason tools and declared Treesitter parsers. Keep the backup until the
-checks and normal editing work. Do not use this procedure for an offline
-platform release, where `~/.local/share/nvim2` is an activation symlink; use the
+revisions from `nvim-pack-lock.json`; restart after that asynchronous bootstrap
+so the newly installed plugins and profile commands are active.
+`Nvim2ToolsInstallSync` then installs the pinned Mason tools and declared
+Treesitter parsers. Keep the backup until the checks and normal editing work.
+Do not use this procedure for an offline platform release, where
+`~/.local/share/nvim2` is an activation symlink; use the
 [offline release runbook](offline-releases.md) instead.
 
 Legacy profiles use separate application directories and do not affect Nvim2.
@@ -223,6 +227,12 @@ Terraform variables, Ansible, Helm and generic YAML. Some servers also call
 programs that are not Mason packages. The complete offline release supplies
 Terraform and the isolated ansible-core entry points used by Ansible Language
 Server. Connected installations must provide those commands separately.
+
+Generated Python inputs and hashed locks for Python-backed Mason packages live
+in `python-locks/` beside this configuration's plugin lock. Regenerate them
+with `task update:python-locks`; do not edit them by hand. The complete release
+builder copies those files into the existing payload-level `python-locks/`
+directory, so the installed archive layout remains unchanged.
 
 The script performs five isolated headless starts and reports the minimum,
 median and maximum startup time. Startup speed depends on the VM, filesystem

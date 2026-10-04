@@ -17,6 +17,18 @@ fail() {
 
 # shellcheck source=../versions.env
 source "$repo_dir/versions.env"
+# shellcheck source=../scripts/setup-lib
+source "$repo_dir/scripts/setup-lib"
+SETUP_PROGRAM=setup-asdf-test
+setup_release_first TOOL_RELEASES asdf
+ASDF_VERSION=$RELEASE_VERSION
+
+append_release() {
+  local file=$1 tool=$2 version=$3 url=$4 digest=$5 value
+
+  value=$'\n'"$version|$url|$digest"$'\n'
+  printf 'TOOL_RELEASES[%q]=%q\n' "$tool" "$value" >>"$file"
+}
 
 write_asdf_fixture() {
   local path=$1 version=$2
@@ -55,8 +67,8 @@ record_asdf_fixture() {
 }
 
 prepare_plugin() {
-  local home=$1 repository=$2
-  local plugin=$home/.asdf/plugins/terraform
+  local home=$1 repository=$2 name=${3:-terraform}
+  local plugin=$home/.asdf/plugins/$name
   local plugin_commit
   mkdir -p "$plugin"
   git init -q "$plugin"
@@ -66,9 +78,9 @@ prepare_plugin() {
   git -C "$plugin" add plugin
   git -C "$plugin" commit -qm fixture
   plugin_commit=$(git -C "$plugin" rev-parse HEAD)
-  git -C "$plugin" remote add origin "$plugin"
-  printf 'ASDF_TERRAFORM_PLUGIN_REPO=%s\nASDF_TERRAFORM_PLUGIN_COMMIT=%s\n' \
-    "$plugin" "$plugin_commit" >>"$repository/versions.env"
+  git -C "$plugin" remote add origin "https://example.invalid/$name.git"
+  printf 'ASDF_PLUGINS[%q]=%q\n' "$name" \
+    "https://example.invalid/$name.git|$plugin_commit" >>"$repository/versions.env"
 }
 
 test_repo="$test_root/repository"
@@ -129,8 +141,8 @@ prepare_plugin "$legacy_home" "$legacy_repo"
 write_asdf_fixture "$legacy_archive_root/asdf" "$ASDF_VERSION"
 tar -C "$legacy_archive_root" -czf "$legacy_archive" asdf
 legacy_archive_digest=$(sha256sum "$legacy_archive" | awk '{print $1}')
-sed -i "s/^ASDF_SHA256=.*/ASDF_SHA256=$legacy_archive_digest/" \
-  "$legacy_repo/versions.env"
+append_release "$legacy_repo/versions.env" asdf "$ASDF_VERSION" \
+  https://example.invalid/asdf.tar.gz "$legacy_archive_digest"
 cp "$legacy_archive_root/asdf" "$legacy_home/bin/asdf-$ASDF_VERSION"
 ln -s "asdf-$ASDF_VERSION" "$legacy_home/bin/asdf"
 cat >"$legacy_home/bin/curl" <<'EOF'
@@ -239,6 +251,54 @@ HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
   fail 'second setup-asdf run reinstalled a runtime'
 [[ $(grep -c '^set' "$reconcile_log") -eq 2 ]] ||
   fail 'setup-asdf did not select the home default after each successful run'
+
+order_repo=$test_root/order-repository
+order_home=$test_root/order-home
+order_log=$test_root/order.log
+mkdir -p "$order_repo/scripts" "$order_home/bin"
+cp "$repo_dir/setup-asdf" "$order_repo/setup-asdf"
+cp "$repo_dir/scripts/setup-lib" "$order_repo/scripts/setup-lib"
+cp "$repo_dir/versions.env" "$order_repo/versions.env"
+prepare_plugin "$order_home" "$order_repo"
+write_asdf_fixture "$order_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
+ln -s "asdf-$ASDF_VERSION" "$order_home/bin/asdf"
+record_asdf_fixture "$order_home" "asdf-$ASDF_VERSION"
+printf 'TOOL_RELEASES[terraform]=%q\n' \
+  $'\n1.15.9|https://example.invalid/terraform-1.15.9.zip|0000000000000000000000000000000000000000000000000000000000000000\n1.16.4|https://example.invalid/terraform-1.16.4.zip|1111111111111111111111111111111111111111111111111111111111111111\n' \
+  >>"$order_repo/versions.env"
+HOME="$order_home" TEST_ASDF_LOG="$order_log" "$order_repo/setup-asdf" terraform
+[[ $(grep '^install' "$order_log") == $'install\tterraform\t1.15.9\ninstall\tterraform\t1.16.4' &&
+  $(tail -n 1 "$order_log") == $'set\tterraform\t1.15.9' ]] ||
+  fail 'record order did not control installation order and home default'
+
+default_repo=$test_root/default-repository
+default_home=$test_root/default-home
+default_log=$test_root/default.log
+mkdir -p "$default_repo/scripts" "$default_home/bin"
+cp "$repo_dir/setup-asdf" "$default_repo/setup-asdf"
+cp "$repo_dir/scripts/setup-lib" "$default_repo/scripts/setup-lib"
+cp "$repo_dir/versions.env" "$default_repo/versions.env"
+for tool in "${ASDF_TOOLS[@]}"; do
+  prepare_plugin "$default_home" "$default_repo" "$tool"
+done
+write_asdf_fixture "$default_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
+ln -s "asdf-$ASDF_VERSION" "$default_home/bin/asdf"
+record_asdf_fixture "$default_home" "asdf-$ASDF_VERSION"
+HOME="$default_home" TEST_ASDF_LOG="$default_log" "$default_repo/setup-asdf"
+[[ $(grep -c '^install' "$default_log") -eq 9 ]] ||
+  fail 'default setup-asdf did not install every catalog runtime version'
+[[ $(grep -c '^set' "$default_log") -eq 6 ]] ||
+  fail 'default setup-asdf did not select every home default'
+for expected in \
+  $'set\tterraform\t1.16.4' \
+  $'set\tkubectl\t1.36.0' \
+  $'set\thelm\t4.3.0' \
+  $'set\tpython\t3.12.12' \
+  $'set\tnodejs\t22.23.2' \
+  $'set\tterragrunt\t1.1.6'; do
+  grep -Fx "$expected" "$default_log" >/dev/null ||
+    fail "default setup-asdf omitted: $expected"
+done
 
 failure_repo=$test_root/failure-repository
 failure_home=$test_root/failure-home

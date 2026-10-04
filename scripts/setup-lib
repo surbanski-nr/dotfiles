@@ -31,31 +31,124 @@ setup_validate_commit() {
   [[ $value =~ ^[0-9a-f]{40}$ ]] || setup_die "$name is not a commit SHA"
 }
 
-setup_validate_array() {
-  local name=$1
-  local item
-  local previous
-  local -a seen_items=()
-  local -n values=$name
+setup_release_versions() {
+  local catalog_name=$1
+  local tool=$2
+  local record version url digest separators previous
+  local -n catalog=$catalog_name
 
-  declare -p "$name" 2>/dev/null | grep -q '^declare -a' ||
-    setup_die "$name must be an indexed array" || return
-  ((${#values[@]} > 0)) || setup_die "$name is empty" || return
-  for item in "${values[@]}"; do
-    setup_validate_version "$name" "$item" || return
-    for previous in "${seen_items[@]}"; do
-      [[ $previous != "$item" ]] || setup_die "$name contains duplicate $item" || return
+  declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
+    setup_die "$catalog_name must be an associative array" || return
+  [[ -v catalog[$tool] ]] || setup_die "$catalog_name has no releases for $tool" || return
+  RELEASE_VERSIONS=()
+  while IFS= read -r record || [[ -n $record ]]; do
+    [[ -n $record ]] || continue
+    [[ $record != *[[:space:]]* ]] ||
+      setup_die "${catalog_name}[$tool] contains whitespace" || return
+    separators=${record//[^|]/}
+    [[ $separators == '||' ]] ||
+      setup_die "${catalog_name}[$tool] record must contain exactly three fields" || return
+    IFS='|' read -r version url digest <<<"$record"
+    [[ -n $version && -n $url && -n $digest ]] ||
+      setup_die "${catalog_name}[$tool] contains an empty field" || return
+    setup_validate_version "${catalog_name}[$tool]" "$version" || return
+    if [[ $url == - || $digest == - ]]; then
+      [[ $url == - && $digest == - ]] ||
+        setup_die "${catalog_name}[$tool] must provide both URL and SHA256 or neither" || return
+    else
+      [[ $url == https://* ]] ||
+        setup_die "${catalog_name}[$tool] URL must use HTTPS: $url" || return
+      setup_validate_digest "${catalog_name}[$tool] digest" "$digest" || return
+    fi
+    for previous in "${RELEASE_VERSIONS[@]}"; do
+      [[ $previous != "$version" ]] ||
+        setup_die "${catalog_name}[$tool] contains duplicate $version" || return
     done
-    seen_items+=("$item")
+    RELEASE_VERSIONS+=("$version")
+  done <<<"${catalog[$tool]}"
+  ((${#RELEASE_VERSIONS[@]} > 0)) ||
+    setup_die "${catalog_name}[$tool] is empty" || return
+}
+
+setup_release_record() {
+  local catalog_name=$1
+  local tool=$2
+  local requested_version=$3
+  local record version url digest
+  local -n catalog=$catalog_name
+
+  setup_release_versions "$catalog_name" "$tool" || return
+  RELEASE_VERSION=
+  RELEASE_URL=
+  RELEASE_SHA256=
+  RELEASE_ASSET=
+  while IFS= read -r record || [[ -n $record ]]; do
+    [[ -n $record ]] || continue
+    IFS='|' read -r version url digest <<<"$record"
+    [[ $version == "$requested_version" ]] || continue
+    RELEASE_VERSION=$version
+    RELEASE_URL=$url
+    RELEASE_SHA256=$digest
+    RELEASE_ASSET=${url##*/}
+    if [[ $tool == python && $url != - ]]; then
+      RELEASE_ASSET="cpython-${version}+${PYTHON_STANDALONE_BUILD}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+    fi
+    return 0
+  done <<<"${catalog[$tool]}"
+  setup_die "${catalog_name}[$tool] has no release $requested_version"
+}
+
+setup_release_first() {
+  local catalog_name=$1
+  local tool=$2
+
+  setup_release_versions "$catalog_name" "$tool" || return
+  setup_release_record "$catalog_name" "$tool" "${RELEASE_VERSIONS[0]}"
+}
+
+setup_validate_release_catalog() {
+  local catalog_name=$1
+  shift
+  local expected name
+  local seen=' '
+  local -n catalog=$catalog_name
+
+  declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
+    setup_die "$catalog_name must be an associative array" || return
+  ((${#catalog[@]} == $#)) ||
+    setup_die "$catalog_name contains an unexpected number of tools" || return
+  for expected in "$@"; do
+    [[ -v catalog[$expected] ]] ||
+      setup_die "$catalog_name has no releases for $expected" || return
+    setup_release_versions "$catalog_name" "$expected" || return
+    seen+="$expected "
+  done
+  for name in "${!catalog[@]}"; do
+    [[ $name =~ ^[a-z0-9-]+$ && $seen == *" $name "* ]] ||
+      setup_die "$catalog_name contains unsupported tool $name" || return
+  done
+}
+
+setup_validate_validation_versions() {
+  local tool version
+
+  setup_validate_release_catalog VALIDATION_RELEASES \
+    actionlint shellcheck stylua zizmor task || return
+  for tool in actionlint shellcheck stylua zizmor task; do
+    setup_release_versions VALIDATION_RELEASES "$tool" || return
+    for version in "${RELEASE_VERSIONS[@]}"; do
+      setup_release_record VALIDATION_RELEASES "$tool" "$version" || return
+      [[ $RELEASE_URL != - ]] ||
+        setup_die "validation release $tool $version requires an artifact" || return
+    done
+  done
+  for version in YAMLLINT_VERSION YAMLLINT_PATHSPEC_VERSION YAMLLINT_PYYAML_VERSION; do
+    setup_validate_version "$version" "${!version:-}" || return
   done
 }
 
 setup_validate_versions() {
-  local commit_name
-  local digest_name
-  local array_name
-  local scalar_name
-  local version
+  local plugin record repository commit tool version
 
   declare -p OFFLINE_TOOLS 2>/dev/null | grep -q '^declare -a' ||
     setup_die 'OFFLINE_TOOLS must be an indexed array' || return
@@ -79,44 +172,65 @@ setup_validate_versions() {
   ((${#OFFLINE_TOOLS[@]} == 13)) ||
     setup_die 'OFFLINE_TOOLS must contain only the required offline profile' || return
 
-  for scalar_name in ASDF_VERSION GH_VERSION K9S_VERSION TRIVY_VERSION \
-    KYVERNO_VERSION KUBECONFORM_VERSION SHELLCHECK_VERSION RG_VERSION \
-    ZOXIDE_VERSION UV_VERSION OMP_VERSION KUBECTX_VERSION NVIM_VERSION \
-    NPM_VERSION KREW_VERSION TMUX_VERSION FZF_VERSION PIP_TOOLS_VERSION; do
-    setup_validate_version "$scalar_name" "${!scalar_name:-}" || return
+  setup_validate_release_catalog TOOL_RELEASES \
+    asdf gh k9s trivy kyverno kubeconform shellcheck rg zoxide uv \
+    oh-my-posh kubectx kubens nvim npm python tmux fzf krew terraform \
+    kubectl helm nodejs terragrunt || return
+  setup_validate_version KUBECTX_VERSION "${KUBECTX_VERSION:-}" || return
+  for tool in kubectx kubens; do
+    setup_release_versions TOOL_RELEASES "$tool" || return
+    ((${#RELEASE_VERSIONS[@]} == 1)) ||
+      setup_die "$tool must have exactly one release" || return
+    [[ ${RELEASE_VERSIONS[0]} == "$KUBECTX_VERSION" ]] ||
+      setup_die "$tool must use KUBECTX_VERSION" || return
   done
-  for digest_name in ASDF_SHA256 GH_SHA256 K9S_SHA256 TRIVY_SHA256 \
-    KYVERNO_SHA256 KUBECONFORM_SHA256 SHELLCHECK_SHA256 RG_SHA256 \
-    ZOXIDE_SHA256 UV_SHA256 OMP_SHA256 KUBECTX_SHA256 KUBENS_SHA256 \
-    NVIM_SHA256 NPM_SHA256 KREW_SHA256 PYTHON_STANDALONE_SHA256 TMUX_SHA256 \
-    FZF_SHA256; do
-    setup_validate_digest "$digest_name" "${!digest_name:-}" || return
+  for tool in kubectl helm; do
+    setup_release_versions TOOL_RELEASES "$tool" || return
+    for version in "${RELEASE_VERSIONS[@]}"; do
+      setup_release_record TOOL_RELEASES "$tool" "$version" || return
+      [[ $RELEASE_URL != - ]] ||
+        setup_die "$tool $version requires a direct artifact" || return
+    done
   done
-  for array_name in TERRAFORM_VERSIONS KUBECTL_VERSIONS HELM_VERSIONS \
-    PYTHON_VERSIONS NODEJS_VERSIONS TERRAGRUNT_VERSIONS; do
-    setup_validate_array "$array_name" || return
+  for tool in nvim nodejs python rg tmux oh-my-posh k9s zoxide kubectx \
+    kubens fzf terraform; do
+    setup_release_first TOOL_RELEASES "$tool" || return
+    [[ $RELEASE_URL != - ]] ||
+      setup_die "offline default $tool $RELEASE_VERSION requires an artifact" || return
   done
-  for version in "${KUBECTL_VERSIONS[@]}"; do
-    setup_validate_digest "KUBECTL_SHA256_BY_VERSION[$version]" \
-      "${KUBECTL_SHA256_BY_VERSION[$version]:-}" || return
-  done
-  for version in "${HELM_VERSIONS[@]}"; do
-    setup_validate_digest "HELM_SHA256_BY_VERSION[$version]" \
-      "${HELM_SHA256_BY_VERSION[$version]:-}" || return
-  done
-  version=${NODEJS_VERSIONS[0]}
-  setup_validate_digest "NODEJS_SHA256_BY_VERSION[$version]" \
-      "${NODEJS_SHA256_BY_VERSION[$version]:-}" || return
-  version=${TERRAFORM_VERSIONS[0]}
-  setup_validate_digest "TERRAFORM_SHA256_BY_VERSION[$version]" \
-    "${TERRAFORM_SHA256_BY_VERSION[$version]:-}" || return
+  setup_validate_version PIP_TOOLS_VERSION "${PIP_TOOLS_VERSION:-}" || return
   [[ $PYTHON_STANDALONE_BUILD =~ ^[0-9]{8}$ ]] ||
     setup_die 'PYTHON_STANDALONE_BUILD must use YYYYMMDD' || return
-  for commit_name in ASDF_TERRAFORM_PLUGIN_COMMIT ASDF_KUBECTL_PLUGIN_COMMIT \
-    ASDF_HELM_PLUGIN_COMMIT ASDF_PYTHON_PLUGIN_COMMIT \
-    ASDF_NODEJS_PLUGIN_COMMIT ASDF_TERRAGRUNT_PLUGIN_COMMIT TPM_COMMIT \
-    TMUX_SENSIBLE_COMMIT TMUX_RESURRECT_COMMIT TMUX_CONTINUUM_COMMIT; do
-    setup_validate_commit "$commit_name" "${!commit_name:-}" || return
+  declare -p ASDF_TOOLS 2>/dev/null | grep -q '^declare -a' ||
+    setup_die 'ASDF_TOOLS must be an indexed array' || return
+  declare -p ASDF_PLUGINS 2>/dev/null | grep -q '^declare -A' ||
+    setup_die 'ASDF_PLUGINS must be an associative array' || return
+  ((${#ASDF_TOOLS[@]} == 6 && ${#ASDF_PLUGINS[@]} == 6)) ||
+    setup_die 'ASDF tool and plugin profiles must contain six tools' || return
+  local asdf_seen=' '
+  for tool in "${ASDF_TOOLS[@]}"; do
+    case $tool in terraform | kubectl | helm | python | nodejs | terragrunt) ;; *)
+      setup_die "ASDF_TOOLS contains unsupported tool $tool"; return ;; esac
+    [[ $asdf_seen != *" $tool "* ]] ||
+      setup_die "ASDF_TOOLS contains duplicate $tool" || return
+    asdf_seen+="$tool "
+    [[ -v ASDF_PLUGINS[$tool] ]] ||
+      setup_die "ASDF_PLUGINS has no entry for $tool" || return
+    record=${ASDF_PLUGINS[$tool]}
+    [[ $record != *[[:space:]]* && ${record//[^|]/} == '|' ]] ||
+      setup_die "ASDF_PLUGINS[$tool] must contain repository|commit" || return
+    IFS='|' read -r repository commit <<<"$record"
+    [[ $repository == https://*.git ]] ||
+      setup_die "ASDF_PLUGINS[$tool] has an invalid repository" || return
+    setup_validate_commit "ASDF_PLUGINS[$tool] commit" "$commit" || return
+  done
+  for plugin in "${!ASDF_PLUGINS[@]}"; do
+    [[ $asdf_seen == *" $plugin "* ]] ||
+      setup_die "ASDF_PLUGINS contains unsupported plugin $plugin" || return
+  done
+  for commit in "$TPM_COMMIT" "$TMUX_SENSIBLE_COMMIT" \
+    "$TMUX_RESURRECT_COMMIT" "$TMUX_CONTINUUM_COMMIT"; do
+    setup_validate_commit 'tmux plugin commit' "$commit" || return
   done
 }
 
@@ -136,117 +250,93 @@ setup_download() {
     --output "$destination" "$url"
 }
 
-setup_artifact_spec() {
+setup_artifact_layout() {
   local name=$1
   local version=$2
+  local asset=$3
 
+  [[ $asset =~ ^[0-9A-Za-z][0-9A-Za-z._+%-]*$ ]] ||
+    setup_die "unsafe artifact name for $name $version: $asset" || return
+  # Consumed by callers after sourcing this library.
+  # shellcheck disable=SC2034
+  SPEC_ASSET=$asset
   SPEC_DESTS=()
   SPEC_LINKS=()
   SPEC_SECOND_MEMBER=
   case $name in
+    asdf)
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=asdf
+      SPEC_DESTS=("asdf-$version")
+      SPEC_LINKS=("asdf:asdf-$version")
+      ;;
     gh)
-      SPEC_ASSET="gh_${version}_linux_amd64.tar.gz"
-      SPEC_URL="https://github.com/cli/cli/releases/download/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$GH_SHA256
       SPEC_FORMAT=gz-member
       SPEC_MEMBER="gh_${version}_linux_amd64/bin/gh"
       SPEC_DESTS=("gh-$version")
       SPEC_LINKS=("gh:gh-$version")
       ;;
     kyverno)
-      SPEC_ASSET="kyverno-cli_v${version}_linux_x86_64.tar.gz"
-      SPEC_URL="https://github.com/kyverno/kyverno/releases/download/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$KYVERNO_SHA256
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=kyverno
       SPEC_DESTS=("kyverno-$version")
       SPEC_LINKS=("kyverno:kyverno-$version")
       ;;
     task)
-      SPEC_ASSET=task_linux_amd64.tar.gz
-      SPEC_URL="https://github.com/go-task/task/releases/download/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$TASK_SHA256
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=task
       SPEC_DESTS=("task-$version")
       SPEC_LINKS=("task:task-$version")
       ;;
     trivy)
-      SPEC_ASSET="trivy_${version}_Linux-64bit.tar.gz"
-      SPEC_URL="https://github.com/aquasecurity/trivy/releases/download/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$TRIVY_SHA256
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=trivy
       SPEC_DESTS=("trivy-$version")
       SPEC_LINKS=("trivy:trivy-$version")
       ;;
     k9s)
-      SPEC_ASSET=k9s_Linux_amd64.tar.gz
-      SPEC_URL="https://github.com/derailed/k9s/releases/download/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$K9S_SHA256
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=k9s
       SPEC_DESTS=("k9s-$version")
       SPEC_LINKS=("k9s:k9s-$version")
       ;;
     kubeconform)
-      SPEC_ASSET=kubeconform-linux-amd64.tar.gz
-      SPEC_URL="https://github.com/yannh/kubeconform/releases/download/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$KUBECONFORM_SHA256
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=kubeconform
       SPEC_DESTS=("kubeconform-$version")
       SPEC_LINKS=("kubeconform:kubeconform-$version")
       ;;
     shellcheck)
-      SPEC_ASSET="shellcheck-v${version}.linux.x86_64.tar.xz"
-      SPEC_URL="https://github.com/koalaman/shellcheck/releases/download/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$SHELLCHECK_SHA256
       SPEC_FORMAT=xz-member
       SPEC_MEMBER="shellcheck-v${version}/shellcheck"
       SPEC_DESTS=("shellcheck-$version")
       SPEC_LINKS=("shellcheck:shellcheck-$version")
       ;;
     oh-my-posh)
-      SPEC_ASSET=posh-linux-amd64
-      SPEC_URL="https://github.com/JanDeDobbeleer/oh-my-posh/releases/download/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$OMP_SHA256
       SPEC_FORMAT=raw
       SPEC_MEMBER=
       SPEC_DESTS=("oh-my-posh-$version")
       SPEC_LINKS=("oh-my-posh:oh-my-posh-$version")
       ;;
     kubectx | kubens)
-      SPEC_ASSET="${name}_v${version}_linux_x86_64.tar.gz"
-      SPEC_URL="https://github.com/ahmetb/kubectx/releases/download/v${version}/$SPEC_ASSET"
-      if [[ $name == kubectx ]]; then SPEC_DIGEST=$KUBECTX_SHA256; else SPEC_DIGEST=$KUBENS_SHA256; fi
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=$name
       SPEC_DESTS=("$name-$version")
       SPEC_LINKS=("$name:$name-$version")
       ;;
     rg)
-      SPEC_ASSET="ripgrep-${version}-x86_64-unknown-linux-musl.tar.gz"
-      SPEC_URL="https://github.com/BurntSushi/ripgrep/releases/download/${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$RG_SHA256
       SPEC_FORMAT=gz-member
       SPEC_MEMBER="ripgrep-${version}-x86_64-unknown-linux-musl/rg"
       SPEC_DESTS=("rg-$version")
       SPEC_LINKS=("rg:rg-$version")
       ;;
     zoxide)
-      SPEC_ASSET="zoxide-${version}-x86_64-unknown-linux-musl.tar.gz"
-      SPEC_URL="https://github.com/ajeetdsouza/zoxide/releases/download/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$ZOXIDE_SHA256
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=zoxide
       SPEC_DESTS=("zoxide-$version")
       SPEC_LINKS=("zoxide:zoxide-$version")
       ;;
     uv)
-      SPEC_ASSET=uv-x86_64-unknown-linux-gnu.tar.gz
-      SPEC_URL="https://github.com/astral-sh/uv/releases/download/${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$UV_SHA256
       SPEC_FORMAT=gz-pair
       SPEC_MEMBER=uv-x86_64-unknown-linux-gnu/uv
       SPEC_SECOND_MEMBER=uv-x86_64-unknown-linux-gnu/uvx
@@ -254,83 +344,54 @@ setup_artifact_spec() {
       SPEC_LINKS=("uv:uv-$version" "uvx:uvx-$version")
       ;;
     nvim)
-      SPEC_ASSET=nvim-linux-x86_64.tar.gz
-      SPEC_URL="https://github.com/neovim/neovim/releases/download/${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$NVIM_SHA256
       SPEC_FORMAT=gz-tree
       SPEC_MEMBER=nvim-linux-x86_64
       SPEC_DESTS=("nvim-$version")
       SPEC_LINKS=("nvim:nvim-$version/bin/nvim")
       ;;
     kubectl)
-      SPEC_ASSET=kubectl
-      SPEC_URL="https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubectl"
-      SPEC_DIGEST=${KUBECTL_SHA256_BY_VERSION[$version]:-}
       SPEC_FORMAT=raw
       SPEC_MEMBER=
       SPEC_DESTS=("kubectl-$version")
       SPEC_LINKS=("kubectl:kubectl-$version")
       ;;
     helm)
-      SPEC_ASSET="helm-v${version}-linux-amd64.tar.gz"
-      SPEC_URL="https://get.helm.sh/$SPEC_ASSET"
-      SPEC_DIGEST=${HELM_SHA256_BY_VERSION[$version]:-}
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=linux-amd64/helm
       SPEC_DESTS=("helm-$version")
       SPEC_LINKS=("helm:helm-$version")
       ;;
     nodejs)
-      SPEC_ASSET="node-v${version}-linux-x64.tar.xz"
-      SPEC_URL="https://nodejs.org/download/release/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=${NODEJS_SHA256_BY_VERSION[$version]:-}
       SPEC_FORMAT=xz-tree
       SPEC_MEMBER="node-v${version}-linux-x64"
       SPEC_DESTS=("node-$version")
       SPEC_LINKS=()
       ;;
     npm)
-      SPEC_ASSET="npm-${version}.tgz"
-      SPEC_URL="https://registry.npmjs.org/npm/-/npm-${version}.tgz"
-      SPEC_DIGEST=$NPM_SHA256
       SPEC_FORMAT=gz-tree
       SPEC_MEMBER=package
       SPEC_DESTS=(npm-package)
       SPEC_LINKS=()
       ;;
     python)
-      SPEC_ASSET="cpython-${version}+${PYTHON_STANDALONE_BUILD}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
-      SPEC_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_STANDALONE_BUILD}/${SPEC_ASSET/+/%2B}"
-      SPEC_DIGEST=$PYTHON_STANDALONE_SHA256
       SPEC_FORMAT=gz-tree
       SPEC_MEMBER=python
       SPEC_DESTS=("python-$version")
       SPEC_LINKS=()
       ;;
     fzf)
-      SPEC_ASSET="fzf-${version}-linux_amd64.tar.gz"
-      SPEC_URL="https://github.com/junegunn/fzf/releases/download/v${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$FZF_SHA256
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=fzf
       SPEC_DESTS=("fzf-$version")
       SPEC_LINKS=()
       ;;
     terraform)
-      SPEC_ASSET="terraform_${version}_linux_amd64.zip"
-      SPEC_URL="https://releases.hashicorp.com/terraform/${version}/$SPEC_ASSET"
-      SPEC_DIGEST=${TERRAFORM_SHA256_BY_VERSION[$version]:-}
       SPEC_FORMAT=zip-member
       SPEC_MEMBER=terraform
       SPEC_DESTS=("terraform-$version")
       SPEC_LINKS=()
       ;;
     tmux)
-      SPEC_ASSET="tmux-${version}.tar.gz"
-      # Consumed by the release builder, which sources this library.
-      # shellcheck disable=SC2034
-      SPEC_URL="https://github.com/tmux/tmux/releases/download/${version}/$SPEC_ASSET"
-      SPEC_DIGEST=$TMUX_SHA256
       SPEC_FORMAT=gz-tree
       SPEC_MEMBER="tmux-$version"
       SPEC_DESTS=("tmux-$version")
@@ -441,12 +502,14 @@ setup_extract_artifact() {
 }
 
 setup_prepare_artifact() {
-  local name=$1 version=$2 archive=$3 destination=$4
+  local catalog_name=$1 name=$2 version=$3 archive=$4 destination=$5
 
-  setup_artifact_spec "$name" "$version"
-  setup_validate_digest "$name $version digest" "$SPEC_DIGEST"
+  setup_release_record "$catalog_name" "$name" "$version" || return
+  [[ $RELEASE_URL != - ]] ||
+    setup_die "$name $version has no direct artifact" || return
+  setup_artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
   [[ -f $archive && ! -L $archive ]] || setup_die "missing artifact: $archive" || return
-  setup_verify_sha256 "$archive" "$SPEC_DIGEST"
+  setup_verify_sha256 "$archive" "$RELEASE_SHA256"
   mkdir -p "$destination"
   setup_extract_artifact "$archive" "$destination"
 }
@@ -454,66 +517,81 @@ setup_prepare_artifact() {
 setup_system_package_list() {
   local platform=$1
   local role=$2
-  local -a runtime=()
-  local -a extra=()
+  local -a runtime_common=(
+    bash
+    ca-certificates
+    coreutils
+    diffutils
+    findutils
+    gawk
+    git
+    grep
+    gzip
+    ncurses-term
+    sed
+    tar
+    unzip
+    util-linux
+  )
+  local -a build_common=(
+    autoconf
+    automake
+    bison
+    curl
+    file
+    libtool
+    make
+    patch
+  )
+  local -a connected_common=(
+    autoconf
+    automake
+    bash-completion
+    bison
+    curl
+    dos2unix
+    file
+    htop
+    jq
+    libtool
+    make
+    mc
+    patch
+    python3
+    python3-pip
+    tmux
+  )
+  local -a runtime_platform=()
+  local -a role_common=()
+  local -a role_platform=()
 
   case $platform in
     debian:* | ubuntu:* | debian-*-x86_64 | ubuntu-*-x86_64)
-      runtime=(
-        bash
-        ca-certificates
-        coreutils
-        diffutils
-        findutils
-        git
-        gawk
-        grep
-        gzip
+      runtime_platform=(
         iproute2
         libevent-core-2.1-7t64
         libtinfo6
         ncurses-bin
-        ncurses-term
         passwd
-        sed
-        tar
-        unzip
-        util-linux
         xz-utils
       )
       case $role in
-        runtime) extra=() ;;
+        runtime) ;;
         build)
-          extra=(
-            autoconf
-            automake
-            bison
+          role_common=("${build_common[@]}")
+          role_platform=(
             build-essential
-            curl
-            file
             libevent-dev
             libncurses-dev
-            libtool
-            make
-            patch
             pkg-config
           )
           ;;
         connected)
-          extra=(
-            autoconf
-            automake
-            bash-completion
-            bison
+          role_common=("${connected_common[@]}")
+          role_platform=(
             build-essential
-            curl
             dirmngr
-            dos2unix
-            file
-            gawk
             gnupg
-            htop
-            jq
             libbz2-dev
             libevent-dev
             libffi-dev
@@ -522,16 +600,9 @@ setup_system_package_list() {
             libreadline-dev
             libssl-dev
             libsqlite3-dev
-            libtool
-            make
-            mc
-            patch
             pkg-config
-            python3
-            python3-pip
             python3-venv
             tk-dev
-            tmux
             uuid-dev
             vim
             zlib1g-dev
@@ -541,79 +612,42 @@ setup_system_package_list() {
       esac
       ;;
     amzn:2023 | amzn-2023-x86_64)
-      runtime=(
-        bash
-        ca-certificates
-        coreutils
-        diffutils
-        findutils
-        git
-        gawk
-        grep
-        gzip
+      runtime_platform=(
         iproute
         libevent
         ncurses-libs
-        ncurses-term
         shadow-utils
-        sed
-        tar
-        unzip
-        util-linux
         which
         xz
       )
       case $role in
-        runtime) extra=() ;;
+        runtime) ;;
         build)
-          extra=(
-            autoconf
-            automake
-            bison
+          role_common=("${build_common[@]}")
+          role_platform=(
             cargo
             clang-devel
-            curl
-            file
             gcc
             gcc-c++
             libevent-devel
-            libtool
-            make
             ncurses-devel
-            patch
             pkgconf
           )
           ;;
         connected)
-          extra=(
-            autoconf
-            automake
-            bash-completion
-            bison
+          role_common=("${connected_common[@]}")
+          role_platform=(
             bzip2-devel
-            curl
-            dos2unix
-            file
-            gawk
             gcc
             gcc-c++
-            htop
-            jq
             libevent-devel
             libffi-devel
-            libtool
-            make
-            mc
             ncurses-devel
             openssl-devel
-            patch
             pkgconf
-            python3
-            python3-pip
             readline-devel
             sqlite-devel
             tk-devel
-            tmux
             vim-enhanced
             vim-minimal
             xz-devel
@@ -627,5 +661,39 @@ setup_system_package_list() {
   esac
   # Consumed by setup-system or dotfiles-release after sourcing this library.
   # shellcheck disable=SC2034
-  SETUP_SYSTEM_PACKAGES=("${runtime[@]}" "${extra[@]}")
+  SETUP_SYSTEM_PACKAGES=(
+    "${runtime_common[@]}"
+    "${runtime_platform[@]}"
+    "${role_common[@]}"
+    "${role_platform[@]}"
+  )
+}
+
+setup_install_system_packages() {
+  local platform=$1 role=$2 no_recommends=$3
+  shift 3
+  local -a root_command=("$@")
+  local -a install_args=(install -y)
+
+  setup_system_package_list "$platform" "$role" || return
+  case $platform in
+    debian:* | ubuntu:* | debian-*-x86_64 | ubuntu-*-x86_64)
+      [[ $no_recommends != true ]] || install_args+=(--no-install-recommends)
+      "${root_command[@]}" env DEBIAN_FRONTEND=noninteractive apt-get update || return
+      "${root_command[@]}" env DEBIAN_FRONTEND=noninteractive apt-get \
+        "${install_args[@]}" "${SETUP_SYSTEM_PACKAGES[@]}"
+      ;;
+    amzn:2023 | amzn-2023-x86_64)
+      if [[ $role == connected ]]; then
+        if rpm -q gnupg2-minimal >/dev/null 2>&1; then
+          "${root_command[@]}" dnf swap -y gnupg2-minimal gnupg2 || return
+        else
+          "${root_command[@]}" dnf install -y gnupg2 || return
+        fi
+      fi
+      "${root_command[@]}" dnf install -y --allowerasing \
+        "${SETUP_SYSTEM_PACKAGES[@]}"
+      ;;
+    *) setup_die "unsupported system package platform: $platform" ;;
+  esac
 }

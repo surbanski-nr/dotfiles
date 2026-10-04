@@ -288,7 +288,7 @@ validate_configs() {
     sleep 0.02
   done
   [[ -n $client ]] || die 'tmux validation client did not attach'
-  HOME="$temporary_home" tmux -L "$socket" send-keys -K -c "$client" C-a R
+  printf '\001R' >&"$client_input_fd"
   reloaded_value=
   for _ in {1..50}; do
     reloaded_value=$(HOME="$temporary_home" tmux -L "$socket" \
@@ -342,10 +342,22 @@ validate_repo() {
   check_shell_syntax bash dotfiles-release.env validation.env versions.env
   # shellcheck source=../versions.env
   source versions.env
+  # shellcheck source=../validation.env
+  source validation.env
   # shellcheck source=setup-lib
   source scripts/setup-lib
   SETUP_PROGRAM=validate
   setup_validate_versions
+  setup_validate_validation_versions
+  for file in nvim2/.config/nvim2/python-locks/{ansible-lint,yamllint}.{in,lock}; do
+    [[ -f $file && ! -L $file ]] || die "Nvim2 Python lock source is missing: $file"
+  done
+  [[ ! -e offline ]] || die 'legacy offline source directory still exists'
+  if rg -uu --quiet \
+    '^(ASDF|GH|K9S|TRIVY|KYVERNO|KUBECONFORM|SHELLCHECK|RG|ZOXIDE|UV|OMP|NVIM|NPM|TMUX|FZF|KREW|ACTIONLINT|STYLUA|ZIZMOR|TASK)_(VERSION|SHA256)=' \
+    versions.env validation.env; then
+    die 'legacy editable release scalars remain in the catalogs'
+  fi
   # shellcheck source=../dotfiles-release.env
   source dotfiles-release.env
   for variable in DEBIAN_13_IMAGE UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE \

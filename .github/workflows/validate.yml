@@ -26,25 +26,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Read Task pin
-        id: task-pin
-        shell: bash
-        run: |
-          set -euo pipefail
-          source ./validation.env
-          [[ $TASK_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ $TASK_SHA256 =~ ^[0-9a-f]{64}$ ]]
-          printf 'version=%s\nchecksum=%s\n' \
-            "$TASK_VERSION" "$TASK_SHA256" >>"$GITHUB_OUTPUT"
-
       - name: Install Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e  # v2.2.0
-        with:
-          checksum: ${{ steps.task-pin.outputs.checksum }}
-          version: ${{ steps.task-pin.outputs.version }}
+        run: bash scripts/install-validation-tool task
 
       - name: Validate
         env:
           GH_TOKEN: ${{ github.token }}
           VALIDATE_BASE_SHA: ${{ github.event.before }}
-        run: task --output=group validate
+        run: .cache/validation-tools/bin/task --output=group validate

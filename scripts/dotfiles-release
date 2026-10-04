@@ -23,6 +23,57 @@ SNAPSHOT_TYPE=
 SNAPSHOT_MODE=
 SNAPSHOT_IDENTITY=
 RECOVERED_PENDING=false
+declare -A BUILD_VERSIONS=()
+RELEASE_PROBE_COMMANDS=(
+  nvim tmux node npm rg zoxide k9s kubectx kubens oh-my-posh task fzf terraform
+)
+RELEASE_VERSION_COMMANDS=(
+  nvim node npm tmux rg fzf zoxide k9s kubectx oh-my-posh task terraform
+)
+declare -A RELEASE_VERSION_FIELDS=(
+  [nvim]=NVIM_VERSION
+  [node]=NODE_VERSION
+  [npm]=NPM_VERSION
+  [tmux]=TMUX_VERSION
+  [rg]=RG_VERSION
+  [fzf]=FZF_VERSION
+  [zoxide]=ZOXIDE_VERSION
+  [k9s]=K9S_VERSION
+  [kubectx]=KUBECTX_VERSION
+  [kubens]=KUBECTX_VERSION
+  [oh-my-posh]=OMP_VERSION
+  [task]=TASK_VERSION
+  [terraform]=TERRAFORM_VERSION
+)
+declare -A RELEASE_VERSION_TOOLS=(
+  [nvim]=nvim
+  [node]=nodejs
+  [npm]=npm
+  [tmux]=tmux
+  [rg]=rg
+  [fzf]=fzf
+  [zoxide]=zoxide
+  [k9s]=k9s
+  [kubectx]=kubectx
+  [oh-my-posh]=oh-my-posh
+  [task]=task
+  [terraform]=terraform
+)
+declare -A RELEASE_PROBE_ARGS=(
+  [nvim]=--version
+  [tmux]=-V
+  [node]=--version
+  [npm]=--version
+  [rg]=--version
+  [zoxide]=--version
+  [k9s]=$'version\n--short'
+  [kubectx]=--version
+  [kubens]=--version
+  [oh-my-posh]=version
+  [task]=--version
+  [fzf]=--version
+  [terraform]=version
+)
 
 die() {
   printf '%s: %s\n' "$PROGRAM" "$*" >&2
@@ -137,8 +188,17 @@ load_build_config() {
   setup_validate_versions || return
   # shellcheck source=../validation.env
   source "$source_dir/validation.env" || return
-  setup_validate_version TASK_VERSION "$TASK_VERSION" || return
-  setup_validate_digest TASK_SHA256 "$TASK_SHA256" || return
+  setup_validate_validation_versions || return
+  local tool catalog
+  for tool in nvim nodejs npm python tmux rg fzf zoxide k9s kubectx \
+    oh-my-posh task terraform; do
+    catalog=TOOL_RELEASES
+    [[ $tool != task ]] || catalog=VALIDATION_RELEASES
+    setup_release_first "$catalog" "$tool" || return
+    [[ $RELEASE_URL != - ]] ||
+      { die "offline default $tool $RELEASE_VERSION has no artifact"; return 1; }
+    BUILD_VERSIONS[$tool]=$RELEASE_VERSION
+  done
   # shellcheck source=../dotfiles-release.env
   source "$source_dir/dotfiles-release.env" || return
 }
@@ -154,11 +214,10 @@ metadata_value() {
   printf '%s\n' "$value"
 }
 
-validate_release_metadata() {
-  local file=$1 line key value required
-  local -A seen=()
+read_release_metadata() {
+  local file=$1 map_name=$2 line key value required
+  local -n parsed=$map_name
   local -a required_keys=(
-    FORMAT_VERSION
     RELEASE_ID
     PLATFORM_ID
     SOURCE_COMMIT
@@ -184,6 +243,7 @@ validate_release_metadata() {
   )
 
   [[ -f $file && ! -L $file ]] || { die "invalid release metadata file: $file"; return 1; }
+  parsed=()
   while IFS= read -r line || [[ -n $line ]]; do
     [[ $line =~ ^([A-Z0-9_]+)=([[:print:]]+)$ ]] || {
       die "invalid release metadata line in $file"
@@ -200,43 +260,47 @@ validate_release_metadata() {
         OFFLINE_TOOLS | PAYLOAD_PATHS) ;;
       *) die "unknown release metadata key: $key"; return 1 ;;
     esac
-    [[ -z ${seen[$key]:-} ]] || { die "duplicate release metadata key: $key"; return 1; }
+    [[ ! -v parsed[$key] ]] || { die "duplicate release metadata key: $key"; return 1; }
     ((${#value} <= 512)) || { die "release metadata value is too long: $key"; return 1; }
-    seen[$key]=1
+    parsed["$key"]=$value
   done <"$file"
   for required in "${required_keys[@]}"; do
-    [[ -n ${seen[$required]:-} ]] || { die "missing release metadata key: $required"; return 1; }
+    [[ -v parsed[$required] ]] || { die "missing release metadata key: $required"; return 1; }
   done
 
-  [[ $(metadata_value "$file" FORMAT_VERSION) == 1 ]] || { die 'unsupported release metadata format'; return 1; }
-  validate_platform_name "$(metadata_value "$file" PLATFORM_ID)" || return
-  [[ $(metadata_value "$file" RELEASE_ID) =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
+  [[ ! -v parsed[FORMAT_VERSION] || ${parsed[FORMAT_VERSION]} == 1 ]] || {
+    die 'invalid legacy release metadata marker'
+    return 1
+  }
+  validate_platform_name "${parsed[PLATFORM_ID]}" || return
+  [[ ${parsed[RELEASE_ID]} =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
     { die 'invalid release metadata ID'; return 1; }
-  [[ $(metadata_value "$file" SOURCE_COMMIT) =~ ^[0-9a-f]{40}$ ]] ||
+  [[ ${parsed[SOURCE_COMMIT]} =~ ^[0-9a-f]{40}$ ]] ||
     { die 'invalid release source commit'; return 1; }
-  [[ $(metadata_value "$file" SOURCE_TREE) =~ ^[0-9a-f]{40}$ ]] ||
+  [[ ${parsed[SOURCE_TREE]} =~ ^[0-9a-f]{40}$ ]] ||
     { die 'invalid release source tree'; return 1; }
-  [[ $(metadata_value "$file" BUILDER_IMAGE) =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]] ||
+  [[ ${parsed[BUILDER_IMAGE]} =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]] ||
     { die 'invalid builder image identity'; return 1; }
   for key in NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION \
     PYTHON_VERSION TMUX_VERSION RG_VERSION \
     FZF_VERSION ZOXIDE_VERSION K9S_VERSION KUBECTX_VERSION OMP_VERSION TASK_VERSION \
     TERRAFORM_VERSION; do
-    [[ $(metadata_value "$file" "$key") =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] ||
+    [[ ${parsed[$key]} =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] ||
       { die "invalid release tool version: $key"; return 1; }
   done
-  [[ $(metadata_value "$file" PYTHON_BUILD) =~ ^[0-9]{8}$ ]] ||
+  [[ ${parsed[PYTHON_BUILD]} =~ ^[0-9]{8}$ ]] ||
     { die 'invalid standalone Python build'; return 1; }
-  [[ $(metadata_value "$file" OFFLINE_TOOLS) == \
+  [[ ${parsed[OFFLINE_TOOLS]} == \
     nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform ]] ||
     { die 'release metadata has an invalid offline tool profile'; return 1; }
-  [[ $(metadata_value "$file" PAYLOAD_PATHS) == \
+  [[ ${parsed[PAYLOAD_PATHS]} == \
     bin,config,dotfiles,python-locks,python-wheelhouse,share,tools ]] ||
     { die 'release metadata has an invalid payload layout'; return 1; }
 }
 
 install_build_packages() {
   local platform=$1 role=$2
+  local -a root_command=()
 
   if ! declare -F setup_system_package_list >/dev/null; then
     local script_dir setup_library
@@ -254,30 +318,22 @@ install_build_packages() {
   fi
   declare -F setup_system_package_list >/dev/null ||
     { die 'cannot load shared system package definitions'; return 1; }
-  setup_system_package_list "$platform" "$role" || return
-
-  case $platform in
-    debian-* | ubuntu-*)
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get update || return
-      apt-get install -y --no-install-recommends "${SETUP_SYSTEM_PACKAGES[@]}" || return
-      ;;
-    amzn-2023-x86_64)
-      dnf install -y --allowerasing "${SETUP_SYSTEM_PACKAGES[@]}" || return
-      ;;
-  esac
+  setup_install_system_packages "$platform" "$role" true "${root_command[@]}"
 }
 
 prepare_release_artifact() {
-  local name=$1 version=$2 inputs=$3
+  local catalog=$1 name=$2 version=$3 inputs=$4
   local archive stage
 
-  setup_artifact_spec "$name" "$version" || return
-  archive=$inputs/$SPEC_ASSET
-  setup_download "$SPEC_URL" "$archive" || return
+  setup_release_record "$catalog" "$name" "$version" || return
+  [[ $RELEASE_URL != - ]] ||
+    { die "$name $version has no direct artifact"; return 1; }
+  setup_artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
+  archive=$inputs/$RELEASE_ASSET
+  setup_download "$RELEASE_URL" "$archive" || return
   stage=$(mktemp -d) || return
   TEMP_PATHS+=("$stage")
-  setup_prepare_artifact "$name" "$version" "$archive" "$stage" || return
+  setup_prepare_artifact "$catalog" "$name" "$version" "$archive" "$stage" || return
   PREPARED_ARTIFACT=$stage/${SPEC_DESTS[0]}
 }
 
@@ -293,6 +349,7 @@ write_launchers() {
     'release=${self%/bin/nvim}' \
     'export NVIM_APPNAME=${NVIM_APPNAME:-nvim2}' \
     'if [[ $NVIM_APPNAME == nvim2 ]]; then' \
+    '  if [[ -f $release/installed.sha256 ]]; then export DOTFILES_OFFLINE_RELEASE_ROOT="$release"; fi' \
     '  if [[ ! -v DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET ]]; then if [[ -v XDG_CONFIG_HOME ]]; then export DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET=1 DOTFILES_LAUNCHER_XDG_CONFIG_HOME=$XDG_CONFIG_HOME; else export DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET=0; fi; fi' \
     '  if [[ ! -v DOTFILES_LAUNCHER_XDG_DATA_HOME_SET ]]; then if [[ -v XDG_DATA_HOME ]]; then export DOTFILES_LAUNCHER_XDG_DATA_HOME_SET=1 DOTFILES_LAUNCHER_XDG_DATA_HOME=$XDG_DATA_HOME; else export DOTFILES_LAUNCHER_XDG_DATA_HOME_SET=0; fi; fi' \
     '  if [[ ! -v DOTFILES_LAUNCHER_ZO_DATA_DIR_SET ]]; then if [[ -v _ZO_DATA_DIR ]]; then export DOTFILES_LAUNCHER_ZO_DATA_DIR_SET=1 DOTFILES_LAUNCHER_ZO_DATA_DIR=$_ZO_DATA_DIR; else export DOTFILES_LAUNCHER_ZO_DATA_DIR_SET=0; export _ZO_DATA_DIR=${XDG_DATA_HOME:-$HOME/.local/share}/zoxide; fi; fi' \
@@ -322,50 +379,49 @@ write_launchers() {
 
 install_release_tools() {
   local release=$1 inputs=$2
-  local node_version=${NODEJS_VERSIONS[0]}
-  local python_version=${PYTHON_VERSIONS[0]}
-  local terraform_version=${TERRAFORM_VERSIONS[0]}
-  local command_name version npm_archive
+  local node_version=${BUILD_VERSIONS[nodejs]}
+  local python_version=${BUILD_VERSIONS[python]}
+  local terraform_version=${BUILD_VERSIONS[terraform]}
+  local command_name catalog version npm_archive
 
   mkdir -p "$release/bin" "$release/tools/bin" "$inputs" || return
 
-  prepare_release_artifact nvim "$NVIM_VERSION" "$inputs" || return
+  prepare_release_artifact TOOL_RELEASES nvim "${BUILD_VERSIONS[nvim]}" "$inputs" || return
   mv -- "$PREPARED_ARTIFACT" "$release/tools/nvim" || return
 
-  prepare_release_artifact nodejs "$node_version" "$inputs" || return
+  prepare_release_artifact TOOL_RELEASES nodejs "$node_version" "$inputs" || return
   mv -- "$PREPARED_ARTIFACT" "$release/tools/node" || return
   NODE_UPSTREAM_NPM_VERSION=$(PATH="$release/tools/node/bin:$PATH" \
     "$release/tools/node/bin/npm" --version) || return
-  setup_artifact_spec npm "$NPM_VERSION" || return
-  npm_archive=$inputs/$SPEC_ASSET
-  setup_download "$SPEC_URL" "$npm_archive" || return
-  setup_verify_sha256 "$npm_archive" "$SPEC_DIGEST" || return
+  setup_release_record TOOL_RELEASES npm "${BUILD_VERSIONS[npm]}" || return
+  npm_archive=$inputs/$RELEASE_ASSET
+  setup_download "$RELEASE_URL" "$npm_archive" || return
+  setup_verify_sha256 "$npm_archive" "$RELEASE_SHA256" || return
   PATH="$release/tools/node/bin:$PATH" NPM_CONFIG_AUDIT=false \
     npm install --global "$npm_archive" >/dev/null || return
 
-  prepare_release_artifact python "$python_version" "$inputs" || return
+  prepare_release_artifact TOOL_RELEASES python "$python_version" "$inputs" || return
   mv -- "$PREPARED_ARTIFACT" "$release/tools/python-$python_version" || return
   ln -s "../tools/python-$python_version/bin/python3" "$release/bin/python" || return
   ln -s "../tools/python-$python_version/bin/python3" "$release/bin/python3" || return
 
   for command_name in rg zoxide k9s kubectx kubens oh-my-posh task fzf; do
-    case $command_name in
-      rg) version=$RG_VERSION ;;
-      zoxide) version=$ZOXIDE_VERSION ;;
-      k9s) version=$K9S_VERSION ;;
-      kubectx | kubens) version=$KUBECTX_VERSION ;;
-      oh-my-posh) version=$OMP_VERSION ;;
-      task) version=$TASK_VERSION ;;
-      fzf) version=$FZF_VERSION ;;
-    esac
-    prepare_release_artifact "$command_name" "$version" "$inputs" || return
+    catalog=TOOL_RELEASES
+    [[ $command_name != task ]] || catalog=VALIDATION_RELEASES
+    if [[ $command_name == kubens ]]; then
+      setup_release_first TOOL_RELEASES kubens || return
+      version=$RELEASE_VERSION
+    else
+      version=${BUILD_VERSIONS[$command_name]}
+    fi
+    prepare_release_artifact "$catalog" "$command_name" "$version" "$inputs" || return
     install -m 0755 "$PREPARED_ARTIFACT" "$release/tools/bin/$command_name" || return
   done
 
-  prepare_release_artifact terraform "$terraform_version" "$inputs" || return
+  prepare_release_artifact TOOL_RELEASES terraform "$terraform_version" "$inputs" || return
   install -m 0755 "$PREPARED_ARTIFACT" "$release/tools/bin/terraform" || return
 
-  prepare_release_artifact tmux "$TMUX_VERSION" "$inputs" || return
+  prepare_release_artifact TOOL_RELEASES tmux "${BUILD_VERSIONS[tmux]}" "$inputs" || return
   (
     cd "$PREPARED_ARTIFACT" || exit
     ./configure --prefix="$release/tools/tmux" >/dev/null || exit
@@ -467,14 +523,14 @@ python_inventory_packages() {
 
 prepare_nvim_payload() {
   local release=$1 build_home=$2 platform=$3
-  local python="$release/tools/python-${PYTHON_VERSIONS[0]}/bin/python3"
+  local python="$release/tools/python-${BUILD_VERSIONS[python]}/bin/python3"
   local data=$release/share/nvim2
   local package receipt link target relative lua_launcher command_name package_output link_list
   local tree_sitter_version tree_sitter_root tree_sitter_binary
 
   mkdir -p "$build_home/.cache" "$release/share" || return
   export HOME=$build_home
-  export PATH="$release/bin:$release/tools/python-${PYTHON_VERSIONS[0]}/bin:$release/tools/node/bin:$release/tools/bin:/usr/local/bin:/usr/bin:/bin"
+  export PATH="$release/bin:$release/tools/python-${BUILD_VERSIONS[python]}/bin:$release/tools/node/bin:$release/tools/bin:/usr/local/bin:/usr/bin:/bin"
   export NVIM_APPNAME=nvim2
   export XDG_CACHE_HOME=$build_home/.cache
   if [[ $platform == amzn-2023-x86_64 ]]; then
@@ -571,34 +627,37 @@ verify_release_symlinks() {
 
 write_package_metadata() {
   local release=$1 platform=$2 source_commit=$3 source_tree=$4 image=$5 inputs=$6
-  local release_id=${release##*/}
+  local release_id=${release##*/} command_name field tool
   local manifest package origin plugin_commit value
 
   printf '%s\n' \
-    'FORMAT_VERSION=1' \
     "RELEASE_ID=$release_id" \
     "PLATFORM_ID=$platform" \
     "SOURCE_COMMIT=$source_commit" \
     "SOURCE_TREE=$source_tree" \
     "BUILDER_IMAGE=$image" \
-    "NVIM_VERSION=$NVIM_VERSION" \
-    "NODE_VERSION=${NODEJS_VERSIONS[0]}" \
-    "NPM_VERSION=$NPM_VERSION" \
+    >"$release/release.env" || return
+  for command_name in "${RELEASE_VERSION_COMMANDS[@]:0:3}"; do
+    field=${RELEASE_VERSION_FIELDS[$command_name]}
+    tool=${RELEASE_VERSION_TOOLS[$command_name]}
+    printf '%s=%s\n' "$field" "${BUILD_VERSIONS[$tool]}" \
+      >>"$release/release.env" || return
+  done
+  printf '%s\n' \
     "NODE_UPSTREAM_NPM_VERSION=$NODE_UPSTREAM_NPM_VERSION" \
-    "PYTHON_VERSION=${PYTHON_VERSIONS[0]}" \
+    "PYTHON_VERSION=${BUILD_VERSIONS[python]}" \
     "PYTHON_BUILD=$PYTHON_STANDALONE_BUILD" \
-    "TMUX_VERSION=$TMUX_VERSION" \
-    "RG_VERSION=$RG_VERSION" \
-    "FZF_VERSION=$FZF_VERSION" \
-    "ZOXIDE_VERSION=$ZOXIDE_VERSION" \
-    "K9S_VERSION=$K9S_VERSION" \
-    "KUBECTX_VERSION=$KUBECTX_VERSION" \
-    "OMP_VERSION=$OMP_VERSION" \
-    "TASK_VERSION=$TASK_VERSION" \
-    "TERRAFORM_VERSION=${TERRAFORM_VERSIONS[0]}" \
+    >>"$release/release.env" || return
+  for command_name in "${RELEASE_VERSION_COMMANDS[@]:3}"; do
+    field=${RELEASE_VERSION_FIELDS[$command_name]}
+    tool=${RELEASE_VERSION_TOOLS[$command_name]}
+    printf '%s=%s\n' "$field" "${BUILD_VERSIONS[$tool]}" \
+      >>"$release/release.env" || return
+  done
+  printf '%s\n' \
     "OFFLINE_TOOLS=$(IFS=,; printf '%s' "${OFFLINE_TOOLS[*]}")" \
     'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
-    >"$release/release.env" || return
+    >>"$release/release.env" || return
 
   {
     printf 'source_commit=%s\nsource_tree=%s\nplatform=%s\nbuilder_image=%s\n' \
@@ -612,7 +671,7 @@ write_package_metadata() {
     value=$("$release/bin/npm" --version) || return
     printf 'npm_runtime=%s\n' "$value" || return
     printf 'npm_upstream=%s\n' "$NODE_UPSTREAM_NPM_VERSION"
-    "$release/tools/python-${PYTHON_VERSIONS[0]}/bin/python3" --version || return
+    "$release/tools/python-${BUILD_VERSIONS[python]}/bin/python3" --version || return
     "$release/bin/tmux" -V || return
     printf 'tmux_configure=--prefix=tools/tmux\n'
     ldd "$release/tools/tmux/bin/tmux" || return
@@ -676,7 +735,8 @@ build_release() {
     tar -x -C "$release/dotfiles" || return
   cp -a "$release/dotfiles/nvim2/.config/nvim2" "$release/config/nvim2" || return
   mkdir -p "$release/python-locks" || return
-  cp "$release/dotfiles"/offline/*.in "$release/dotfiles"/offline/*.lock \
+  cp "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.in \
+    "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.lock \
     "$release/python-locks/" || return
   cp "$source_dir/scripts/dotfiles-release" "$release/dotfiles-release" || return
   chmod 0755 "$release/dotfiles-release" || return
@@ -756,21 +816,22 @@ validate_archive_members() {
 
 validate_release_directory() {
   local release=$1 expected_platform=${2:-} release_id commit tree
+  local -A release_metadata=()
 
   [[ -d $release && ! -L $release ]] || { die "invalid release directory: $release"; return 1; }
   [[ -f $release/release.env && -f $release/SHA256SUMS ]] ||
     { die 'release metadata is incomplete'; return 1; }
-  validate_release_metadata "$release/release.env" || return
-  release_id=$(metadata_value "$release/release.env" RELEASE_ID) || return
-  commit=$(metadata_value "$release/release.env" SOURCE_COMMIT) || return
-  tree=$(metadata_value "$release/release.env" SOURCE_TREE) || return
+  read_release_metadata "$release/release.env" release_metadata || return
+  release_id=${release_metadata[RELEASE_ID]}
+  commit=${release_metadata[SOURCE_COMMIT]}
+  tree=${release_metadata[SOURCE_TREE]}
   [[ $release_id == "${release##*/}" && $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
     { die 'release ID does not match its directory'; return 1; }
   [[ $commit =~ ^[0-9a-f]{40}$ && $release_id == "dotfiles-${commit:0:12}" ]] ||
     { die 'release ID does not match source commit'; return 1; }
   [[ $tree =~ ^[0-9a-f]{40}$ ]] || { die 'source tree is not a full Git object ID'; return 1; }
   if [[ -n $expected_platform ]]; then
-    [[ $(metadata_value "$release/release.env" PLATFORM_ID) == "$expected_platform" ]] ||
+    [[ ${release_metadata[PLATFORM_ID]} == "$expected_platform" ]] ||
       { die "release is not for $expected_platform"; return 1; }
   fi
   if [[ ! -f $release/installed.sha256 ]]; then
@@ -1320,8 +1381,10 @@ manage_stable_link() {
 release_commands() {
   local release_id=$1 tool serialized
   local -a tools=()
+  local -A release_metadata=()
 
-  serialized=$(metadata_value "$RELEASE_ROOT/$release_id/release.env" OFFLINE_TOOLS) || return
+  read_release_metadata "$RELEASE_ROOT/$release_id/release.env" release_metadata || return
+  serialized=${release_metadata[OFFLINE_TOOLS]}
   IFS=, read -r -a tools <<<"$serialized"
   printf '%s\n' dotfiles-release
   for tool in "${tools[@]}"; do
@@ -1399,8 +1462,10 @@ validate_projection() {
 
 create_python_tools() {
   local release=$1 python_version python venv mason_bin package command_name package_output
+  local -A release_metadata=()
 
-  python_version=$(metadata_value "$release/release.env" PYTHON_VERSION) || return
+  read_release_metadata "$release/release.env" release_metadata || return
+  python_version=${release_metadata[PYTHON_VERSION]}
   python=$release/tools/python-$python_version/bin/python3
   [[ -x $python ]] || { die "bundled Python is missing: $python"; return 1; }
   package_output=$(python_inventory_packages "$release") || return
@@ -1629,6 +1694,7 @@ activate_release() {
 install_archive() {
   local archive=$1 top import release release_id platform old_current old_previous artifact_digest
   local install_status=0 recovery_status=0
+  local -A release_metadata=()
 
   for command_name in awk find flock id mv readlink sed sha256sum sync tar; do
     need "$command_name"
@@ -1644,7 +1710,8 @@ install_archive() {
   TEMP_PATHS+=("$import")
   tar -xzf "$archive" -C "$import" --no-same-owner --no-same-permissions || return
   release=$import/$top
-  platform=$(metadata_value "$release/release.env" PLATFORM_ID) || return
+  read_release_metadata "$release/release.env" release_metadata || return
+  platform=${release_metadata[PLATFORM_ID]}
   validate_platform "$platform" || return
   validate_release_directory "$release" "$platform" || return
   artifact_digest=$(sha256sum "$archive" | cut -d ' ' -f1) || return
@@ -1708,9 +1775,8 @@ install_archive() {
 }
 
 health_python() {
-  local release=$1 python_version python package venv package_output
+  local release=$1 python_version=$2 python package venv package_output
 
-  python_version=$(metadata_value "$release/release.env" PYTHON_VERSION) || return
   python=$release/tools/python-$python_version/bin/python3
   env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
     "$python" -I - "$release" "$python_version" <<'PY' || return
@@ -1764,7 +1830,7 @@ PY
   PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
     "$release/share/nvim2/mason/bin/ansible-config" --version || return
   PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
-    "$release/share/nvim2/mason/bin/ansible-lint" --version || return
+    "$release/share/nvim2/mason/bin/ansible-lint" --offline --version || return
   PATH="$release/share/nvim2/mason/packages/yamllint/venv/bin:$release/bin:/usr/bin:/bin" \
     "$release/share/nvim2/mason/bin/yamllint" --version || return
 }
@@ -1889,7 +1955,7 @@ health_tmux() {
     exec {client_input_fd}<>"$client_input"
     env -u TMUX HOME="$health_home" TMUX_TMPDIR="$health_home/tmux-tmp" \
       TERM=xterm-256color timeout 10s script -qefc \
-      "$(printf '%q ' "$tmux" -L "$socket" attach-session -t health)" /dev/null \
+      "$(printf '%q ' "$tmux" -CC -L "$socket" attach-session -t health)" /dev/null \
       <"$client_input" >/dev/null 2>"$client_stderr" &
     client_pid=$!
     client=
@@ -1976,23 +2042,10 @@ health_version() {
 }
 
 health_release() {
-  local release_id=$1 mode=${2:-full} release python_version command_name path check_script health_home
-  local PATH output expected
-  local -a commands=(
-    nvim
-    tmux
-    node
-    npm
-    rg
-    zoxide
-    k9s
-    kubectx
-    kubens
-    oh-my-posh
-    task
-    fzf
-    terraform
-  )
+  local release_id=$1 mode=${2:-full} release command_name path check_script health_home
+  local PATH output expected field
+  local -a probe_args=()
+  local -A release_metadata=()
 
   [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
     { die "invalid release ID: $release_id"; return 1; }
@@ -2000,7 +2053,8 @@ health_release() {
   PATH="$release/bin:$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/share/nvim2/mason/bin:/usr/bin:/bin"
   export PATH
   validate_release_directory "$release" || return
-  output=$(metadata_value "$release/release.env" PLATFORM_ID) || return
+  read_release_metadata "$release/release.env" release_metadata || return
+  output=${release_metadata[PLATFORM_ID]}
   validate_platform "$output" || return
   if [[ -f $release/installed.sha256 ]]; then
     verify_installed_manifest "$release" || return
@@ -2008,50 +2062,19 @@ health_release() {
     [[ $mode == candidate && -f $release/.incomplete ]] ||
       { die "installed manifest is missing in $release"; return 1; }
   fi
-  health_python "$release" || return
-  for command_name in "${commands[@]}"; do
+  health_python "$release" "${release_metadata[PYTHON_VERSION]}" || return
+  for command_name in "${RELEASE_PROBE_COMMANDS[@]}"; do
     path=$release/bin/$command_name
     [[ -x $path ]] || { die "release executable is missing: $path"; return 1; }
   done
 
-  expected=$(metadata_value "$release/release.env" NVIM_VERSION) || return
-  output=$("$release/bin/nvim" --version | sed -n '1p') || return
-  health_version nvim "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" TMUX_VERSION) || return
-  output=$("$release/bin/tmux" -V) || return
-  health_version tmux "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" NODE_VERSION) || return
-  output=$("$release/bin/node" --version) || return
-  health_version node "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" NPM_VERSION) || return
-  output=$("$release/bin/npm" --version) || return
-  health_version npm "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" RG_VERSION) || return
-  output=$("$release/bin/rg" --version | sed -n '1p') || return
-  health_version rg "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" ZOXIDE_VERSION) || return
-  output=$("$release/bin/zoxide" --version) || return
-  health_version zoxide "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" K9S_VERSION) || return
-  output=$("$release/bin/k9s" version --short) || return
-  health_version k9s "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" KUBECTX_VERSION) || return
-  output=$("$release/bin/kubectx" --version) || return
-  health_version kubectx "$expected" "$output" || return
-  output=$("$release/bin/kubens" --version) || return
-  health_version kubens "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" OMP_VERSION) || return
-  output=$("$release/bin/oh-my-posh" version) || return
-  health_version oh-my-posh "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" TASK_VERSION) || return
-  output=$("$release/bin/task" --version) || return
-  health_version task "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" FZF_VERSION) || return
-  output=$("$release/bin/fzf" --version) || return
-  health_version fzf "$expected" "$output" || return
-  expected=$(metadata_value "$release/release.env" TERRAFORM_VERSION) || return
-  output=$("$release/bin/terraform" version | sed -n '1p') || return
-  health_version terraform "$expected" "$output" || return
+  for command_name in "${RELEASE_PROBE_COMMANDS[@]}"; do
+    field=${RELEASE_VERSION_FIELDS[$command_name]}
+    expected=${release_metadata[$field]}
+    mapfile -t probe_args <<<"${RELEASE_PROBE_ARGS[$command_name]}"
+    output=$("$release/bin/$command_name" "${probe_args[@]}") || return
+    health_version "$command_name" "$expected" "$output" || return
+  done
   for command_name in tmux-sensible tmux-resurrect tmux-continuum; do
     [[ -d $release/share/tmux/plugins/$command_name/.git ]] ||
       { die "tmux plugin metadata is missing: $command_name"; return 1; }
@@ -2065,10 +2088,13 @@ health_release() {
   health_tmux "$release" "$health_home" || return
   health_bash "$release" "$health_home" || return
   check_script=$release/config/nvim2/tests/check.sh
-  HOME="$health_home" XDG_CACHE_HOME="$health_home/.cache" \
-    XDG_STATE_HOME="$health_home/.local/state" GIT_OPTIONAL_LOCKS=0 \
-    PYTHONDONTWRITEBYTECODE=1 NVIM_APPNAME=nvim2 NVIM2_CHECK_TOOLS=1 \
-    NVIM2_BENCHMARK_RUNS=3 timeout 1200s bash "$check_script" || return
+  (
+    if [[ -n ${LOCK_FD:-} ]]; then exec {LOCK_FD}>&-; fi
+    HOME="$health_home" XDG_CACHE_HOME="$health_home/.cache" \
+      XDG_STATE_HOME="$health_home/.local/state" GIT_OPTIONAL_LOCKS=0 \
+      PYTHONDONTWRITEBYTECODE=1 NVIM_APPNAME=nvim2 NVIM2_CHECK_TOOLS=1 \
+      NVIM2_BENCHMARK_RUNS=3 timeout 1200s bash "$check_script"
+  ) || return
 }
 
 health_current() {
@@ -2090,6 +2116,7 @@ health_current() {
 list_releases() {
   local current previous path id marker completeness metadata paths
   local platform commit nvim_version node_version python_version
+  local -A release_metadata=()
   acquire_lock exclusive || return
   recover_pending || return
   current=$(selected_id current) || return
@@ -2103,7 +2130,7 @@ list_releases() {
     id=${path##*/}
     [[ $id =~ ^dotfiles-[0-9a-f]{12}$ ]] || continue
     metadata=$path/release.env
-    validate_release_metadata "$metadata" || return
+    read_release_metadata "$metadata" release_metadata || return
     marker=
     [[ $id == "$current" ]] && marker=current
     if [[ $id == "$previous" ]]; then marker=${marker:+$marker,}previous; fi
@@ -2111,11 +2138,11 @@ list_releases() {
     [[ -f $path/.complete && ! -e $path/.incomplete ]] && completeness=complete
     marker=${marker:+$marker,}$completeness
     if [[ -f $PENDING_FILE && $(pending_value new_id) == "$id" ]]; then marker=$marker,pending; fi
-    platform=$(metadata_value "$metadata" PLATFORM_ID) || return
-    commit=$(metadata_value "$metadata" SOURCE_COMMIT) || return
-    nvim_version=$(metadata_value "$metadata" NVIM_VERSION) || return
-    node_version=$(metadata_value "$metadata" NODE_VERSION) || return
-    python_version=$(metadata_value "$metadata" PYTHON_VERSION) || return
+    platform=${release_metadata[PLATFORM_ID]}
+    commit=${release_metadata[SOURCE_COMMIT]}
+    nvim_version=${release_metadata[NVIM_VERSION]}
+    node_version=${release_metadata[NODE_VERSION]}
+    python_version=${release_metadata[PYTHON_VERSION]}
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$id" \
       "$platform" \
@@ -2129,6 +2156,7 @@ list_releases() {
 
 rollback_release() {
   local requested=${1:-} current previous target platform
+  local -A release_metadata=()
   acquire_lock exclusive || return
   recover_pending || return
   current=$(selected_id current) || return
@@ -2155,7 +2183,8 @@ rollback_release() {
     printf '%s: %s is already selected\n' "$PROGRAM" "$current"
     return
   fi
-  platform=$(metadata_value "$RELEASE_ROOT/$target/release.env" PLATFORM_ID) || return
+  read_release_metadata "$RELEASE_ROOT/$target/release.env" release_metadata || return
+  platform=${release_metadata[PLATFORM_ID]}
   validate_platform "$platform" || return
   health_release "$target" quick || return
   activate_release switching-existing "$target" "$current" "$previous" || return
@@ -2271,10 +2300,12 @@ uninstall_release() {
 
 verify_archive() {
   local platform=$1 archive=$2 current
+  local -A release_metadata=()
   validate_platform "$platform" || return
   install_archive "$archive" || return
   current=$(selected_id current) || return
-  [[ $(metadata_value "$RELEASE_ROOT/$current/release.env" PLATFORM_ID) == "$platform" ]] ||
+  read_release_metadata "$RELEASE_ROOT/$current/release.env" release_metadata || return
+  [[ ${release_metadata[PLATFORM_ID]} == "$platform" ]] ||
     { die "release is not for $platform"; return 1; }
   health_release "$current" full || return
   printf '%s: %s is healthy\n' "$PROGRAM" "$current"

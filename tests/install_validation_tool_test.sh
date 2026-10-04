@@ -32,6 +32,8 @@ run_installer() {
 
 mkdir -p "$test_repo/scripts" "$test_bin" "$tools_dir/bin"
 cp "$repo_dir/scripts/install-validation-tool" "$test_repo/scripts/"
+cp "$repo_dir/scripts/setup-lib" "$test_repo/scripts/"
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
 ln -s "$repo_dir/tests/fixtures/scripts/curl-copy" "$test_bin/curl"
 
 cat >"$tools_dir/bin/actionlint" <<'EOF'
@@ -52,9 +54,10 @@ candidate_archive=$test_root/actionlint.tar.gz
 tar -czf "$candidate_archive" -C "$candidate_dir" actionlint
 candidate_hash=$(sha256sum "$candidate_archive")
 candidate_hash=${candidate_hash%% *}
-cat >"$test_repo/validation.env" <<EOF
-ACTIONLINT_VERSION=2.0.0
-ACTIONLINT_SHA256=$candidate_hash
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[actionlint]='
+2.0.0|https://example.invalid/actionlint.tar.gz|$candidate_hash
+'
 EOF
 
 TEST_DOWNLOAD_FILE=$candidate_archive
@@ -73,9 +76,11 @@ bad_archive=$test_root/not-a-tar.gz
 printf 'not an archive\n' >"$bad_archive"
 bad_hash=$(sha256sum "$bad_archive")
 bad_hash=${bad_hash%% *}
-cat >"$test_repo/validation.env" <<EOF
-ACTIONLINT_VERSION=2.0.0
-ACTIONLINT_SHA256=$bad_hash
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[actionlint]='
+2.0.0|https://example.invalid/actionlint.tar.gz|$bad_hash
+'
 EOF
 TEST_DOWNLOAD_FILE=$bad_archive
 export TEST_DOWNLOAD_FILE
@@ -84,9 +89,11 @@ run_installer actionlint
 [[ $(sha256sum "$tools_dir/bin/actionlint") == "$old_actionlint_hash" ]] ||
   fail 'failed extraction replaced the existing actionlint'
 
-cat >"$test_repo/validation.env" <<EOF
-ACTIONLINT_VERSION=2.0.0
-ACTIONLINT_SHA256=$candidate_hash
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[actionlint]='
+2.0.0|https://example.invalid/actionlint.tar.gz|$candidate_hash
+'
 EOF
 TEST_DOWNLOAD_FILE=$candidate_archive
 export TEST_DOWNLOAD_FILE
@@ -103,7 +110,8 @@ printf 'yamllint 1.0.0\n'
 EOF
 chmod +x "$tools_dir/bin/yamllint"
 old_yamllint_hash=$(sha256sum "$tools_dir/bin/yamllint")
-cat >"$test_repo/validation.env" <<'EOF'
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
+cat >>"$test_repo/validation.env" <<'EOF'
 YAMLLINT_VERSION=2.0.0
 YAMLLINT_PATHSPEC_VERSION=0.12.1
 YAMLLINT_PYYAML_VERSION=6.0.2
@@ -139,9 +147,11 @@ task_archive=$test_root/task.tar.gz
 tar -czf "$task_archive" -C "$task_candidate_dir" task
 task_hash=$(sha256sum "$task_archive")
 task_hash=${task_hash%% *}
-cat >"$test_repo/validation.env" <<EOF
-TASK_VERSION=$task_version
-TASK_SHA256=$task_hash
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[task]='
+$task_version|https://example.invalid/task.tar.gz|$task_hash
+'
 EOF
 cat >"$test_bin/task" <<EOF
 #!/usr/bin/env bash

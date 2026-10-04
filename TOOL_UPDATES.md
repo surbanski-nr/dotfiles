@@ -26,11 +26,18 @@ git -C "$candidate_root/current" status --short
 cp -a "$candidate_root/current" "$candidate_root/candidate"
 ```
 
-Edit only the intended pins in `candidate/versions.env` or
-`candidate/dotfiles-release.env`. For a daily tool, install the current selection
-first, record its version and canonical link, then run the candidate from the
-other read-only checkout. This tested example uses Debian 13 and an immutable
-image digest. Replace `TOOL` and the version check for another daily tool:
+Edit only the intended records in `candidate/versions.env`, validator records
+in `candidate/validation.env`, or builder images in
+`candidate/dotfiles-release.env`. `TOOL_RELEASES` and `VALIDATION_RELEASES`
+store ordered `version|full_URL|SHA256` records. The first record is the
+default and cannot fall back if its artifact is absent. Task belongs only to
+`VALIDATION_RELEASES`. `ASDF_PLUGINS` owns plugin repository and commit pins,
+while runtime versions still come from `TOOL_RELEASES`.
+
+For a daily tool, install the current selection first, record its version and
+canonical link, then run the candidate from the other read-only checkout. This
+tested example uses Debian 13 and an immutable image digest. Replace `TOOL` and
+the version check for another daily tool:
 
 ```bash
 image='debian@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a'
@@ -93,8 +100,9 @@ ls -l "$HOME/bin/k9s"*
 "$HOME/bin/k9s-0.50.18" version --short
 ```
 
-For a persistent rollback, restore the earlier scalar version and digest in
-`versions.env`, then run one of these commands from that reviewed revision:
+For a persistent rollback, put the earlier complete
+`version|full_URL|SHA256` record first for that tool in `TOOL_RELEASES`, then
+run one of these commands from that reviewed revision:
 
 ```bash
 ./setup-tools k9s
@@ -122,9 +130,9 @@ type -a k9s
 k9s version --short
 ```
 
-The next `setup-tools k9s` selects the scalar pin again. Keep the older pin in
-`versions.env` for a persistent rollback. Treat `uv` with `uvx`, and `kubectx`
-with `kubens`, as paired selections.
+The next `setup-tools k9s` selects the first catalog record again. Keep the
+older complete record in `versions.env` for a persistent rollback. Treat `uv`
+with `uvx`, and `kubectx` with `kubens`, as paired selections.
 
 ## Python environments
 
@@ -144,7 +152,8 @@ files on a connected machine:
 ```bash
 bash scripts/install-validation-tool task
 .cache/validation-tools/bin/task update:python-locks
-git diff -- offline versions.env nvim2/.config/nvim2/lua/custom/lsp.lua
+git diff -- versions.env nvim2/.config/nvim2/lua/custom/lsp.lua \
+  nvim2/.config/nvim2/python-locks
 ```
 
 The generator creates an empty HOME, installs the pinned `PIP_TOOLS_VERSION`
@@ -161,8 +170,8 @@ ansible-lint or yamllint.
 
 ## Project runtime rollback
 
-Project runtimes remain under asdf. Put the earlier version first in the
-corresponding ordered list in `versions.env`, then reconcile it:
+Project runtimes remain under asdf. Put the earlier release record first for
+the tool in `TOOL_RELEASES`, then reconcile it:
 
 ```bash
 ./setup-asdf terraform kubectl helm python nodejs

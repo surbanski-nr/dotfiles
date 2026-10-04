@@ -16,10 +16,13 @@ come from the same source commit recorded in `release.env`.
 The connected builder starts from empty Neovim data and runs
 `Nvim2ToolsInstallSync` and the tool-enabled test suite. It removes the Mason
 venvs for ansible-lint and yamllint before packaging. Their exact generated
-locks and wheels travel in the artifact. The target installer uses the bundled
-standalone Python to recreate ordinary isolated venvs at their final retained
-paths with `--no-index`, `--require-hashes` and `--only-binary=:all:`. It never
-moves a completed venv and does not use a host Python or site-packages.
+inputs and locks are maintained in the source profile at
+`nvim2/.config/nvim2/python-locks/`; the builder copies them into the unchanged
+payload path `python-locks/`, alongside the downloaded wheels. The target
+installer uses the bundled standalone Python to recreate ordinary isolated
+venvs at their final retained paths with `--no-index`, `--require-hashes` and
+`--only-binary=:all:`. It never moves a completed venv and does not use a host
+Python or site-packages.
 
 The release `nvim` launcher resolves its physical release root once. For the
 `nvim2` app it sets physical `XDG_CONFIG_HOME` and `XDG_DATA_HOME` plus a
@@ -76,7 +79,9 @@ The Nvim2 suite covers plugin HEAD and cleanliness, Mason receipts and probes,
 Treesitter parsers, feature behavior, LSP, diagnostics, formatting and linting.
 Terraform and tfvars continue to use `terraform fmt`. The local Helm chart test
 uses helm-ls without a Helm executable. No plugin, parser, language server or
-formatter is installed or updated by health.
+formatter is installed or updated by health. The release launcher uses the
+bundled Mason registry snapshot and disables registry refresh, so startup and
+health do not make network requests.
 
 For qualification evidence, preserve the unfiltered manager output and the
 files produced by the normal Nvim checks, including messages, Mason, Conform

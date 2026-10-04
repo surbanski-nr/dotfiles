@@ -1,6 +1,10 @@
 local function run()
   require('custom.checks').assert_all { tools = vim.env.NVIM2_CHECK_TOOLS ~= '0' }
   assert(require('mason.settings').current.max_concurrent_installers == 1, 'Mason installers are not serialized')
+  assert(
+    require('mason.settings').current.registry_cache.refresh == (vim.env.DOTFILES_OFFLINE_RELEASE_ROOT == nil),
+    'Mason registry refresh does not match the connected/offline context'
+  )
   vim.lsp.enable('markdown_oxide', false)
   dofile(vim.fs.joinpath(vim.fn.stdpath 'config', 'tests', 'telescope_query.lua'))()
 

@@ -44,6 +44,12 @@ remaining conflict, including a foreign symlink.
 Existing Homebrew installations and private shell configuration are left
 alone. Setup does not install Homebrew or initialize it from Bash.
 
+Release data is explicit: `versions.env` contains ordered
+`version|full_URL|SHA256` records for daily tools and project runtimes, while
+`validation.env` owns validator records, including the only Task pin. The
+first record is the default. `ASDF_PLUGINS` separately pins plugin repositories
+and commits; asdf keeps responsibility for fetching and verifying its plugins.
+
 The Kubernetes prompt segment is disabled by default. Run `kp` to toggle it
 for the current shell session. While disabled, Oh My Posh does not read the
 kubeconfig for that segment.
