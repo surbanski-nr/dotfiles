@@ -220,7 +220,8 @@ validate_configs() {
   local json_files=()
   local socket="dotfiles-validate-$$"
   local client configured_path pane_active_border_style pane_border_lines
-  local pane_border_style repeat_time reloaded_value tmux_config temporary_home
+  local pane_border_style repeat_time reloaded_value status_style tmux_config
+  local temporary_home window_status_current_style
   local client_input client_stderr
   local plugin tpm_root
   local yaml_files=()
@@ -272,6 +273,12 @@ validate_configs() {
   pane_active_border_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv pane-active-border-style)
   [[ $pane_active_border_style == *'fg=#008080'* ]] ||
     die "tmux active pane border is not Windows 95 teal: $pane_active_border_style"
+  status_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv status-style)
+  [[ $status_style == 'bg=#008080,fg=white,bold' ]] ||
+    die "tmux status bar does not use bold white on teal: $status_style"
+  window_status_current_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv window-status-current-style)
+  [[ $window_status_current_style == 'bg=#008080,fg=white,bold' ]] ||
+    die "tmux current window does not use bold white on teal: $window_status_current_style"
   HOME="$temporary_home" tmux -L "$socket" show-options -gv status-right >/dev/null
   configured_path=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv @dotfiles-config)
   [[ $configured_path == "$tmux_config" ]] ||
