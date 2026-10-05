@@ -56,9 +56,10 @@ alone. Setup does not install Homebrew or initialize it from Bash.
 
 Release data is explicit: `versions.env` contains ordered
 `version|full_URL|SHA256` records for daily tools and project runtimes, while
-`validation.env` owns validator records, including the only Task pin. The
-first record is the default. `ASDF_PLUGINS` separately pins plugin repositories
-and commits; asdf keeps responsibility for fetching and verifying its plugins.
+`validation.env` owns the validator list and records, including the only Task
+pin. The first record is the default. `ASDF_PLUGINS` separately pins plugin
+repositories and commits; asdf keeps responsibility for fetching and verifying
+its plugins.
 Asdf remains an optional online provider, independent of offline releases.
 The tmux plugin `*_REPO` and `*_COMMIT` pairs also live in `versions.env`.
 

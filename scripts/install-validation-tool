@@ -19,37 +19,40 @@ source "$repo_dir/scripts/setup-lib"
 PROGRAM=install-validation-tool
 # shellcheck source=../validation.env
 source "$repo_dir/validation.env"
-validate_validator_config
+validate_profile VALIDATION_TOOLS
+
+supported=false
+for configured_tool in "${VALIDATION_TOOLS[@]}"; do
+  if [[ $tool == "$configured_tool" ]]; then
+    supported=true
+    break
+  fi
+done
+[[ $supported == true ]] || die "unsupported tool: $tool"
 
 mkdir -p "$bin_dir"
 export PATH="$bin_dir:$PATH"
 
 tool_version() {
-  local executable=$2
+  local executable=$1 output
 
-  case "$1" in
-    actionlint) "$executable" -version 2>/dev/null | head -n 1 ;;
-    shellcheck) "$executable" --version 2>/dev/null | awk '/^version:/ { print $2 }' ;;
-    stylua) "$executable" --version 2>/dev/null | awk '{ print $2 }' ;;
-    task) "$executable" --version 2>/dev/null | awk '{ sub(/^v/, "", $NF); print $NF }' ;;
-    yamllint) "$executable" --version 2>/dev/null | awk '{ print $2 }' ;;
-    zizmor) "$executable" --version 2>/dev/null | awk '{ print $2 }' ;;
-    *) die "unsupported tool: $1" ;;
-  esac
+  output=$("$executable" --version 2>/dev/null) || return
+  [[ $output =~ v?([0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?) ]] || return
+  printf '%s\n' "${BASH_REMATCH[1]}"
 }
 
-case $tool in
-  actionlint | shellcheck | stylua | task | zizmor)
-    select_default_release VALIDATION_RELEASES "$tool"
-    version=$RELEASE_VERSION
-    url=$RELEASE_URL
-    checksum=$RELEASE_SHA256
-    ;;
-  yamllint) version=$YAMLLINT_VERSION ;;
-  *) die "unsupported tool: $tool" ;;
-esac
+if [[ $tool == yamllint ]]; then
+  for variable in YAMLLINT_VERSION YAMLLINT_PATHSPEC_VERSION YAMLLINT_PYYAML_VERSION; do
+    validate_version "$variable" "${!variable:-}"
+  done
+  version=$YAMLLINT_VERSION
+else
+  select_default_release VALIDATION_RELEASES "$tool"
+  version=$RELEASE_VERSION
+  url=$RELEASE_URL
+fi
 if [[ -x $bin_dir/$tool ]] &&
-  [[ $(tool_version "$tool" "$bin_dir/$tool") == "$version" ]]; then
+  [[ $(tool_version "$bin_dir/$tool") == "$version" ]]; then
   exit 0
 fi
 
@@ -65,17 +68,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-download() {
-  local url=$1
-  local checksum=$2
-  local destination=$3
-
-  curl --connect-timeout 30 --max-time 300 \
-    --retry 3 --retry-all-errors -fL "$url" -o "$destination"
-  printf '%s  %s\n' "$checksum" "$destination" |
-    sha256sum --check --strict
-}
-
 activate_binary() {
   local candidate=$1
   local destination=$bin_dir/$tool
@@ -84,7 +76,7 @@ activate_binary() {
 
   install -m 0755 "$candidate" "$stage/$tool.candidate"
   candidate=$stage/$tool.candidate
-  [[ $(tool_version "$tool" "$candidate") == "$version" ]] ||
+  [[ $(tool_version "$candidate") == "$version" ]] ||
     die "$tool $version candidate validation failed"
 
   if [[ -e $destination || -L $destination ]]; then
@@ -92,7 +84,7 @@ activate_binary() {
     previous_exists=1
   fi
   mv -f "$candidate" "$destination"
-  if [[ $(tool_version "$tool" "$destination") == "$version" ]]; then
+  if [[ $(tool_version "$destination") == "$version" ]]; then
     return 0
   fi
 
@@ -110,7 +102,7 @@ activate_yamllint() {
   local previous=$stage/previous-yamllint
   local previous_exists=0
 
-  [[ $(tool_version yamllint "$candidate/bin/yamllint") == "$version" ]] ||
+  [[ $(tool_version "$candidate/bin/yamllint") == "$version" ]] ||
     die "yamllint $version candidate validation failed"
   ln -s "$candidate/bin/yamllint" "$link"
 
@@ -119,7 +111,7 @@ activate_yamllint() {
     previous_exists=1
   fi
   mv -Tf "$link" "$destination"
-  if [[ $(tool_version yamllint "$destination") == "$version" ]]; then
+  if [[ $(tool_version "$destination") == "$version" ]]; then
     staged_venv=
     return 0
   fi
@@ -131,51 +123,25 @@ activate_yamllint() {
   die "yamllint $version activation failed; restored the previous environment"
 }
 
-case "$tool" in
-  actionlint)
-    archive="$stage/actionlint.tar.gz"
-    download "$url" "$checksum" "$archive"
-    tar -xzf "$archive" -C "$stage"
-    activate_binary "$stage/actionlint"
-    ;;
-  shellcheck)
-    archive="$stage/shellcheck.tar.xz"
-    download "$url" "$checksum" "$archive"
-    tar -xJf "$archive" -C "$stage"
-    activate_binary "$stage/shellcheck-v$version/shellcheck"
-    ;;
-  stylua)
-    archive="$stage/stylua.zip"
-    download "$url" "$checksum" "$archive"
-    unzip -q "$archive" -d "$stage"
-    activate_binary "$stage/stylua"
-    ;;
-  task)
-    archive="$stage/task.tar.gz"
-    download "$url" "$checksum" "$archive"
-    tar -xzf "$archive" -C "$stage"
-    activate_binary "$stage/task"
-    ;;
-  yamllint)
-    venv="$tools_dir/yamllint-$YAMLLINT_VERSION"
-    if [[ -e $venv || -L $venv ]]; then
-      venv=$tools_dir/yamllint-$YAMLLINT_VERSION-${stage##*.}
-    fi
-    staged_venv=$venv
-    python3 -m venv "$venv"
-    "$venv/bin/python" -m pip install --disable-pip-version-check \
-      "pathspec==$YAMLLINT_PATHSPEC_VERSION" \
-      "PyYAML==$YAMLLINT_PYYAML_VERSION" \
-      "yamllint==$YAMLLINT_VERSION"
-    activate_yamllint "$venv"
-    ;;
-  zizmor)
-    archive="$stage/zizmor.tar.gz"
-    download "$url" "$checksum" "$archive"
-    tar -xzf "$archive" -C "$stage"
-    activate_binary "$stage/zizmor"
-    ;;
-esac
+if [[ $tool == yamllint ]]; then
+  venv="$tools_dir/yamllint-$YAMLLINT_VERSION"
+  if [[ -e $venv || -L $venv ]]; then
+    venv=$tools_dir/yamllint-$YAMLLINT_VERSION-${stage##*.}
+  fi
+  staged_venv=$venv
+  python3 -m venv "$venv"
+  "$venv/bin/python" -m pip install --disable-pip-version-check \
+    "pathspec==$YAMLLINT_PATHSPEC_VERSION" \
+    "PyYAML==$YAMLLINT_PYYAML_VERSION" \
+    "yamllint==$YAMLLINT_VERSION"
+  activate_yamllint "$venv"
+else
+  archive=$stage/$RELEASE_ASSET
+  prepared=$stage/prepared
+  download_file "$url" "$archive"
+  prepare_artifact VALIDATION_RELEASES "$tool" "$version" "$archive" "$prepared"
+  activate_binary "$prepared/${SPEC_DESTS[0]}"
+fi
 
-[[ $(tool_version "$tool" "$bin_dir/$tool") == "$version" ]] ||
+[[ $(tool_version "$bin_dir/$tool") == "$version" ]] ||
   die "$tool $version installation failed"

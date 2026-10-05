@@ -140,23 +140,26 @@ validate_profile() {
 }
 
 validate_validator_config() {
-  local required tool version seen=' '
+  local tool version seen=' '
 
+  validate_profile VALIDATION_TOOLS || return
   validate_release_catalog VALIDATION_RELEASES || return
-  for required in actionlint shellcheck stylua zizmor task; do
-    [[ -v VALIDATION_RELEASES[$required] ]] ||
-      report_error "VALIDATION_RELEASES has no releases for $required" || return
-    seen+="$required "
-  done
-  for tool in "${!VALIDATION_RELEASES[@]}"; do
-    [[ $seen == *" $tool "* ]] ||
-      report_error "VALIDATION_RELEASES contains unsupported tool $tool" || return
+  for tool in "${VALIDATION_TOOLS[@]}"; do
+    seen+="$tool "
+    [[ $tool == yamllint ]] && continue
+    [[ -v VALIDATION_RELEASES[$tool] ]] ||
+      report_error "VALIDATION_RELEASES has no releases for $tool" || return
     release_versions VALIDATION_RELEASES "$tool" || return
     for version in "${RELEASE_VERSIONS[@]}"; do
       select_release VALIDATION_RELEASES "$tool" "$version" || return
       [[ $RELEASE_URL != - ]] ||
         report_error "validation release $tool $version requires an artifact" || return
+      artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
     done
+  done
+  for tool in "${!VALIDATION_RELEASES[@]}"; do
+    [[ $tool != yamllint && $seen == *" $tool "* ]] ||
+      report_error "VALIDATION_RELEASES contains unsupported tool $tool" || return
   done
   for version in YAMLLINT_VERSION YAMLLINT_PATHSPEC_VERSION YAMLLINT_PYYAML_VERSION; do
     validate_version "$version" "${!version:-}" || return
@@ -285,7 +288,7 @@ artifact_layout() {
   SPEC_LINKS=()
   SPEC_SECOND_MEMBER=
   case $name in
-    asdf | kyverno | task | trivy | k9s | kubeconform | kubectx | kubens | zoxide)
+    actionlint | asdf | kyverno | task | trivy | k9s | kubeconform | kubectx | kubens | zizmor | zoxide)
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=$name
       SPEC_DESTS=("$name-$version")
@@ -358,11 +361,11 @@ artifact_layout() {
       SPEC_DESTS=("fzf-$version")
       SPEC_LINKS=()
       ;;
-    terraform)
+    stylua | terraform)
       SPEC_FORMAT=zip-member
-      SPEC_MEMBER=terraform
-      SPEC_DESTS=("terraform-$version")
-      SPEC_LINKS=()
+      SPEC_MEMBER=$name
+      SPEC_DESTS=("$name-$version")
+      SPEC_LINKS=("$name:$name-$version")
       ;;
     tmux)
       SPEC_FORMAT=gz-tree

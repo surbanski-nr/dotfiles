@@ -219,7 +219,8 @@ validate_configs() {
   need yamllint
   local json_files=()
   local socket="dotfiles-validate-$$"
-  local client configured_path reloaded_value tmux_config temporary_home
+  local client configured_path pane_active_border_style pane_border_lines
+  local pane_border_style repeat_time reloaded_value tmux_config temporary_home
   local client_input client_stderr
   local plugin tpm_root
   local yaml_files=()
@@ -260,6 +261,17 @@ validate_configs() {
       -f "$tmux_config" new-session -d
   )
   HOME="$temporary_home" tmux -L "$socket" show-options -gv prefix >/dev/null
+  repeat_time=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv repeat-time)
+  [[ $repeat_time == 2000 ]] || die "tmux repeat time is not 2000 ms: $repeat_time"
+  pane_border_lines=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv pane-border-lines)
+  [[ $pane_border_lines == single ]] ||
+    die "tmux pane borders are not single-width: $pane_border_lines"
+  pane_border_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv pane-border-style)
+  [[ $pane_border_style == 'fg=colour238' ]] ||
+    die "tmux inactive pane border is not muted: $pane_border_style"
+  pane_active_border_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv pane-active-border-style)
+  [[ $pane_active_border_style == *'fg=#008080'* ]] ||
+    die "tmux active pane border is not Windows 95 teal: $pane_active_border_style"
   HOME="$temporary_home" tmux -L "$socket" show-options -gv status-right >/dev/null
   configured_path=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv @dotfiles-config)
   [[ $configured_path == "$tmux_config" ]] ||

@@ -5,7 +5,7 @@ set -eu
 [[ ${TEST_DOWNLOAD_FAIL:-0} == 0 ]] || exit 60
 destination=
 while [[ $# -gt 0 ]]; do
-  if [[ $1 == -o ]]; then
+  if [[ $1 == -o || $1 == --output ]]; then
     [[ $# -ge 2 ]] || exit 61
     destination=$2
     shift 2

@@ -38,8 +38,9 @@ remaining conflict, including a foreign symlink.
 `version|full_URL|SHA256` records, and the first record is the default. A
 required default without an artifact is an error, with no fallback to a later
 record. `validation.env` uses the same record format in
-`VALIDATION_RELEASES`; Task exists only there. Daily ShellCheck, validation
-ShellCheck and Mason ShellCheck remain independent pins.
+`VALIDATION_RELEASES`, and `VALIDATION_TOOLS` is the installer's authoritative
+tool list. Task exists only there. Daily ShellCheck, validation ShellCheck and
+Mason ShellCheck remain independent pins.
 
 `setup-tools` downloads and installs the selected daily tools from these exact
 official release records. It supports only connected installation; offline
