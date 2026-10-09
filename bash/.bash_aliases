@@ -128,7 +128,6 @@ dotfiles-check() (
     # Loaded only when dotfiles-check runs, never during normal shell startup.
     # shellcheck source=../scripts/setup-lib
     source "$manifest_dir/scripts/setup-lib"
-    PROGRAM=dotfiles-check
     validate_tool_config || return
     validate_validator_config || return
   fi

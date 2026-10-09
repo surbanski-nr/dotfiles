@@ -57,6 +57,22 @@ checksum-verified official archive. Provider conflicts are checked before any
 ownership state is written. Similar names, version output alone and modified
 binaries are rejected without changing them.
 
+Edit OS package lists and their expected commands in `system.env`. Common
+runtime packages are included in every role; build and connected roles add
+their own common and distribution-specific packages. These packages have no
+version pins and use the current apt/dnf repository candidates. The same file
+lists commands each connected entry point requires before installation.
+Package names and command names are separate, since packages such as
+`diffutils` provide commands such as `cmp`. Amazon Linux's full GnuPG swap
+remains part of the connected installation procedure.
+
+`probes.env` owns tool version arguments shared by `setup-tools` and release
+health. Each value contains whitespace-separated arguments; omitted tools use
+`--version`. The builder embeds this data in the generated standalone manager,
+so it works outside the checkout and can check older releases that did not
+include the shared configuration file. Edit the source configuration and
+rebuild; do not edit generated managers.
+
 The direct kubectl and Helm route is an online alternative for machines where
 asdf is not appropriate. Do not install both providers in the same home:
 
@@ -88,12 +104,12 @@ offline package. Optional online `setup-asdf` remains available independently.
 The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
 `ubuntu-26.04-x86_64` and `amzn-2023-x86_64`. Build from a clean committed
 checkout on a connected machine. Select the matching immutable image from
-`dotfiles-release.env` and keep the checkout read-only in the builder:
+`release.env` and keep the checkout read-only in the builder:
 
 ```bash
 set -euo pipefail
 test -z "$(git status --porcelain --untracked-files=normal)"
-source dotfiles-release.env
+source release.env
 platform=debian-13-x86_64
 image=$DEBIAN_13_IMAGE
 output=${1:-"$PWD/offline-output"}
@@ -129,6 +145,8 @@ main repository history. It also contains the full Neovim runtime tree, pinned
 plugin Git metadata, parsers, queries, Mason receipts, tmux plugins, Python
 locks and the temporary wheelhouse. `release.env`, `build-manifest.txt` and
 `SHA256SUMS` record source identity, layout, versions, inputs and content.
+The generated payload-root `release.env` is distinct from the checked-in
+`dotfiles/release.env`, which contains builder image pins.
 After venv creation the retained installation removes the wheelhouse and
 records a new local manifest covering file contents, modes and symlink targets.
 

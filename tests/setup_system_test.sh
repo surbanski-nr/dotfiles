@@ -88,7 +88,9 @@ if PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \
 fi
 [[ ! -e $package_log ]] || fail 'invalid arguments reached the package manager'
 
-for command_name in curl file gpg gpg-agent htop jq make mc python3 tmux vi vim; do
+# shellcheck source=../system.env
+source "$repo_dir/system.env"
+for command_name in "${SYSTEM_CONNECTED_COMMANDS[@]}"; do
   ln -s /bin/true "$fixture_bin/$command_name"
 done
 
@@ -143,7 +145,8 @@ grep -Fx $'dnf\tinstall\t-y\tgnupg2' "$package_log" >/dev/null ||
 
 # shellcheck source=../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
-PROGRAM=setup-system-test
+# shellcheck source=../system.env
+source "$repo_dir/system.env"
 system_package_list amzn:2023 build
 printf '%s\n' "${SETUP_SYSTEM_PACKAGES[@]}" | grep -Fx cargo >/dev/null ||
   fail 'Amazon build omitted cargo'
@@ -155,6 +158,29 @@ if printf '%s\n' "${SETUP_SYSTEM_PACKAGES[@]}" | grep -Eq '^(cargo|clang-devel)$
 fi
 [[ $(printf '%s\n' "${SETUP_SYSTEM_PACKAGES[@]}" | sort -u | wc -l) -eq ${#SETUP_SYSTEM_PACKAGES[@]} ]] ||
   fail 'Amazon connected package list contains duplicates'
+
+config_repo=$test_root/config-repo
+mkdir -p "$config_repo/scripts"
+cp "$repo_dir/setup-system" "$config_repo/setup-system"
+cp "$repo_dir/scripts/setup-lib" "$config_repo/scripts/setup-lib"
+cp "$repo_dir/system.env" "$config_repo/system.env"
+printf 'SYSTEM_RUNTIME_PACKAGES+=(fixture-package)\n' >>"$config_repo/system.env"
+PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \
+  SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
+  "$config_repo/setup-system" --offline-release >/dev/null
+grep $'^apt-get\tinstall' "$package_log" | grep -F $'\tfixture-package' >/dev/null ||
+  fail 'setup-system ignored the configured package list'
+
+printf 'SYSTEM_RUNTIME_COMMANDS+=(dotfiles-fixture-missing-command)\n' >>"$config_repo/system.env"
+set +e
+verification_output=$(PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \
+  SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
+  "$config_repo/setup-system" --offline-release 2>&1)
+verification_status=$?
+set -e
+[[ $verification_status -ne 0 && $verification_output == \
+  *'setup-system: package installation did not provide dotfiles-fixture-missing-command'* ]] ||
+  fail 'setup-system ignored a configured installation check'
 
 set +e
 PATH="$fixture_bin:$PATH" TEST_PACKAGE_LOG="$package_log" \

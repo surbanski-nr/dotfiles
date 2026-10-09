@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 
 report_error() {
-  printf '%s: %s\n' "${PROGRAM:-setup}" "$*" >&2
+  printf '%s: %s\n' "${0##*/}" "$*" >&2
   return 1
 }
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || report_error "required command is missing: $1"
+}
+
+require_setup_commands() {
+  local command_name
+  local -a commands=()
+
+  read -r -a commands <<<"${SETUP_PREREQUISITES[$1]}"
+  for command_name in "${commands[@]}"; do
+    require_command "$command_name" || return
+  done
 }
 
 validate_version() {
@@ -491,154 +501,29 @@ prepare_artifact() {
 }
 
 system_package_list() {
-  local platform=$1
-  local role=$2
-  local -a runtime_common=(
-    bash
-    ca-certificates
-    coreutils
-    diffutils
-    findutils
-    gawk
-    git
-    grep
-    gzip
-    ncurses-term
-    sed
-    tar
-    unzip
-    util-linux
-  )
-  local -a build_common=(
-    autoconf
-    automake
-    bison
-    curl
-    file
-    libtool
-    make
-    patch
-  )
-  local -a connected_common=(
-    autoconf
-    automake
-    bash-completion
-    bison
-    curl
-    dos2unix
-    file
-    htop
-    jq
-    libtool
-    make
-    mc
-    patch
-    python3
-    python3-pip
-    tmux
-  )
-  local -a runtime_platform=()
-  local -a role_common=()
-  local -a role_platform=()
+  local platform=$1 role=$2 family
+  local -a role_common=() role_platform=()
 
   case $platform in
-    debian:* | ubuntu:* | debian-*-x86_64 | ubuntu-*-x86_64)
-      runtime_platform=(
-        iproute2
-        libevent-core-2.1-7t64
-        libtinfo6
-        ncurses-bin
-        passwd
-        xz-utils
-      )
-      case $role in
-        runtime) ;;
-        build)
-          role_common=("${build_common[@]}")
-          role_platform=(
-            build-essential
-            libevent-dev
-            libncurses-dev
-            pkg-config
-          )
-          ;;
-        connected)
-          role_common=("${connected_common[@]}")
-          role_platform=(
-            build-essential
-            dirmngr
-            gnupg
-            libbz2-dev
-            libevent-dev
-            libffi-dev
-            liblzma-dev
-            libncurses-dev
-            libreadline-dev
-            libssl-dev
-            libsqlite3-dev
-            pkg-config
-            python3-venv
-            tk-dev
-            uuid-dev
-            vim
-            zlib1g-dev
-          )
-          ;;
-        *) report_error "unknown system package role: $role"; return ;;
-      esac
-      ;;
-    amzn:2023 | amzn-2023-x86_64)
-      runtime_platform=(
-        iproute
-        libevent
-        ncurses-libs
-        shadow-utils
-        which
-        xz
-      )
-      case $role in
-        runtime) ;;
-        build)
-          role_common=("${build_common[@]}")
-          role_platform=(
-            cargo
-            clang-devel
-            gcc
-            gcc-c++
-            libevent-devel
-            ncurses-devel
-            pkgconf
-          )
-          ;;
-        connected)
-          role_common=("${connected_common[@]}")
-          role_platform=(
-            bzip2-devel
-            gcc
-            gcc-c++
-            libevent-devel
-            libffi-devel
-            ncurses-devel
-            openssl-devel
-            pkgconf
-            readline-devel
-            sqlite-devel
-            tk-devel
-            vim-enhanced
-            vim-minimal
-            xz-devel
-            zlib-devel
-          )
-          ;;
-        *) report_error "unknown system package role: $role"; return ;;
-      esac
-      ;;
+    debian:* | ubuntu:* | debian-*-x86_64 | ubuntu-*-x86_64) family=DEBIAN ;;
+    amzn:2023 | amzn-2023-x86_64) family=AMZN ;;
     *) report_error "unsupported system package platform: $platform"; return ;;
   esac
-  # Consumed by setup-system or dotfiles-release after sourcing this library.
+  local -n runtime_platform=SYSTEM_${family}_RUNTIME_PACKAGES
+  case $role in
+    runtime) ;;
+    build | connected)
+      local -n common=SYSTEM_${role^^}_PACKAGES
+      local -n specific=SYSTEM_${family}_${role^^}_PACKAGES
+      role_common=("${common[@]}")
+      role_platform=("${specific[@]}")
+      ;;
+    *) report_error "unknown system package role: $role"; return ;;
+  esac
+  # Consumed by setup-system and the builder after sourcing this library.
   # shellcheck disable=SC2034
   SETUP_SYSTEM_PACKAGES=(
-    "${runtime_common[@]}"
+    "${SYSTEM_RUNTIME_PACKAGES[@]}"
     "${runtime_platform[@]}"
     "${role_common[@]}"
     "${role_platform[@]}"

@@ -63,6 +63,12 @@ its plugins.
 Asdf remains an optional online provider, independent of offline releases.
 The tmux plugin `*_REPO` and `*_COMMIT` pairs also live in `versions.env`.
 
+`system.env` owns OS package lists, installation checks and connected setup
+prerequisites. OS packages use the current repository candidates without
+version pins. `probes.env` supplies version command arguments for both
+connected installation and offline release health. Builder image pins live in
+`release.env`.
+
 The Kubernetes prompt segment is disabled by default. Run `kp` to toggle it
 for the current shell session. While disabled, Oh My Posh does not read the
 kubeconfig for that segment.

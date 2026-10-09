@@ -2,7 +2,13 @@
 
 set -euo pipefail
 
-PROGRAM=dotfiles-release
+# Release builds prepend probes.env so the delivered manager is self-contained.
+if ! declare -p TOOL_PROBE_ARGS >/dev/null 2>&1; then
+  manager_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+  # shellcheck source=../probes.env
+  source "$manager_dir/../probes.env"
+fi
+
 RELEASE_ROOT=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}
 STATE_DIR=$RELEASE_ROOT/.state
 LOCK_FILE=$STATE_DIR/lock
@@ -23,19 +29,19 @@ SNAPSHOT_MODE=
 SNAPSHOT_IDENTITY=
 RECOVERED_PENDING=false
 RELEASE_PROBES=(
-  'nvim|NVIM_VERSION|--version'
-  'tmux|TMUX_VERSION|-V'
-  'node|NODE_VERSION|--version'
-  'npm|NPM_VERSION|--version'
-  'rg|RG_VERSION|--version'
-  'zoxide|ZOXIDE_VERSION|--version'
-  'k9s|K9S_VERSION|version --short'
-  'kubectx|KUBECTX_VERSION|--version'
-  'kubens|KUBECTX_VERSION|--version'
-  'oh-my-posh|OMP_VERSION|version'
-  'task|TASK_VERSION|--version'
-  'fzf|FZF_VERSION|--version'
-  'terraform|TERRAFORM_VERSION|version'
+  'nvim|NVIM_VERSION'
+  'tmux|TMUX_VERSION'
+  'node|NODE_VERSION'
+  'npm|NPM_VERSION'
+  'rg|RG_VERSION'
+  'zoxide|ZOXIDE_VERSION'
+  'k9s|K9S_VERSION'
+  'kubectx|KUBECTX_VERSION'
+  'kubens|KUBECTX_VERSION'
+  'oh-my-posh|OMP_VERSION'
+  'task|TASK_VERSION'
+  'fzf|FZF_VERSION'
+  'terraform|TERRAFORM_VERSION'
 )
 RELEASE_METADATA_FIELDS=(
   RELEASE_ID PLATFORM_ID SOURCE_COMMIT SOURCE_TREE BUILDER_IMAGE
@@ -46,7 +52,7 @@ RELEASE_METADATA_FIELDS=(
 )
 
 die() {
-  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  printf '%s: %s\n' "${0##*/}" "$*" >&2
   return 1
 }
 
@@ -960,7 +966,7 @@ migrate_nvim_state() {
     if [[ -e $destination/$file || -L $destination/$file ]]; then continue; fi
     mkdir -p "$destination" || return
     cp -p -- "$source" "$destination/$file" || return
-    printf '%s: copied legacy Nvim state to %s\n' "$PROGRAM" "$destination/$file"
+    printf '%s: copied legacy Nvim state to %s\n' "${0##*/}" "$destination/$file"
   done
 }
 
@@ -1101,7 +1107,7 @@ recover_pending() {
   esac
   durable_unlink "$PENDING_FILE" || return
   RECOVERED_PENDING=true
-  printf '%s: recovered interrupted installation of %s\n' "$PROGRAM" "$new_id"
+  printf '%s: recovered interrupted installation of %s\n' "${0##*/}" "$new_id"
 }
 
 activate_release() {
@@ -1169,7 +1175,7 @@ install_archive() {
       health_release "$release_id" quick || return
       activate_release switching-existing "$release_id" "$old_current" "$old_previous" || return
       printf '%s: release %s is already installed and selected; reload Bash with: source ~/.bashrc && hash -r\n' \
-        "$PROGRAM" "$release_id"
+        "${0##*/}" "$release_id"
       return
     fi
     die "release ID collision: $release_id"
@@ -1215,7 +1221,7 @@ install_archive() {
   fi
   activate_release switching-new "$release_id" "$old_current" "$old_previous" || return
   printf '%s: installed %s; reload Bash with: source ~/.bashrc && hash -r\n' \
-    "$PROGRAM" "$release_id"
+    "${0##*/}" "$release_id"
 }
 
 health_python() {
@@ -1497,7 +1503,7 @@ health_version() {
 
 health_release() {
   local release_id=$1 mode=${2:-full} release command_name path check_script health_home
-  local PATH output expected field arguments probe DOTFILES_OFFLINE_RELEASE_ROOT
+  local PATH output expected field probe DOTFILES_OFFLINE_RELEASE_ROOT
   local KUBECTL_VERSION='' HELM_VERSION=''
   local tool version serialized
   local -a probe_args=() versions=()
@@ -1523,15 +1529,15 @@ health_release() {
   fi
   health_python "$release" "${release_metadata[PYTHON_VERSION]}" || return
   for probe in "${RELEASE_PROBES[@]}"; do
-    IFS='|' read -r command_name field arguments <<<"$probe"
+    IFS='|' read -r command_name field <<<"$probe"
     path=$release/bin/$command_name
     [[ -x $path ]] || { die "release executable is missing: $path"; return 1; }
   done
 
   for probe in "${RELEASE_PROBES[@]}"; do
-    IFS='|' read -r command_name field arguments <<<"$probe"
+    IFS='|' read -r command_name field <<<"$probe"
     expected=${release_metadata[$field]}
-    read -r -a probe_args <<<"$arguments"
+    read -r -a probe_args <<<"${TOOL_PROBE_ARGS[$command_name]:---version}"
     output=$("$release/bin/$command_name" "${probe_args[@]}") || return
     health_version "$command_name" "$expected" "$output" || return
   done
@@ -1539,10 +1545,7 @@ health_release() {
     field=${tool^^}_VERSIONS
     serialized=${release_metadata[$field]}
     IFS=, read -r -a versions <<<"$serialized"
-    case $tool in
-      kubectl) probe_args=(version --client=true) ;;
-      helm) probe_args=(version --short) ;;
-    esac
+    read -r -a probe_args <<<"${TOOL_PROBE_ARGS[$tool]}"
     output=$("$release/bin/$tool" "${probe_args[@]}") || return
     health_version "$tool" "${versions[0]}" "$output" || return
     for version in "${versions[@]}"; do
@@ -1589,7 +1592,7 @@ health_current() {
     [[ -n $current ]] || { die 'no current release is selected'; return 1; }
   fi
   health_release "$current" full || return
-  printf '%s: %s is healthy\n' "$PROGRAM" "$current"
+  printf '%s: %s is healthy\n' "${0##*/}" "$current"
 }
 
 list_releases() {
@@ -1655,11 +1658,11 @@ rollback_release() {
     switch_selection current || return
     switch_selection previous || return
     durable_unlink "$PENDING_FILE" || return
-    printf '%s: restored the pre-release baseline; retained %s\n' "$PROGRAM" "$current"
+    printf '%s: restored the pre-release baseline; retained %s\n' "${0##*/}" "$current"
     return
   fi
   if [[ $target == "$current" ]]; then
-    printf '%s: %s is already selected\n' "$PROGRAM" "$current"
+    printf '%s: %s is already selected\n' "${0##*/}" "$current"
     return
   fi
   read_release_metadata "$RELEASE_ROOT/$target/release.env" release_metadata || return
@@ -1668,7 +1671,7 @@ rollback_release() {
   health_release "$target" quick || return
   activate_release switching-existing "$target" "$current" "$previous" || return
   printf '%s: rolled back to %s; reload Bash with: source ~/.bashrc && hash -r\n' \
-    "$PROGRAM" "$target"
+    "${0##*/}" "$target"
 }
 
 restore_owned_links() {
@@ -1742,7 +1745,7 @@ uninstall_release() {
   if [[ -z $release_id ]]; then
     if [[ -z $current && ! -f $OWNERSHIP_FILE ]]; then
       if [[ $RECOVERED_PENDING == true ]]; then
-        printf '%s: recovery already restored the pre-release baseline\n' "$PROGRAM"
+        printf '%s: recovery already restored the pre-release baseline\n' "${0##*/}"
         return 0
       fi
       die 'no active release or baseline to uninstall'
@@ -1754,7 +1757,7 @@ uninstall_release() {
     switch_selection current || return
     switch_selection previous || return
     durable_unlink "$PENDING_FILE" || return
-    printf '%s: restored the pre-release baseline; retained installed releases\n' "$PROGRAM"
+    printf '%s: restored the pre-release baseline; retained installed releases\n' "${0##*/}"
     return
   fi
   [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
@@ -1766,7 +1769,7 @@ uninstall_release() {
   verify_installed_manifest "$RELEASE_ROOT/$release_id" || return
   cleanup_path "$RELEASE_ROOT/$release_id" || return
   cleanup_path "$STATE_DIR/release-identities/$release_id.sha256" || return
-  printf '%s: uninstalled %s\n' "$PROGRAM" "$release_id"
+  printf '%s: uninstalled %s\n' "${0##*/}" "$release_id"
 }
 
 verify_archive() {
@@ -1779,7 +1782,7 @@ verify_archive() {
   [[ ${release_metadata[PLATFORM_ID]} == "$platform" ]] ||
     { die "release is not for $platform"; return 1; }
   health_release "$current" full || return
-  printf '%s: %s is healthy\n' "$PROGRAM" "$current"
+  printf '%s: %s is healthy\n' "${0##*/}" "$current"
 }
 
 main() {

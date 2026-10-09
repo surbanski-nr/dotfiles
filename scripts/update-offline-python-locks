@@ -20,12 +20,11 @@ repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$repo_dir/scripts/setup-lib"
 # shellcheck source=../versions.env
 source "$repo_dir/versions.env"
-PROGRAM=update-offline-python-locks
 validate_tool_config
 
-for command_name in curl find mktemp mv sha256sum tar timeout; do
-  require_command "$command_name"
-done
+# shellcheck source=../system.env
+source "$repo_dir/system.env"
+require_setup_commands update-offline-python-locks
 
 work=$(mktemp -d)
 generator_home=$work/home

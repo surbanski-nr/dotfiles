@@ -2,7 +2,6 @@
 
 set -euo pipefail
 
-PROGRAM=build-dotfiles-release
 TEMP_PATHS=()
 NODE_UPSTREAM_NPM_VERSION=
 declare -A BUILD_VERSIONS=()
@@ -19,7 +18,7 @@ ORDINARY_TOOLS=(
 )
 
 die() {
-  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  printf '%s: %s\n' "${0##*/}" "$*" >&2
   return 1
 }
 
@@ -93,13 +92,15 @@ load_build_config() {
   local source_dir=$1
 
   [[ -f $source_dir/versions.env ]] || { die "missing $source_dir/versions.env"; return 1; }
-  [[ -f $source_dir/dotfiles-release.env ]] ||
-    { die "missing $source_dir/dotfiles-release.env"; return 1; }
+  [[ -f $source_dir/release.env ]] ||
+    { die "missing $source_dir/release.env"; return 1; }
   [[ -f $source_dir/validation.env ]] || { die "missing $source_dir/validation.env"; return 1; }
   [[ -f $source_dir/scripts/setup-lib ]] ||
     { die "missing $source_dir/scripts/setup-lib"; return 1; }
   # shellcheck source=setup-lib
   source "$source_dir/scripts/setup-lib" || return
+  # shellcheck source=../system.env
+  source "$source_dir/system.env" || return
   # shellcheck source=../versions.env
   source "$source_dir/versions.env" || return
   validate_tool_config || return
@@ -117,8 +118,8 @@ load_build_config() {
   done
   select_default_release TOOL_RELEASES npm || return
   BUILD_VERSIONS[npm]=$RELEASE_VERSION
-  # shellcheck source=../dotfiles-release.env
-  source "$source_dir/dotfiles-release.env" || return
+  # shellcheck source=../release.env
+  source "$source_dir/release.env" || return
 }
 
 install_build_packages() {
@@ -132,6 +133,11 @@ install_build_packages() {
     [[ -f $setup_library ]] || { die 'cannot find the trusted setup library'; return 1; }
     # shellcheck disable=SC1090
     source "$setup_library"
+    # The qualification image keeps configuration beside its copied library.
+    local system_config=${setup_library%/*}/../system.env
+    [[ -f $system_config ]] || system_config=${setup_library%/*}/system.env
+    # shellcheck source=../system.env
+    source "$system_config" || return
   fi
   declare -F system_package_list >/dev/null ||
     { die 'cannot load shared system package definitions'; return 1; }
@@ -572,7 +578,10 @@ build_release() {
   cp "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.in \
     "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.lock \
     "$release/python-locks/" || return
-  cp "$source_dir/scripts/dotfiles-release" "$release/dotfiles-release" || return
+  {
+    printf '#!/usr/bin/env bash\n'
+    cat "$source_dir/probes.env" "$source_dir/scripts/dotfiles-release"
+  } >"$release/dotfiles-release" || return
   chmod 0755 "$release/dotfiles-release" || return
   install_release_tools "$release" "$inputs" || return
   ln -s ../dotfiles-release "$release/bin/dotfiles-release" || return
@@ -587,7 +596,7 @@ build_release() {
   tar -C "$work" -czf "$archive" "$release_id" || return
   (cd "$output_dir" && sha256sum "${archive##*/}" >"${archive##*/}.sha256") || return
   chmod -R a+rX "$output_dir" || return
-  printf '%s: built %s\n' "$PROGRAM" "$archive"
+  printf '%s: built %s\n' "${0##*/}" "$archive"
 }
 
 prepare_runtime() {

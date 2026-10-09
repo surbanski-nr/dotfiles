@@ -39,6 +39,10 @@ main() {
 }
 
 load_setup_config() {
+  # shellcheck source=system.env
+  source "$REPO_DIR/system.env"
+  # shellcheck source=probes.env
+  source "$REPO_DIR/probes.env"
   # Task deliberately keeps its only editable pin in validation.env.
   # shellcheck source=validation.env
   source "$REPO_DIR/validation.env"
@@ -52,14 +56,7 @@ load_setup_config() {
 validate_host() {
   [[ $(uname -s) == Linux ]] || report_error 'only Linux is supported'
   [[ $(uname -m) == x86_64 ]] || report_error 'only Linux x86-64 is supported'
-  require_command curl
-  require_command sha256sum
-  require_command tar
-  require_command mktemp
-  require_command find
-  require_command mv
-  require_command ln
-  require_command readlink
+  require_setup_commands setup-tools
 }
 
 normalize_requested() {
@@ -320,11 +317,9 @@ verify_executable() {
   local executable=$2
   local version=${3#v}
   local output
-  local -a arguments=(--version)
+  local -a arguments=()
 
-  if [[ -v TOOL_PROBE_ARGS[$name] ]]; then
-    mapfile -t arguments <<<"${TOOL_PROBE_ARGS[$name]}"
-  fi
+  read -r -a arguments <<<"${TOOL_PROBE_ARGS[$name]:---version}"
   output=$("$executable" "${arguments[@]}" 2>&1)
   [[ $output == *"$version"* ]] ||
     report_error "$name executable did not report version $version: ${output%%$'\n'*}"
@@ -482,11 +477,6 @@ source "$REPO_DIR/scripts/setup-lib"
 # this file does not download, install or validate anything.
 # shellcheck source=versions.env
 source "$REPO_DIR/versions.env"
-PROGRAM=setup-tools
-declare -a NORMALIZED_TOOLS=()
-declare -a TOOL_VERSIONS=()
-declare -a SPEC_DESTS=()
-declare -a SPEC_LINKS=()
 declare -a TEMP_PATHS=()
 declare -a HELD_LOCKS=()
 BIN_DIR=
@@ -500,13 +490,5 @@ RELEASE_VERSION=
 RELEASE_URL=
 RELEASE_SHA256=
 RELEASE_ASSET=
-declare -A TOOL_PROBE_ARGS=(
-  [kubeconform]='-v'
-  [kyverno]='version'
-  [k9s]=$'version\n--short'
-  [kubectl]=$'version\n--client'
-  [helm]=$'version\n--short'
-  [oh-my-posh]='version'
-)
 trap cleanup EXIT
 main "$@"

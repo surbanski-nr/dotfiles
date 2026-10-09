@@ -16,7 +16,6 @@ tool=$1
 
 # shellcheck source=setup-lib
 source "$repo_dir/scripts/setup-lib"
-PROGRAM=install-validation-tool
 # shellcheck source=../validation.env
 source "$repo_dir/validation.env"
 validate_profile VALIDATION_TOOLS

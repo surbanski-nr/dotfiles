@@ -178,7 +178,7 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
-          source dotfiles-release.env
+          source release.env
           case "$PLATFORM" in
             debian-13-x86_64)
               image=$DEBIAN_13_IMAGE; uid=23131; home='/srv/debian offline'
@@ -242,6 +242,8 @@ jobs:
           docker exec "$container" mkdir -p /usr/local/lib/dotfiles
           docker cp scripts/setup-lib \
             "$container:/usr/local/lib/dotfiles/setup-lib"
+          docker cp system.env \
+            "$container:/usr/local/lib/dotfiles/system.env"
           timeout --signal=TERM --kill-after=15s 900s docker exec "$container" \
             bash /usr/local/bin/build-dotfiles-release prepare-runtime \
               "$PLATFORM" offline-test "$TEST_UID" "$TEST_HOME"

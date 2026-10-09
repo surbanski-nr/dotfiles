@@ -105,7 +105,7 @@ validate_bash() {
     tests/bash_test.sh
   )
 
-  check_shell_syntax bash "${files[@]}" dotfiles-release.env validation.env versions.env
+  check_shell_syntax bash "${files[@]}" release.env validation.env versions.env system.env probes.env
   check_markdown_bash README.md SETUP.md TOOL_UPDATES.md \
     nvim2/.config/nvim2/offline-releases.md
   shellcheck --shell=bash --external-sources --source-path=SCRIPTDIR \
@@ -359,14 +359,13 @@ validate_repo() {
   local image
   local variable
 
-  check_shell_syntax bash dotfiles-release.env validation.env versions.env
+  check_shell_syntax bash release.env validation.env versions.env system.env probes.env
   # shellcheck source=../versions.env
   source versions.env
   # shellcheck source=../validation.env
   source validation.env
   # shellcheck source=setup-lib
   source scripts/setup-lib
-  PROGRAM=validate
   validate_tool_config
   validate_validator_config
   for file in nvim2/.config/nvim2/python-locks/{ansible-lint,yamllint}.{in,lock}; do
@@ -381,8 +380,8 @@ validate_repo() {
     grep_status=$?
     ((grep_status == 1)) || die 'cannot inspect release catalogs for legacy scalars'
   fi
-  # shellcheck source=../dotfiles-release.env
-  source dotfiles-release.env
+  # shellcheck source=../release.env
+  source release.env
   for variable in DEBIAN_13_IMAGE UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE \
     AMZN_2023_IMAGE; do
     image=${!variable}
@@ -391,7 +390,7 @@ validate_repo() {
   done
   if grep -qE \
     'nvim2-release|NVIM2_RELEASE|TARGET_(USER|UID|HOME)' \
-    scripts/dotfiles-release scripts/build-dotfiles-release dotfiles-release.env \
+    scripts/dotfiles-release scripts/build-dotfiles-release release.env \
     .github/workflows/dotfiles-release.yml; then
     die 'offline release files retain a legacy name or baked target identity'
   fi

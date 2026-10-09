@@ -36,6 +36,8 @@ main() {
 }
 
 load_config() {
+  # shellcheck source=system.env
+  source "$REPO_DIR/system.env"
   # shellcheck source=versions.env
   source "$REPO_DIR/versions.env"
   validate_tool_config
@@ -50,9 +52,7 @@ load_config() {
 validate_host() {
   [[ $(uname -s) == Linux ]] || report_error 'only Linux is supported'
   [[ $(uname -m) == x86_64 ]] || report_error 'only Linux x86-64 is supported'
-  for command_name in awk cmp curl find git sha256sum tar mktemp mv ln readlink; do
-    require_command "$command_name"
-  done
+  require_setup_commands setup-asdf
 }
 
 normalize_requested() {
@@ -328,8 +328,6 @@ cleanup() {
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/setup-lib
 source "$REPO_DIR/scripts/setup-lib"
-PROGRAM=setup-asdf
-declare -a NORMALIZED_TOOLS=()
 declare -a TEMP_PATHS=()
 BIN_DIR=
 STATE_DIR=
@@ -337,7 +335,6 @@ LOCK_DIR=
 LEGACY_ASDF_TARGET=
 PLUGIN_REPO=
 PLUGIN_COMMIT=
-declare -a TOOL_VERSIONS=()
 temporary_link=
 ASDF_VERSION=
 RELEASE_VERSION=

@@ -30,6 +30,8 @@ write_fake() {
   mkdir -p "$(dirname -- "$path")"
   cat >"$path" <<EOF
 #!/usr/bin/env bash
+if [[ '$name' == k9s && \$* != 'version --short' ]]; then exit 93; fi
+if [[ '$name' == oh-my-posh && \$* != version ]]; then exit 94; fi
 printf '%s\\n' '$name $version'
 EOF
   chmod 0755 "$path"
@@ -66,6 +68,8 @@ make_test_repo() {
   cp "$repo_dir/setup-tools" "$destination/setup-tools"
   cp "$repo_dir/scripts/setup-lib" "$destination/scripts/setup-lib"
   cp "$repo_dir/versions.env" "$destination/versions.env"
+  cp "$repo_dir/system.env" "$destination/system.env"
+  cp "$repo_dir/probes.env" "$destination/probes.env"
   cp "$repo_dir/validation.env" "$destination/validation.env"
 }
 
@@ -181,8 +185,24 @@ assert_link "$test_home/bin/uvx" "uvx-$UV_VERSION"
 assert_link "$test_home/bin/nvim" "nvim-$NVIM_VERSION/bin/nvim"
 [[ -f $test_home/bin/nvim-$NVIM_VERSION/share/nvim/runtime/syntax/test.vim ]] ||
   fail 'Neovim runtime tree was not retained'
-"$test_home/bin/k9s" --version | grep -F "$K9S_VERSION" >/dev/null
+"$test_home/bin/k9s" version --short | grep -F "$K9S_VERSION" >/dev/null
 "$test_home/bin/uvx" --version | grep -F "$UV_VERSION" >/dev/null
+
+prerequisite_repository=$test_root/prerequisite-repository
+prerequisite_home=$test_root/prerequisite-home
+make_test_repo "$prerequisite_repository"
+printf "SETUP_PREREQUISITES[setup-tools]+=' dotfiles-fixture-missing-command'\n" \
+  >>"$prerequisite_repository/system.env"
+set +e
+prerequisite_output=$(run_setup "$prerequisite_home" "$prerequisite_repository" \
+  "$archive_root" k9s 2>&1)
+prerequisite_status=$?
+set -e
+[[ $prerequisite_status -ne 0 && $prerequisite_output == \
+  *'setup-tools: required command is missing: dotfiles-fixture-missing-command'* ]] ||
+  fail 'setup-tools ignored its configured prerequisites'
+[[ ! -e $prerequisite_home/bin && ! -e $prerequisite_home/.local ]] ||
+  fail 'a missing prerequisite changed the target home'
 
 set +e
 retired_from_output=$(run_setup "$test_root/retired-from-home" "$test_repository" \
@@ -267,7 +287,6 @@ tar -C "$tmux_work" -czf "$test_root/tmux.tar.gz" "tmux-$TMUX_VERSION"
 TMUX_SHA256=$(sha256sum "$test_root/tmux.tar.gz" | awk '{print $1}')
 # shellcheck source=../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
-PROGRAM=setup-tools-test
 # Used through a nameref in prepare_artifact.
 # shellcheck disable=SC2034
 declare -A TEST_RELEASES=([tmux]=$'\n'"$TMUX_VERSION|https://example.invalid/tmux.tar.gz|$TMUX_SHA256"$'\n')

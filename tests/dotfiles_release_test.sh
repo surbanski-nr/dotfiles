@@ -43,6 +43,11 @@ if [[ \${1:-} == hold ]]; then
   printf 'after=%s\n' "\$self" >>"\$2"
   exit 0
 fi
+case \$(basename -- "\$0") in
+  k9s) [[ \$* == 'version --short' ]] || exit 93 ;;
+  oh-my-posh | terraform) [[ \$* == version ]] || exit 94 ;;
+  tmux) [[ \$* == -V ]] || exit 95 ;;
+esac
 printf '%s fixture $version\n' "\$(basename -- "\$0")"
 EOF
   if [[ ${path##*/} == nvim ]]; then
@@ -110,7 +115,10 @@ make_artifact() {
     "$release/python-wheelhouse" "$release/share/tmux/plugins" \
     "$release/tools/bin" "$release/tools/nvim/bin" "$release/tools/tmux/bin"
 
-  cp "$repo_dir/scripts/dotfiles-release" "$release/dotfiles-release"
+  {
+    printf '#!/usr/bin/env bash\n'
+    cat "$repo_dir/probes.env" "$repo_dir/scripts/dotfiles-release"
+  } >"$release/dotfiles-release"
   chmod 0755 "$release/dotfiles-release"
   ln -s ../dotfiles-release "$release/bin/dotfiles-release"
   for command_name in nvim tmux; do

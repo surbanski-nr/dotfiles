@@ -19,7 +19,6 @@ fail() {
 source "$repo_dir/versions.env"
 # shellcheck source=../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
-PROGRAM=setup-asdf-test
 select_default_release TOOL_RELEASES asdf
 ASDF_VERSION=$RELEASE_VERSION
 
@@ -89,6 +88,7 @@ mkdir -p "$test_repo/scripts" "$test_home/bin"
 cp "$repo_dir/setup-asdf" "$test_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$test_repo/scripts/setup-lib"
 cp "$repo_dir/versions.env" "$test_repo/versions.env"
+cp "$repo_dir/system.env" "$test_repo/system.env"
 
 cat >"$test_home/bin/kubectl" <<'EOF'
 #!/usr/bin/env bash
@@ -137,6 +137,7 @@ mkdir -p "$legacy_repo/scripts" "$legacy_home/bin" "$legacy_archive_root"
 cp "$repo_dir/setup-asdf" "$legacy_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$legacy_repo/scripts/setup-lib"
 cp "$repo_dir/versions.env" "$legacy_repo/versions.env"
+cp "$repo_dir/system.env" "$legacy_repo/system.env"
 prepare_plugin "$legacy_home" "$legacy_repo"
 write_asdf_fixture "$legacy_archive_root/asdf" "$ASDF_VERSION"
 tar -C "$legacy_archive_root" -czf "$legacy_archive" asdf
@@ -230,6 +231,7 @@ mkdir -p "$reconcile_repo/scripts" "$reconcile_home/bin"
 cp "$repo_dir/setup-asdf" "$reconcile_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$reconcile_repo/scripts/setup-lib"
 cp "$repo_dir/versions.env" "$reconcile_repo/versions.env"
+cp "$repo_dir/system.env" "$reconcile_repo/system.env"
 prepare_plugin "$reconcile_home" "$reconcile_repo"
 write_asdf_fixture "$reconcile_home/bin/asdf-0.19.0" 0.19.0
 write_asdf_fixture "$reconcile_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
@@ -259,6 +261,7 @@ mkdir -p "$order_repo/scripts" "$order_home/bin"
 cp "$repo_dir/setup-asdf" "$order_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$order_repo/scripts/setup-lib"
 cp "$repo_dir/versions.env" "$order_repo/versions.env"
+cp "$repo_dir/system.env" "$order_repo/system.env"
 prepare_plugin "$order_home" "$order_repo"
 write_asdf_fixture "$order_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
 ln -s "asdf-$ASDF_VERSION" "$order_home/bin/asdf"
@@ -278,6 +281,7 @@ mkdir -p "$default_repo/scripts" "$default_home/bin"
 cp "$repo_dir/setup-asdf" "$default_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$default_repo/scripts/setup-lib"
 cp "$repo_dir/versions.env" "$default_repo/versions.env"
+cp "$repo_dir/system.env" "$default_repo/system.env"
 for tool in "${ASDF_TOOLS[@]}"; do
   prepare_plugin "$default_home" "$default_repo" "$tool"
 done
@@ -307,6 +311,7 @@ mkdir -p "$failure_repo/scripts" "$failure_home/bin"
 cp "$repo_dir/setup-asdf" "$failure_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$failure_repo/scripts/setup-lib"
 cp "$repo_dir/versions.env" "$failure_repo/versions.env"
+cp "$repo_dir/system.env" "$failure_repo/system.env"
 prepare_plugin "$failure_home" "$failure_repo"
 write_asdf_fixture "$failure_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
 ln -s "asdf-$ASDF_VERSION" "$failure_home/bin/asdf"

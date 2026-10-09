@@ -28,7 +28,7 @@ cp -a "$candidate_root/current" "$candidate_root/candidate"
 
 Edit only the intended records in `candidate/versions.env`, validator records
 in `candidate/validation.env`, or builder images in
-`candidate/dotfiles-release.env`. `TOOL_RELEASES` and `VALIDATION_RELEASES`
+`candidate/release.env`. `TOOL_RELEASES` and `VALIDATION_RELEASES`
 store ordered `version|full_URL|SHA256` records. The first record is the
 default and cannot fall back if its artifact is absent. Task belongs only to
 `VALIDATION_RELEASES`. `ASDF_PLUGINS` owns plugin repository and commit pins,
