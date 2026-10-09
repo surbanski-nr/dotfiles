@@ -177,22 +177,18 @@ validate_validator_config() {
 }
 
 validate_tool_config() {
-  local plugin record repository commit tool version profile seen=' '
+  local record repository commit tool version profile
 
   validate_release_catalog TOOL_RELEASES || return
-  for profile in DAILY_TOOLS OPTIONAL_TOOLS OFFLINE_TOOLS ASDF_TOOLS; do
+  for profile in ONLINE_TOOLS OFFLINE_TOOLS; do
     validate_profile "$profile" || return
   done
-  for profile in DAILY_TOOLS OPTIONAL_TOOLS OFFLINE_TOOLS; do
+  for profile in ONLINE_TOOLS OFFLINE_TOOLS; do
     local -n tools=$profile
     for tool in "${tools[@]}"; do
-      if [[ $tool == task ]]; then
-        [[ $profile != OPTIONAL_TOOLS ]] ||
-          report_error 'task is only supported in the daily and offline profiles' || return
-      else
-        [[ -v TOOL_RELEASES[$tool] ]] ||
-          report_error "$profile references unknown tool $tool" || return
-      fi
+      [[ $tool == task ]] && continue
+      [[ -v TOOL_RELEASES[$tool] ]] ||
+        report_error "$profile references unknown tool $tool" || return
     done
     unset -n tools
   done
@@ -206,21 +202,17 @@ validate_tool_config() {
       report_error "offline default $tool $RELEASE_VERSION requires an artifact" || return
     artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   done
-  for profile in DAILY_TOOLS OPTIONAL_TOOLS; do
-    local -n tools=$profile
-    for tool in "${tools[@]}"; do
-      [[ $tool == task ]] && continue
-      release_versions TOOL_RELEASES "$tool" || return
-      for version in "${RELEASE_VERSIONS[@]}"; do
-        select_release TOOL_RELEASES "$tool" "$version" || return
-        [[ $RELEASE_URL != - ]] ||
-          report_error "$profile release $tool $version requires an artifact" || return
-        artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
-        ((${#SPEC_LINKS[@]} > 0)) ||
-          report_error "$profile tool $tool is not supported by setup-tools" || return
-      done
+  for tool in "${ONLINE_TOOLS[@]}"; do
+    [[ $tool == task ]] && continue
+    release_versions TOOL_RELEASES "$tool" || return
+    for version in "${RELEASE_VERSIONS[@]}"; do
+      select_release TOOL_RELEASES "$tool" "$version" || return
+      [[ $RELEASE_URL != - ]] ||
+        report_error "ONLINE_TOOLS release $tool $version requires an artifact" || return
+      artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
+      ((${#SPEC_LINKS[@]} > 0)) ||
+        report_error "ONLINE_TOOLS tool $tool is not supported by setup-tools" || return
     done
-    unset -n tools
   done
   for tool in asdf npm; do
     select_default_release TOOL_RELEASES "$tool" || return
@@ -239,12 +231,12 @@ validate_tool_config() {
 
   declare -p ASDF_PLUGINS 2>/dev/null | grep -q '^declare -A' ||
     report_error 'ASDF_PLUGINS must be an associative array' || return
-  for tool in "${ASDF_TOOLS[@]}"; do
+  ((${#ASDF_PLUGINS[@]} > 0)) || report_error 'ASDF_PLUGINS is empty' || return
+  for tool in "${!ASDF_PLUGINS[@]}"; do
+    [[ $tool =~ ^[a-z0-9-]+$ ]] ||
+      report_error "ASDF_PLUGINS contains invalid tool name $tool" || return
     [[ -v TOOL_RELEASES[$tool] ]] ||
-      report_error "ASDF_TOOLS references unknown tool $tool" || return
-    [[ -v ASDF_PLUGINS[$tool] ]] ||
-      report_error "ASDF_PLUGINS has no entry for $tool" || return
-    seen+="$tool "
+      report_error "ASDF_PLUGINS references unknown tool $tool" || return
     record=${ASDF_PLUGINS[$tool]}
     [[ $record != *[[:space:]]* && ${record//[^|]/} == '|' ]] ||
       report_error "ASDF_PLUGINS[$tool] must contain repository|commit" || return
@@ -252,10 +244,6 @@ validate_tool_config() {
     [[ $repository == https://*.git ]] ||
       report_error "ASDF_PLUGINS[$tool] has an invalid repository" || return
     validate_commit "ASDF_PLUGINS[$tool] commit" "$commit" || return
-  done
-  for plugin in "${!ASDF_PLUGINS[@]}"; do
-    [[ $seen == *" $plugin "* ]] ||
-      report_error "ASDF_PLUGINS contains unsupported plugin $plugin" || return
   done
   for commit in "$TPM_COMMIT" "$TMUX_SENSIBLE_COMMIT" \
     "$TMUX_RESURRECT_COMMIT" "$TMUX_CONTINUUM_COMMIT"; do
@@ -327,6 +315,12 @@ artifact_layout() {
       SPEC_MEMBER="ripgrep-${version}-x86_64-unknown-linux-musl/rg"
       SPEC_DESTS=("rg-$version")
       SPEC_LINKS=("rg:rg-$version")
+      ;;
+    fd)
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER="fd-v${version}-x86_64-unknown-linux-musl/fd"
+      SPEC_DESTS=("fd-$version")
+      SPEC_LINKS=("fd:fd-$version")
       ;;
     uv)
       SPEC_FORMAT=gz-pair

@@ -195,6 +195,22 @@ assert_contains "$independent_output" 'cat=file vi=function vim=alias v=function
 assert_contains "$(<"$editor_log")" 'vi:first'
 assert_contains "$(<"$editor_log")" 'vim:second'
 
+git_home=$test_root/git-home
+git_bin=$test_root/git-bin
+git_editor_log=$test_root/git-editor.log
+mkdir -p "$git_home" "$git_bin"
+cp "$repo_dir/git/.gitconfig" "$git_home/.gitconfig"
+cp "$repo_dir/tests/fixtures/bash/git-editor" "$git_bin/vi"
+chmod 0755 "$git_bin/vi"
+ln -s "$(PATH="$original_path" command -v git)" "$git_bin/git"
+timeout 15s env -u GIT_EDITOR -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
+  HOME="$git_home" PATH="$git_bin:/usr/bin:/bin" TERM=xterm-256color \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$git_home/.gitconfig" \
+  TEST_GIT_EDITOR_LOG="$git_editor_log" TEST_REPO_DIR="$repo_dir" \
+  TEST_SCENARIO=git-editor bash --noprofile --norc -i "$scenario_fixture"
+[[ $(<"$git_editor_log") == 'editor=vi visual=vi' ]] ||
+  fail 'Git commit or shell editor defaults did not use system vi'
+
 checkout_with_spaces="$test_root/checkout with spaces"
 mkdir -p "$checkout_with_spaces/scripts"
 custom_output=$(

@@ -3,14 +3,18 @@
 set -euo pipefail
 
 usage() {
+  local -a names=()
   cat <<'EOF'
 Usage: setup-asdf [NAME ...]
 
 Install the pinned asdf executable, pin the selected project-tool plugins,
 install every listed version and set the first version as the home default.
 
-Names: terraform kubectl helm python nodejs terragrunt
 EOF
+  mapfile -t names < <(printf '%s\n' "${!ASDF_PLUGINS[@]}" | LC_ALL=C sort)
+  printf 'Names:'
+  printf ' %s' "${names[@]}"
+  printf '\n'
 }
 
 main() {
@@ -25,7 +29,7 @@ main() {
   done
   load_config
   if ((${#requested[@]} == 0)); then
-    requested=("${ASDF_TOOLS[@]}")
+    mapfile -t requested < <(printf '%s\n' "${!ASDF_PLUGINS[@]}" | LC_ALL=C sort)
   fi
   validate_host
   normalize_requested "${requested[@]}"
@@ -38,8 +42,6 @@ main() {
 load_config() {
   # shellcheck source=system.env
   source "$REPO_DIR/system.env"
-  # shellcheck source=versions.env
-  source "$REPO_DIR/versions.env"
   validate_tool_config
   select_default_release TOOL_RELEASES asdf
   ASDF_VERSION=$RELEASE_VERSION
@@ -64,7 +66,7 @@ normalize_requested() {
   NORMALIZED_TOOLS=()
   for name in "$@"; do
     supported=0
-    for allowed in "${ASDF_TOOLS[@]}"; do
+    for allowed in "${!ASDF_PLUGINS[@]}"; do
       if [[ $name == "$allowed" ]]; then supported=1; break; fi
     done
     ((supported == 1)) || report_error "unknown project tool: $name"
@@ -328,6 +330,8 @@ cleanup() {
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/setup-lib
 source "$REPO_DIR/scripts/setup-lib"
+# shellcheck source=versions.env
+source "$REPO_DIR/versions.env"
 declare -a TEMP_PATHS=()
 BIN_DIR=
 STATE_DIR=

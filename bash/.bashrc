@@ -424,8 +424,8 @@ fi
 unset _dotfiles_omp_provider
 
 export NVIM_APPNAME="${NVIM_APPNAME:-nvim2}"
-export VISUAL=nvim
-export EDITOR=nvim
+export VISUAL=vi
+export EDITOR=vi
 
 if [ -f ~/.extras ]; then
   # Private optional configuration is outside this repository's analysis.

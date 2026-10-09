@@ -193,7 +193,7 @@ install or use asdf. Put the earlier release record first for
 the tool in `TOOL_RELEASES`, then reconcile it:
 
 ```bash
-./setup-asdf terraform kubectl helm python nodejs
+./setup-asdf terraform python nodejs terragrunt
 asdf current
 ```
 
@@ -203,6 +203,9 @@ required project versions in the list, use the asdf shims, and do not add
 same-named launchers in `~/bin`. After changing Node.js or global npm tools,
 run `asdf reshim nodejs VERSION` and check both `node --version` and
 `npm --version`.
+
+Kubectl and Helm are installed directly by the default `ONLINE_TOOLS` profile.
+Include them in `setup-asdf` only in a home without their direct launchers.
 
 Outside complete releases, online direct kubectl and Helm installations are
 the multi-version case in `setup-tools`. Run a version-qualified executable

@@ -10,7 +10,7 @@ Download and install selected Linux x86-64 tools under ~/bin.
 For offline deployment, use the complete dotfiles release instead.
 EOF
   printf 'Names:'
-  printf ' %s' "${DAILY_TOOLS[@]}" "${OPTIONAL_TOOLS[@]}"
+  printf ' %s' "${ONLINE_TOOLS[@]}"
   printf '\n'
 }
 
@@ -30,7 +30,7 @@ main() {
 
   load_setup_config
   if ((${#requested[@]} == 0)); then
-    requested=("${DAILY_TOOLS[@]}")
+    requested=("${ONLINE_TOOLS[@]}")
   fi
   validate_host
   normalize_requested "${requested[@]}"
@@ -68,7 +68,7 @@ normalize_requested() {
   NORMALIZED_TOOLS=()
   for name in "$@"; do
     supported=0
-    for allowed in "${DAILY_TOOLS[@]}" "${OPTIONAL_TOOLS[@]}"; do
+    for allowed in "${ONLINE_TOOLS[@]}"; do
       if [[ $name == "$allowed" ]]; then supported=1; break; fi
     done
     ((supported == 1)) || report_error "unknown tool: $name"

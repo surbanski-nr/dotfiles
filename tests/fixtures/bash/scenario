@@ -97,6 +97,15 @@ case $TEST_SCENARIO in
     printf 'cat=%s vi=%s vim=%s v=%s\n' \
       "$(type -t cat)" "$(type -t vi)" "$(type -t vim)" "$(type -t v)"
     ;;
+  git-editor)
+    load_bashrc
+    load_bashrc
+    git init -q "$HOME/repository"
+    git -C "$HOME/repository" -c user.name=fixture \
+      -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+      -c core.hooksPath=/dev/null commit -q --allow-empty
+    [[ $(git -C "$HOME/repository" log -1 --format=%s) == 'system vi commit' ]]
+    ;;
   custom-dotfiles)
     load_bashrc
     eval cddot

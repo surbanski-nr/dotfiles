@@ -29,6 +29,7 @@ SNAPSHOT_MODE=
 SNAPSHOT_IDENTITY=
 RECOVERED_PENDING=false
 RELEASE_PROBES=(
+  'fd|FD_VERSION'
   'nvim|NVIM_VERSION'
   'tmux|TMUX_VERSION'
   'node|NODE_VERSION'
@@ -48,7 +49,7 @@ RELEASE_METADATA_FIELDS=(
   NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION
   PYTHON_VERSION PYTHON_BUILD TMUX_VERSION RG_VERSION FZF_VERSION
   ZOXIDE_VERSION K9S_VERSION KUBECTX_VERSION OMP_VERSION TASK_VERSION
-  TERRAFORM_VERSION KUBECTL_VERSIONS HELM_VERSIONS OFFLINE_TOOLS PAYLOAD_PATHS
+  TERRAFORM_VERSION KUBECTL_VERSIONS HELM_VERSIONS OFFLINE_TOOLS PAYLOAD_PATHS FD_VERSION
 )
 
 die() {
@@ -171,6 +172,7 @@ read_release_metadata() {
     parsed["$key"]=$value
   done <"$file"
   for required in "${RELEASE_METADATA_FIELDS[@]}"; do
+    [[ $required == FD_VERSION ]] && continue
     [[ -v parsed[$required] ]] || { die "missing release metadata key: $required"; return 1; }
   done
 
@@ -186,7 +188,8 @@ read_release_metadata() {
   for key in NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION \
     PYTHON_VERSION TMUX_VERSION RG_VERSION \
     FZF_VERSION ZOXIDE_VERSION K9S_VERSION KUBECTX_VERSION OMP_VERSION TASK_VERSION \
-    TERRAFORM_VERSION; do
+    TERRAFORM_VERSION FD_VERSION; do
+    [[ $key == FD_VERSION && ! -v parsed[$key] ]] && continue
     [[ ${parsed[$key]} =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] ||
       { die "invalid release tool version: $key"; return 1; }
   done
@@ -204,9 +207,14 @@ read_release_metadata() {
   done
   [[ ${parsed[PYTHON_BUILD]} =~ ^[0-9]{8}$ ]] ||
     { die 'invalid standalone Python build'; return 1; }
-  [[ ${parsed[OFFLINE_TOOLS]} == \
-    nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm ]] ||
-    { die 'release metadata has an invalid offline tool profile'; return 1; }
+  # Retained releases from before fd was bundled have neither the tool nor its pin.
+  value=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm
+  if [[ ${parsed[OFFLINE_TOOLS]} == "$value,fd" ]]; then
+    [[ -v parsed[FD_VERSION] ]] || { die 'missing release metadata key: FD_VERSION'; return 1; }
+  else
+    [[ ${parsed[OFFLINE_TOOLS]} == "$value" && ! -v parsed[FD_VERSION] ]] ||
+      { die 'release metadata has an invalid offline tool profile'; return 1; }
+  fi
   [[ ${parsed[PAYLOAD_PATHS]} == \
     bin,config,dotfiles,python-locks,python-wheelhouse,share,tools ]] ||
     { die 'release metadata has an invalid payload layout'; return 1; }
@@ -558,7 +566,7 @@ managed_path_target_valid() {
     "$HOME/bin/"*)
       command_name=${path##*/}
       case $command_name in
-        dotfiles-release | nvim | tmux | node | npm | npx | corepack | rg | zoxide | \
+        dotfiles-release | nvim | tmux | node | npm | npx | corepack | rg | fd | zoxide | \
           k9s | kubectx | kubens | oh-my-posh | task | fzf | terraform | kubectl | helm) ;;
         *) return 1 ;;
       esac
@@ -635,7 +643,7 @@ setup_tools_state_owns_link() {
       version=${version%/bin/nvim}
       destination=${target%/bin/nvim}
       ;;
-    rg:rg-* | zoxide:zoxide-* | k9s:k9s-* | kubectx:kubectx-* | \
+    rg:rg-* | fd:fd-* | zoxide:zoxide-* | k9s:k9s-* | kubectx:kubectx-* | \
       kubens:kubens-* | oh-my-posh:oh-my-posh-* | task:task-*)
       name=$command_name
       version=${target#"$command_name-"}
@@ -1463,6 +1471,9 @@ health_bash() {
     k9s kubectx kubens oh-my-posh task fzf terraform kubectl helm; do
     ln -s "$release/bin/$command_name" "$health_home/bin/$command_name" || return
   done
+  if [[ -x $release/bin/fd ]]; then
+    ln -s "$release/bin/fd" "$health_home/bin/fd" || return
+  fi
   ln -s "$release/dotfiles/bash/.bashrc" "$health_home/.bashrc" || return
   ln -s "$release/dotfiles/bash/.bash_aliases" "$health_home/.bash_aliases" || return
   ln -s "$release/dotfiles/oh-my-posh/.oh-my-posh.omp.json" "$health_home/.oh-my-posh.omp.json" || return
@@ -1530,12 +1541,14 @@ health_release() {
   health_python "$release" "${release_metadata[PYTHON_VERSION]}" || return
   for probe in "${RELEASE_PROBES[@]}"; do
     IFS='|' read -r command_name field <<<"$probe"
+    [[ $field == FD_VERSION && ! -v release_metadata[$field] ]] && continue
     path=$release/bin/$command_name
     [[ -x $path ]] || { die "release executable is missing: $path"; return 1; }
   done
 
   for probe in "${RELEASE_PROBES[@]}"; do
     IFS='|' read -r command_name field <<<"$probe"
+    [[ $field == FD_VERSION && ! -v release_metadata[$field] ]] && continue
     expected=${release_metadata[$field]}
     read -r -a probe_args <<<"${TOOL_PROBE_ARGS[$command_name]:---version}"
     output=$("$release/bin/$command_name" "${probe_args[@]}") || return

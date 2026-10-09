@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+printf 'editor=%s visual=%s\n' "$EDITOR" "$VISUAL" >"$TEST_GIT_EDITOR_LOG"
+printf 'system vi commit\n' >"$1"

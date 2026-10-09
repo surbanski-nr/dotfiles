@@ -101,6 +101,8 @@ EOF
 make_artifact() {
   local commit=$1 marker=$2 destination=$3
   local release_version=${4:-1.0}
+  local include_fd=${5:-true}
+  local offline_profile=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm
   local id=dotfiles-${commit:0:12}
   local stage=$test_root/stage-$marker release=$test_root/stage-$marker/$id
   local command_name plugin plugin_dir version
@@ -138,6 +140,11 @@ make_artifact() {
     ln -s "$command_name-$release_version" "$release/tools/bin/$command_name"
     install -m 0755 "$repo_dir/scripts/offline-kubernetes-client" "$release/bin/$command_name"
   done
+  if [[ $include_fd == true ]]; then
+    write_fake_tool "$release/tools/bin/fd" "$release_version"
+    ln -s ../tools/bin/fd "$release/bin/fd"
+    offline_profile+=,fd
+  fi
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python"
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python3"
   # The generated launchers intentionally expand these expressions at runtime.
@@ -228,9 +235,12 @@ make_artifact() {
     "TERRAFORM_VERSION=$release_version" \
     "KUBECTL_VERSIONS=$release_version,0.9" \
     "HELM_VERSIONS=$release_version,0.9" \
-    'OFFLINE_TOOLS=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm' \
+    "OFFLINE_TOOLS=$offline_profile" \
     'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
     >"$release/release.env"
+  if [[ $include_fd == true ]]; then
+    printf 'FD_VERSION=%s\n' "$release_version" >>"$release/release.env"
+  fi
   printf 'marker=%s\n' "$marker" >"$release/build-manifest.txt"
   (
     cd "$release"
@@ -268,9 +278,53 @@ id_three=dotfiles-${commit_three:0:12}
 artifact_one=$test_root/one.tar.gz
 artifact_two=$test_root/two.tar.gz
 artifact_three=$test_root/three.tar.gz
-make_artifact "$commit_one" one "$artifact_one"
+make_artifact "$commit_one" one "$artifact_one" 1.0 false
 make_artifact "$commit_two" two "$artifact_two" 2.0
 make_artifact "$commit_three" three "$artifact_three"
+
+test_home=$test_root/fd-validation-home
+fd_broken=$test_root/fd-broken.tar.gz
+make_artifact "$commit_three" fd-missing-pin "$fd_broken"
+sed -i '/^FD_VERSION=/d' "$test_root/stage-fd-missing-pin/$id_three/release.env"
+repack_artifact fd-missing-pin "$id_three" "$fd_broken"
+if run_manager verify debian-13-x86_64 "$fd_broken" >"$test_root/fd-missing-pin.log" 2>&1; then
+  fail 'fd profile was accepted without its version pin'
+fi
+make_artifact "$commit_three" fd-missing-executable "$fd_broken"
+rm "$test_root/stage-fd-missing-executable/$id_three/tools/bin/fd"
+repack_artifact fd-missing-executable "$id_three" "$fd_broken"
+if run_manager install "$fd_broken" >"$test_root/fd-missing-executable.log" 2>&1; then
+  fail 'fd release was installed without its executable'
+fi
+make_artifact "$commit_three" fd-wrong-version "$fd_broken"
+sed -i 's/^FD_VERSION=.*/FD_VERSION=9.9/' "$test_root/stage-fd-wrong-version/$id_three/release.env"
+repack_artifact fd-wrong-version "$id_three" "$fd_broken"
+if run_manager install "$fd_broken" >"$test_root/fd-wrong-version.log" 2>&1; then
+  fail 'fd release was installed with an unexpected executable version'
+fi
+[[ ! -e $test_home/dotfiles-releases/current ]] || fail 'failed fd release became active'
+
+test_home=$test_root/fd-connected-migration-home
+mkdir -p "$test_home/bin" "$test_home/.local/state/dotfiles/setup-tools"
+write_fake_tool "$test_home/bin/fd-0.9" 0.9
+ln -s fd-0.9 "$test_home/bin/fd"
+fd_content=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+  -C "$test_home/bin" -cf - -- fd-0.9 | sha256sum | awk '{print $1}')
+printf 'complete\t%s\t%s\n' \
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  "$fd_content" >"$test_home/.local/state/dotfiles/setup-tools/fd-0.9.state"
+run_manager install "$artifact_two" >/dev/null
+[[ $("$test_home/bin/fd" --version) == *'fixture 2.0'* ]] ||
+  fail 'offline release did not adopt the owned connected fd launcher'
+run_manager uninstall >/dev/null
+assert_link "$test_home/bin/fd" fd-0.9
+[[ $("$test_home/bin/fd" --version) == *'fixture 0.9'* ]] ||
+  fail 'uninstall did not restore the connected fd payload'
+printf '\nmodified\n' >>"$test_home/bin/fd-0.9"
+if run_manager install "$artifact_two" >"$test_root/fd-modified-provider.log" 2>&1; then
+  fail 'offline release adopted a modified connected fd payload'
+fi
+assert_link "$test_home/bin/fd" fd-0.9
 
 reserved_root=$test_root/reserved-paths
 mkdir -p "$reserved_root"
@@ -1002,6 +1056,9 @@ run_manager install "$artifact_one"
 
 process_record=$test_root/process-record
 run_manager install "$artifact_two"
+assert_link "$test_home/bin/fd" '../dotfiles-releases/current/bin/fd'
+[[ $("$test_home/bin/fd" --version) == *'fixture 2.0'* ]] ||
+  fail 'fd launcher did not select the active release'
 [[ $("$test_home/bin/kubectl") == *'fixture 2.0'* &&
   $("$test_home/bin/helm") == *'fixture 2.0'* &&
   $(KUBECTL_VERSION=0.9 "$test_home/bin/kubectl") == *'fixture 0.9'* ]] ||
@@ -1022,6 +1079,7 @@ grep -F "$id_one/tools/nvim/bin/nvim" "$process_record" >/dev/null ||
   fail 'running process did not stay on its physical release'
 assert_link "$test_home/dotfiles-releases/current" "$id_one"
 assert_link "$test_home/dotfiles-releases/previous" "$id_two"
+[[ ! -e $test_home/bin/fd ]] || fail 'legacy rollback retained an executable from the newer release'
 [[ $("$test_home/bin/kubectl") == *'fixture 1.0'* &&
   $("$test_home/bin/helm") == *'fixture 1.0'* ]] ||
   fail 'client launchers did not follow rollback'

@@ -9,6 +9,50 @@ Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2023.
 The complete connected and offline-release procedures, exact tool ownership
 and private input files are in [SETUP.md](SETUP.md).
 
+### GitHub SSH access
+
+On the host where you will use GitHub, generate a key if you do not already
+have one. Keep the private key on that host and choose a passphrase:
+
+```bash
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+ssh-keygen -t ed25519 \
+  -C "122265380+surbanski-nr@users.noreply.github.com" \
+  -f "$HOME/.ssh/github"
+cat "$HOME/.ssh/github.pub"
+```
+
+Do not overwrite an existing key. Add the public key to
+[GitHub's SSH keys](https://github.com/settings/keys), then load the private
+key into an agent for the current session. Reuse an existing agent if one
+is already available:
+
+```bash
+if [[ -z ${SSH_AUTH_SOCK:-} ]]; then
+  eval "$(ssh-agent -s)"
+fi
+ssh-add "$HOME/.ssh/github"
+ssh -o IdentitiesOnly=yes -i "$HOME/.ssh/github" -T git@github.com
+```
+
+On the first connection, compare the displayed host fingerprint with
+[GitHub's published SSH fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)
+before answering `yes`. SSH then records the trusted host in
+`~/.ssh/known_hosts`. Successful authentication prints a greeting but exits
+with status 1 because GitHub does not provide shell access. Dotfiles startup
+does not start an agent or load keys automatically.
+
+Clone over SSH once access is verified, or use HTTPS if it is already configured:
+
+```bash
+mkdir -p "$HOME/github.com/surbanski"
+git clone git@github.com:surbanski-nr/dotfiles.git "$HOME/github.com/surbanski/dotfiles"
+cd "$HOME/github.com/surbanski/dotfiles"
+```
+
+### Deployment
+
 The preferred deployment is a complete offline release, built on a connected
 machine and installed without network access. Each release contains its own
 tools, including every pinned kubectl and Helm version. `KUBECTL_VERSION` and
@@ -25,7 +69,7 @@ user. Only `setup-system` uses `sudo`:
 ./setup-system
 ./setup-tools
 # Optional online project runtimes, including .tool-versions support:
-./setup-asdf
+./setup-asdf terraform python nodejs terragrunt
 
 for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
   if [[ -f $file && ! -L $file && ! -e $file.before-dotfiles && ! -L $file.before-dotfiles ]]; then
@@ -55,10 +99,12 @@ Existing Homebrew installations and private shell configuration are left
 alone. Setup does not install Homebrew or initialize it from Bash.
 
 Release data is explicit: `versions.env` contains ordered
-`version|full_URL|SHA256` records for daily tools and project runtimes, while
+`version|full_URL|SHA256` records for online tools and project runtimes, while
 `validation.env` owns the validator list and records, including the only Task
-pin. The first record is the default. `ASDF_PLUGINS` separately pins plugin
-repositories and commits; asdf keeps responsibility for fetching and verifying
+pin. `ONLINE_TOOLS` and `OFFLINE_TOOLS` select the tools for each route,
+including `fd`. Online setup installs kubectl and Helm directly by default.
+The first record is the default. `ASDF_PLUGINS` is the sole asdf tool list and
+pins plugin repositories and commits; asdf keeps responsibility for fetching and verifying
 its plugins.
 Asdf remains an optional online provider, independent of offline releases.
 The tmux plugin `*_REPO` and `*_COMMIT` pairs also live in `versions.env`.
@@ -87,7 +133,8 @@ rebuilds. The [offline release runbook](nvim2/.config/nvim2/offline-releases.md)
 covers connected builds, restricted installation and whole-dotfiles rollback.
 
 `v` starts Nvim2. The shell configuration does not redefine `cat`, `vi` or
-`vim`, so the system editors remain independent. `old-nvim` is an unsupported
+`vim`. Git's editor and the shell's `EDITOR`/`VISUAL` defaults use system `vi`.
+`old-nvim` is an unsupported
 archived profile and is not installed by the normal setup.
 
 ## Updates and rollback

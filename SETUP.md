@@ -13,7 +13,7 @@ cd "$HOME/github.com/surbanski/dotfiles"
 ./setup-system
 ./setup-tools
 # Optional online project runtimes:
-./setup-asdf
+./setup-asdf terraform python nodejs terragrunt
 
 for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
   if [[ -f $file && ! -L $file && ! -e $file.before-dotfiles && ! -L $file.before-dotfiles ]]; then
@@ -39,14 +39,26 @@ remaining conflict, including a foreign symlink.
 required default without an artifact is an error, with no fallback to a later
 record. `validation.env` uses the same record format in
 `VALIDATION_RELEASES`, and `VALIDATION_TOOLS` is the installer's authoritative
-tool list. Task exists only there. Daily ShellCheck, validation ShellCheck and
+tool list. Task exists only there. Online ShellCheck, validation ShellCheck and
 Mason ShellCheck remain independent pins.
 
-`setup-tools` downloads and installs the selected daily tools from these exact
+Yamllint is a Python package installed in an isolated validation venv, not a
+prebuilt executable archive. Its PyYAML dependency parses YAML, and pathspec
+handles ignore patterns. All three versions are pinned in `validation.env`
+to keep validator behavior consistent.
+
+`ONLINE_TOOLS` and `OFFLINE_TOOLS` are the authoritative tool profiles, with
+one tool per line. Both include `fd`, installed from its verified official
+Linux musl archive rather than an OS package. GNU `find` remains a system
+prerequisite for scripts that depend on its semantics.
+
+`setup-tools` downloads and installs the selected online tools from these exact
 official release records. It supports only connected installation; offline
-deployment uses the complete release described below. Optional online
+deployment uses the complete release described below. Without names, it
+installs all of `ONLINE_TOOLS`, including kubectl and Helm. Optional online
 `setup-asdf` reads runtime versions from the same catalog, but plugin repository
-and commit data from `ASDF_PLUGINS`; plugin downloads and
+and commit data from `ASDF_PLUGINS`, whose keys are also the supported tool
+list and the alphabetical no-argument install order; plugin downloads and
 verification remain asdf's responsibility. It selects the first version for
 each runtime as the home default. A project `.tool-versions` file continues to
 override those defaults.
@@ -66,6 +78,13 @@ Package names and command names are separate, since packages such as
 `diffutils` provide commands such as `cmp`. Amazon Linux's full GnuPG swap
 remains part of the connected installation procedure.
 
+The runtime role is the minimal OS baseline for running a prepared offline
+release. The build role adds compilers and libraries for disposable release
+builders. The connected role is the normal online-machine setup: download and
+verification tools, interactive utilities such as tmux, htop and mc, and
+headers needed by asdf to compile Python and other project runtimes. It is
+not a second release-builder role; builder-only packages stay out of it.
+
 `probes.env` owns tool version arguments shared by `setup-tools` and release
 health. Each value contains whitespace-separated arguments; omitted tools use
 `--version`. The builder embeds this data in the generated standalone manager,
@@ -73,8 +92,11 @@ so it works outside the checkout and can check older releases that did not
 include the shared configuration file. Edit the source configuration and
 rebuild; do not edit generated managers.
 
-The direct kubectl and Helm route is an online alternative for machines where
-asdf is not appropriate. Do not install both providers in the same home:
+Kubectl and Helm use direct installation by default. Do not install both
+direct and asdf providers for either tool in the same home. To use asdf for
+them instead, explicitly select the other online tools when running
+`setup-tools`, then run `setup-asdf kubectl helm`. Direct installation also
+supports selecting just those tools:
 
 ```bash
 ./setup-tools kubectl helm
@@ -95,11 +117,16 @@ For a restricted host, use the complete platform artifact. This is the only
 supported offline installation route; `setup-tools` and `setup-asdf` are not
 used. The artifact contains one immutable dotfiles snapshot together
 with Neovim and its complete profile, Node.js, private standalone Python,
-ripgrep, tmux and plugins, Oh My Posh, k9s, zoxide, kubectx, kubens, Task, fzf
+ripgrep, fd, tmux and plugins, Oh My Posh, k9s, zoxide, kubectx, kubens, Task, fzf
 and Terraform, plus every kubectl and Helm version listed in `versions.env`.
 Each release owns its complete tool payload, even when another retained release
 contains the same versions. Asdf, its plugins and its shims are not part of the
 offline package. Optional online `setup-asdf` remains available independently.
+
+The current manager can check and select retained releases from before `fd`
+was bundled. Selecting one makes `fd` unavailable through the release launcher.
+Keep a copy of the newer manager when rolling back across that boundary:
+older managers do not understand the newer release metadata.
 
 The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
 `ubuntu-26.04-x86_64` and `amzn-2023-x86_64`. Build from a clean committed

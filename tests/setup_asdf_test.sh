@@ -282,7 +282,7 @@ cp "$repo_dir/setup-asdf" "$default_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$default_repo/scripts/setup-lib"
 cp "$repo_dir/versions.env" "$default_repo/versions.env"
 cp "$repo_dir/system.env" "$default_repo/system.env"
-for tool in "${ASDF_TOOLS[@]}"; do
+for tool in "${!ASDF_PLUGINS[@]}"; do
   prepare_plugin "$default_home" "$default_repo" "$tool"
 done
 write_asdf_fixture "$default_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
@@ -303,6 +303,19 @@ for expected in \
   grep -Fx "$expected" "$default_log" >/dev/null ||
     fail "default setup-asdf omitted: $expected"
 done
+
+printf 'unset "ASDF_PLUGINS[helm]"\n' >>"$default_repo/versions.env"
+subset_log=$test_root/subset.log
+HOME="$default_home" TEST_ASDF_LOG="$subset_log" "$default_repo/setup-asdf"
+[[ $(grep -c '^set' "$subset_log") -eq 5 ]] ||
+  fail 'default setup-asdf ignored a removed plugin mapping'
+if grep -q $'\thelm\t' "$subset_log"; then
+  fail 'default setup-asdf installed a tool without a plugin mapping'
+fi
+if HOME="$default_home" TEST_ASDF_LOG="$subset_log" "$default_repo/setup-asdf" helm \
+  >"$test_root/removed-plugin.log" 2>&1; then
+  fail 'setup-asdf accepted a removed plugin mapping'
+fi
 
 failure_repo=$test_root/failure-repository
 failure_home=$test_root/failure-home

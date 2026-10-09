@@ -59,6 +59,7 @@ load_test_versions() {
   select_default_release TOOL_RELEASES uv; UV_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES nvim; NVIM_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES tmux; TMUX_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES fd; FD_VERSION=$RELEASE_VERSION
 }
 
 make_test_repo() {
@@ -89,6 +90,14 @@ make_archives() {
 
   load_test_versions "$repository"
   mkdir -p "$archive_root" "$work"
+
+  write_fake "$work/fd-v${FD_VERSION}-x86_64-unknown-linux-musl/fd" fd "$FD_VERSION"
+  mkdir -p "$archive_root/fd/$FD_VERSION"
+  tar -C "$work" -czf "$archive_root/fd/$FD_VERSION/fd-v${FD_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+    "fd-v${FD_VERSION}-x86_64-unknown-linux-musl"
+  digest=$(sha256sum "$archive_root/fd/$FD_VERSION/fd-v${FD_VERSION}-x86_64-unknown-linux-musl.tar.gz" | awk '{print $1}')
+  append_release "$repository/versions.env" TOOL_RELEASES fd "$FD_VERSION" \
+    "https://example.invalid/fd/$FD_VERSION/fd-v${FD_VERSION}-x86_64-unknown-linux-musl.tar.gz" "$digest"
 
   write_fake "$work/gh_${GH_VERSION}_linux_amd64/bin/gh" gh "$GH_VERSION"
   mkdir -p "$archive_root/gh/$GH_VERSION"
@@ -165,7 +174,7 @@ test_xdg=$test_root/'xdg elsewhere'
 
 before=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
 XDG_CONFIG_HOME="$test_xdg" run_setup "$test_home" "$test_repository" "$archive_root" \
-  k9s gh oh-my-posh uv nvim
+  k9s gh oh-my-posh uv nvim fd
 after=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
 [[ $before == "$after" ]] || fail 'setup-tools changed a download fixture'
 cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
@@ -183,10 +192,22 @@ assert_link "$test_home/bin/oh-my-posh" "oh-my-posh-$OMP_VERSION"
 assert_link "$test_home/bin/uv" "uv-$UV_VERSION"
 assert_link "$test_home/bin/uvx" "uvx-$UV_VERSION"
 assert_link "$test_home/bin/nvim" "nvim-$NVIM_VERSION/bin/nvim"
+assert_link "$test_home/bin/fd" "fd-$FD_VERSION"
+"$test_home/bin/fd" --version | grep -F "$FD_VERSION" >/dev/null
 [[ -f $test_home/bin/nvim-$NVIM_VERSION/share/nvim/runtime/syntax/test.vim ]] ||
   fail 'Neovim runtime tree was not retained'
 "$test_home/bin/k9s" version --short | grep -F "$K9S_VERSION" >/dev/null
 "$test_home/bin/uvx" --version | grep -F "$UV_VERSION" >/dev/null
+
+default_repository=$test_root/default-repository
+default_home=$test_root/default-home
+make_test_repo "$default_repository"
+cp "$test_repository/versions.env" "$default_repository/versions.env"
+printf 'ONLINE_TOOLS=(fd k9s gh oh-my-posh uv nvim)\n' >>"$default_repository/versions.env"
+run_setup "$default_home" "$default_repository" "$archive_root"
+for tool in fd k9s gh oh-my-posh uv nvim; do
+  [[ -x $default_home/bin/$tool ]] || fail "default online install omitted $tool"
+done
 
 prerequisite_repository=$test_root/prerequisite-repository
 prerequisite_home=$test_root/prerequisite-home
@@ -217,7 +238,7 @@ set -e
 unsupported_repository=$test_root/unsupported-repository
 unsupported_home=$test_root/unsupported-home
 make_test_repo "$unsupported_repository"
-printf 'DAILY_TOOLS+=(fzf)\n' >>"$unsupported_repository/versions.env"
+printf 'ONLINE_TOOLS+=(fzf)\n' >>"$unsupported_repository/versions.env"
 if run_setup "$unsupported_home" "$unsupported_repository" "$archive_root" \
   k9s >"$test_root/unsupported-profile.log" 2>&1; then
   fail 'setup-tools accepted a profile tool without a command adapter'
