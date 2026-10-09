@@ -32,6 +32,22 @@ run_command() {
   set -e
 }
 
+run_command "$repo_dir/scripts/color-contrast" '#008080' '#ffffff'
+assert_status 0 'color-contrast teal against white'
+assert_contains "$output" '#008080    4.77:1' 'color-contrast WCAG ratio'
+assert_contains "$output" 'pass fail pass' 'color-contrast WCAG levels'
+assert_contains "$output" '7.0+        AAA normal text; very strong' \
+  'color-contrast WCAG guide'
+
+run_command "$repo_dir/scripts/color-contrast" --shades 2 '#008080' '#ffffff'
+assert_status 0 'color-contrast shade generation'
+assert_contains "$output" '#002B2B' 'color-contrast darker shade'
+assert_contains "$output" '#55AAAA' 'color-contrast lighter shade'
+
+run_command "$repo_dir/scripts/color-contrast" '#GG0000' '#ffffff'
+[[ $status -ne 0 ]] || fail 'color-contrast accepted an invalid color'
+assert_contains "$output" 'expected #RRGGBB' 'color-contrast invalid color error'
+
 run_in() {
   local directory=$1
   shift

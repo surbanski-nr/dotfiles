@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  printf '%s\n' 'usage: color-contrast [--shades COUNT] COLOR1 COLOR2' >&2
+  exit "${1:-2}"
+}
+
+die() {
+  printf 'color-contrast: %s\n' "$*" >&2
+  exit 1
+}
+
+shades=0
+if [[ ${1:-} == --help ]]; then
+  usage 0
+elif [[ ${1:-} == --shades ]]; then
+  [[ ${2:-} =~ ^[0-9]+$ ]] || die 'shade count must be an integer from 1 to 20'
+  shades=$2
+  ((shades >= 1 && shades <= 20)) ||
+    die 'shade count must be an integer from 1 to 20'
+  shift 2
+fi
+[[ $# -eq 2 ]] || usage
+command -v awk >/dev/null 2>&1 || die 'required command is missing: awk'
+
+normalize_color() {
+  local color=${1#\#}
+
+  [[ $color =~ ^[[:xdigit:]]{6}$ ]] ||
+    die "invalid color '$1'; expected #RRGGBB"
+  printf '%s' "${color^^}"
+}
+
+first=$(normalize_color "$1")
+second=$(normalize_color "$2")
+
+awk \
+  -v r1="$((16#${first:0:2}))" \
+  -v g1="$((16#${first:2:2}))" \
+  -v b1="$((16#${first:4:2}))" \
+  -v r2="$((16#${second:0:2}))" \
+  -v g2="$((16#${second:2:2}))" \
+  -v b2="$((16#${second:4:2}))" \
+  -v shades="$shades" '
+function linear(channel) {
+  channel /= 255
+  return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ^ 2.4
+}
+function luminance(red, green, blue) {
+  return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+}
+function contrast(red, green, blue, other, value) {
+  value = luminance(red, green, blue)
+  other = luminance(r2, g2, b2)
+  return value > other ? (value + 0.05) / (other + 0.05) : (other + 0.05) / (value + 0.05)
+}
+function result(value, threshold) {
+  return value >= threshold ? "pass" : "fail"
+}
+function row(label, red, green, blue, ratio) {
+  ratio = contrast(red, green, blue)
+  printf "%-12s #%02X%02X%02X  %6.2f:1  %-3s %-3s %-3s\n", \
+    label, red, green, blue, ratio, result(ratio, 4.5), result(ratio, 7), result(ratio, 3)
+}
+BEGIN {
+  print "shade        color      contrast  AA  AAA large"
+  if (shades > 0) {
+    for (step = shades; step >= 1; step--) {
+      mix = step / (shades + 1)
+      row(sprintf("darken %d%%", int(mix * 100 + 0.5)), \
+        int(r1 * (1 - mix) + 0.5), int(g1 * (1 - mix) + 0.5), int(b1 * (1 - mix) + 0.5))
+    }
+  }
+  row("input", r1, g1, b1)
+  if (shades > 0) {
+    for (step = 1; step <= shades; step++) {
+      mix = step / (shades + 1)
+      row(sprintf("lighten %d%%", int(mix * 100 + 0.5)), \
+        int(r1 + (255 - r1) * mix + 0.5), \
+        int(g1 + (255 - g1) * mix + 0.5), \
+        int(b1 + (255 - b1) * mix + 0.5))
+    }
+  }
+  print ""
+  print "WCAG guide"
+  print "ratio       meaning"
+  print "7.0+        AAA normal text; very strong"
+  print "4.5-6.99   AA normal text; good"
+  print "3.0-4.49   AA large text only"
+  print "below 3.0  insufficient for text"
+}'

@@ -274,11 +274,11 @@ validate_configs() {
   [[ $pane_active_border_style == *'fg=#008080'* ]] ||
     die "tmux active pane border is not Windows 95 teal: $pane_active_border_style"
   status_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv status-style)
-  [[ $status_style == 'bg=#008080,fg=white,bold' ]] ||
-    die "tmux status bar does not use bold white on teal: $status_style"
+  [[ $status_style == 'bg=#008080,fg=#ffffff' ]] ||
+    die "tmux status bar does not use white on teal: $status_style"
   window_status_current_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv window-status-current-style)
-  [[ $window_status_current_style == 'bg=#008080,fg=white,bold' ]] ||
-    die "tmux current window does not use bold white on teal: $window_status_current_style"
+  [[ $window_status_current_style == default ]] ||
+    die "tmux current window does not inherit the complete status style: $window_status_current_style"
   HOME="$temporary_home" tmux -L "$socket" show-options -gv status-right >/dev/null
   configured_path=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv @dotfiles-config)
   [[ $configured_path == "$tmux_config" ]] ||
