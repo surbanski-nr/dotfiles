@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+self=$(readlink -f -- "$0")
+package_dir=${self%/*}
+command_name=${self##*/}
+
+case $command_name in
+  debugpy | debugpy-adapter)
+    module=debugpy
+    [[ $command_name != debugpy-adapter ]] || module=debugpy.adapter
+    export PYTHONDONTWRITEBYTECODE=1
+    exec "$package_dir/venv/bin/python" -I -B -X frozen_modules=off -m "$module" "$@"
+    ;;
+  *)
+    printf 'offline-debug-adapter: unsupported launcher name: %s\n' "$command_name" >&2
+    exit 1
+    ;;
+esac

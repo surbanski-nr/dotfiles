@@ -1,6 +1,7 @@
 require 'kickstart.plugins.gitsigns'
 require 'kickstart.plugins.neo-tree'
 require 'custom.plugins.default_colors'
+require 'custom.plugins.debug'
 require 'custom.plugins.highlight_enclosing_pairs'
 require 'custom.plugins.indent_guides'
 require 'custom.plugins.lint'

@@ -911,6 +911,86 @@ For a fence, type the language over the selected `lang`, press `<Tab>`, and
 write the body. For an inline expansion, type its content and press `<Tab>` to
 leave it. The expansion does not add surrounding spaces.
 
+## Python debugger
+
+Python debugging uses `nvim-dap`, `nvim-dap-python` and `nvim-dap-ui` with
+Mason's pinned `debugpy`. It works in a terminal without a browser or GPU,
+including complete offline releases. TypeScript/frontend debugging is not
+enabled; its LSP, linting and formatting are unchanged.
+
+On a connected installation, provision tools with `:Nvim2ToolsInstallSync`.
+Complete offline releases already include the adapter, plugins and Python
+wheel. No startup install, automatic update or extra `setup-*` step is added.
+
+Set a breakpoint with `<leader>db`, then press `<F5>` and select a launch
+configuration. The choices are current file, current file with prompted
+arguments, a prompted Python module (such as `package.main`), or attach to
+`127.0.0.1` on a prompted port (default `5678`). Empty module/port input cancels;
+the attach port must be an integer from 1 to 65535. File/module launch uses
+the nearest Python project marker (`pyproject.toml`, `setup.cfg`, `setup.py`)
+or Git root as cwd, falling back to the file's directory. Save changes before
+starting: the debugger runs the file on disk, not unsaved buffer content.
+
+Launches and cursor tests load `.env` only from their launch cwd, not Neovim's
+cwd. A missing project `.env` does not fall back to another directory. An
+explicit `envFile` in a project-specific DAP configuration takes precedence.
+
+| Action | Keys |
+| --- | --- |
+| Start or continue | `<F5>` or `<leader>dc` |
+| Toggle breakpoint | `<leader>db` |
+| Conditional breakpoint / logpoint | `<leader>dB` / `<leader>dp` |
+| Step over / into / out | `<F10>` / `<F11>` / `<F12>` or `<leader>do` / `<leader>di` / `<leader>dO` |
+| Run previous configuration | `<leader>dl` |
+| Debug test method / class near cursor | `<leader>dt` / `<leader>dT` |
+| Evaluate expression or visual selection | `<leader>de` |
+| Toggle REPL / panels | `<leader>dr` / `<leader>du` |
+| Terminate all debug sessions | `<leader>dq` |
+| Disconnect from current session | `<leader>dd` |
+
+Scopes, stacks, watches and console panels open after session initialization
+and close when the last session ends. The controls use plain terminal labels.
+Uncaught exceptions stop by default; inspect their stack/locals and continue
+or terminate. Conditional breakpoint expressions and logpoints are evaluated
+by Python, not Lua.
+
+The adapter always uses its own Mason `debugpy` venv. The debugged application
+uses the first available choice in this order:
+
+1. Buffer-local `vim.b.nvim2_debug_python`, then `NVIM2_DEBUG_PYTHON`.
+2. An active `VIRTUAL_ENV`, then `CONDA_PREFIX`.
+3. The nearest `.venv/bin/python` or `venv/bin/python`, searching from the
+   file's directory up to its Git/project root.
+4. Offline: that physical release's `bin/python`. Connected: `python3` on PATH.
+
+An invalid explicit or active interpreter is an error, not a silent fallback.
+Venv symlinks are not resolved to their base executable, so `pyvenv.cfg` and
+project-only dependencies remain effective. Starting Neovim outside the
+project does not prevent `.venv` discovery. Inspect the choices with:
+
+```vim
+:lua vim.print(require('custom.debug').python(), require('custom.debug').root())
+:lua vim.b.nvim2_debug_python = '/absolute/project/.venv/bin/python'
+```
+
+The bundled Python does not replace a project's required Python version or
+install project dependencies. Create/provision that environment separately.
+Cursor test shortcuts inspect only the current project's runner markers (`pytest.ini`,
+`[tool.pytest...]` in `pyproject.toml`, or Django's `manage.py`; otherwise
+`unittest`), even when Neovim started elsewhere or another project's LSP is
+active. The markers use the same precedence as dap-python.
+Pytest/Django must be installed in the project environment. Override the runner
+with `:lua require('dap-python').test_runner = 'pytest'` when needed.
+
+Attach is optional for an already-running Python process that enabled debugpy,
+for example `python -m debugpy --listen 127.0.0.1:5678 --wait-for-client app.py`
+when that environment has debugpy installed. Disconnect leaves that externally
+owned process running; terminate explicitly requests that it stop. Never expose
+the debug port publicly: a debugger can execute code in the target process.
+Remote/container debugging needs an explicit project-specific configuration
+and, if needed, a trusted SSH tunnel and `pathMappings`; it is not enabled by
+the default loopback configuration.
+
 ## Formatting, linting and tools
 
 The main day-to-day language stacks are:

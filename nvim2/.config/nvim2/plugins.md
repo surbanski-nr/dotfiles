@@ -24,6 +24,10 @@ with the Kickstart template, not that the plugin comes with Neovim.
 | `neo-tree.nvim`             | Kickstart module enabled by the custom loader        | Provide the sidebar filesystem browser and file operations                                                       |
 | `nvim-lint`                 | Custom module                                        | Publish Actionlint, ESLint, Hadolint, TFLint and yamllint results as diagnostics                                 |
 | `nvim-lspconfig`            | Main `init.lua`                                      | Supply default commands, filetypes and root detection for language servers                                       |
+| `nvim-dap`                  | `lua/custom/plugins/debug.lua`, `lua/custom/debug.lua` | DAP client, breakpoints, stepping and REPL for Python |
+| `nvim-dap-python`           | Python debug module                                  | Connect pinned debugpy and run cursor-selected Python tests |
+| `nvim-dap-ui`               | Python debug module                                  | Show scopes, stacks, watches, console and controls during a session |
+| `nvim-nio`                  | DAP UI dependency                                    | Async runtime for the debugger panels |
 | `nvim-treesitter`           | Main `init.lua` plus custom tooling and fold modules | Install parsers and queries used by Neovim's built-in Treesitter runtime                                         |
 | `nui.nvim`                  | Neo-tree dependency                                  | Supply popup and layout components required by Neo-tree                                                          |
 | `plenary.nvim`              | Telescope and Neo-tree dependency                    | Supply shared Lua utilities required by those plugins                                                            |
@@ -38,11 +42,10 @@ diagnostic APIs, netrw and the default colorscheme. In particular,
 `nvim-lspconfig` and `nvim-treesitter` are external plugins despite their
 names.
 
-Every Lua file under `lua/custom/plugins/` is loaded by Kickstart's standard
-custom-extension loop. External-plugin modules own their `vim.pack.add`
-declaration and setup. Local feature modules install nothing. Move or delete a
-module to disable it; leaving a module in this directory enables it on the next
-start. Project-mark persistence is a local feature, not a session plugin.
+`lua/custom/plugins/init.lua` explicitly lists enabled extension modules.
+External-plugin modules own their `vim.pack.add` declaration and setup. Local
+feature modules install nothing. Remove a module's `require` from that loader
+to disable it. Project-mark persistence is a local feature, not a session plugin.
 
 Configuration that must run at a specific point in Kickstart stays directly
 under `lua/custom/` and is called from a small seam in `init.lua`:
@@ -52,6 +55,7 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 | `core.lua`                    | Options, filetype detection, register behavior, general commands and autocommands             |
 | `checks.lua` and `health.lua` | Inspect real locked checkouts and tools through `:Nvim2Check`; the health module only reports shared check results |
 | `lsp.lua`                     | Language-server configuration and pinned Mason tool versions                                  |
+| `debug.lua`                   | Python launch/attach configurations, interpreter selection, DAP panels and mappings |
 | `conform.lua`                 | Formatter selection and format-on-save controls                                               |
 | `project.lua`                 | Canonical nearest-Git-root discovery shared by search and project marks                        |
 | `pairs.lua`                   | Treesitter-confirmed delimiter ranges shared by highlighting and tab-out                      |
@@ -97,6 +101,7 @@ need a daily key sequence:
 | `mason-lspconfig.nvim`, `mason-tool-installer.nvim`, `nvim-lspconfig` | Connect configured language servers; inspect them with `:Mason` and install pinned versions with `:Nvim2ToolsInstallSync`                         |
 | `nvim-treesitter`                                                     | Supplies parsing, highlighting, indentation and injections automatically for installed languages                                                  |
 | `nvim-lint`                                                           | Runs configured linters after save; publishes diagnostics with filetype/project restrictions |
+| `nvim-dap`, `nvim-dap-python`, `nvim-dap-ui`, `nvim-nio`                | Python-only debugging with pinned debugpy; panels open only for an initialized session and close after its last session ends |
 | `nui.nvim`, `plenary.nvim`                                            | Runtime libraries for Neo-tree and Telescope; there is nothing to invoke directly                                                                 |
 | `telescope-ui-select.nvim`                                            | Shows `vim.ui.select` prompts, including custom project-mark choices, in a Telescope dropdown                                                     |
 

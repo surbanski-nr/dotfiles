@@ -132,6 +132,7 @@ validate_scripts() {
     tests/bstow_test.sh
     tests/install_validation_tool_test.sh
     tests/dotfiles_release_test.sh
+    tests/offline_debug_adapter_test.sh
     tests/scripts_test.sh
     tests/setup_asdf_test.sh
     tests/setup_system_test.sh
@@ -171,6 +172,7 @@ validate_scripts() {
   timeout 120s bash tests/bstow_test.sh
   timeout 30s bash tests/install_validation_tool_test.sh
   timeout 300s bash tests/dotfiles_release_test.sh
+  timeout 30s bash tests/offline_debug_adapter_test.sh
   timeout 120s bash tests/scripts_test.sh
   timeout 30s bash tests/setup_asdf_test.sh
   timeout 30s bash tests/setup_system_test.sh

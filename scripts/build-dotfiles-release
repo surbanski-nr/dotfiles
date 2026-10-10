@@ -373,6 +373,18 @@ python_inventory_packages() {
   printf '%s\n' "${packages[@]}"
 }
 
+write_debug_launchers() {
+  local release=$1 command_name
+  local source=$release/dotfiles/scripts/offline-debug-adapter
+
+  for command_name in debugpy debugpy-adapter; do
+    [[ -x $release/share/nvim2/mason/packages/debugpy/$command_name ]] ||
+      { die "debug adapter launcher is missing: $command_name"; return 1; }
+    install -m 0755 "$source" \
+      "$release/share/nvim2/mason/packages/debugpy/$command_name" || return
+  done
+}
+
 prepare_nvim_payload() {
   local release=$1 build_home=$2 platform=$3
   local python="$release/tools/python-${BUILD_VERSIONS[python]}/bin/python3"
@@ -399,6 +411,7 @@ prepare_nvim_payload() {
     install -m 0755 "$tree_sitter_root/bin/tree-sitter" "$tree_sitter_binary" || return
   fi
   timeout 2400s nvim --headless '+Nvim2ToolsInstallSync' '+qa!' || return
+  write_debug_launchers "$release" || return
   write_python_inventory "$release" || return
   package_output=$(python_inventory_packages "$release") || return
   for command_name in ansible ansible-config ansible-playbook; do

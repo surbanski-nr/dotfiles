@@ -190,10 +190,20 @@ target distribution libraries, starts from empty Neovim data, and runs the
 tool-enabled profile checks. The official Node archive initially contains its
 upstream npm, then the builder installs the separately pinned and hashed npm
 archive. The standalone CPython runtime contains the standard library but not
-ansible-lint, yamllint or ansible-core. Separate generated hashed locks and a
+ansible-lint, yamllint, ansible-core or debugpy. Separate generated hashed locks and a
 complete wheelhouse supply those dependencies. The target installer creates
 ordinary isolated venvs at their final retained paths using only those wheels.
 It does not need sudo, a distribution Python, a compiler or network access.
+
+Python debugging adds four locked Neovim plugins and Mason's pinned `debugpy`
+package. The builder supplies its hashed wheel and portable launchers; the
+existing installer recreates its isolated venv at the final retained path.
+`setup-system`, `setup-tools`, `setup-asdf` and their OS/runtime inventories do
+not change. For a connected Nvim2 installation, run
+`:Nvim2ToolsInstallSync` after installing the profile. The debugger's Python
+is separate from a project's `.venv`; project dependencies still belong to the
+project and are not bundled. No browser, GPU or TypeScript debug adapter is
+required. See the [Python debugger guide](nvim2/.config/nvim2/guide.md#python-debugger).
 
 `scripts/build-dotfiles-release` is the connected build and runtime-image
 preparation entry point. `scripts/dotfiles-release` is the standalone manager

@@ -161,9 +161,17 @@ through an explicitly complete index or `--find-links` workflow. Normal builds
 do not resolve dependencies again. The target installs only the locked binary
 wheels with `--no-index --require-hashes --only-binary=:all:` and runs
 `pip check`; the standalone interpreter alone does not contain ansible-core,
-ansible-lint or yamllint. The resulting venv executables remain below the
+ansible-lint, yamllint or debugpy. The resulting venv executables remain below the
 Mason package tree; the release launcher puts the ansible-lint venv,
 `release/bin` and `mason/bin` on `PATH` in that order.
+
+The Python debugger uses Mason's `debugpy` venv to run its adapter, not the
+interpreter selected for the project. After changing the debugpy pin, regenerate
+its lock, rebuild complete artifacts, and run the tool-enabled Nvim2 suite on
+each platform with networking disabled. That suite starts real launch and
+loopback-attach sessions and checks venv selection, locals, stepping, modules,
+cursor-selected unittest, exceptions and process cleanup. Browser/TypeScript
+adapters are deliberately not part of this profile.
 
 ## Offline kubectl and Helm versions
 

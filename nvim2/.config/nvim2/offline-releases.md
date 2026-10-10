@@ -15,7 +15,7 @@ come from the same source commit recorded in `release.env`.
 
 The connected builder starts from empty Neovim data and runs
 `Nvim2ToolsInstallSync` and the tool-enabled test suite. It removes the Mason
-venvs for ansible-lint and yamllint before packaging. Their exact generated
+venvs for ansible-lint, yamllint and debugpy before packaging. Their exact generated
 inputs and locks are maintained in the source profile at
 `nvim2/.config/nvim2/python-locks/`; the builder copies them into the unchanged
 payload path `python-locks/`, alongside the downloaded wheels. The target
@@ -27,6 +27,17 @@ Python or site-packages.
 The generated `python-locks/inventory.tsv` contains just the Python package
 name and version, separated by a tab. It is build/install data, not a file
 automatically imported by Nvim.
+
+Python DAP uses the bundled `debugpy` adapter venv and four locked plugins:
+`nvim-dap`, `nvim-dap-python`, `nvim-dap-ui` and `nvim-nio`. Both debugpy
+entry points are portable launchers that resolve their physical Mason package
+and use its final venv without builder paths, user site-packages or bytecode
+writes into the release. Neovim retains that physical adapter path even when
+another release becomes `current`. The program uses its own selected Python,
+preferring an explicit override, active environment or nearest project venv;
+only the no-venv offline fallback uses `release/bin/python`.
+Project dependencies and application-specific Python versions are not bundled.
+There is no TypeScript/Node or browser debug adapter.
 
 The release `nvim` launcher resolves its physical release root once. For the
 `nvim2` app it sets physical `XDG_CONFIG_HOME` and `XDG_DATA_HOME` plus a
@@ -87,7 +98,9 @@ NVIM2_CHECK_TOOLS=1 NVIM2_BENCHMARK_RUNS=3 \
 ```
 
 The Nvim2 suite covers plugin HEAD and cleanliness, Mason receipts and probes,
-Treesitter parsers, feature behavior, LSP, diagnostics, formatting and linting.
+Treesitter parsers, feature behavior, LSP, diagnostics, formatting and linting,
+plus real Python breakpoint/step, venv, module/unittest, exception, terminate,
+Neovim-exit and loopback attach/disconnect sessions.
 Terraform and tfvars continue to use `terraform fmt`. The local Helm chart test
 uses helm-ls without a Helm executable. No plugin, parser, language server or
 formatter is installed or updated by health. The release launcher uses the

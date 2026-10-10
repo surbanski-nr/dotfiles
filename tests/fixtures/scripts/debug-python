@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+printf 'python=%s\n' "$0"
+printf '<%s>\n' "$@"
+exit "${FIXTURE_PYTHON_EXIT_CODE:-0}"
