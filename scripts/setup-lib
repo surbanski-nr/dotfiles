@@ -9,6 +9,32 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || report_error "required command is missing: $1"
 }
 
+# The kernel releases flock when its last descriptor closes, even after SIGKILL.
+# Children may hold inherited descriptors until they exit. Keep the file in place
+# so concurrent processes cannot lock different inodes for the same operation.
+acquire_setup_lock() {
+  local path=$1 message=$2 descriptor
+
+  if [[ -L $path || -s $path || ( -e $path && ! -f $path ) ]]; then
+    report_error "$message (invalid or legacy lock path: $path)"
+    return 1
+  fi
+  exec {descriptor}>"$path" || return
+  if ! flock -n "$descriptor"; then
+    exec {descriptor}>&-
+    report_error "$message"
+    return 1
+  fi
+  HELD_LOCK_FDS+=("$descriptor")
+}
+
+release_setup_locks() {
+  local descriptor
+  for descriptor in "${HELD_LOCK_FDS[@]}"; do
+    exec {descriptor}>&-
+  done
+}
+
 require_setup_commands() {
   local command_name
   local -a commands=()
@@ -47,21 +73,31 @@ validate_commit() {
 parse_release_record() {
   local catalog_name=$1 tool=$2 record=$3 separators
 
-  [[ $record != *[[:space:]]* ]] ||
-    report_error "${catalog_name}[$tool] contains whitespace" || return
+  if [[ $record == *[[:space:]]* ]]; then
+    report_error "${catalog_name}[$tool] contains whitespace"
+    return 1
+  fi
   separators=${record//[^|]/}
-  [[ $separators == '||' ]] ||
-    report_error "${catalog_name}[$tool] record must contain exactly three fields" || return
+  if ! [[ $separators == '||' ]]; then
+    report_error "${catalog_name}[$tool] record must contain exactly three fields"
+    return 1
+  fi
   IFS='|' read -r RELEASE_VERSION RELEASE_URL RELEASE_SHA256 <<<"$record"
-  [[ -n $RELEASE_VERSION && -n $RELEASE_URL && -n $RELEASE_SHA256 ]] ||
-    report_error "${catalog_name}[$tool] contains an empty field" || return
+  if ! [[ -n $RELEASE_VERSION && -n $RELEASE_URL && -n $RELEASE_SHA256 ]]; then
+    report_error "${catalog_name}[$tool] contains an empty field"
+    return 1
+  fi
   validate_version "${catalog_name}[$tool]" "$RELEASE_VERSION" || return
   if [[ $RELEASE_URL == - || $RELEASE_SHA256 == - ]]; then
-    [[ $RELEASE_URL == - && $RELEASE_SHA256 == - ]] ||
-      report_error "${catalog_name}[$tool] must provide both URL and SHA256 or neither" || return
+    if ! [[ $RELEASE_URL == - && $RELEASE_SHA256 == - ]]; then
+      report_error "${catalog_name}[$tool] must provide both URL and SHA256 or neither"
+      return 1
+    fi
   else
-    [[ $RELEASE_URL == https://* ]] ||
-      report_error "${catalog_name}[$tool] URL must use HTTPS: $RELEASE_URL" || return
+    if ! [[ $RELEASE_URL == https://* ]]; then
+      report_error "${catalog_name}[$tool] URL must use HTTPS: $RELEASE_URL"
+      return 1
+    fi
     validate_digest "${catalog_name}[$tool] digest" "$RELEASE_SHA256" || return
   fi
   RELEASE_ASSET=${RELEASE_URL##*/}
@@ -74,16 +110,23 @@ release_versions() {
   local catalog_name=$1 tool=$2 record previous
   local -n catalog=$catalog_name
 
-  declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
-    report_error "$catalog_name must be an associative array" || return
-  [[ -v catalog[$tool] ]] || report_error "$catalog_name has no releases for $tool" || return
+  if ! declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A'; then
+    report_error "$catalog_name must be an associative array"
+    return 1
+  fi
+  if ! [[ -v catalog[$tool] ]]; then
+    report_error "$catalog_name has no releases for $tool"
+    return 1
+  fi
   RELEASE_VERSIONS=()
   while IFS= read -r record || [[ -n $record ]]; do
     [[ -n $record ]] || continue
     parse_release_record "$catalog_name" "$tool" "$record" || return
     for previous in "${RELEASE_VERSIONS[@]}"; do
-      [[ $previous != "$RELEASE_VERSION" ]] ||
-        report_error "${catalog_name}[$tool] contains duplicate $RELEASE_VERSION" || return
+      if [[ $previous == "$RELEASE_VERSION" ]]; then
+        report_error "${catalog_name}[$tool] contains duplicate $RELEASE_VERSION"
+        return 1
+      fi
     done
     RELEASE_VERSIONS+=("$RELEASE_VERSION")
   done <<<"${catalog[$tool]}"
@@ -94,9 +137,14 @@ select_release() {
   local catalog_name=$1 tool=$2 requested_version=$3 record
   local -n catalog=$catalog_name
 
-  declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
-    report_error "$catalog_name must be an associative array" || return
-  [[ -v catalog[$tool] ]] || report_error "$catalog_name has no releases for $tool" || return
+  if ! declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A'; then
+    report_error "$catalog_name must be an associative array"
+    return 1
+  fi
+  if ! [[ -v catalog[$tool] ]]; then
+    report_error "$catalog_name has no releases for $tool"
+    return 1
+  fi
   while IFS= read -r record || [[ -n $record ]]; do
     [[ -n $record ]] || continue
     parse_release_record "$catalog_name" "$tool" "$record" || return
@@ -109,9 +157,14 @@ select_default_release() {
   local catalog_name=$1 tool=$2 record
   local -n catalog=$catalog_name
 
-  declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
-    report_error "$catalog_name must be an associative array" || return
-  [[ -v catalog[$tool] ]] || report_error "$catalog_name has no releases for $tool" || return
+  if ! declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A'; then
+    report_error "$catalog_name must be an associative array"
+    return 1
+  fi
+  if ! [[ -v catalog[$tool] ]]; then
+    report_error "$catalog_name has no releases for $tool"
+    return 1
+  fi
   while IFS= read -r record || [[ -n $record ]]; do
     [[ -n $record ]] || continue
     parse_release_record "$catalog_name" "$tool" "$record"
@@ -124,11 +177,15 @@ validate_release_catalog() {
   local catalog_name=$1 tool
   local -n catalog=$catalog_name
 
-  declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A' ||
-    report_error "$catalog_name must be an associative array" || return
+  if ! declare -p "$catalog_name" 2>/dev/null | grep -q '^declare -A'; then
+    report_error "$catalog_name must be an associative array"
+    return 1
+  fi
   for tool in "${!catalog[@]}"; do
-    [[ $tool =~ ^[a-z0-9-]+$ ]] ||
-      report_error "$catalog_name contains invalid tool name $tool" || return
+    if ! [[ $tool =~ ^[a-z0-9-]+$ ]]; then
+      report_error "$catalog_name contains invalid tool name $tool"
+      return 1
+    fi
     release_versions "$catalog_name" "$tool" || return
   done
 }
@@ -137,14 +194,23 @@ validate_profile() {
   local profile_name=$1 tool seen=' '
   local -n profile=$profile_name
 
-  declare -p "$profile_name" 2>/dev/null | grep -q '^declare -a' ||
-    report_error "$profile_name must be an indexed array" || return
-  ((${#profile[@]} > 0)) || report_error "$profile_name is empty" || return
+  if ! declare -p "$profile_name" 2>/dev/null | grep -q '^declare -a'; then
+    report_error "$profile_name must be an indexed array"
+    return 1
+  fi
+  if ((${#profile[@]} == 0)); then
+    report_error "$profile_name is empty"
+    return 1
+  fi
   for tool in "${profile[@]}"; do
-    [[ $tool =~ ^[a-z0-9-]+$ ]] ||
-      report_error "$profile_name contains invalid tool name $tool" || return
-    [[ $seen != *" $tool "* ]] ||
-      report_error "$profile_name contains duplicate $tool" || return
+    if ! [[ $tool =~ ^[a-z0-9-]+$ ]]; then
+      report_error "$profile_name contains invalid tool name $tool"
+      return 1
+    fi
+    if [[ $seen == *" $tool "* ]]; then
+      report_error "$profile_name contains duplicate $tool"
+      return 1
+    fi
     seen+="$tool "
   done
 }
@@ -152,24 +218,30 @@ validate_profile() {
 validate_validator_config() {
   local tool version seen=' '
 
-  validate_profile VALIDATION_TOOLS || return
-  validate_release_catalog VALIDATION_RELEASES || return
-  for tool in "${VALIDATION_TOOLS[@]}"; do
+  validate_profile VALIDATOR_TOOLS || return
+  validate_release_catalog VALIDATOR_RELEASES || return
+  for tool in "${VALIDATOR_TOOLS[@]}"; do
     seen+="$tool "
     [[ $tool == yamllint ]] && continue
-    [[ -v VALIDATION_RELEASES[$tool] ]] ||
-      report_error "VALIDATION_RELEASES has no releases for $tool" || return
-    release_versions VALIDATION_RELEASES "$tool" || return
+    if ! [[ -v VALIDATOR_RELEASES[$tool] ]]; then
+      report_error "VALIDATOR_RELEASES has no releases for $tool"
+      return 1
+    fi
+    release_versions VALIDATOR_RELEASES "$tool" || return
     for version in "${RELEASE_VERSIONS[@]}"; do
-      select_release VALIDATION_RELEASES "$tool" "$version" || return
-      [[ $RELEASE_URL != - ]] ||
-        report_error "validation release $tool $version requires an artifact" || return
+      select_release VALIDATOR_RELEASES "$tool" "$version" || return
+      if [[ $RELEASE_URL == - ]]; then
+        report_error "validation release $tool $version requires an artifact"
+        return 1
+      fi
       artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
     done
   done
-  for tool in "${!VALIDATION_RELEASES[@]}"; do
-    [[ $tool != yamllint && $seen == *" $tool "* ]] ||
-      report_error "VALIDATION_RELEASES contains unsupported tool $tool" || return
+  for tool in "${!VALIDATOR_RELEASES[@]}"; do
+    if [[ $tool == yamllint || $seen != *" $tool "* ]]; then
+      report_error "VALIDATOR_RELEASES contains unsupported tool $tool"
+      return 1
+    fi
   done
   for version in YAMLLINT_VERSION YAMLLINT_PATHSPEC_VERSION YAMLLINT_PYYAML_VERSION; do
     validate_version "$version" "${!version:-}" || return
@@ -180,69 +252,99 @@ validate_tool_config() {
   local record repository commit tool version profile
 
   validate_release_catalog TOOL_RELEASES || return
-  for profile in ONLINE_TOOLS OFFLINE_TOOLS; do
+  for profile in TOOLS OFFLINE_RELEASE_TOOLS; do
     validate_profile "$profile" || return
   done
-  for profile in ONLINE_TOOLS OFFLINE_TOOLS; do
-    local -n tools=$profile
-    for tool in "${tools[@]}"; do
+  for profile in TOOLS OFFLINE_RELEASE_TOOLS; do
+    local -n profile_tools=$profile
+    for tool in "${profile_tools[@]}"; do
       [[ $tool == task ]] && continue
-      [[ -v TOOL_RELEASES[$tool] ]] ||
-        report_error "$profile references unknown tool $tool" || return
+      if ! [[ -v TOOL_RELEASES[$tool] ]]; then
+        report_error "$profile references unknown tool $tool"
+        return 1
+      fi
     done
-    unset -n tools
+    unset -n profile_tools
   done
-  [[ ! -v TOOL_RELEASES[task] ]] ||
-    report_error 'task must be pinned only in validation.env' || return
+  if [[ -v TOOL_RELEASES[task] ]]; then
+    report_error 'task must be pinned only in validation.env'
+    return 1
+  fi
 
-  for tool in "${OFFLINE_TOOLS[@]}"; do
+  for tool in "${OFFLINE_RELEASE_TOOLS[@]}"; do
     [[ $tool == task ]] && continue
     select_default_release TOOL_RELEASES "$tool" || return
-    [[ $RELEASE_URL != - ]] ||
-      report_error "offline default $tool $RELEASE_VERSION requires an artifact" || return
+    if [[ $RELEASE_URL == - ]]; then
+      report_error "offline default $tool $RELEASE_VERSION requires an artifact"
+      return 1
+    fi
     artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   done
-  for tool in "${ONLINE_TOOLS[@]}"; do
+  for tool in "${TOOLS[@]}"; do
     [[ $tool == task ]] && continue
     release_versions TOOL_RELEASES "$tool" || return
     for version in "${RELEASE_VERSIONS[@]}"; do
       select_release TOOL_RELEASES "$tool" "$version" || return
-      [[ $RELEASE_URL != - ]] ||
-        report_error "ONLINE_TOOLS release $tool $version requires an artifact" || return
+      if [[ $RELEASE_URL == - ]]; then
+        report_error "TOOLS release $tool $version requires an artifact"
+        return 1
+      fi
       artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
-      ((${#SPEC_LINKS[@]} > 0)) ||
-        report_error "ONLINE_TOOLS tool $tool is not supported by setup-tools" || return
+      if ((${#SPEC_LINKS[@]} == 0)); then
+        report_error "TOOLS tool $tool is not supported by setup-tools"
+        return 1
+      fi
     done
   done
   for tool in asdf npm; do
     select_default_release TOOL_RELEASES "$tool" || return
-    [[ $RELEASE_URL != - ]] || report_error "$tool default requires an artifact" || return
+    if [[ $RELEASE_URL == - ]]; then
+      report_error "$tool default requires an artifact"
+      return 1
+    fi
     artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   done
   validate_version KUBECTX_VERSION "${KUBECTX_VERSION:-}" || return
   for tool in kubectx kubens; do
     select_default_release TOOL_RELEASES "$tool" || return
-    [[ $RELEASE_VERSION == "$KUBECTX_VERSION" ]] ||
-      report_error "$tool default must use KUBECTX_VERSION" || return
+    if ! [[ $RELEASE_VERSION == "$KUBECTX_VERSION" ]]; then
+      report_error "$tool default must use KUBECTX_VERSION"
+      return 1
+    fi
   done
   validate_version PIP_TOOLS_VERSION "${PIP_TOOLS_VERSION:-}" || return
-  [[ $PYTHON_STANDALONE_BUILD =~ ^[0-9]{8}$ ]] ||
-    report_error 'PYTHON_STANDALONE_BUILD must use YYYYMMDD' || return
+  if ! [[ $PYTHON_STANDALONE_BUILD =~ ^[0-9]{8}$ ]]; then
+    report_error 'PYTHON_STANDALONE_BUILD must use YYYYMMDD'
+    return 1
+  fi
 
-  declare -p ASDF_PLUGINS 2>/dev/null | grep -q '^declare -A' ||
-    report_error 'ASDF_PLUGINS must be an associative array' || return
-  ((${#ASDF_PLUGINS[@]} > 0)) || report_error 'ASDF_PLUGINS is empty' || return
+  if ! declare -p ASDF_PLUGINS 2>/dev/null | grep -q '^declare -A'; then
+    report_error 'ASDF_PLUGINS must be an associative array'
+    return 1
+  fi
+  if ((${#ASDF_PLUGINS[@]} == 0)); then
+    report_error 'ASDF_PLUGINS is empty'
+    return 1
+  fi
   for tool in "${!ASDF_PLUGINS[@]}"; do
-    [[ $tool =~ ^[a-z0-9-]+$ ]] ||
-      report_error "ASDF_PLUGINS contains invalid tool name $tool" || return
-    [[ -v TOOL_RELEASES[$tool] ]] ||
-      report_error "ASDF_PLUGINS references unknown tool $tool" || return
+    if ! [[ $tool =~ ^[a-z0-9-]+$ ]]; then
+      report_error "ASDF_PLUGINS contains invalid tool name $tool"
+      return 1
+    fi
+    if ! [[ -v TOOL_RELEASES[$tool] ]]; then
+      report_error "ASDF_PLUGINS references unknown tool $tool"
+      return 1
+    fi
     record=${ASDF_PLUGINS[$tool]}
-    [[ $record != *[[:space:]]* && ${record//[^|]/} == '|' ]] ||
-      report_error "ASDF_PLUGINS[$tool] must contain repository|commit" || return
+    if [[ $record == *[[:space:]]* || ${record//[^|]/} != '|' ]]; then
+      report_error "ASDF_PLUGINS[$tool] must contain repository|commit"
+      return 1
+    fi
     IFS='|' read -r repository commit <<<"$record"
-    [[ $repository == https://*.git ]] ||
-      report_error "ASDF_PLUGINS[$tool] has an invalid repository" || return
+    if ! [[ $repository == https://*.git ]]; then
+      report_error "ASDF_PLUGINS[$tool] has an invalid repository"
+      return 1
+    fi
     validate_commit "ASDF_PLUGINS[$tool] commit" "$commit" || return
   done
   for commit in "$TPM_COMMIT" "$TMUX_SENSIBLE_COMMIT" \
@@ -251,8 +353,10 @@ validate_tool_config() {
   done
   for repository in "$TPM_REPO" "$TMUX_SENSIBLE_REPO" \
     "$TMUX_RESURRECT_REPO" "$TMUX_CONTINUUM_REPO"; do
-    [[ $repository == https://*.git && $repository != *[[:space:]]* ]] ||
-      report_error "invalid tmux plugin repository: $repository" || return
+    if [[ $repository != https://*.git || $repository == *[[:space:]]* ]]; then
+      report_error "invalid tmux plugin repository: $repository"
+      return 1
+    fi
   done
 }
 
@@ -277,8 +381,10 @@ artifact_layout() {
   local version=$2
   local asset=$3
 
-  [[ $asset =~ ^[0-9A-Za-z][0-9A-Za-z._+%-]*$ ]] ||
-    report_error "unsafe artifact name for $name $version: $asset" || return
+  if ! [[ $asset =~ ^[0-9A-Za-z][0-9A-Za-z._+%-]*$ ]]; then
+    report_error "unsafe artifact name for $name $version: $asset"
+    return 1
+  fi
   # Consumed by callers after sourcing this library.
   # shellcheck disable=SC2034
   SPEC_ASSET=$asset
@@ -485,10 +591,15 @@ prepare_artifact() {
   local catalog_name=$1 name=$2 version=$3 archive=$4 destination=$5
 
   select_release "$catalog_name" "$name" "$version" || return
-  [[ $RELEASE_URL != - ]] ||
-    report_error "$name $version has no direct artifact" || return
+  if [[ $RELEASE_URL == - ]]; then
+    report_error "$name $version has no direct artifact"
+    return 1
+  fi
   artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
-  [[ -f $archive && ! -L $archive ]] || report_error "missing artifact: $archive" || return
+  if ! [[ -f $archive && ! -L $archive ]]; then
+    report_error "missing artifact: $archive"
+    return 1
+  fi
   verify_sha256 "$archive" "$RELEASE_SHA256" || return
   mkdir -p "$destination" || return
   extract_artifact "$archive" "$destination"
@@ -506,7 +617,7 @@ system_package_list() {
   local -n runtime_platform=SYSTEM_${family}_RUNTIME_PACKAGES
   case $role in
     runtime) ;;
-    build | connected)
+    build | setup)
       local -n common=SYSTEM_${role^^}_PACKAGES
       local -n specific=SYSTEM_${family}_${role^^}_PACKAGES
       role_common=("${common[@]}")
@@ -539,7 +650,7 @@ install_system_packages() {
         "${install_args[@]}" "${SETUP_SYSTEM_PACKAGES[@]}"
       ;;
     amzn:2023 | amzn-2023-x86_64)
-      if [[ $role == connected ]]; then
+      if [[ $role == setup ]]; then
         if rpm -q gnupg2-minimal >/dev/null 2>&1; then
           "${root_command[@]}" dnf swap -y gnupg2-minimal gnupg2 || return
         else

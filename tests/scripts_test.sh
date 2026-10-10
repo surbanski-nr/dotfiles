@@ -235,7 +235,7 @@ assert_contains "$output" 'failed to list pods on node: node-b' \
 
 run_command env PATH="$fixture_bin:$PATH" "$repo_dir/scripts/curr"
 assert_status 0 'curr named namespace'
-assert_contains "$output" 'Current cluster:   fixture-context' 'curr context'
+assert_contains "$output" 'Current context:   fixture-context' 'curr context'
 assert_contains "$output" 'Current namespace: fixture-namespace' 'curr namespace'
 run_command env PATH="$fixture_bin:$PATH" TEST_KUBECTL_SCENARIO=curr-default \
   "$repo_dir/scripts/curr"

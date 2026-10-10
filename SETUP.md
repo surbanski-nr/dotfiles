@@ -38,7 +38,7 @@ remaining conflict, including a foreign symlink.
 `version|full_URL|SHA256` records, and the first record is the default. A
 required default without an artifact is an error, with no fallback to a later
 record. `validation.env` uses the same record format in
-`VALIDATION_RELEASES`, and `VALIDATION_TOOLS` is the installer's authoritative
+`VALIDATOR_RELEASES`, and `VALIDATOR_TOOLS` is the installer's authoritative
 tool list. Task exists only there. Online ShellCheck, validation ShellCheck and
 Mason ShellCheck remain independent pins.
 
@@ -47,7 +47,7 @@ prebuilt executable archive. Its PyYAML dependency parses YAML, and pathspec
 handles ignore patterns. All three versions are pinned in `validation.env`
 to keep validator behavior consistent.
 
-`ONLINE_TOOLS` and `OFFLINE_TOOLS` are the authoritative tool profiles, with
+`TOOLS` and `OFFLINE_RELEASE_TOOLS` are the authoritative tool profiles, with
 one tool per line. Both include `fd`, installed from its verified official
 Linux musl archive rather than an OS package. GNU `find` remains a system
 prerequisite for scripts that depend on its semantics.
@@ -55,7 +55,7 @@ prerequisite for scripts that depend on its semantics.
 `setup-tools` downloads and installs the selected online tools from these exact
 official release records. It supports only connected installation; offline
 deployment uses the complete release described below. Without names, it
-installs all of `ONLINE_TOOLS`, including kubectl and Helm. Optional online
+installs all of `TOOLS`, including kubectl and Helm. Optional online
 `setup-asdf` reads runtime versions from the same catalog, but plugin repository
 and commit data from `ASDF_PLUGINS`, whose keys are also the supported tool
 list and the alphabetical no-argument install order; plugin downloads and
@@ -70,7 +70,7 @@ ownership state is written. Similar names, version output alone and modified
 binaries are rejected without changing them.
 
 Edit OS package lists and their expected commands in `system.env`. Common
-runtime packages are included in every role; build and connected roles add
+runtime packages are included in every role; build and setup roles add
 their own common and distribution-specific packages. These packages have no
 version pins and use the current apt/dnf repository candidates. The same file
 lists commands each connected entry point requires before installation.
@@ -80,13 +80,13 @@ remains part of the connected installation procedure.
 
 The runtime role is the minimal OS baseline for running a prepared offline
 release. The build role adds compilers and libraries for disposable release
-builders. The connected role is the normal online-machine setup: download and
+builders. The setup role is the normal host setup: download and
 verification tools, interactive utilities such as tmux, htop and mc, and
 headers needed by asdf to compile Python and other project runtimes. It is
 not a second release-builder role; builder-only packages stay out of it.
 
-`probes.env` owns tool version arguments shared by `setup-tools` and release
-health. Each value contains whitespace-separated arguments; omitted tools use
+`probes.env` owns tool version arguments shared by `setup-tools`, shell
+diagnostics and release health, plus the builder/health metadata-field mapping. Each value contains whitespace-separated arguments; omitted tools use
 `--version`. The builder embeds this data in the generated standalone manager,
 so it works outside the checkout and can check older releases that did not
 include the shared configuration file. Edit the source configuration and
@@ -110,6 +110,39 @@ the setup command from the matching reviewed repository revision. An intact
 retained installation is reused without downloading it again.
 Terraform and Terragrunt use optional `setup-asdf` in this connected flow.
 `htop` remains an operating-system package, and Go is not a setup dependency.
+
+### Reruns and recovery
+
+`setup-system` repeats the package-manager operation. `setup-tools` reuses
+intact recorded payloads, completes intact pending payloads without downloading,
+and reinstalls inactive partial payloads. A failed multi-command selection
+attempt restores the prior links; after a killed process, rerunning reconciles
+each link to the first configured version. This is not a transaction across
+all requested tools: earlier successfully selected tools remain selected.
+
+`setup-asdf` records verified binary ownership before publishing the binary and
+journals the selected link before changing it. Rerunning finishes interrupted
+publication, verifies retained binary content, reuses installed runtimes and
+regenerates shims. Partial runtime builds remain the asdf plugin's responsibility;
+a broken provider installation may require provider-specific repair. Home
+defaults are changed only after all requested runtime installations succeed.
+
+Both installers use nonblocking process-held locks. The kernel releases them
+when the last holding process exits, including a killed process; a running child
+may retain an inherited lock until it exits. Empty lock files are retained.
+Old directory locks are not removed automatically because another older
+installer may still own them. Stop that installer and remove only its exact
+empty lock directory after checking it, then rerun.
+
+Modified managed binaries, malformed ownership state, foreign paths and dirty
+plugin checkouts fail safely instead of being overwritten. Do not delete state
+to bypass those checks. These are process-interruption guarantees, not a promise
+of power-loss durability on every filesystem.
+
+System `vi` is explicitly installed in the runtime baseline; normal setup adds
+`less`. Operational helpers have their own prerequisites: `checkbackups` needs
+`jq`, and `postgres-db-list` needs `psql`. The minimal offline baseline does not
+install those optional clients.
 
 ## Complete offline release
 
@@ -187,7 +220,10 @@ dotfiles snapshot:
 
 This flag installs only the release's system prerequisites, not its bundled
 tools. It still needs access to apt/dnf repositories. The default invocation
-without a flag prepares a connected setup instead.
+without a flag prepares normal host setup instead. It does not select either
+tool list: `setup-tools` selects `TOOLS`, and the builder selects
+`OFFLINE_RELEASE_TOOLS`. The archive retains the old metadata key
+`OFFLINE_TOOLS` for compatibility with retained releases.
 
 After disconnecting external networking, run the installer as the intended
 ordinary user. It derives identity from that account and does not require a

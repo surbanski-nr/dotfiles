@@ -10,7 +10,7 @@ Download and install selected Linux x86-64 tools under ~/bin.
 For offline deployment, use the complete dotfiles release instead.
 EOF
   printf 'Names:'
-  printf ' %s' "${ONLINE_TOOLS[@]}"
+  printf ' %s' "${TOOLS[@]}"
   printf '\n'
 }
 
@@ -30,12 +30,12 @@ main() {
 
   load_setup_config
   if ((${#requested[@]} == 0)); then
-    requested=("${ONLINE_TOOLS[@]}")
+    requested=("${TOOLS[@]}")
   fi
   validate_host
-  normalize_requested "${requested[@]}"
-  preflight "${NORMALIZED_TOOLS[@]}"
-  install_requested "${NORMALIZED_TOOLS[@]}"
+  select_requested_tools "${requested[@]}"
+  preflight "${SELECTED_TOOLS[@]}"
+  install_selected_tools "${SELECTED_TOOLS[@]}"
 }
 
 load_setup_config() {
@@ -59,21 +59,25 @@ validate_host() {
   require_setup_commands setup-tools
 }
 
-normalize_requested() {
+# Validate names and deduplicate requests, preserving their selection order.
+select_requested_tools() {
   local name
   local allowed
   local supported
   local seen=' '
 
-  NORMALIZED_TOOLS=()
+  SELECTED_TOOLS=()
   for name in "$@"; do
     supported=0
-    for allowed in "${ONLINE_TOOLS[@]}"; do
+    for allowed in "${TOOLS[@]}"; do
       if [[ $name == "$allowed" ]]; then supported=1; break; fi
     done
-    ((supported == 1)) || report_error "unknown tool: $name"
+    if ((supported == 0)); then
+      report_error "unknown tool: $name"
+      return 1
+    fi
     if [[ $seen != *" $name "* ]]; then
-      NORMALIZED_TOOLS+=("$name")
+      SELECTED_TOOLS+=("$name")
       seen+="$name "
     fi
   done
@@ -82,7 +86,8 @@ normalize_requested() {
 load_tool_versions() {
   local catalog=TOOL_RELEASES
 
-  [[ $1 != task ]] || catalog=VALIDATION_RELEASES
+  # Task has one shared pin for setup and repository validation.
+  if [[ $1 == task ]]; then catalog=VALIDATOR_RELEASES; fi
   release_versions "$catalog" "$1" || return
   TOOL_VERSIONS=("${RELEASE_VERSIONS[@]}")
 }
@@ -92,10 +97,12 @@ load_tool_release() {
   local version=$2
   local catalog=TOOL_RELEASES
 
-  [[ $name != task ]] || catalog=VALIDATION_RELEASES
+  if [[ $name == task ]]; then catalog=VALIDATOR_RELEASES; fi
   select_release "$catalog" "$name" "$version" || return
-  [[ $RELEASE_URL != - ]] ||
-    report_error "$name $version has no direct artifact" || return
+  if [[ $RELEASE_URL == - ]]; then
+    report_error "$name $version has no direct artifact"
+    return 1
+  fi
   artifact_layout "$name" "$version" "$RELEASE_ASSET"
 }
 
@@ -103,6 +110,11 @@ state_path() {
   printf '%s/%s-%s.state\n' "$STATE_DIR" "$1" "$2"
 }
 
+# Hash a deterministic tar stream of installed payloads, not the downloaded archive.
+# Example for root=$HOME/bin and the two uv destinations:
+# tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+#   -C "$HOME/bin" -cf - -- uv-0.12.19 uvx-0.12.19 | sha256sum | awk '{print $1}'
+# Timestamps and owner/group IDs are normalized; contents, paths and modes remain.
 content_digest() {
   local root=$1
   local destination
@@ -118,14 +130,16 @@ content_digest() {
 
 read_state() {
   local path=$1
-  STATE_STATUS=
-  STATE_ARTIFACT=
-  STATE_CONTENT=
-  [[ -f $path && ! -L $path ]] || return 1
-  IFS=$'\t' read -r STATE_STATUS STATE_ARTIFACT STATE_CONTENT <"$path" || return 1
-  [[ $STATE_STATUS == pending || $STATE_STATUS == complete ]] || return 1
-  validate_digest state-artifact "$STATE_ARTIFACT" || return 1
-  validate_digest state-content "$STATE_CONTENT" || return 1
+  # Artifact hash authenticates the download; payload hash detects local edits.
+  RECORDED_INSTALL_PHASE=
+  RECORDED_ARTIFACT_SHA256=
+  RECORDED_PAYLOAD_SHA256=
+  [[ -f $path && ! -L $path && $(wc -l <"$path") == 1 ]] || return 1
+  IFS=$'\t' read -r RECORDED_INSTALL_PHASE RECORDED_ARTIFACT_SHA256 \
+    RECORDED_PAYLOAD_SHA256 <"$path" || return 1
+  [[ $RECORDED_INSTALL_PHASE == pending || $RECORDED_INSTALL_PHASE == complete ]] || return 1
+  validate_digest state-artifact "$RECORDED_ARTIFACT_SHA256" || return 1
+  validate_digest state-content "$RECORDED_PAYLOAD_SHA256" || return 1
 }
 
 destinations_exist() {
@@ -135,7 +149,9 @@ destinations_exist() {
   done
 }
 
-installation_status() {
+# A named classification permits recovery without using error exit codes as data.
+# The saved phase owns payloads; complete does not mean canonical links are selected.
+classify_installation() {
   local name=$1
   local version=$2
   local expected_artifact=$3
@@ -144,30 +160,46 @@ installation_status() {
   local destination
 
   path=$(state_path "$name" "$version")
-  if ! read_state "$path"; then
+  if [[ ! -e $path && ! -L $path ]]; then
     for destination in "${SPEC_DESTS[@]}"; do
       if [[ -e $BIN_DIR/$destination || -L $BIN_DIR/$destination ]]; then
         report_error "unmanaged versioned destination exists: $BIN_DIR/$destination"
         return 1
       fi
     done
-    return 10
+    INSTALLATION_STATE=missing
+    return 0
   fi
-  [[ $STATE_ARTIFACT == "$expected_artifact" ]] ||
-    report_error "state digest differs for $name $version" || return
+  if ! read_state "$path"; then
+    report_error "invalid installation state: $path"
+    return 1
+  fi
+  if [[ $RECORDED_ARTIFACT_SHA256 != "$expected_artifact" ]]; then
+    report_error "state digest differs for $name $version"
+    return 1
+  fi
   if ! destinations_exist; then
-    [[ $STATE_STATUS == pending ]] ||
-      report_error "managed installation is incomplete: $name $version" || return
-    return 12
+    if [[ $RECORDED_INSTALL_PHASE == complete ]]; then
+      report_error "managed installation is incomplete: $name $version"
+      return 1
+    fi
+    INSTALLATION_STATE=pending-incomplete
+    return 0
   fi
-  actual=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}")
-  if [[ $actual != "$STATE_CONTENT" ]]; then
-    [[ $STATE_STATUS == pending ]] ||
-      report_error "managed installation was modified: $name $version" || return
-    return 12
+  actual=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}") || return
+  if [[ $actual != "$RECORDED_PAYLOAD_SHA256" ]]; then
+    if [[ $RECORDED_INSTALL_PHASE == complete ]]; then
+      report_error "managed installation was modified: $name $version"
+      return 1
+    fi
+    INSTALLATION_STATE=pending-incomplete
+    return 0
   fi
-  [[ $STATE_STATUS == complete ]] && return 0
-  return 11
+  if [[ $RECORDED_INSTALL_PHASE == complete ]]; then
+    INSTALLATION_STATE=complete
+  else
+    INSTALLATION_STATE=pending-intact
+  fi
 }
 
 state_owns_link_target() {
@@ -192,26 +224,19 @@ state_owns_link_target() {
   [[ -n $version && $version != */* ]] || return 1
   state=$(state_path "$name" "$version")
   read_state "$state" || return 1
-  [[ $STATE_STATUS == complete ]] || return 1
+  [[ $RECORDED_INSTALL_PHASE == complete ]] || return 1
   artifact_layout "$name" "$version" retained
   for entry in "${SPEC_LINKS[@]}"; do
     [[ $entry == "$command_name:$target" ]] || continue
     destinations_exist || return 1
     actual=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}") || return 1
-    [[ $actual == "$STATE_CONTENT" ]]
+    [[ $actual == "$RECORDED_PAYLOAD_SHA256" ]]
     return
   done
   return 1
 }
 
-managed_link_target() {
-  local name=$1
-  local command_name=$2
-  local target=$3
-
-  state_owns_link_target "$name" "$command_name" "$target"
-}
-
+# Never overwrite another provider or a file this installer cannot authenticate.
 preflight_link() {
   local name=$1
   local entry=$2
@@ -222,21 +247,28 @@ preflight_link() {
 
   if [[ -L $link ]]; then
     target=$(readlink -- "$link")
-    managed_link_target "$name" "$command_name" "$target" ||
+    if ! state_owns_link_target "$name" "$command_name" "$target"; then
       report_error "refusing foreign link: $link -> $target"
-  elif [[ -e $link ]]; then
-    report_error "refusing unmanaged path: $link"
-  elif provider=$(command -v "$command_name" 2>/dev/null) &&
-    [[ $provider == "$HOME/.asdf/shims/"* || $provider == "$HOME/.krew/bin/"* ||
-      $provider == "$HOME/.local/share/nvim2/mason/bin/"* ]]; then
-    report_error "$command_name is already provided by $provider"
+      return 1
+    fi
+    return 0
   fi
+  if [[ -e $link ]]; then
+    report_error "refusing unmanaged path: $link"
+    return 1
+  fi
+  if ! provider=$(command -v "$command_name" 2>/dev/null); then return 0; fi
+  case $provider in
+    "$HOME/.asdf/shims/"* | "$HOME/.krew/bin/"* | "$HOME/.local/share/nvim2/mason/bin/"*)
+      report_error "$command_name is already provided by $provider"
+      return 1
+      ;;
+  esac
 }
 
 preflight() {
   local name
   local version
-  local status
   local entry
 
   if [[ -e $BIN_DIR || -L $BIN_DIR ]]; then
@@ -245,32 +277,31 @@ preflight() {
   if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
     [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || report_error "invalid state directory: $STATE_DIR"
   fi
+  if [[ -L $STATE_DIR/locks || ( -e $STATE_DIR/locks && ! -d $STATE_DIR/locks ) ]]; then
+    report_error "invalid lock directory: $STATE_DIR/locks"
+    return 1
+  fi
+  mkdir -p "$BIN_DIR" "$STATE_DIR/locks"
+  # Acquire in a stable order before checking ownership to avoid check/use races.
+  local -a lock_names=()
+  mapfile -t lock_names < <(printf '%s\n' "$@" | LC_ALL=C sort)
+  for name in "${lock_names[@]}"; do acquire_lock "$name"; done
   for name in "$@"; do
     load_tool_versions "$name"
     for version in "${TOOL_VERSIONS[@]}"; do
       load_tool_release "$name" "$version"
-      if installation_status "$name" "$version" "$RELEASE_SHA256"; then
-        status=0
-      else
-        status=$?
-      fi
-      case $status in
-        0 | 10 | 11 | 12) ;;
-        *) return "$status" ;;
-      esac
+      classify_installation "$name" "$version" "$RELEASE_SHA256"
     done
     load_tool_release "$name" "${TOOL_VERSIONS[0]}"
     for entry in "${SPEC_LINKS[@]}"; do preflight_link "$name" "$entry"; done
   done
-  mkdir -p "$BIN_DIR" "$STATE_DIR/locks"
 }
 
 acquire_lock() {
   local name=$1
   local lock="$STATE_DIR/locks/$name.lock"
 
-  mkdir -- "$lock" 2>/dev/null || report_error "another setup-tools process owns $name"
-  HELD_LOCKS+=("$lock")
+  acquire_setup_lock "$lock" "another setup-tools process owns $name"
 }
 
 write_state() {
@@ -289,7 +320,9 @@ write_state() {
   mv -- "$temporary" "$path"
 }
 
-remove_pending_installation() {
+# A crash between moving uv and uvx leaves a partial payload. Only remove it
+# when no canonical link uses it; intact pending payloads are completed in place.
+remove_incomplete_payload() {
   local destination
   local entry
   local command_name
@@ -300,8 +333,10 @@ remove_pending_installation() {
       command_name=${entry%%:*}
       if [[ -L $BIN_DIR/$command_name ]]; then
         link_target=$(readlink -- "$BIN_DIR/$command_name")
-        [[ $link_target != "$destination" && $link_target != "$destination/"* ]] ||
-          report_error "pending installation is active: $destination" || return
+        if [[ $link_target == "$destination" || $link_target == "$destination/"* ]]; then
+          report_error "pending installation is active: $destination"
+          return 1
+        fi
       fi
     done
   done
@@ -340,32 +375,29 @@ verify_staged() {
   fi
 }
 
+# Install or recover one version, without changing the selected command links.
 install_version() {
   local name=$1
   local version=$2
-  local status
   local input
   local content
   local destination
 
   load_tool_release "$name" "$version"
-  if installation_status "$name" "$version" "$RELEASE_SHA256"; then
-    printf 'setup-tools: reuse %s %s\n' "$name" "$version"
-    return
-  else
-    status=$?
-  fi
-  if [[ $status -eq 11 ]]; then
-    content=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}")
-    write_state "$name" "$version" complete "$content" "$RELEASE_SHA256"
-    printf 'setup-tools: recovered %s %s\n' "$name" "$version"
-    return
-  fi
-  if [[ $status -eq 12 ]]; then
-    remove_pending_installation
-  elif [[ $status -ne 10 ]]; then
-    return "$status"
-  fi
+  classify_installation "$name" "$version" "$RELEASE_SHA256"
+  case $INSTALLATION_STATE in
+    complete)
+      printf 'setup-tools: reuse %s %s\n' "$name" "$version"
+      return
+      ;;
+    pending-intact)
+      write_state "$name" "$version" complete "$RECORDED_PAYLOAD_SHA256" "$RELEASE_SHA256"
+      printf 'setup-tools: recovered %s %s\n' "$name" "$version"
+      return
+      ;;
+    pending-incomplete) remove_incomplete_payload ;;
+    missing) ;;
+  esac
 
   STAGE_DIR=$(mktemp -d "$BIN_DIR/.setup-tools.XXXXXX")
   TEMP_PATHS+=("$STAGE_DIR")
@@ -438,13 +470,13 @@ activate_links() {
   printf 'setup-tools: selected %s\n' "$name"
 }
 
-install_requested() {
+# Reconcile every configured version, then select the first only after success.
+install_selected_tools() {
   local name
   local version
   local selected
 
   for name in "$@"; do
-    acquire_lock "$name"
     load_tool_versions "$name"
     selected=${TOOL_VERSIONS[0]}
     for version in "${TOOL_VERSIONS[@]}"; do
@@ -464,9 +496,7 @@ cleanup() {
   for path in "${TEMP_PATHS[@]:-}"; do
     if [[ -e $path || -L $path ]]; then find "$path" -depth -delete; fi
   done
-  for path in "${HELD_LOCKS[@]:-}"; do
-    if [[ -d $path && ! -L $path ]]; then rmdir -- "$path"; fi
-  done
+  release_setup_locks
   exit "$status"
 }
 
@@ -477,18 +507,8 @@ source "$REPO_DIR/scripts/setup-lib"
 # this file does not download, install or validate anything.
 # shellcheck source=versions.env
 source "$REPO_DIR/versions.env"
+# Cleanup must also work when --help returns before any installation starts.
 declare -a TEMP_PATHS=()
-declare -a HELD_LOCKS=()
-BIN_DIR=
-STATE_DIR=
-STAGE_DIR=
-SPEC_ASSET=
-SPEC_FORMAT=
-SPEC_MEMBER=
-SPEC_SECOND_MEMBER=
-RELEASE_VERSION=
-RELEASE_URL=
-RELEASE_SHA256=
-RELEASE_ASSET=
+declare -a HELD_LOCK_FDS=()
 trap cleanup EXIT
 main "$@"

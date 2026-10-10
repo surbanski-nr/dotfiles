@@ -18,10 +18,10 @@ tool=$1
 source "$repo_dir/scripts/setup-lib"
 # shellcheck source=../validation.env
 source "$repo_dir/validation.env"
-validate_profile VALIDATION_TOOLS
+validate_profile VALIDATOR_TOOLS
 
 supported=false
-for configured_tool in "${VALIDATION_TOOLS[@]}"; do
+for configured_tool in "${VALIDATOR_TOOLS[@]}"; do
   if [[ $tool == "$configured_tool" ]]; then
     supported=true
     break
@@ -46,7 +46,7 @@ if [[ $tool == yamllint ]]; then
   done
   version=$YAMLLINT_VERSION
 else
-  select_default_release VALIDATION_RELEASES "$tool"
+  select_default_release VALIDATOR_RELEASES "$tool"
   version=$RELEASE_VERSION
   url=$RELEASE_URL
 fi
@@ -138,7 +138,7 @@ else
   archive=$stage/$RELEASE_ASSET
   prepared=$stage/prepared
   download_file "$url" "$archive"
-  prepare_artifact VALIDATION_RELEASES "$tool" "$version" "$archive" "$prepared"
+  prepare_artifact VALIDATOR_RELEASES "$tool" "$version" "$archive" "$prepared"
   activate_binary "$prepared/${SPEC_DESTS[0]}"
 fi
 

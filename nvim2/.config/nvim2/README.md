@@ -14,8 +14,8 @@ After stowing `nvim2`:
 NVIM_APPNAME=nvim2 nvim
 ```
 
-The stowed Bash configuration sets `NVIM_APPNAME=nvim2`, `$EDITOR=nvim` and
-`$VISUAL=nvim`; the `v` and FZF-based `ffv` helpers also start this profile.
+The stowed Bash configuration sets `NVIM_APPNAME=nvim2`. The `v` and FZF-based
+`ffv` helpers start this profile; `EDITOR`, `VISUAL` and Git use system `vi`.
 It deliberately leaves `vi` and `vim` as independent recovery editors. Use
 `vold` only when the archived `~/.config/old-nvim` profile has been stowed
 explicitly and is needed for reference. To start directly from a checkout:

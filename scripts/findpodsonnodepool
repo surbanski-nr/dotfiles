@@ -12,7 +12,8 @@ die() {
 command -v kubectl >/dev/null 2>&1 || die 'required command is missing: kubectl'
 
 selector=$1
-if ! node_output=$(kubectl get nodes --selector="$selector"   -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}'); then
+if ! node_output=$(kubectl get nodes --selector="$selector" \
+  -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}'); then
   die "failed to list nodes for selector: $selector"
 fi
 
@@ -25,7 +26,8 @@ mapfile -t nodes <<<"$node_output"
 status=0
 for node in "${nodes[@]}"; do
   printf 'Pods on node %s:\n' "$node"
-  if ! kubectl get pods --all-namespaces     --field-selector="spec.nodeName=$node" -o wide; then
+  if ! kubectl get pods --all-namespaces \
+    --field-selector="spec.nodeName=$node" -o wide; then
     printf 'findpodsonnodepool: failed to list pods on node: %s\n' "$node" >&2
     status=1
   fi

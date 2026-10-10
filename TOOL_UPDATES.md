@@ -28,10 +28,10 @@ cp -a "$candidate_root/current" "$candidate_root/candidate"
 
 Edit only the intended records in `candidate/versions.env`, validator records
 in `candidate/validation.env`, or builder images in
-`candidate/release.env`. `TOOL_RELEASES` and `VALIDATION_RELEASES`
+`candidate/release.env`. `TOOL_RELEASES` and `VALIDATOR_RELEASES`
 store ordered `version|full_URL|SHA256` records. The first record is the
 default and cannot fall back if its artifact is absent. Task belongs only to
-`VALIDATION_RELEASES`. `ASDF_PLUGINS` owns plugin repository and commit pins,
+`VALIDATOR_RELEASES`. `ASDF_PLUGINS` owns plugin repository and commit pins,
 while runtime versions still come from `TOOL_RELEASES`.
 For a tmux plugin bump, change its `*_COMMIT` in `versions.env`; change the
 adjacent `*_REPO` only when deliberately moving to a different repository.
@@ -204,7 +204,7 @@ same-named launchers in `~/bin`. After changing Node.js or global npm tools,
 run `asdf reshim nodejs VERSION` and check both `node --version` and
 `npm --version`.
 
-Kubectl and Helm are installed directly by the default `ONLINE_TOOLS` profile.
+Kubectl and Helm are installed directly by the default `TOOLS` profile.
 Include them in `setup-asdf` only in a home without their direct launchers.
 
 Outside complete releases, online direct kubectl and Helm installations are

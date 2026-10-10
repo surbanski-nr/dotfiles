@@ -90,7 +90,7 @@ fi
 
 # shellcheck source=../system.env
 source "$repo_dir/system.env"
-for command_name in "${SYSTEM_CONNECTED_COMMANDS[@]}"; do
+for command_name in "${SYSTEM_SETUP_COMMANDS[@]}"; do
   ln -s /bin/true "$fixture_bin/$command_name"
 done
 
@@ -152,7 +152,7 @@ printf '%s\n' "${SETUP_SYSTEM_PACKAGES[@]}" | grep -Fx cargo >/dev/null ||
   fail 'Amazon build omitted cargo'
 printf '%s\n' "${SETUP_SYSTEM_PACKAGES[@]}" | grep -Fx clang-devel >/dev/null ||
   fail 'Amazon build omitted clang-devel'
-system_package_list amzn:2023 connected
+system_package_list amzn:2023 setup
 if printf '%s\n' "${SETUP_SYSTEM_PACKAGES[@]}" | grep -Eq '^(cargo|clang-devel)$'; then
   fail 'Amazon connected role contains a builder-only package'
 fi

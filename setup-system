@@ -8,28 +8,34 @@ Usage: setup-system [--offline-release]
 
 Install the approved operating-system packages on Debian 13, Ubuntu 24.04,
 Ubuntu 26.04 or Amazon Linux 2023. This is the only setup entry point that
-uses root privileges. With no flag, install packages for connected setup.
+uses root privileges. With no flag, install packages for normal host setup.
 --offline-release installs only system prerequisites for a prepared release.
-Both modes need access to the operating-system package repositories.
+Both profiles need access to the operating-system package repositories.
 EOF
 }
 
 main() {
-  MODE=connected
+  # This selects OS packages only, never TOOLS or OFFLINE_RELEASE_TOOLS.
+  local package_profile=setup
   case ${1:-} in
     '') ;;
     --offline-release)
+      # Reject extra input before running a privileged package manager.
       (($# == 1)) || report_error '--offline-release takes no arguments'
-      MODE=runtime
+      package_profile=runtime
       ;;
-    -h | --help) (($# == 1)) || report_error 'help takes no arguments'; usage; return 0 ;;
+    -h | --help)
+      (($# == 1)) || report_error 'help takes no arguments'
+      usage
+      return 0
+      ;;
     *) report_error "unexpected argument: $1" ;;
   esac
   # shellcheck source=system.env
   source "$REPO_DIR/system.env"
   validate_host
-  install_packages
-  verify_packages
+  install_packages "$package_profile"
+  verify_packages "$package_profile"
 }
 
 validate_host() {
@@ -50,25 +56,27 @@ validate_host() {
 }
 
 install_packages() {
+  local package_profile=$1
   local -a root_command=()
 
   if ((EUID != 0)); then root_command=(sudo --); fi
-  install_system_packages "$PLATFORM" "$MODE" false "${root_command[@]}"
+  install_system_packages "$PLATFORM" "$package_profile" false "${root_command[@]}"
 }
 
 verify_packages() {
+  local package_profile=$1
   local command_name
   local -a commands=("${SYSTEM_RUNTIME_COMMANDS[@]}")
 
-  if [[ $MODE == connected ]]; then
-    commands+=("${SYSTEM_CONNECTED_COMMANDS[@]}")
+  if [[ $package_profile == setup ]]; then
+    commands+=("${SYSTEM_SETUP_COMMANDS[@]}")
   fi
   for command_name in "${commands[@]}"; do
     command -v "$command_name" >/dev/null 2>&1 ||
       report_error "package installation did not provide $command_name"
   done
-  if [[ $MODE == connected ]]; then
-    printf 'setup-system: connected packages ready on %s\n' "$PLATFORM"
+  if [[ $package_profile == setup ]]; then
+    printf 'setup-system: host setup packages ready on %s\n' "$PLATFORM"
   else
     printf 'setup-system: offline-release prerequisites ready on %s\n' "$PLATFORM"
   fi

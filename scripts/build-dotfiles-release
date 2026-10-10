@@ -5,18 +5,6 @@ set -euo pipefail
 TEMP_PATHS=()
 NODE_UPSTREAM_NPM_VERSION=
 declare -A BUILD_VERSIONS=()
-ORDINARY_TOOLS=(
-  'fd|FD_VERSION'
-  'rg|RG_VERSION'
-  'zoxide|ZOXIDE_VERSION'
-  'k9s|K9S_VERSION'
-  'kubectx|KUBECTX_VERSION'
-  'kubens|'
-  'oh-my-posh|OMP_VERSION'
-  'task|TASK_VERSION'
-  'fzf|FZF_VERSION'
-  'terraform|TERRAFORM_VERSION'
-)
 
 die() {
   printf '%s: %s\n' "${0##*/}" "$*" >&2
@@ -104,23 +92,44 @@ load_build_config() {
   source "$source_dir/system.env" || return
   # shellcheck source=../versions.env
   source "$source_dir/versions.env" || return
+  # shellcheck source=../probes.env
+  source "$source_dir/probes.env" || return
   validate_tool_config || return
   # shellcheck source=../validation.env
   source "$source_dir/validation.env" || return
   validate_validator_config || return
   local tool catalog
-  for tool in "${OFFLINE_TOOLS[@]}"; do
+  SIMPLE_RELEASE_TOOLS=()
+  for tool in "${OFFLINE_RELEASE_TOOLS[@]}"; do
     catalog=TOOL_RELEASES
-    [[ $tool != task ]] || catalog=VALIDATION_RELEASES
+    if [[ $tool == task ]]; then catalog=VALIDATOR_RELEASES; fi
     select_default_release "$catalog" "$tool" || return
     [[ $RELEASE_URL != - ]] ||
       { die "offline default $tool $RELEASE_VERSION has no artifact"; return 1; }
     BUILD_VERSIONS[$tool]=$RELEASE_VERSION
+    # These need compilation, a runtime tree, or multiple versions. Other
+    # direct binaries are derived from the configured release tool list.
+    case $tool in
+      nvim | nodejs | python | tmux | kubectl | helm) ;;
+      *) SIMPLE_RELEASE_TOOLS+=("$tool") ;;
+    esac
   done
   select_default_release TOOL_RELEASES npm || return
   BUILD_VERSIONS[npm]=$RELEASE_VERSION
   # shellcheck source=../release.env
   source "$source_dir/release.env" || return
+}
+
+release_version_field() {
+  local tool=$1 record name field
+  for record in "${RELEASE_TOOL_VERSIONS[@]}"; do
+    IFS='|' read -r name field <<<"$record"
+    if [[ $name == "$tool" ]]; then
+      printf '%s\n' "$field"
+      return 0
+    fi
+  done
+  die "missing release version field for $tool"
 }
 
 install_build_packages() {
@@ -221,7 +230,7 @@ install_release_tools() {
   local release=$1 inputs=$2
   local node_version=${BUILD_VERSIONS[nodejs]}
   local python_version=${BUILD_VERSIONS[python]}
-  local command_name catalog tool version record npm_archive
+  local command_name catalog tool version npm_archive
 
   mkdir -p "$release/bin" "$release/tools/bin" "$inputs" || return
 
@@ -244,10 +253,9 @@ install_release_tools() {
   ln -s "../tools/python-$python_version/bin/python3" "$release/bin/python" || return
   ln -s "../tools/python-$python_version/bin/python3" "$release/bin/python3" || return
 
-  for record in "${ORDINARY_TOOLS[@]}"; do
-    tool=${record%%|*}
+  for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do
     catalog=TOOL_RELEASES
-    [[ $tool != task ]] || catalog=VALIDATION_RELEASES
+    if [[ $tool == task ]]; then catalog=VALIDATOR_RELEASES; fi
     version=${BUILD_VERSIONS[$tool]}
     prepare_release_artifact "$catalog" "$tool" "$version" "$inputs" || return
     install -m 0755 "$PREPARED_ARTIFACT" "$release/tools/bin/$tool" || return
@@ -274,8 +282,7 @@ install_release_tools() {
   for command_name in node npm npx corepack; do
     ln -s "../tools/node/bin/$command_name" "$release/bin/$command_name" || return
   done
-  for record in "${ORDINARY_TOOLS[@]}"; do
-    tool=${record%%|*}
+  for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do
     ln -s "../tools/bin/$tool" "$release/bin/$tool" || return
   done
   write_launchers "$release" || return
@@ -466,7 +473,7 @@ verify_release_symlinks() {
 
 write_release_metadata() {
   local release=$1 platform=$2 source_commit=$3 source_tree=$4 image=$5 inputs=$6
-  local release_id=${release##*/} field tool record
+  local release_id=${release##*/} field tool
   local manifest package origin plugin_commit value
 
   printf '%s\n' \
@@ -483,9 +490,10 @@ write_release_metadata() {
     "PYTHON_BUILD=$PYTHON_STANDALONE_BUILD" \
     "TMUX_VERSION=${BUILD_VERSIONS[tmux]}" \
     >"$release/release.env" || return
-  for record in "${ORDINARY_TOOLS[@]}"; do
-    IFS='|' read -r tool field <<<"$record"
-    [[ -n $field ]] || continue
+  for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do
+    # kubens shares the KUBECTX_VERSION field emitted for kubectx.
+    if [[ $tool == kubens ]]; then continue; fi
+    field=$(release_version_field "$tool") || return
     printf '%s=%s\n' "$field" "${BUILD_VERSIONS[$tool]}" \
     >>"$release/release.env" || return
   done
@@ -496,7 +504,7 @@ write_release_metadata() {
       >>"$release/release.env" || return
   done
   printf '%s\n' \
-    "OFFLINE_TOOLS=$(IFS=,; printf '%s' "${OFFLINE_TOOLS[*]}")" \
+    "OFFLINE_TOOLS=$(IFS=,; printf '%s' "${OFFLINE_RELEASE_TOOLS[*]}")" \
     'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
     >>"$release/release.env" || return
 
@@ -600,6 +608,7 @@ build_release() {
   printf '%s: built %s\n' "${0##*/}" "$archive"
 }
 
+# Used by the release workflow to create a minimal image for network-free tests.
 prepare_runtime() {
   local platform=$1 user=$2 uid=$3 home=$4 group
 
@@ -624,8 +633,14 @@ main() {
   local command=${1:-}
 
   case $command in
-    build) (($# == 4)) || { usage; return 2; }; build_release "$2" "$3" "$4" ;;
-    prepare-runtime) (($# == 5)) || { usage; return 2; }; prepare_runtime "$2" "$3" "$4" "$5" ;;
+    build)
+      if (($# != 4)); then usage; return 2; fi
+      build_release "$2" "$3" "$4"
+      ;;
+    prepare-runtime)
+      if (($# != 5)); then usage; return 2; fi
+      prepare_runtime "$2" "$3" "$4" "$5"
+      ;;
     -h | --help) usage ;;
     *) usage; return 2 ;;
   esac

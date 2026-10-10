@@ -92,10 +92,12 @@ _dotfiles_check_release_version() {
   local command_name=$2
   local catalog=$3
   local tool=$4
+  local -a arguments=()
   shift 4
 
   select_default_release "$catalog" "$tool" || return 1
-  _dotfiles_check_version "$label" "$command_name" "$RELEASE_VERSION" "$@"
+  read -r -a arguments <<<"${TOOL_PROBE_ARGS[$command_name]:---version}"
+  _dotfiles_check_version "$label" "$command_name" "$RELEASE_VERSION" "${arguments[@]}"
 }
 
 dotfiles-check() (
@@ -128,6 +130,8 @@ dotfiles-check() (
     # Loaded only when dotfiles-check runs, never during normal shell startup.
     # shellcheck source=../scripts/setup-lib
     source "$manifest_dir/scripts/setup-lib"
+    # shellcheck source=../probes.env
+    source "$manifest_dir/probes.env"
     validate_tool_config || return
     validate_validator_config || return
   fi
@@ -162,28 +166,28 @@ dotfiles-check() (
   _dotfiles_check_tool ssh-agent ssh-agent || true
   _dotfiles_check_tool ssh-add ssh-add || true
 
-  if declare -p TOOL_RELEASES VALIDATION_RELEASES >/dev/null 2>&1; then
+  if declare -p TOOL_RELEASES VALIDATOR_RELEASES >/dev/null 2>&1; then
     printf '\nSelected versions:\n'
-    _dotfiles_check_release_version gh gh TOOL_RELEASES gh --version || missing=1
-    _dotfiles_check_release_version kyverno kyverno TOOL_RELEASES kyverno version || missing=1
-    _dotfiles_check_release_version Task task VALIDATION_RELEASES task --version || missing=1
-    _dotfiles_check_release_version Trivy trivy TOOL_RELEASES trivy --version || missing=1
-    _dotfiles_check_release_version k9s k9s TOOL_RELEASES k9s version --short || missing=1
-    _dotfiles_check_release_version kubeconform kubeconform TOOL_RELEASES kubeconform -v || missing=1
-    _dotfiles_check_release_version ShellCheck shellcheck TOOL_RELEASES shellcheck --version || missing=1
-    _dotfiles_check_release_version 'Oh My Posh' oh-my-posh TOOL_RELEASES oh-my-posh version || missing=1
-    _dotfiles_check_release_version kubectx kubectx TOOL_RELEASES kubectx --version || missing=1
-    _dotfiles_check_release_version kubens kubens TOOL_RELEASES kubens --version || missing=1
-    _dotfiles_check_release_version ripgrep rg TOOL_RELEASES rg --version || missing=1
-    _dotfiles_check_release_version zoxide zoxide TOOL_RELEASES zoxide --version || missing=1
-    _dotfiles_check_release_version uv uv TOOL_RELEASES uv --version || missing=1
-    _dotfiles_check_release_version Neovim nvim TOOL_RELEASES nvim --version || missing=1
-    _dotfiles_check_release_version Terraform terraform TOOL_RELEASES terraform version || missing=1
-    _dotfiles_check_release_version kubectl kubectl TOOL_RELEASES kubectl version --client || missing=1
-    _dotfiles_check_release_version Helm helm TOOL_RELEASES helm version --short || missing=1
-    _dotfiles_check_release_version Node.js node TOOL_RELEASES nodejs --version || missing=1
-    _dotfiles_check_release_version Python python TOOL_RELEASES python --version || missing=1
-    _dotfiles_check_release_version Terragrunt terragrunt TOOL_RELEASES terragrunt --version || missing=1
+    _dotfiles_check_release_version gh gh TOOL_RELEASES gh || missing=1
+    _dotfiles_check_release_version kyverno kyverno TOOL_RELEASES kyverno || missing=1
+    _dotfiles_check_release_version Task task VALIDATOR_RELEASES task || missing=1
+    _dotfiles_check_release_version Trivy trivy TOOL_RELEASES trivy || missing=1
+    _dotfiles_check_release_version k9s k9s TOOL_RELEASES k9s || missing=1
+    _dotfiles_check_release_version kubeconform kubeconform TOOL_RELEASES kubeconform || missing=1
+    _dotfiles_check_release_version ShellCheck shellcheck TOOL_RELEASES shellcheck || missing=1
+    _dotfiles_check_release_version 'Oh My Posh' oh-my-posh TOOL_RELEASES oh-my-posh || missing=1
+    _dotfiles_check_release_version kubectx kubectx TOOL_RELEASES kubectx || missing=1
+    _dotfiles_check_release_version kubens kubens TOOL_RELEASES kubens || missing=1
+    _dotfiles_check_release_version ripgrep rg TOOL_RELEASES rg || missing=1
+    _dotfiles_check_release_version zoxide zoxide TOOL_RELEASES zoxide || missing=1
+    _dotfiles_check_release_version uv uv TOOL_RELEASES uv || missing=1
+    _dotfiles_check_release_version Neovim nvim TOOL_RELEASES nvim || missing=1
+    _dotfiles_check_release_version Terraform terraform TOOL_RELEASES terraform || missing=1
+    _dotfiles_check_release_version kubectl kubectl TOOL_RELEASES kubectl || missing=1
+    _dotfiles_check_release_version Helm helm TOOL_RELEASES helm || missing=1
+    _dotfiles_check_release_version Node.js node TOOL_RELEASES nodejs || missing=1
+    _dotfiles_check_release_version Python python TOOL_RELEASES python || missing=1
+    _dotfiles_check_release_version Terragrunt terragrunt TOOL_RELEASES terragrunt || missing=1
   fi
 
   return "$missing"

@@ -101,7 +101,7 @@ alone. Setup does not install Homebrew or initialize it from Bash.
 Release data is explicit: `versions.env` contains ordered
 `version|full_URL|SHA256` records for online tools and project runtimes, while
 `validation.env` owns the validator list and records, including the only Task
-pin. `ONLINE_TOOLS` and `OFFLINE_TOOLS` select the tools for each route,
+pin. `TOOLS` and `OFFLINE_RELEASE_TOOLS` select the tools for each route,
 including `fd`. Online setup installs kubectl and Helm directly by default.
 The first record is the default. `ASDF_PLUGINS` is the sole asdf tool list and
 pins plugin repositories and commits; asdf keeps responsibility for fetching and verifying
@@ -109,11 +109,16 @@ its plugins.
 Asdf remains an optional online provider, independent of offline releases.
 The tmux plugin `*_REPO` and `*_COMMIT` pairs also live in `versions.env`.
 
-`system.env` owns OS package lists, installation checks and connected setup
+`system.env` owns OS package lists, installation checks and host setup
 prerequisites. OS packages use the current repository candidates without
 version pins. `probes.env` supplies version command arguments for both
-connected installation and offline release health. Builder image pins live in
+installation, shell diagnostics and offline release health. Builder image pins live in
 `release.env`.
+
+`setup-system` defaults to the `setup` OS package profile; `--offline-release`
+selects only the `runtime` profile. It never chooses a tool list. Each env
+variable has a short purpose comment. Installer rerun guarantees and limits are
+documented in [SETUP.md](SETUP.md#reruns-and-recovery).
 
 The Kubernetes prompt segment is disabled by default. Run `kp` to toggle it
 for the current shell session. While disabled, Oh My Posh does not read the

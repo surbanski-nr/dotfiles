@@ -106,7 +106,9 @@ set -e
   fail 'provider conflict changed the asdf installation'
 
 rm "$test_home/bin/kubectl"
-mkdir -p "$test_home/.local/state/dotfiles/setup-asdf/lock"
+mkdir -p "$test_home/.local/state/dotfiles/setup-asdf"
+exec {test_lock_fd}>"$test_home/.local/state/dotfiles/setup-asdf/lock"
+flock -n "$test_lock_fd"
 set +e
 lock_output=$(HOME="$test_home" "$test_repo/setup-asdf" kubectl 2>&1)
 lock_status=$?
@@ -116,7 +118,7 @@ set -e
   fail 'concurrent setup-asdf did not report the lock'
 [[ ! -e $test_home/bin/asdf ]] || fail 'lock conflict installed asdf'
 
-rmdir "$test_home/.local/state/dotfiles/setup-asdf/lock"
+exec {test_lock_fd}>&-
 write_asdf_fixture "$test_home/bin/asdf-manual" manual
 ln -s asdf-manual "$test_home/bin/asdf"
 set +e
@@ -338,5 +340,79 @@ set -e
 [[ $failure_status -ne 0 ]] || fail 'asdf runtime installation failure was hidden'
 [[ ! -f $failure_log || $(grep -c '^set' "$failure_log") -eq 0 ]] ||
   fail 'runtime failure changed the home default'
+
+HOME="$failure_home" TEST_ASDF_LOG="$failure_log" \
+  "$failure_repo/setup-asdf" terraform >/dev/null
+[[ $(grep -c '^install' "$failure_log") -eq 3 &&
+  $(tail -n 1 "$failure_log") == $'set\tterraform\t1.16.4' ]] ||
+  fail 'runtime retry did not reuse success and finish the failed version'
+
+# Interrupt each publication boundary, then retry with downloads disabled once
+# the verified binary is present. Canonical links and ownership must agree.
+recovery_bin=$test_root/recovery-bin
+mkdir -p "$recovery_bin"
+cat >"$recovery_bin/mv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+destination=${!#}
+case "$TEST_ASDF_FAIL_POINT:$destination" in
+  binary:*/bin/asdf-* | digest:*/installations/asdf-*.sha256 | selection:*/asdf-target)
+    if [[ ! -e $TEST_ASDF_FAIL_MARKER ]]; then
+      : >"$TEST_ASDF_FAIL_MARKER"
+      exit 74
+    fi
+    ;;
+esac
+exec /usr/bin/mv "$@"
+EOF
+chmod 0755 "$recovery_bin/mv"
+for point in digest binary selection; do
+  recovery_home=$test_root/recovery-$point
+  recovery_repo=$test_root/recovery-repository-$point
+  recovery_log=$test_root/recovery-$point.log
+  mkdir -p "$recovery_home/bin" "$recovery_repo/scripts"
+  cp "$repo_dir/setup-asdf" "$recovery_repo/setup-asdf"
+  cp "$repo_dir/scripts/setup-lib" "$recovery_repo/scripts/setup-lib"
+  cp "$legacy_repo/versions.env" "$recovery_repo/versions.env"
+  cp "$repo_dir/system.env" "$recovery_repo/system.env"
+  prepare_plugin "$recovery_home" "$recovery_repo"
+  cp "$legacy_home/bin/curl" "$recovery_home/bin/curl"
+  set +e
+  HOME="$recovery_home" PATH="$recovery_bin:$recovery_home/bin:/usr/bin:/bin" \
+    TEST_ASDF_ARCHIVE="$legacy_archive" TEST_ASDF_LOG="$recovery_log" \
+    TEST_ASDF_FAIL_POINT="$point" TEST_ASDF_FAIL_MARKER="$test_root/failed-$point" \
+    "$recovery_repo/setup-asdf" terraform >"$test_root/failure-$point.log" 2>&1
+  publication_status=$?
+  set -e
+  [[ $publication_status -eq 74 ]] || fail "$point publication failure was hidden"
+  if [[ $point == selection ]]; then
+    [[ -L $recovery_home/bin/asdf &&
+      -f $recovery_home/.local/state/dotfiles/setup-asdf/pending-selection ]] ||
+      fail 'selection failure did not leave recoverable ownership'
+    # Journal recovery must not need the archive a second time.
+    recovery_archive=$test_root/absent-archive
+  else
+    recovery_archive=$legacy_archive
+  fi
+  HOME="$recovery_home" PATH="$recovery_home/bin:/usr/bin:/bin" \
+    TEST_ASDF_ARCHIVE="$recovery_archive" TEST_ASDF_LOG="$recovery_log" \
+    "$recovery_repo/setup-asdf" terraform >/dev/null
+  [[ $(readlink -- "$recovery_home/bin/asdf") == "asdf-$ASDF_VERSION" &&
+    $(<"$recovery_home/.local/state/dotfiles/setup-asdf/asdf-target") == "asdf-$ASDF_VERSION" &&
+    ! -e $recovery_home/.local/state/dotfiles/setup-asdf/pending-selection ]] ||
+    fail "$point retry did not reconcile selection and ownership"
+done
+
+# Recovery refuses external edits rather than interpreting them as interrupted work.
+printf '%s\t%s\n' "asdf-$ASDF_VERSION" - \
+  >"$recovery_home/.local/state/dotfiles/setup-asdf/pending-selection"
+unlink "$recovery_home/bin/asdf"
+ln -s asdf-manual "$recovery_home/bin/asdf"
+if HOME="$recovery_home" TEST_ASDF_LOG="$recovery_log" \
+  "$recovery_repo/setup-asdf" terraform >"$test_root/foreign-pending.log" 2>&1; then
+  fail 'pending recovery replaced an unrelated asdf link'
+fi
+[[ $(readlink -- "$recovery_home/bin/asdf") == asdf-manual ]] ||
+  fail 'pending recovery modified an unrelated asdf link'
 
 printf 'Setup asdf tests passed\n'

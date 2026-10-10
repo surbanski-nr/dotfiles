@@ -145,6 +145,17 @@ test_home="$test_root/home"
 make_test_repo "$test_repository"
 make_archives "$test_repository" "$archive_root"
 
+# Native validator catalog must not silently accept entries outside its profile.
+for validator in foreign-validator yamllint; do
+  if (
+    source "$test_repository/validation.env"
+    VALIDATOR_RELEASES[$validator]=${VALIDATOR_RELEASES[actionlint]}
+    validate_validator_config
+  ) >"$test_root/invalid-validator.log" 2>&1; then
+    fail "validator catalog accepted unsupported native tool: $validator"
+  fi
+done
+
 mkdir -p "$test_root/shim"
 cat >"$test_root/shim/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -203,7 +214,7 @@ default_repository=$test_root/default-repository
 default_home=$test_root/default-home
 make_test_repo "$default_repository"
 cp "$test_repository/versions.env" "$default_repository/versions.env"
-printf 'ONLINE_TOOLS=(fd k9s gh oh-my-posh uv nvim)\n' >>"$default_repository/versions.env"
+printf 'TOOLS=(fd k9s gh oh-my-posh uv nvim)\n' >>"$default_repository/versions.env"
 run_setup "$default_home" "$default_repository" "$archive_root"
 for tool in fd k9s gh oh-my-posh uv nvim; do
   [[ -x $default_home/bin/$tool ]] || fail "default online install omitted $tool"
@@ -238,7 +249,7 @@ set -e
 unsupported_repository=$test_root/unsupported-repository
 unsupported_home=$test_root/unsupported-home
 make_test_repo "$unsupported_repository"
-printf 'ONLINE_TOOLS+=(fzf)\n' >>"$unsupported_repository/versions.env"
+printf 'TOOLS+=(fzf)\n' >>"$unsupported_repository/versions.env"
 if run_setup "$unsupported_home" "$unsupported_repository" "$archive_root" \
   k9s >"$test_root/unsupported-profile.log" 2>&1; then
   fail 'setup-tools accepted a profile tool without a command adapter'
@@ -355,7 +366,7 @@ append_release "$pin_repository/versions.env" TOOL_RELEASES shellcheck \
   "$daily_shellcheck" \
   "https://example.invalid/shellcheck/$daily_shellcheck/shellcheck-v$daily_shellcheck.linux.x86_64.tar.xz" \
   "$daily_shellcheck_digest"
-append_release "$pin_repository/validation.env" VALIDATION_RELEASES shellcheck \
+append_release "$pin_repository/validation.env" VALIDATOR_RELEASES shellcheck \
   "$validation_shellcheck" \
   "https://example.invalid/shellcheck-v$validation_shellcheck.linux.x86_64.tar.xz" \
   "$(printf '%064d' 0)"
@@ -582,7 +593,19 @@ set -e
 assert_link "$pair_home/bin/uv" "$old_uv_target"
 assert_link "$pair_home/bin/uvx" "$old_uvx_target"
 
-mkdir -p "$failure_home/.local/state/dotfiles/setup-tools/locks/k9s.lock"
+# A kill between the two payload moves leaves recorded but inactive content.
+# Retry removes only that partial version and installs both executables again.
+pair_state=$pair_home/.local/state/dotfiles/setup-tools/uv-$new_uv_version.state
+sed -i 's/^complete/pending/' "$pair_state"
+unlink "$pair_home/bin/uvx-$new_uv_version"
+run_setup "$pair_home" "$pair_repo" "$pair_archives" uv >/dev/null
+assert_link "$pair_home/bin/uv" "uv-$new_uv_version"
+assert_link "$pair_home/bin/uvx" "uvx-$new_uv_version"
+"$pair_home/bin/uvx" --version | grep -F "$new_uv_version" >/dev/null ||
+  fail 'partial paired payload retry did not restore the second executable'
+
+exec {test_lock_fd}>"$failure_home/.local/state/dotfiles/setup-tools/locks/k9s.lock"
+flock -n "$test_lock_fd"
 set +e
 lock_output=$(run_setup "$failure_home" "$failure_repo" "$failure_archives" k9s 2>&1)
 lock_status=$?
@@ -590,6 +613,43 @@ set -e
 [[ $lock_status -ne 0 ]] || fail 'concurrent setup lock was ignored'
 [[ $lock_output == *'another setup-tools process owns k9s'* ]] ||
   fail 'concurrent setup did not report its lock owner'
+exec {test_lock_fd}>&-
+run_setup "$test_home" "$test_repository" "$archive_root" k9s >/dev/null
+
+# SIGKILL cannot run cleanup traps, but must still release a process-held lock.
+bash -c 'exec {fd}>"$1"; flock -n "$fd"; : >"$2"; exec sleep 30' \
+  bash "$test_home/.local/state/dotfiles/setup-tools/locks/k9s.lock" \
+  "$test_root/killed-lock-ready" &
+killed_lock_pid=$!
+for ((attempt = 0; attempt < 100; attempt++)); do
+  [[ ! -e $test_root/killed-lock-ready ]] || break
+  sleep 0.02
+done
+[[ -e $test_root/killed-lock-ready ]] || fail 'lock holder did not become ready'
+kill -KILL "$killed_lock_pid"
+wait "$killed_lock_pid" 2>/dev/null || true
+run_setup "$test_home" "$test_repository" "$archive_root" k9s >/dev/null
+
+legacy_lock_home=$test_root/legacy-lock-home
+mkdir -p "$legacy_lock_home/.local/state/dotfiles/setup-tools/locks/k9s.lock"
+if run_setup "$legacy_lock_home" "$test_repository" "$archive_root" k9s \
+  >"$test_root/legacy-lock.log" 2>&1; then
+  fail 'legacy directory lock was silently removed'
+fi
+[[ -d $legacy_lock_home/.local/state/dotfiles/setup-tools/locks/k9s.lock ]] ||
+  fail 'legacy directory lock was changed'
+
+# Invalid state must not be treated as a fresh installation, even with no payload.
+corrupt_home=$test_root/corrupt-state-home
+mkdir -p "$corrupt_home/.local/state/dotfiles/setup-tools"
+printf 'not a state record\n' >"$corrupt_home/.local/state/dotfiles/setup-tools/k9s-$K9S_VERSION.state"
+if run_setup "$corrupt_home" "$test_repository" "$archive_root" k9s \
+  >"$test_root/corrupt-state.log" 2>&1; then
+  fail 'malformed ownership state was overwritten'
+fi
+grep -F 'invalid installation state' "$test_root/corrupt-state.log" >/dev/null ||
+  fail 'malformed ownership state was not reported'
+[[ ! -e $corrupt_home/bin/k9s-$K9S_VERSION ]] || fail 'malformed state installed a payload'
 
 printf 'changed\n' >>"$recovery_home/bin/k9s-$K9S_VERSION"
 set +e

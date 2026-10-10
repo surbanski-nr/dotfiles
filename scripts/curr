@@ -10,7 +10,7 @@ die() {
 [[ $# -eq 0 ]] || die 'usage: curr'
 command -v kubectl >/dev/null 2>&1 || die 'required command is missing: kubectl'
 
-if ! cluster=$(kubectl config current-context); then
+if ! context=$(kubectl config current-context); then
   die 'failed to read the current Kubernetes context'
 fi
 if ! namespace=$(kubectl config view --minify -o 'jsonpath={..namespace}'); then
@@ -18,5 +18,5 @@ if ! namespace=$(kubectl config view --minify -o 'jsonpath={..namespace}'); then
 fi
 namespace=${namespace:-default}
 
-printf 'Current cluster:   %s\n' "$cluster"
+printf 'Current context:   %s\n' "$context"
 printf 'Current namespace: %s\n' "$namespace"

@@ -55,7 +55,7 @@ tar -czf "$candidate_archive" -C "$candidate_dir" actionlint
 candidate_hash=$(sha256sum "$candidate_archive")
 candidate_hash=${candidate_hash%% *}
 cat >>"$test_repo/validation.env" <<EOF
-VALIDATION_RELEASES[actionlint]='
+VALIDATOR_RELEASES[actionlint]='
 2.0.0|https://example.invalid/actionlint.tar.gz|$candidate_hash
 '
 EOF
@@ -78,7 +78,7 @@ bad_hash=$(sha256sum "$bad_archive")
 bad_hash=${bad_hash%% *}
 cp "$repo_dir/validation.env" "$test_repo/validation.env"
 cat >>"$test_repo/validation.env" <<EOF
-VALIDATION_RELEASES[actionlint]='
+VALIDATOR_RELEASES[actionlint]='
 2.0.0|https://example.invalid/actionlint.tar.gz|$bad_hash
 '
 EOF
@@ -91,7 +91,7 @@ run_installer actionlint
 
 cp "$repo_dir/validation.env" "$test_repo/validation.env"
 cat >>"$test_repo/validation.env" <<EOF
-VALIDATION_RELEASES[actionlint]='
+VALIDATOR_RELEASES[actionlint]='
 2.0.0|https://example.invalid/actionlint.tar.gz|$candidate_hash
 '
 EOF
@@ -149,7 +149,7 @@ task_hash=$(sha256sum "$task_archive")
 task_hash=${task_hash%% *}
 cp "$repo_dir/validation.env" "$test_repo/validation.env"
 cat >>"$test_repo/validation.env" <<EOF
-VALIDATION_RELEASES[task]='
+VALIDATOR_RELEASES[task]='
 $task_version|https://example.invalid/task.tar.gz|$task_hash
 '
 EOF

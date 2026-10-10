@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Release builds prepend probes.env so the delivered manager is self-contained.
-if ! declare -p TOOL_PROBE_ARGS >/dev/null 2>&1; then
+if ! declare -p TOOL_PROBE_ARGS RELEASE_TOOL_VERSIONS >/dev/null 2>&1; then
   manager_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
   # shellcheck source=../probes.env
   source "$manager_dir/../probes.env"
@@ -28,22 +28,6 @@ SNAPSHOT_TYPE=
 SNAPSHOT_MODE=
 SNAPSHOT_IDENTITY=
 RECOVERED_PENDING=false
-RELEASE_PROBES=(
-  'fd|FD_VERSION'
-  'nvim|NVIM_VERSION'
-  'tmux|TMUX_VERSION'
-  'node|NODE_VERSION'
-  'npm|NPM_VERSION'
-  'rg|RG_VERSION'
-  'zoxide|ZOXIDE_VERSION'
-  'k9s|K9S_VERSION'
-  'kubectx|KUBECTX_VERSION'
-  'kubens|KUBECTX_VERSION'
-  'oh-my-posh|OMP_VERSION'
-  'task|TASK_VERSION'
-  'fzf|FZF_VERSION'
-  'terraform|TERRAFORM_VERSION'
-)
 RELEASE_METADATA_FIELDS=(
   RELEASE_ID PLATFORM_ID SOURCE_COMMIT SOURCE_TREE BUILDER_IMAGE
   NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION
@@ -66,6 +50,8 @@ Usage:
   dotfiles-release health [RELEASE_ID]
   dotfiles-release rollback [RELEASE_ID]
   dotfiles-release uninstall [RELEASE_ID]
+
+verify installs and activates the archive, then checks it. Use a disposable HOME.
 
 Platforms: debian-13-x86_64, ubuntu-24.04-x86_64,
            ubuntu-26.04-x86_64, amzn-2023-x86_64
@@ -1539,14 +1525,14 @@ health_release() {
       { die "installed manifest is missing in $release"; return 1; }
   fi
   health_python "$release" "${release_metadata[PYTHON_VERSION]}" || return
-  for probe in "${RELEASE_PROBES[@]}"; do
+  for probe in "${RELEASE_TOOL_VERSIONS[@]}"; do
     IFS='|' read -r command_name field <<<"$probe"
     [[ $field == FD_VERSION && ! -v release_metadata[$field] ]] && continue
     path=$release/bin/$command_name
     [[ -x $path ]] || { die "release executable is missing: $path"; return 1; }
   done
 
-  for probe in "${RELEASE_PROBES[@]}"; do
+  for probe in "${RELEASE_TOOL_VERSIONS[@]}"; do
     IFS='|' read -r command_name field <<<"$probe"
     [[ $field == FD_VERSION && ! -v release_metadata[$field] ]] && continue
     expected=${release_metadata[$field]}
