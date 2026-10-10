@@ -149,13 +149,17 @@ set `mA` when `A` should return to that file from anywhere. Each buffer can
 have its own lowercase `a`; there is only one global uppercase `A`, and setting
 `mA` elsewhere moves it.
 
+With the profile's default ShaDa settings, uppercase marks survive a normal
+Neovim exit and a host restart. A crash or forced kill before ShaDa is written
+can lose the latest marks.
+
 | Action                                                      | Keys or command                    |
 | ----------------------------------------------------------- | ---------------------------------- |
 | Set local mark `a`                                          | `ma`                               |
 | Set cross-file mark `A`                                     | `mA`                               |
 | Jump to the exact row and column                            | `` `a `` or `` `A ``               |
 | Jump to the marked line's first nonblank character          | `'a` or `'A`                       |
-| Browse and jump to marks                                    | `<leader>sm` or `:Telescope marks` |
+| Browse all native marks                                     | `<leader>sM` or `:Telescope marks` |
 | List marks without Telescope                                | `:marks`                           |
 | Delete named marks `a` and `A`                              | `:delmarks a A`                    |
 | Delete lowercase marks `a` through `z`                      | `:delmarks a-z`                    |
@@ -164,7 +168,11 @@ have its own lowercase `a`; there is only one global uppercase `A`, and setting
 
 A short native flow is: use `mA`, `mB` and `mC` in frequently used places,
 jump back with `` `A ``, `` `B `` or `` `C ``, and browse them with
-`<leader>sm`. Setting the same uppercase mark elsewhere moves it.
+`<leader>sM`. Setting the same uppercase mark elsewhere moves it.
+
+`<leader>sM` shows all native marks: global file marks and the current buffer's
+lowercase and automatic marks. `<leader>sm` opens the separate custom project
+marks described below.
 
 The character after a backtick or single quote is the mark name. A backtick
 jumps to its exact row and column; a single quote jumps to the first nonblank
@@ -172,7 +180,7 @@ character on its line. Thus `` `a `` is exact while `'a` is linewise. For the
 automatic mark named `"`, the exact jump is a backtick followed by a double
 quote: `` `" ``.
 
-Neovim also maintains automatic marks, which is why `<leader>sm` shows entries
+Neovim also maintains automatic marks, which is why `<leader>sM` shows entries
 you did not create:
 
 | Mark            | Meaning                                                   | Exact jump or related action                                            |
@@ -191,7 +199,7 @@ last change and is not used for startup restoration. An explicit command such
 as `nvim +42 file` is applied after the file-read event and remains
 authoritative.
 
-`<leader>sm` browses and jumps but does not delete. Note the mark name, close
+`<leader>sM` browses and jumps but does not delete. Note the mark name, close
 Telescope, then use `:delmarks {name}`. `:delmarks!` also clears the current
 buffer's changelist. Automatic `"` and numbered marks may reappear as Neovim
 records later exits; the previous-jump mark `'` is maintained continuously.
@@ -202,7 +210,7 @@ worktree. They do not consume or rewrite native letter marks:
 | Action                         | Keys or command                              |
 | ------------------------------ | -------------------------------------------- |
 | Add or update a named position | `<leader>ma` or `:ProjectMark X`             |
-| Pick and jump                  | `<leader>mm`, `<leader>sM`, or `:ProjectMarks` |
+| Pick and jump                  | `<leader>mm`, `<leader>sm`, or `:ProjectMarks` |
 | Delete a named position        | `<leader>md` or `:ProjectMarkDelete X`       |
 
 The current buffer must be a normal named file under a Git root. Each nested
@@ -216,8 +224,7 @@ stored position. A missing target is reported as stale and remains deletable.
 Moving an entire checkout creates a new namespace. Renames and edits made
 while Neovim is closed are not followed automatically, and competing writes
 to the same name use the last successful atomic rename. Use the command again
-to update a stale position. Mini Visits labels under `<leader>v` remain useful
-for frecency and cwd-scoped groups of files.
+to update a stale position.
 
 ### Editing, selection, undo and registers
 
@@ -1196,37 +1203,25 @@ functionality. Mini Icons is enabled only when the Nerd Font flag is set and
 supplies a web-devicons compatibility mock for consumers such as Telescope.
 Neither automatic module needs an action key.
 
-### Buffer removal and visited files
+### Buffer removal and recent files
 
 | Action                                             | Keys         |
 | -------------------------------------------------- | ------------ |
 | Remove current buffer                              | `<C-x>`      |
 | Remove all other listed buffers                    | `<leader>xo` |
-| Select frecent file from current working directory | `<leader>vv` |
-| Select frecent file from all tracked directories   | `<leader>vV` |
-| Add a label to current file                        | `<leader>va` |
-| Remove a label from current file                   | `<leader>vr` |
-| Select a label and file from current working directory | `<leader>vl` |
-| Select a label and file from all tracked directories   | `<leader>vL` |
+| Search recent files                               | `<leader>s.` |
 
-Mini Visits records a normal file after it remains open for about one second
-and ranks files using both recency and frequency. `<leader>vv` and
-`<leader>vl` are scoped to `:pwd`, which initially is the directory where
-Neovim was started and can include several repositories in a shared workspace.
-They do not replace that scope with the nearest Git root. `<leader>vV` and
-`<leader>vL` search the complete history.
+`<leader>s.` uses Telescope's `oldfiles` picker: Neovim's native file history
+from ShaDa plus files visited in the current session. It searches across
+directories, skips missing files and the current file, and supports the usual
+Telescope query syntax. A normal Neovim exit saves history for the next start;
+`:oldfiles` lists the persisted history without Telescope.
+Default ShaDa keeps at most 100 file records and excludes `/tmp/` and
+`/private/`, so this is a recent-file list rather than a complete visit log.
 
-To create a persistent project bookmark list, start Neovim from the project or
-workspace directory, open each important file, press `<leader>va` and give each
-the same label, such as `core`. After restarting Neovim from that directory,
-press `<leader>vl`, select `core`, then select a file. `<leader>vr` removes a
-label from the current file. Visit history and labels are written to
-`stdpath('state')/mini-visits-index` when Neovim exits, usually
-`~/.local/state/nvim2/mini-visits-index` on Linux unless XDG state is overridden.
-Changing effective cwd with `:cd`, `:tcd`, `:lcd` or Neo-tree's bound root
-changes lowercase picker scope. Labels group files, not named cursor
-positions; use [project or native marks](#marks-and-a-small-harpoon-like-shortlist)
-for those.
+For an intentional shortlist of named positions, use
+[project or native marks](#marks-and-a-small-harpoon-like-shortlist).
+Visit-frequency ranking and file labels are intentionally not configured.
 
 ## Markdown, colors and TODO comments
 

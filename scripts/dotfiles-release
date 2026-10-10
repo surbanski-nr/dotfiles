@@ -954,7 +954,7 @@ migrate_nvim_state() {
   local source destination file
 
   destination=$state_home/nvim2
-  for file in mini-visits-index telescope_history telescope_history.sqlite3; do
+  for file in telescope_history telescope_history.sqlite3; do
     source=$HOME/.local/share/nvim2/$file
     [[ -f $source && ! -L $source ]] || continue
     if [[ -e $destination/$file || -L $destination/$file ]]; then continue; fi

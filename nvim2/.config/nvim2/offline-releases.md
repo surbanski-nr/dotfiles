@@ -53,12 +53,11 @@ values and are consumed only by the release Bash startup.
 
 ## Mutable data
 
-The immutable payload never owns ShaDa, undo files, project marks, Mini Visits
-or Telescope history. They use `${XDG_STATE_HOME:-$HOME/.local/state}/nvim2`.
-On first activation, the manager copies legacy `mini-visits-index`,
-`telescope_history` and `telescope_history.sqlite3` from the old data path only
-when the destination does not exist. It preserves the source and never replaces
-newer state.
+The immutable payload never owns ShaDa, undo files, project marks or
+Telescope history. They use `${XDG_STATE_HOME:-$HOME/.local/state}/nvim2`.
+On first activation, the manager copies legacy `telescope_history` and
+`telescope_history.sqlite3` from the old data path only when the destination
+does not exist. It preserves the source and never replaces newer state.
 
 Cache and logs also stay outside the payload. In particular,
 lua-language-server writes its log below the Nvim2 state directory. Health uses

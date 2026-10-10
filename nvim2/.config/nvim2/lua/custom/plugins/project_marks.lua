@@ -355,6 +355,6 @@ end, { nargs = '?', desc = 'Delete a project mark' })
 vim.keymap.set('n', '<leader>ma', M.add, { desc = '[M]arks [A]dd or update' })
 vim.keymap.set('n', '<leader>mm', M.pick, { desc = '[M]arks [M]enu' })
 vim.keymap.set('n', '<leader>md', M.select_delete, { desc = '[M]arks [D]elete' })
-vim.keymap.set('n', '<leader>sM', M.pick, { desc = '[S]earch project [M]arks' })
+vim.keymap.set('n', '<leader>sm', M.pick, { desc = '[S]earch project [M]arks' })
 
 return M

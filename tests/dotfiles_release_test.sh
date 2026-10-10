@@ -977,10 +977,9 @@ printf 'complete\t%s\t%s\n' \
   "$legacy_rg_content" >"$test_home/.local/state/dotfiles/setup-tools/rg-0.9.state"
 
 mkdir -p "$test_home/.local/share" "$test_home/.local/state/nvim2"
-printf 'legacy visits\n' >"$legacy_data/mini-visits-index"
 printf 'legacy telescope\n' >"$legacy_data/telescope_history.sqlite3"
 printf 'legacy telescope prompts\n' >"$legacy_data/telescope_history"
-printf 'newer visits\n' >"$test_home/.local/state/nvim2/mini-visits-index"
+printf 'newer telescope\n' >"$test_home/.local/state/nvim2/telescope_history.sqlite3"
 ln -s "$legacy_data" "$test_home/.local/share/nvim2"
 mkdir -p "$test_home/.tmux/plugins"
 cp -a "$test_root/stage-one/$id_one/share/tmux/plugins/." "$test_home/.tmux/plugins/"
@@ -996,6 +995,21 @@ set -e
 [[ $foreign_status -ne 0 && $foreign_output == *'foreign managed path exists'* ]] ||
   fail 'foreign managed link was accepted'
 assert_link "$foreign_home/bin/rg" /usr/bin/true
+test_home="$test_root/nonstandard home"
+
+test_home=$test_root/telescope-state-home
+mkdir -p "$test_home/.local/share" "$test_home/.local/state/nvim2" "$test_home/.local/state/bstow"
+ln -s "$legacy_data" "$test_home/.local/share/nvim2"
+printf '%s\0%s\0' "$legacy_source" '.local/share/nvim2' \
+  >"$test_home/.local/state/bstow/nvim2.links"
+printf 'newer prompts\n' >"$test_home/.local/state/nvim2/telescope_history"
+run_manager install "$artifact_one" >"$test_root/telescope-migration.log" 2>&1
+[[ $(<"$test_home/.local/state/nvim2/telescope_history.sqlite3") == 'legacy telescope' ]] ||
+  fail 'Telescope SQLite history was not migrated'
+[[ $(<"$test_home/.local/state/nvim2/telescope_history") == 'newer prompts' ]] ||
+  fail 'state migration replaced newer Telescope prompt history'
+[[ $(<"$legacy_data/telescope_history") == 'legacy telescope prompts' ]] ||
+  fail 'state migration removed the Telescope prompt source'
 test_home="$test_root/nonstandard home"
 
 run_manager verify debian-13-x86_64 "$artifact_one"
@@ -1032,13 +1046,11 @@ assert_link "$test_home/.config/k9s/config.yaml" \
   fail 'ansible-lint offline venv was not created'
 [[ -x $test_home/dotfiles-releases/$id_one/share/nvim2/mason/packages/yamllint/venv/bin/yamllint ]] ||
   fail 'yamllint offline venv was not created'
-[[ $(<"$test_home/.local/state/nvim2/mini-visits-index") == 'newer visits' ]] ||
-  fail 'state migration replaced newer Mini Visits state'
-[[ $(<"$test_home/.local/state/nvim2/telescope_history.sqlite3") == 'legacy telescope' ]] ||
-  fail 'Telescope state was not migrated'
+[[ $(<"$test_home/.local/state/nvim2/telescope_history.sqlite3") == 'newer telescope' ]] ||
+  fail 'state migration replaced newer Telescope state'
 [[ $(<"$test_home/.local/state/nvim2/telescope_history") == 'legacy telescope prompts' ]] ||
   fail 'Telescope prompt history was not migrated'
-[[ $(<"$legacy_data/mini-visits-index") == 'legacy visits' ]] ||
+[[ $(<"$legacy_data/telescope_history.sqlite3") == 'legacy telescope' ]] ||
   fail 'state migration removed its source'
 run_manager health
 set +e

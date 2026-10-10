@@ -306,9 +306,9 @@ server's physical config through `source-file -F`; it does not switch an A
 server to B. Finish or safely stop the old server before expecting a new one to
 use the newly selected release.
 
-Mutable Nvim state, including ShaDa, undo, project marks, Mini Visits and
+Mutable Nvim state, including ShaDa, undo, project marks and
 Telescope history, stays under `XDG_STATE_HOME` or `~/.local/state/nvim2`.
-The first activation copies legacy Mini Visits and Telescope files only when
+The first activation copies legacy Telescope history files only when
 the new destination is absent and preserves the source. zoxide data,
 tmux-resurrect sessions, caches, kubeconfig and credentials also remain outside
 the immutable payload. The Nvim launcher remembers the user's original

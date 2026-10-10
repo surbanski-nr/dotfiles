@@ -468,6 +468,93 @@ assert(vim.deep_equal(vim.fn.getpos "'A", native_global), 'project marks changed
 vim.cmd.edit(file_a)
 assert(vim.deep_equal(vim.fn.getpos "'a", native_local), 'project marks changed the native local mark')
 
+do
+  vim.cmd.edit(file_b)
+  vim.cmd.normal { args = { 'ma' }, bang = true }
+  local native_map = vim.fn.maparg('<leader>sM', 'n', false, true)
+  native_map.callback()
+  local picker
+  assert(
+    vim.wait(2000, function()
+      if vim.bo.filetype ~= 'TelescopePrompt' then return false end
+      picker = require('telescope.actions.state').get_current_picker(vim.api.nvim_get_current_buf())
+      return picker and picker.manager and picker.manager:num_results() > 0
+    end),
+    'native-mark shortcut did not open its Telescope results'
+  )
+  local index, selected, local_mark, automatic_mark = 1, false, false, false
+  for entry in picker.manager:iter() do
+    if entry.value:match '^a%s' then local_mark = true end
+    if entry.value:match '^"%s' then automatic_mark = true end
+    if entry.value:match '^A%s' then
+      picker:set_selection(picker:get_row(index))
+      selected = true
+    end
+    index = index + 1
+  end
+  assert(selected, 'native-mark picker omitted mark A from another repository')
+  assert(local_mark, 'native-mark picker omitted the current buffer local mark a')
+  assert(automatic_mark, 'native-mark picker omitted the automatic last-exit mark')
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'xt', false)
+  assert(vim.wait(2000, function() return vim.bo.filetype ~= 'TelescopePrompt' end), 'native-mark selection did not close its picker')
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'xt', false)
+  assert(project.canonical(vim.api.nvim_buf_get_name(0)) == project.canonical(file_a), 'native-mark shortcut did not jump across repositories')
+  assert(vim.deep_equal(vim.api.nvim_win_get_cursor(0), { 2, 3 }), 'native-mark shortcut did not restore the exact position')
+end
+
+do
+  local history = vim.fs.joinpath(temporary, 'recent-files.shada')
+  local environment = vim.tbl_extend('force', vim.fn.environ(), {
+    XDG_STATE_HOME = vim.fs.joinpath(temporary, 'recent-state'),
+    XDG_CACHE_HOME = vim.fs.joinpath(temporary, 'recent-cache'),
+  })
+  -- Default ShaDa excludes /tmp, where these isolated file fixtures live.
+  local enable_fixture_history = 'set shada-=r/tmp/ shada-=r/private/'
+  local visited = ([=[
+vim.cmd.edit(%q)
+vim.cmd.edit(%q)
+vim.cmd.wshada { args = { %q }, bang = true }
+]=]):format(file_a, file_b, history)
+  local writer = vim
+    .system({ vim.v.progpath, '--headless', '-i', history, '--cmd', enable_fixture_history, '+lua ' .. visited, '+qa!' }, { env = environment, text = true })
+    :wait(30000)
+  assert(writer.code == 0, 'recent-file fixture could not save native history: ' .. (writer.stderr or ''))
+
+  local reopened = ([=[
+assert(vim.tbl_contains(vim.v.oldfiles, %q), 'native history lost a visited file after restart')
+assert(not MiniVisits and not package.loaded['mini.visits'], 'Mini Visits still tracks files')
+local mapping = vim.fn.maparg('<leader>s.', 'n', false, true)
+mapping.callback()
+local picker
+assert(vim.wait(2000, function()
+  if vim.bo.filetype ~= 'TelescopePrompt' then return false end
+  picker = require('telescope.actions.state').get_current_picker(vim.api.nvim_get_current_buf())
+  return picker and picker.manager and picker.manager:num_results() > 0
+end), 'recent-file shortcut did not open its results')
+local index, selected = 1, false
+for entry in picker.manager:iter() do
+  if entry.value == %q then
+    picker:set_selection(picker:get_row(index))
+    selected = true
+    break
+  end
+  index = index + 1
+end
+assert(selected, 'recent-file picker omitted the file saved by another session')
+vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'xt', false)
+assert(vim.wait(2000, function() return vim.bo.filetype ~= 'TelescopePrompt' end), 'recent-file selection did not close its picker')
+vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'xt', false)
+assert(vim.api.nvim_buf_get_name(0) == %q, 'recent-file shortcut did not reopen the selected file')
+]=]):format(file_a, file_a, file_a)
+  local runner = '+lua local ok, message = xpcall(function() '
+    .. reopened
+    .. " end, debug.traceback); if not ok then vim.api.nvim_err_writeln(message); vim.cmd('cquit 1') end"
+  local reader = vim
+    .system({ vim.v.progpath, '--headless', '-i', history, '--cmd', enable_fixture_history, runner, '+qa!' }, { env = environment, text = true })
+    :wait(30000)
+  assert(reader.code == 0, 'native recent-file navigation failed after restart: ' .. (reader.stderr or ''))
+end
+
 vim.cmd.edit(vim.fs.joinpath(alias, 'tracked.lua'))
 assert(marks.set 'alias')
 assert(#marks.list(project.canonical(repository_b)) == 2, 'symlink alias used another mark namespace')
@@ -652,11 +739,16 @@ assert(not marks.set 'bad\nname', 'control characters were accepted in a project
 vim.cmd.edit(file_b)
 
 local selected = 0
+local picked_by_mapping
 local deleted_by_mapping
 local original_select = vim.ui.select
 vim.ui.select = function(items, _, callback)
   selected = selected + 1
-  if selected == 3 then
+  assert(vim.iter(items):all(function(record) return record.root == root_b end), 'project-mark picker included another repository')
+  if selected == 2 then
+    picked_by_mapping = items[1]
+    callback(items[1])
+  elseif selected == 3 then
     deleted_by_mapping = items[1].name
     callback(items[1])
   else
@@ -664,7 +756,11 @@ vim.ui.select = function(items, _, callback)
   end
 end
 vim.fn.maparg('<leader>mm', 'n', false, true).callback()
-vim.fn.maparg('<leader>sM', 'n', false, true).callback()
+vim.fn.maparg('<leader>sm', 'n', false, true).callback()
+assert(
+  picked_by_mapping and project.canonical(vim.api.nvim_buf_get_name(0)) == project.canonical(vim.fs.joinpath(root_b, picked_by_mapping.file)),
+  'project-mark shortcut did not jump to the selected file'
+)
 vim.fn.maparg('<leader>md', 'n', false, true).callback()
 vim.ui.select = original_select
 assert(selected == 3, 'project-mark picker mappings did not open their UI')

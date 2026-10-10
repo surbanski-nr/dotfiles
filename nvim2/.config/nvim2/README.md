@@ -85,8 +85,8 @@ Use this clean rebuild after a large configuration or plugin-manager change,
 or when `:Nvim2Check` reports undeclared installed tools or parsers.
 
 Close every Nvim2 process first. The following procedure moves the generated
-profile aside instead of deleting it. It restores Mini Visits, Telescope
-history, ShaDa marks and registers, and persistent undo files:
+profile aside instead of deleting it. It restores Telescope history, project
+marks, ShaDa marks and registers, and persistent undo files:
 
 ```bash
 (
@@ -108,7 +108,7 @@ history, ShaDa marks and registers, and persistent undo files:
   [[ ! -e "$cache" ]] || mv "$cache" "$backup/cache"
 
   mkdir -p "$data" "$state"
-  for file in mini-visits-index telescope_history telescope_history.sqlite3; do
+  for file in telescope_history telescope_history.sqlite3; do
     [[ ! -f "$backup/state/$file" ]] || cp -a "$backup/state/$file" "$state/"
   done
   for directory in project-marks shada undo; do
