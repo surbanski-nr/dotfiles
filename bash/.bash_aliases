@@ -122,16 +122,16 @@ dotfiles-check() (
     done
     return 0
   fi
-  if [[ -r $manifest_dir/versions.env && -r $manifest_dir/validation.env ]]; then
+  if [[ -r $manifest_dir/tools.env && -r $manifest_dir/validation.env ]]; then
     # shellcheck source=../validation.env
     source "$manifest_dir/validation.env"
-    # shellcheck source=../versions.env
-    source "$manifest_dir/versions.env"
+    # shellcheck source=../tools.env
+    source "$manifest_dir/tools.env"
     # Loaded only when dotfiles-check runs, never during normal shell startup.
     # shellcheck source=../scripts/setup-lib
     source "$manifest_dir/scripts/setup-lib"
-    # shellcheck source=../probes.env
-    source "$manifest_dir/probes.env"
+    # shellcheck source=../tools-probes.env
+    source "$manifest_dir/tools-probes.env"
     validate_tool_config || return
     validate_validator_config || return
   fi

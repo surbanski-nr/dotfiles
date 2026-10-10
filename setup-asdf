@@ -427,8 +427,8 @@ cleanup() {
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/setup-lib
 source "$REPO_DIR/scripts/setup-lib"
-# shellcheck source=versions.env
-source "$REPO_DIR/versions.env"
+# shellcheck source=tools.env
+source "$REPO_DIR/tools.env"
 # Traps need empty cleanup collections even when --help does no setup work.
 declare -a TEMP_PATHS=()
 declare -a HELD_LOCK_FDS=()

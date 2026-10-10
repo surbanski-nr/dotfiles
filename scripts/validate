@@ -105,7 +105,7 @@ validate_bash() {
     tests/bash_test.sh
   )
 
-  check_shell_syntax bash "${files[@]}" release.env validation.env versions.env system.env probes.env
+  check_shell_syntax bash "${files[@]}" release.env validation.env tools.env system.env tools-probes.env
   check_markdown_bash README.md SETUP.md TOOL_UPDATES.md \
     nvim2/.config/nvim2/offline-releases.md
   shellcheck --shell=bash --external-sources --source-path=SCRIPTDIR \
@@ -361,9 +361,9 @@ validate_repo() {
   local image
   local variable
 
-  check_shell_syntax bash release.env validation.env versions.env system.env probes.env
-  # shellcheck source=../versions.env
-  source versions.env
+  check_shell_syntax bash release.env validation.env tools.env system.env tools-probes.env
+  # shellcheck source=../tools.env
+  source tools.env
   # shellcheck source=../validation.env
   source validation.env
   # shellcheck source=setup-lib
@@ -376,7 +376,7 @@ validate_repo() {
   [[ ! -e offline ]] || die 'legacy offline source directory still exists'
   if grep -Eq \
     '^(ASDF|GH|K9S|TRIVY|KYVERNO|KUBECONFORM|SHELLCHECK|RG|ZOXIDE|UV|OMP|NVIM|NPM|TMUX|FZF|KREW|ACTIONLINT|STYLUA|ZIZMOR|TASK)_(VERSION|SHA256)=' \
-    versions.env validation.env; then
+    tools.env validation.env; then
     die 'legacy editable release scalars remain in the catalogs'
   else
     grep_status=$?

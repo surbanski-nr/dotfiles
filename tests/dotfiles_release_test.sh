@@ -119,7 +119,7 @@ make_artifact() {
 
   {
     printf '#!/usr/bin/env bash\n'
-    cat "$repo_dir/probes.env" "$repo_dir/scripts/dotfiles-release"
+    cat "$repo_dir/tools-probes.env" "$repo_dir/scripts/dotfiles-release"
   } >"$release/dotfiles-release"
   chmod 0755 "$release/dotfiles-release"
   ln -s ../dotfiles-release "$release/bin/dotfiles-release"

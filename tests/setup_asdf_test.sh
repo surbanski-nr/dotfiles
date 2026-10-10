@@ -15,8 +15,8 @@ fail() {
   exit 1
 }
 
-# shellcheck source=../versions.env
-source "$repo_dir/versions.env"
+# shellcheck source=../tools.env
+source "$repo_dir/tools.env"
 # shellcheck source=../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
 select_default_release TOOL_RELEASES asdf
@@ -79,7 +79,7 @@ prepare_plugin() {
   plugin_commit=$(git -C "$plugin" rev-parse HEAD)
   git -C "$plugin" remote add origin "https://example.invalid/$name.git"
   printf 'ASDF_PLUGINS[%q]=%q\n' "$name" \
-    "https://example.invalid/$name.git|$plugin_commit" >>"$repository/versions.env"
+    "https://example.invalid/$name.git|$plugin_commit" >>"$repository/tools.env"
 }
 
 test_repo="$test_root/repository"
@@ -87,7 +87,7 @@ test_home="$test_root/home"
 mkdir -p "$test_repo/scripts" "$test_home/bin"
 cp "$repo_dir/setup-asdf" "$test_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$test_repo/scripts/setup-lib"
-cp "$repo_dir/versions.env" "$test_repo/versions.env"
+cp "$repo_dir/tools.env" "$test_repo/tools.env"
 cp "$repo_dir/system.env" "$test_repo/system.env"
 
 cat >"$test_home/bin/kubectl" <<'EOF'
@@ -138,13 +138,13 @@ legacy_archive=$test_root/asdf.tar.gz
 mkdir -p "$legacy_repo/scripts" "$legacy_home/bin" "$legacy_archive_root"
 cp "$repo_dir/setup-asdf" "$legacy_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$legacy_repo/scripts/setup-lib"
-cp "$repo_dir/versions.env" "$legacy_repo/versions.env"
+cp "$repo_dir/tools.env" "$legacy_repo/tools.env"
 cp "$repo_dir/system.env" "$legacy_repo/system.env"
 prepare_plugin "$legacy_home" "$legacy_repo"
 write_asdf_fixture "$legacy_archive_root/asdf" "$ASDF_VERSION"
 tar -C "$legacy_archive_root" -czf "$legacy_archive" asdf
 legacy_archive_digest=$(sha256sum "$legacy_archive" | awk '{print $1}')
-append_release "$legacy_repo/versions.env" asdf "$ASDF_VERSION" \
+append_release "$legacy_repo/tools.env" asdf "$ASDF_VERSION" \
   https://example.invalid/asdf.tar.gz "$legacy_archive_digest"
 cp "$legacy_archive_root/asdf" "$legacy_home/bin/asdf-$ASDF_VERSION"
 ln -s "asdf-$ASDF_VERSION" "$legacy_home/bin/asdf"
@@ -232,7 +232,7 @@ reconcile_log=$test_root/reconcile.log
 mkdir -p "$reconcile_repo/scripts" "$reconcile_home/bin"
 cp "$repo_dir/setup-asdf" "$reconcile_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$reconcile_repo/scripts/setup-lib"
-cp "$repo_dir/versions.env" "$reconcile_repo/versions.env"
+cp "$repo_dir/tools.env" "$reconcile_repo/tools.env"
 cp "$repo_dir/system.env" "$reconcile_repo/system.env"
 prepare_plugin "$reconcile_home" "$reconcile_repo"
 write_asdf_fixture "$reconcile_home/bin/asdf-0.19.0" 0.19.0
@@ -262,7 +262,7 @@ order_log=$test_root/order.log
 mkdir -p "$order_repo/scripts" "$order_home/bin"
 cp "$repo_dir/setup-asdf" "$order_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$order_repo/scripts/setup-lib"
-cp "$repo_dir/versions.env" "$order_repo/versions.env"
+cp "$repo_dir/tools.env" "$order_repo/tools.env"
 cp "$repo_dir/system.env" "$order_repo/system.env"
 prepare_plugin "$order_home" "$order_repo"
 write_asdf_fixture "$order_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
@@ -270,7 +270,7 @@ ln -s "asdf-$ASDF_VERSION" "$order_home/bin/asdf"
 record_asdf_fixture "$order_home" "asdf-$ASDF_VERSION"
 printf 'TOOL_RELEASES[terraform]=%q\n' \
   $'\n1.15.9|https://example.invalid/terraform-1.15.9.zip|0000000000000000000000000000000000000000000000000000000000000000\n1.16.4|https://example.invalid/terraform-1.16.4.zip|1111111111111111111111111111111111111111111111111111111111111111\n' \
-  >>"$order_repo/versions.env"
+  >>"$order_repo/tools.env"
 HOME="$order_home" TEST_ASDF_LOG="$order_log" "$order_repo/setup-asdf" terraform
 [[ $(grep '^install' "$order_log") == $'install\tterraform\t1.15.9\ninstall\tterraform\t1.16.4' &&
   $(tail -n 1 "$order_log") == $'set\tterraform\t1.15.9' ]] ||
@@ -282,7 +282,7 @@ default_log=$test_root/default.log
 mkdir -p "$default_repo/scripts" "$default_home/bin"
 cp "$repo_dir/setup-asdf" "$default_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$default_repo/scripts/setup-lib"
-cp "$repo_dir/versions.env" "$default_repo/versions.env"
+cp "$repo_dir/tools.env" "$default_repo/tools.env"
 cp "$repo_dir/system.env" "$default_repo/system.env"
 for tool in "${!ASDF_PLUGINS[@]}"; do
   prepare_plugin "$default_home" "$default_repo" "$tool"
@@ -306,7 +306,7 @@ for expected in \
     fail "default setup-asdf omitted: $expected"
 done
 
-printf 'unset "ASDF_PLUGINS[helm]"\n' >>"$default_repo/versions.env"
+printf 'unset "ASDF_PLUGINS[helm]"\n' >>"$default_repo/tools.env"
 subset_log=$test_root/subset.log
 HOME="$default_home" TEST_ASDF_LOG="$subset_log" "$default_repo/setup-asdf"
 [[ $(grep -c '^set' "$subset_log") -eq 5 ]] ||
@@ -325,7 +325,7 @@ failure_log=$test_root/failure.log
 mkdir -p "$failure_repo/scripts" "$failure_home/bin"
 cp "$repo_dir/setup-asdf" "$failure_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$failure_repo/scripts/setup-lib"
-cp "$repo_dir/versions.env" "$failure_repo/versions.env"
+cp "$repo_dir/tools.env" "$failure_repo/tools.env"
 cp "$repo_dir/system.env" "$failure_repo/system.env"
 prepare_plugin "$failure_home" "$failure_repo"
 write_asdf_fixture "$failure_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
@@ -373,7 +373,7 @@ for point in digest binary selection; do
   mkdir -p "$recovery_home/bin" "$recovery_repo/scripts"
   cp "$repo_dir/setup-asdf" "$recovery_repo/setup-asdf"
   cp "$repo_dir/scripts/setup-lib" "$recovery_repo/scripts/setup-lib"
-  cp "$legacy_repo/versions.env" "$recovery_repo/versions.env"
+  cp "$legacy_repo/tools.env" "$recovery_repo/tools.env"
   cp "$repo_dir/system.env" "$recovery_repo/system.env"
   prepare_plugin "$recovery_home" "$recovery_repo"
   cp "$legacy_home/bin/curl" "$recovery_home/bin/curl"

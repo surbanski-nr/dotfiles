@@ -2,11 +2,11 @@
 
 set -euo pipefail
 
-# Release builds prepend probes.env so the delivered manager is self-contained.
+# Release builds prepend tools-probes.env so the delivered manager is self-contained.
 if ! declare -p TOOL_PROBE_ARGS RELEASE_TOOL_VERSIONS >/dev/null 2>&1; then
   manager_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-  # shellcheck source=../probes.env
-  source "$manager_dir/../probes.env"
+  # shellcheck source=../tools-probes.env
+  source "$manager_dir/../tools-probes.env"
 fi
 
 RELEASE_ROOT=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}

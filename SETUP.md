@@ -34,7 +34,8 @@ The setup sequence moves regular distribution-provided Bash startup files
 aside without overwriting an existing backup. `bstow --dry-run` reports any
 remaining conflict, including a foreign symlink.
 
-`versions.env` stores direct releases in `TOOL_RELEASES`. Each tool has ordered
+`tools.env` owns tool profiles, release records and asdf/tmux plugin pins.
+It stores direct releases in `TOOL_RELEASES`. Each tool has ordered
 `version|full_URL|SHA256` records, and the first record is the default. A
 required default without an artifact is an error, with no fallback to a later
 record. `validation.env` uses the same record format in
@@ -85,7 +86,7 @@ verification tools, interactive utilities such as tmux, htop and mc, and
 headers needed by asdf to compile Python and other project runtimes. It is
 not a second release-builder role; builder-only packages stay out of it.
 
-`probes.env` owns tool version arguments shared by `setup-tools`, shell
+`tools-probes.env` owns tool version arguments shared by `setup-tools`, shell
 diagnostics and release health, plus the builder/health metadata-field mapping. Each value contains whitespace-separated arguments; omitted tools use
 `--version`. The builder embeds this data in the generated standalone manager,
 so it works outside the checkout and can check older releases that did not
@@ -151,7 +152,7 @@ supported offline installation route; `setup-tools` and `setup-asdf` are not
 used. The artifact contains one immutable dotfiles snapshot together
 with Neovim and its complete profile, Node.js, private standalone Python,
 ripgrep, fd, tmux and plugins, Oh My Posh, k9s, zoxide, kubectx, kubens, Task, fzf
-and Terraform, plus every kubectl and Helm version listed in `versions.env`.
+and Terraform, plus every kubectl and Helm version listed in `tools.env`.
 Each release owns its complete tool payload, even when another retained release
 contains the same versions. Asdf, its plugins and its shims are not part of the
 offline package. Optional online `setup-asdf` remains available independently.
@@ -337,7 +338,7 @@ helpers are not automatically bundled.
 
 ### Selecting a bundled Kubernetes client
 
-The first kubectl or Helm record in `versions.env` is the default. The builder
+The first kubectl or Helm record in `tools.env` is the default. The builder
 includes every record for those two tools; other tools use only their default.
 Launchers resolve one physical release and run its client without using asdf,
 searching `.tool-versions`, downloading tools or detecting the cluster version.
@@ -533,7 +534,7 @@ private configuration, and opens them with Nvim2.
 
 ## TPM and Krew
 
-TPM and its plugin checkouts use the commits in `versions.env`. This section is
+TPM and its plugin checkouts use the commits in `tools.env`. This section is
 only for the connected setup. Complete offline releases do not bundle or run
 TPM; their tmux config loads sensible, resurrect and continuum directly from
 the physical release. TPM reads plugin declarations from
@@ -546,7 +547,7 @@ On a connected machine, reconcile the managed checkouts with:
 
 ```bash
 set -euo pipefail
-. ./versions.env
+. ./tools.env
 plugins=$HOME/.tmux/plugins
 mkdir -p "$plugins"
 
@@ -588,7 +589,7 @@ install the manager:
 ```bash
 set -euo pipefail
 source scripts/setup-lib
-source versions.env
+source tools.env
 validate_tool_config
 select_default_release TOOL_RELEASES krew
 archive=$(mktemp)

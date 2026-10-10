@@ -50,7 +50,7 @@ load_test_versions() {
   # shellcheck disable=SC1090
   source "$repository/validation.env"
   # shellcheck disable=SC1090
-  source "$repository/versions.env"
+  source "$repository/tools.env"
   # shellcheck disable=SC1090
   source "$repository/scripts/setup-lib"
   select_default_release TOOL_RELEASES gh; GH_VERSION=$RELEASE_VERSION
@@ -68,9 +68,9 @@ make_test_repo() {
   mkdir -p "$destination/scripts"
   cp "$repo_dir/setup-tools" "$destination/setup-tools"
   cp "$repo_dir/scripts/setup-lib" "$destination/scripts/setup-lib"
-  cp "$repo_dir/versions.env" "$destination/versions.env"
+  cp "$repo_dir/tools.env" "$destination/tools.env"
   cp "$repo_dir/system.env" "$destination/system.env"
-  cp "$repo_dir/probes.env" "$destination/probes.env"
+  cp "$repo_dir/tools-probes.env" "$destination/tools-probes.env"
   cp "$repo_dir/validation.env" "$destination/validation.env"
 }
 
@@ -96,7 +96,7 @@ make_archives() {
   tar -C "$work" -czf "$archive_root/fd/$FD_VERSION/fd-v${FD_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
     "fd-v${FD_VERSION}-x86_64-unknown-linux-musl"
   digest=$(sha256sum "$archive_root/fd/$FD_VERSION/fd-v${FD_VERSION}-x86_64-unknown-linux-musl.tar.gz" | awk '{print $1}')
-  append_release "$repository/versions.env" TOOL_RELEASES fd "$FD_VERSION" \
+  append_release "$repository/tools.env" TOOL_RELEASES fd "$FD_VERSION" \
     "https://example.invalid/fd/$FD_VERSION/fd-v${FD_VERSION}-x86_64-unknown-linux-musl.tar.gz" "$digest"
 
   write_fake "$work/gh_${GH_VERSION}_linux_amd64/bin/gh" gh "$GH_VERSION"
@@ -104,19 +104,19 @@ make_archives() {
   tar -C "$work" -czf "$archive_root/gh/$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz" \
     "gh_${GH_VERSION}_linux_amd64"
   digest=$(sha256sum "$archive_root/gh/$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz" | awk '{print $1}')
-  append_release "$repository/versions.env" TOOL_RELEASES gh "$GH_VERSION" \
+  append_release "$repository/tools.env" TOOL_RELEASES gh "$GH_VERSION" \
     "https://example.invalid/gh/$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz" "$digest"
 
   write_fake "$work/k9s" k9s "$K9S_VERSION"
   mkdir -p "$archive_root/k9s/$K9S_VERSION"
   tar -C "$work" -czf "$archive_root/k9s/$K9S_VERSION/k9s_Linux_amd64.tar.gz" k9s
   digest=$(sha256sum "$archive_root/k9s/$K9S_VERSION/k9s_Linux_amd64.tar.gz" | awk '{print $1}')
-  append_release "$repository/versions.env" TOOL_RELEASES k9s "$K9S_VERSION" \
+  append_release "$repository/tools.env" TOOL_RELEASES k9s "$K9S_VERSION" \
     "https://example.invalid/k9s/$K9S_VERSION/k9s_Linux_amd64.tar.gz" "$digest"
 
   write_fake "$archive_root/oh-my-posh/$OMP_VERSION/posh-linux-amd64" oh-my-posh "$OMP_VERSION"
   digest=$(sha256sum "$archive_root/oh-my-posh/$OMP_VERSION/posh-linux-amd64" | awk '{print $1}')
-  append_release "$repository/versions.env" TOOL_RELEASES oh-my-posh "$OMP_VERSION" \
+  append_release "$repository/tools.env" TOOL_RELEASES oh-my-posh "$OMP_VERSION" \
     "https://example.invalid/oh-my-posh/$OMP_VERSION/posh-linux-amd64" "$digest"
 
   write_fake "$work/uv-x86_64-unknown-linux-gnu/uv" uv "$UV_VERSION"
@@ -125,7 +125,7 @@ make_archives() {
   tar -C "$work" -czf "$archive_root/uv/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" \
     uv-x86_64-unknown-linux-gnu
   digest=$(sha256sum "$archive_root/uv/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" | awk '{print $1}')
-  append_release "$repository/versions.env" TOOL_RELEASES uv "$UV_VERSION" \
+  append_release "$repository/tools.env" TOOL_RELEASES uv "$UV_VERSION" \
     "https://example.invalid/uv/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$digest"
 
   write_fake "$work/nvim-linux-x86_64/bin/nvim" nvim "$NVIM_VERSION"
@@ -135,7 +135,7 @@ make_archives() {
   tar -C "$work" -czf "$archive_root/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" \
     nvim-linux-x86_64
   digest=$(sha256sum "$archive_root/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" | awk '{print $1}')
-  append_release "$repository/versions.env" TOOL_RELEASES nvim "$NVIM_VERSION" \
+  append_release "$repository/tools.env" TOOL_RELEASES nvim "$NVIM_VERSION" \
     "https://example.invalid/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" "$digest"
 }
 
@@ -213,8 +213,8 @@ assert_link "$test_home/bin/fd" "fd-$FD_VERSION"
 default_repository=$test_root/default-repository
 default_home=$test_root/default-home
 make_test_repo "$default_repository"
-cp "$test_repository/versions.env" "$default_repository/versions.env"
-printf 'TOOLS=(fd k9s gh oh-my-posh uv nvim)\n' >>"$default_repository/versions.env"
+cp "$test_repository/tools.env" "$default_repository/tools.env"
+printf 'TOOLS=(fd k9s gh oh-my-posh uv nvim)\n' >>"$default_repository/tools.env"
 run_setup "$default_home" "$default_repository" "$archive_root"
 for tool in fd k9s gh oh-my-posh uv nvim; do
   [[ -x $default_home/bin/$tool ]] || fail "default online install omitted $tool"
@@ -249,7 +249,7 @@ set -e
 unsupported_repository=$test_root/unsupported-repository
 unsupported_home=$test_root/unsupported-home
 make_test_repo "$unsupported_repository"
-printf 'TOOLS+=(fzf)\n' >>"$unsupported_repository/versions.env"
+printf 'TOOLS+=(fzf)\n' >>"$unsupported_repository/tools.env"
 if run_setup "$unsupported_home" "$unsupported_repository" "$archive_root" \
   k9s >"$test_root/unsupported-profile.log" 2>&1; then
   fail 'setup-tools accepted a profile tool without a command adapter'
@@ -300,7 +300,7 @@ tar -C "$unsafe_work" -czf \
   "$unsafe_archives/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" nvim-linux-x86_64
 unsafe_digest=$(sha256sum \
   "$unsafe_archives/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" | awk '{print $1}')
-append_release "$unsafe_repository/versions.env" TOOL_RELEASES nvim "$NVIM_VERSION" \
+append_release "$unsafe_repository/tools.env" TOOL_RELEASES nvim "$NVIM_VERSION" \
   "https://example.invalid/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" "$unsafe_digest"
 set +e
 unsafe_output=$(run_setup "$unsafe_home" "$unsafe_repository" "$unsafe_archives" nvim 2>&1)
@@ -362,7 +362,7 @@ tar -C "$pin_work" -cJf \
 daily_shellcheck_digest=$(sha256sum \
   "$pin_archives/shellcheck/$daily_shellcheck/shellcheck-v$daily_shellcheck.linux.x86_64.tar.xz")
 daily_shellcheck_digest=${daily_shellcheck_digest%% *}
-append_release "$pin_repository/versions.env" TOOL_RELEASES shellcheck \
+append_release "$pin_repository/tools.env" TOOL_RELEASES shellcheck \
   "$daily_shellcheck" \
   "https://example.invalid/shellcheck/$daily_shellcheck/shellcheck-v$daily_shellcheck.linux.x86_64.tar.xz" \
   "$daily_shellcheck_digest"
@@ -395,7 +395,7 @@ tar -C "$upgrade_work" -czf \
   "$upgrade_archives/k9s/$upgrade_b_version/k9s_Linux_amd64.tar.gz" k9s
 upgrade_b_digest=$(sha256sum \
   "$upgrade_archives/k9s/$upgrade_b_version/k9s_Linux_amd64.tar.gz" | awk '{print $1}')
-append_release "$upgrade_repository/versions.env" TOOL_RELEASES k9s "$upgrade_b_version" \
+append_release "$upgrade_repository/tools.env" TOOL_RELEASES k9s "$upgrade_b_version" \
   "https://example.invalid/k9s/$upgrade_b_version/k9s_Linux_amd64.tar.gz" "$upgrade_b_digest"
 run_setup "$upgrade_home" "$upgrade_repository" "$upgrade_archives" k9s
 assert_link "$upgrade_home/bin/k9s" "k9s-$upgrade_b_version"
@@ -413,7 +413,7 @@ set -e
   fail 'upgrade accepted a modified selected A installation'
 assert_link "$modified_upgrade_home/bin/k9s" "k9s-$upgrade_a_version"
 
-append_release "$upgrade_repository/versions.env" TOOL_RELEASES k9s "$upgrade_a_version" \
+append_release "$upgrade_repository/tools.env" TOOL_RELEASES k9s "$upgrade_a_version" \
   "https://example.invalid/k9s/$upgrade_a_version/k9s_Linux_amd64.tar.gz" "$upgrade_a_digest"
 find "$upgrade_archives" -depth -delete
 run_setup "$upgrade_home" "$upgrade_repository" "$upgrade_archives" k9s
@@ -426,7 +426,7 @@ make_test_repo "$missing_default_repository"
 make_archives "$missing_default_repository" "$missing_default_archives"
 printf 'TOOL_RELEASES[k9s]=%q\n' \
   $'\n0.51.1|-|-\n0.51.0|https://example.invalid/k9s_Linux_amd64.tar.gz|c3752ad51a5a4015a113819c4eeb6e55a4d0e4b8e652494797532f6fc8161dd7\n' \
-  >>"$missing_default_repository/versions.env"
+  >>"$missing_default_repository/tools.env"
 set +e
 missing_default_output=$(run_setup "$missing_default_home" \
   "$missing_default_repository" "$missing_default_archives" k9s 2>&1)
@@ -445,7 +445,7 @@ for invalid_list in '' '   '; do
   make_test_repo "$list_repository"
   make_archives "$list_repository" "$list_archives"
   printf 'TOOL_RELEASES[terraform]=%q\n' "$invalid_list" \
-    >>"$list_repository/versions.env"
+    >>"$list_repository/tools.env"
   set +e
   list_output=$(run_setup "$list_home" "$list_repository" "$list_archives" k9s 2>&1)
   list_status=$?
@@ -462,7 +462,7 @@ single_archives=$test_root/single-list-archives
 single_home=$test_root/single-list-home
 make_test_repo "$single_repository"
 make_archives "$single_repository" "$single_archives"
-append_release "$single_repository/versions.env" TOOL_RELEASES terraform \
+append_release "$single_repository/tools.env" TOOL_RELEASES terraform \
   1.16.4 https://example.invalid/terraform.zip \
   dc94af0eef1147718ad7c8daea792ed199e3e0492eec180d0adafa2a65a879df
 run_setup "$single_home" "$single_repository" "$single_archives" k9s
@@ -496,7 +496,7 @@ make_archives "$failure_repo" "$failure_archives"
 run_setup "$failure_home" "$failure_repo" "$failure_archives" k9s
 old_target=$(readlink -- "$failure_home/bin/k9s")
 write_fake "$failure_archives/k9s/0.51.1/k9s_Linux_amd64.tar.gz" k9s 0.51.1
-append_release "$failure_repo/versions.env" TOOL_RELEASES k9s 0.51.1 \
+append_release "$failure_repo/tools.env" TOOL_RELEASES k9s 0.51.1 \
   https://example.invalid/k9s/0.51.1/k9s_Linux_amd64.tar.gz \
   0000000000000000000000000000000000000000000000000000000000000000
 set +e
@@ -562,7 +562,7 @@ tar -C "$pair_work" -czf \
   uv-x86_64-unknown-linux-gnu
 new_uv_digest=$(sha256sum \
   "$pair_archives/uv/$new_uv_version/uv-x86_64-unknown-linux-gnu.tar.gz" | awk '{print $1}')
-append_release "$pair_repo/versions.env" TOOL_RELEASES uv "$new_uv_version" \
+append_release "$pair_repo/tools.env" TOOL_RELEASES uv "$new_uv_version" \
   "https://example.invalid/uv/$new_uv_version/uv-x86_64-unknown-linux-gnu.tar.gz" "$new_uv_digest"
 mkdir -p "$test_root/activation-fail-bin"
 cat >"$test_root/activation-fail-bin/mv" <<'EOF'

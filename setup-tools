@@ -41,8 +41,8 @@ main() {
 load_setup_config() {
   # shellcheck source=system.env
   source "$REPO_DIR/system.env"
-  # shellcheck source=probes.env
-  source "$REPO_DIR/probes.env"
+  # shellcheck source=tools-probes.env
+  source "$REPO_DIR/tools-probes.env"
   # Task deliberately keeps its only editable pin in validation.env.
   # shellcheck source=validation.env
   source "$REPO_DIR/validation.env"
@@ -505,8 +505,8 @@ REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$REPO_DIR/scripts/setup-lib"
 # Profiles are data needed by --help and by the default selection. Sourcing
 # this file does not download, install or validate anything.
-# shellcheck source=versions.env
-source "$REPO_DIR/versions.env"
+# shellcheck source=tools.env
+source "$REPO_DIR/tools.env"
 # Cleanup must also work when --help returns before any installation starts.
 declare -a TEMP_PATHS=()
 declare -a HELD_LOCK_FDS=()

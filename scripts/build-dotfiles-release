@@ -80,7 +80,7 @@ image_for_platform() {
 load_build_config() {
   local source_dir=$1
 
-  [[ -f $source_dir/versions.env ]] || { die "missing $source_dir/versions.env"; return 1; }
+  [[ -f $source_dir/tools.env ]] || { die "missing $source_dir/tools.env"; return 1; }
   [[ -f $source_dir/release.env ]] ||
     { die "missing $source_dir/release.env"; return 1; }
   [[ -f $source_dir/validation.env ]] || { die "missing $source_dir/validation.env"; return 1; }
@@ -90,10 +90,10 @@ load_build_config() {
   source "$source_dir/scripts/setup-lib" || return
   # shellcheck source=../system.env
   source "$source_dir/system.env" || return
-  # shellcheck source=../versions.env
-  source "$source_dir/versions.env" || return
-  # shellcheck source=../probes.env
-  source "$source_dir/probes.env" || return
+  # shellcheck source=../tools.env
+  source "$source_dir/tools.env" || return
+  # shellcheck source=../tools-probes.env
+  source "$source_dir/tools-probes.env" || return
   validate_tool_config || return
   # shellcheck source=../validation.env
   source "$source_dir/validation.env" || return
@@ -602,7 +602,7 @@ build_release() {
     "$release/python-locks/" || return
   {
     printf '#!/usr/bin/env bash\n'
-    cat "$source_dir/probes.env" "$source_dir/scripts/dotfiles-release"
+    cat "$source_dir/tools-probes.env" "$source_dir/scripts/dotfiles-release"
   } >"$release/dotfiles-release" || return
   chmod 0755 "$release/dotfiles-release" || return
   install_release_tools "$release" "$inputs" || return

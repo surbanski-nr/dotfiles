@@ -26,17 +26,17 @@ git -C "$candidate_root/current" status --short
 cp -a "$candidate_root/current" "$candidate_root/candidate"
 ```
 
-Edit only the intended records in `candidate/versions.env`, validator records
+Edit only the intended records in `candidate/tools.env`, validator records
 in `candidate/validation.env`, or builder images in
 `candidate/release.env`. `TOOL_RELEASES` and `VALIDATOR_RELEASES`
 store ordered `version|full_URL|SHA256` records. The first record is the
 default and cannot fall back if its artifact is absent. Task belongs only to
 `VALIDATOR_RELEASES`. `ASDF_PLUGINS` owns plugin repository and commit pins,
 while runtime versions still come from `TOOL_RELEASES`.
-For a tmux plugin bump, change its `*_COMMIT` in `versions.env`; change the
+For a tmux plugin bump, change its `*_COMMIT` in `tools.env`; change the
 adjacent `*_REPO` only when deliberately moving to a different repository.
 
-For a normal dependency bump, edit only its first record in `versions.env`,
+For a normal dependency bump, edit only its first record in `tools.env`,
 or in `validation.env` for validation Task and the other validators. Run the
 focused setup in the disposable candidate, then `task validate` and the
 affected platform build and offline checks. To go back, restore the earlier
@@ -107,7 +107,7 @@ If the retained installation is intact, the script reuses it without a new
 download. If it is absent, the script downloads the pinned release again.
 The same procedure applies to `gh`, `oh-my-posh`, `rg` and the complete
 `nvim-VERSION` executable tree. Change `validation.env` for Task's private
-validation bootstrap. A daily ShellCheck change belongs in `versions.env`;
+validation bootstrap. A daily ShellCheck change belongs in `tools.env`;
 Task validation and Mason keep their own pins.
 
 A temporary switch may update only an existing managed relative link. Check
@@ -125,7 +125,7 @@ k9s version --short
 ```
 
 The next `setup-tools k9s` selects the first catalog record again. Keep the
-older complete record in `versions.env` for a persistent rollback. Treat `uv`
+older complete record in `tools.env` for a persistent rollback. Treat `uv`
 with `uvx`, and `kubectx` with `kubens`, as paired selections.
 
 ## Python environments
@@ -146,7 +146,7 @@ files on a connected machine:
 ```bash
 bash scripts/install-validation-tool task
 .cache/validation-tools/bin/task update:python-locks
-git diff -- versions.env nvim2/.config/nvim2/lua/custom/lsp.lua \
+git diff -- tools.env nvim2/.config/nvim2/lua/custom/lsp.lua \
   nvim2/.config/nvim2/python-locks
 ```
 
@@ -175,7 +175,7 @@ adapters are deliberately not part of this profile.
 
 ## Offline kubectl and Helm versions
 
-Keep each needed exact client version in `versions.env` as a complete
+Keep each needed exact client version in `tools.env` as a complete
 `version|full_URL|SHA256` record. The builder bundles every kubectl and Helm
 record into each release, with the first record as its default. To add a
 version, append a verified upstream record; to change the default, move the
@@ -226,7 +226,7 @@ temporarily, or put the required version first and rerun setup:
 ```
 
 To roll back asdf itself or a plugin, restore its executable version, digest
-or plugin commit in `versions.env`, run `setup-asdf`, and verify every retained
+or plugin commit in `tools.env`, run `setup-asdf`, and verify every retained
 runtime. For connected tmux, restore the TPM and plugin checkout commits
 without deleting tmux-resurrect data. Complete offline releases load sensible,
 resurrect and continuum directly from their physical release and do not bundle
