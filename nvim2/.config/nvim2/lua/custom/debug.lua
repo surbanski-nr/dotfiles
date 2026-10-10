@@ -43,17 +43,8 @@ function M.python()
   return executable(fallback, 'Python; select a project .venv or NVIM2_DEBUG_PYTHON')
 end
 
-local function input(label, default, completion)
-  local value = vim.fn.input(label, default or '', completion or '')
-  return value ~= '' and value or require('dap').ABORT
-end
-
-local function port(default)
-  local value = vim.fn.input('Loopback port: ', tostring(default))
-  if value == '' then return require('dap').ABORT end
-  local number = tonumber(value)
-  assert(number and number % 1 == 0 and number >= 1 and number <= 65535, 'Port must be an integer between 1 and 65535')
-  return number
+local function launch_options(cwd, python)
+  return { cwd = cwd, python = python, pythonArgs = { '-B' }, env = { PYTHONDONTWRITEBYTECODE = '1' }, console = 'integratedTerminal' }
 end
 
 local function test_runner(root)
@@ -77,7 +68,7 @@ function M.test(subject)
     local python = require 'dap-python'
     python['test_' .. subject] {
       test_runner = python.test_runner or test_runner(root),
-      config = { cwd = root, python = M.python(), pythonArgs = { '-B', '-X', 'frozen_modules=off' }, env = { PYTHONDONTWRITEBYTECODE = '1' } },
+      config = launch_options(root, M.python()),
     }
   end)
   vim.fn.chdir(previous)
@@ -105,16 +96,7 @@ function M.setup()
   end
   dap.adapters.debugpy = dap.adapters.python
 
-  local python_launch = {
-    type = 'python',
-    request = 'launch',
-    cwd = M.root,
-    python = M.python,
-    pythonArgs = { '-B', '-X', 'frozen_modules=off' },
-    env = { PYTHONDONTWRITEBYTECODE = '1' },
-    console = 'integratedTerminal',
-    justMyCode = true,
-  }
+  local python_launch = vim.tbl_extend('force', launch_options(M.root, M.python), { type = 'python', request = 'launch' })
   dap.configurations.python = {
     vim.tbl_extend('force', python_launch, { name = 'Python: launch file', program = '${file}' }),
     vim.tbl_extend('force', python_launch, {
@@ -122,16 +104,24 @@ function M.setup()
       program = '${file}',
       args = function() return require('dap.utils').splitstr(vim.fn.input 'Arguments: ') end,
     }),
-    vim.tbl_extend('force', python_launch, { name = 'Python: launch module', module = function() return input 'Python module: ' end }),
+    vim.tbl_extend('force', python_launch, {
+      name = 'Python: launch module',
+      module = function()
+        local value = vim.fn.input 'Python module: '
+        return value ~= '' and value or dap.ABORT
+      end,
+    }),
     {
       name = 'Python: attach to loopback',
       type = 'python',
       request = 'attach',
       connect = function()
-        local selected = port(5678)
-        return selected == dap.ABORT and dap.ABORT or { host = '127.0.0.1', port = selected }
+        local value = vim.fn.input('Loopback port: ', '5678')
+        if value == '' then return dap.ABORT end
+        local port = tonumber(value)
+        assert(port and port % 1 == 0 and port >= 1 and port <= 65535, 'Port must be an integer between 1 and 65535')
+        return { host = '127.0.0.1', port = port }
       end,
-      justMyCode = true,
     },
   }
 

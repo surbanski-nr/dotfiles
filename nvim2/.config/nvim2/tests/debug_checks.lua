@@ -1,17 +1,17 @@
 local dap = require 'dap'
 local python = require 'dap-python'
-local saved_test_runner = python.test_runner
+local debugger = require 'custom.debug'
 local temporary
 local children = {}
 local lsp_clients = {}
 local adapter_pids = {}
 local terminal_jobs = {}
-local environment = { 'VIRTUAL_ENV', 'CONDA_PREFIX', 'NVIM2_DEBUG_PYTHON', 'NVIM2_DEBUG_CHECK_ENV', 'NVIM2_DEBUG_CHECK_OUTSIDE' }
-local saved_environment = {}
-for _, name in ipairs(environment) do
-  saved_environment[name] = vim.env[name]
+local exit_code
+
+local function configuration(name, overrides)
+  local config = vim.iter(dap.configurations.python):find(function(candidate) return candidate.name == 'Python: ' .. name end)
+  return vim.tbl_extend('force', vim.deepcopy(assert(config, 'missing Python configuration: ' .. name)), overrides or {})
 end
-local original_cwd = vim.fn.getcwd()
 
 local function write(path, lines)
   vim.fn.mkdir(vim.fs.dirname(path), 'p')
@@ -39,11 +39,8 @@ local function project_environment()
   assert(evaluate '__import__("os").getenv("NVIM2_DEBUG_CHECK_OUTSIDE") is None' == 'True', 'debuggee loaded .env from Neovim cwd')
 end
 
-local function panels()
-  return vim
-    .iter(vim.api.nvim_list_wins())
-    :filter(function(window) return vim.bo[vim.api.nvim_win_get_buf(window)].filetype:match '^dapui_' ~= nil end)
-    :totable()
+local function panels_open()
+  return vim.iter(vim.api.nvim_list_wins()):any(function(window) return vim.bo[vim.api.nvim_win_get_buf(window)].filetype:match '^dapui_' ~= nil end)
 end
 
 local function stopped(line)
@@ -65,13 +62,14 @@ local function stopped(line)
 end
 
 local function closed()
-  wait_for(function() return next(dap.sessions()) == nil and #panels() == 0 end, 'debugger session or panels did not close')
+  wait_for(function() return next(dap.sessions()) == nil and not panels_open() end, 'debugger session or panels did not close')
   for pid in pairs(adapter_pids) do
     wait_for(function() return not vim.uv.kill(pid, 0) end, 'debugger left an adapter process running')
   end
   for job in pairs(terminal_jobs) do
     wait_for(function() return vim.fn.jobwait({ job }, 0)[1] ~= -1 end, 'debugger left an integrated terminal job running')
   end
+  adapter_pids, terminal_jobs = {}, {}
 end
 
 local function breakpoint(path, line)
@@ -81,16 +79,20 @@ local function breakpoint(path, line)
   dap.set_breakpoint()
 end
 
-local function run()
-  if vim.env.NVIM2_CHECK_TOOLS == '0' then
-    io.stdout:write 'Nvim2 debugger checks skipped because tools are disabled\n'
-    return
-  end
+local function start(path, line, name, overrides)
+  breakpoint(path, line)
+  dap.run(configuration(name or 'launch file', overrides))
+  stopped(line)
+end
 
-  for _, name in ipairs(environment) do
-    vim.env[name] = nil
-  end
-  python.test_runner = nil
+local function finish(message)
+  exit_code = nil
+  dap.continue()
+  closed()
+  assert(exit_code == 0, message)
+end
+
+local function fixtures()
   temporary = vim.fn.tempname()
   local project = vim.fs.joinpath(temporary, 'project with spaces')
   local outside = vim.fs.joinpath(temporary, 'outside')
@@ -119,44 +121,49 @@ local function run()
     '    output.write(str(result))',
   })
   vim.fn.chdir(outside)
+  return { project = project, outside = outside, adapter_python = adapter_python, python = project_python, venv = venv, sample = sample, result = result_file }
+end
+
+local function check_selection(fixture)
+  local sample, venv, project_python = fixture.sample, fixture.venv, fixture.python
+  local adapter_python = fixture.adapter_python
   breakpoint(sample, 5)
-  assert(require('custom.debug').python() == project_python, 'project venv was not selected from outside the project')
+  assert(debugger.python() == project_python, 'project venv was not selected from outside the project')
 
   vim.env.VIRTUAL_ENV = venv
   vim.b.nvim2_debug_python = adapter_python
-  assert(require('custom.debug').python() == adapter_python, 'explicit interpreter did not override the active environment')
+  assert(debugger.python() == adapter_python, 'explicit interpreter did not override the active environment')
   vim.b.nvim2_debug_python = nil
-  assert(require('custom.debug').python() == project_python, 'active virtual environment was not selected')
+  assert(debugger.python() == project_python, 'active virtual environment was not selected')
   vim.env.VIRTUAL_ENV = vim.fs.joinpath(temporary, 'missing environment')
-  local valid, message = pcall(require('custom.debug').python)
+  local valid, message = pcall(debugger.python)
   assert(not valid and tostring(message):find('VIRTUAL_ENV', 1, true), 'invalid active environment silently fell back to another Python')
   vim.env.VIRTUAL_ENV = nil
 
   local prompt = vim.fn.input
   local prompts_ok, prompt_error = pcall(function()
     vim.fn.input = function() return '' end
-    assert(dap.configurations.python[3].module() == dap.ABORT, 'empty module prompt did not cancel launch')
-    assert(dap.configurations.python[4].connect() == dap.ABORT, 'empty port prompt did not cancel attach')
+    assert(configuration('launch module').module() == dap.ABORT, 'empty module prompt did not cancel launch')
+    assert(configuration('attach to loopback').connect() == dap.ABORT, 'empty port prompt did not cancel attach')
     for _, invalid in ipairs { 'not a port', '0', '65536', '1.5' } do
       vim.fn.input = function() return invalid end
-      assert(not pcall(dap.configurations.python[4].connect), 'attach accepted an invalid port: ' .. invalid)
+      assert(not pcall(configuration('attach to loopback').connect), 'attach accepted an invalid port: ' .. invalid)
     end
   end)
   vim.fn.input = prompt
   assert(prompts_ok, prompt_error)
+end
 
-  local exits = {}
-  dap.listeners.after.event_exited['nvim2.checks'] = function(_, event) table.insert(exits, event.exitCode) end
-  dap.run(vim.deepcopy(dap.configurations.python[1]))
-  stopped(5)
+local function check_launch(fixture)
+  start(fixture.sample, 5)
   assert(next(adapter_pids), 'launch did not start an observable debugpy adapter process')
   assert(evaluate 'value' == '42', 'project-only dependency did not load in the selected venv')
-  assert(evaluate('sys.prefix == ' .. vim.json.encode(venv)) == 'True', 'debuggee bypassed pyvenv.cfg')
-  assert(evaluate('os.getcwd() == ' .. vim.json.encode(project)) == 'True', 'launch cwd was not the project root')
+  assert(evaluate('sys.prefix == ' .. vim.json.encode(fixture.venv)) == 'True', 'debuggee bypassed pyvenv.cfg')
+  assert(evaluate('os.getcwd() == ' .. vim.json.encode(fixture.project)) == 'True', 'launch cwd was not the project root')
   project_environment()
   local pid = tonumber(evaluate 'os.getpid()')
   assert(pid and vim.uv.kill(pid, 0), 'debuggee process is not running')
-  wait_for(function() return #panels() > 0 end, 'debugger panels did not open')
+  wait_for(panels_open, 'debugger panels did not open')
   local scopes = response(function(callback) dap.session():request('scopes', { frameId = dap.session().current_frame.id }, callback) end).scopes
   local variables =
     response(function(callback) dap.session():request('variables', { variablesReference = scopes[1].variablesReference }, callback) end).variables
@@ -167,54 +174,41 @@ local function run()
   dap.step_over()
   stopped(6)
   assert(evaluate 'result' == '43', 'step over did not execute the stopped statement')
-  dap.continue()
-  closed()
-  assert(exits[#exits] == 0 and vim.fn.readfile(result_file)[1] == '43', 'file launch did not finish successfully')
+  finish 'file launch did not finish successfully'
+  assert(vim.fn.readfile(fixture.result)[1] == '43', 'file launch produced the wrong result')
   wait_for(function() return not vim.uv.kill(pid, 0) end, 'file launch left a debuggee process running')
 
-  breakpoint(sample, 5)
-  local module = vim.deepcopy(dap.configurations.python[3])
-  module.module = 'sample'
-  dap.run(module)
-  stopped(5)
+  start(fixture.sample, 5, 'launch module', { module = 'sample' })
   assert(evaluate 'project_marker.VALUE' == '42', 'module launch used the wrong interpreter or import root')
   project_environment()
-  dap.continue()
-  closed()
-  assert(exits[#exits] == 0, 'module launch failed')
+  finish 'module launch failed'
+end
 
+local function check_environment(fixture)
+  local project, sample = fixture.project, fixture.sample
   local launch_directory = vim.fs.joinpath(project, 'launch directory')
   local custom_environment = vim.fs.joinpath(project, 'custom.env')
   write(vim.fs.joinpath(launch_directory, '.env'), { 'NVIM2_DEBUG_CHECK_ENV=launch-directory' })
   write(custom_environment, { 'NVIM2_DEBUG_CHECK_ENV=explicit-file' })
   for _, explicit in ipairs { false, true } do
-    breakpoint(sample, 5)
-    local launch = vim.deepcopy(dap.configurations.python[1])
-    launch.cwd = launch_directory
-    if explicit then launch.envFile = custom_environment end
-    dap.run(launch)
-    stopped(5)
+    start(sample, 5, 'launch file', { cwd = launch_directory, envFile = explicit and custom_environment or nil })
     local expected = explicit and 'explicit-file' or 'launch-directory'
     assert(
       evaluate('__import__("os").getenv("NVIM2_DEBUG_CHECK_ENV") == ' .. vim.json.encode(expected)) == 'True',
       'launch cwd or explicit envFile was ignored'
     )
-    dap.continue()
-    closed()
-    assert(exits[#exits] == 0, 'launch with custom environment failed')
+    finish 'launch with custom environment failed'
   end
 
   assert(vim.fn.delete(vim.fs.joinpath(project, '.env')) == 0, 'could not remove the project .env fixture')
-  breakpoint(sample, 5)
-  dap.run(vim.deepcopy(dap.configurations.python[1]))
-  stopped(5)
+  start(sample, 5)
   assert(evaluate '__import__("os").getenv("NVIM2_DEBUG_CHECK_ENV") is None' == 'True', 'missing project .env fell back to Neovim cwd')
   assert(evaluate '__import__("os").getenv("NVIM2_DEBUG_CHECK_OUTSIDE") is None' == 'True', 'missing project .env loaded unrelated variables')
-  dap.continue()
-  closed()
-  assert(exits[#exits] == 0, 'launch without a project .env failed')
+  finish 'launch without a project .env failed'
   write(vim.fs.joinpath(project, '.env'), { 'NVIM2_DEBUG_CHECK_ENV=project' })
+end
 
+local function check_tests(fixture)
   local other_project = vim.fs.joinpath(temporary, 'unrelated pytest project')
   local other_file = vim.fs.joinpath(other_project, 'other.py')
   write(vim.fs.joinpath(other_project, 'pytest.ini'), { '[pytest]' })
@@ -234,7 +228,7 @@ local function run()
     return client and client.initialized
   end, 'unrelated project LSP did not initialize')
 
-  local test_file = vim.fs.joinpath(project, 'test_sample.py')
+  local test_file = vim.fs.joinpath(fixture.project, 'test_sample.py')
   write(test_file, {
     'import unittest',
     'import project_marker',
@@ -246,34 +240,39 @@ local function run()
     '        self.fail("the cursor-selected test must not run the whole module")',
   })
   breakpoint(test_file, 6)
-  require('custom.debug').test 'method'
-  assert(vim.fn.getcwd() == outside, 'cursor test changed the working directory')
+  debugger.test 'method'
+  assert(vim.fn.getcwd() == fixture.outside, 'cursor test changed the working directory')
   stopped(6)
   assert(evaluate 'value' == '42', 'cursor-selected unittest used the wrong venv')
   project_environment()
-  dap.continue()
-  closed()
-  assert(exits[#exits] == 0, 'cursor-selected unittest ran an unrelated failing test')
+  finish 'cursor-selected unittest ran an unrelated failing test'
 
-  write(vim.fs.joinpath(project, 'pytest.ini'), { '[pytest]' })
-  for _, runner in ipairs { 'unittest', function() return 'unittest' end } do
-    python.test_runner = runner
-    breakpoint(test_file, 6)
-    require('custom.debug').test 'method'
-    stopped(6)
-    assert(evaluate 'value' == '42', 'explicit test runner used the wrong venv')
-    dap.continue()
-    closed()
-    assert(exits[#exits] == 0, 'explicit unittest runner was overridden by project pytest markers')
-  end
+  write(vim.fs.joinpath(fixture.project, 'pytest.ini'), { '[pytest]' })
+  python.test_runner = 'unittest'
+  breakpoint(test_file, 6)
+  debugger.test 'method'
+  stopped(6)
+  assert(evaluate 'value' == '42', 'explicit test runner used the wrong venv')
+  finish 'explicit unittest runner was overridden by project pytest markers'
+
+  local run, captured = dap.run
+  dap.run = function(config) captured = config end
+  python.test_runner = function() return 'unittest' end
+  local ok, message = pcall(debugger.test, 'method')
+  dap.run = run
+  assert(ok, message)
+  assert(
+    captured and captured.module == 'unittest' and vim.deep_equal(captured.args, { '-v', 'test_sample.SampleTest.test_value' }),
+    'function runner did not produce the cursor-selected unittest command'
+  )
+  assert(vim.fn.getcwd() == fixture.outside, 'function runner changed the working directory')
   python.test_runner = nil
+end
 
-  local exception_file = vim.fs.joinpath(project, 'exception.py')
+local function check_exception(fixture)
+  local exception_file = vim.fs.joinpath(fixture.project, 'exception.py')
   write(exception_file, { 'value = 42', 'raise RuntimeError("nvim2 expected failure")' })
-  breakpoint(exception_file, 2)
-  dap.run(vim.deepcopy(dap.configurations.python[1]))
-  stopped(2)
-  response(function(callback) dap.session():request('setExceptionBreakpoints', { filters = { 'uncaught' } }, callback) end)
+  start(exception_file, 2)
   local reason
   dap.listeners.after.event_stopped['nvim2.checks'] = function(_, event) reason = event.reason end
   dap.continue()
@@ -282,52 +281,24 @@ local function run()
   assert(info.exceptionId == 'RuntimeError', 'wrong exception reported: ' .. vim.inspect(info))
   dap.continue()
   closed()
-  assert(exits[#exits] ~= 0, 'uncaught exception exited successfully')
+  assert(exit_code and exit_code ~= 0, 'uncaught exception exited successfully')
   dap.listeners.after.event_stopped['nvim2.checks'] = nil
+end
 
-  local block = vim.fs.joinpath(project, 'block.py')
+local function check_termination(fixture)
+  local block = vim.fs.joinpath(fixture.project, 'block.py')
   write(block, { 'import os', 'import time', 'value = 42', 'time.sleep(30)' })
-  breakpoint(block, 4)
-  dap.run(vim.deepcopy(dap.configurations.python[1]))
-  stopped(4)
+  start(block, 4)
   local terminated_pid = tonumber(evaluate 'os.getpid()')
   vim.fn.maparg('<leader>dq', 'n', false, true).callback()
   closed()
   wait_for(function() return not vim.uv.kill(terminated_pid, 0) end, 'terminate left the launched Python process running')
 
-  local exit_pid_file = vim.fs.joinpath(project, 'exit-pids')
-  local exit_script = vim.fs.joinpath(project, 'exit-check.lua')
-  write(exit_script, {
-    "vim.opt.runtimepath:prepend(vim.fn.stdpath 'config')",
-    'vim.pack.add {',
-    "  'https://github.com/mfussenegger/nvim-dap',",
-    "  'https://github.com/mfussenegger/nvim-dap-python',",
-    "  'https://github.com/nvim-neotest/nvim-nio',",
-    "  'https://github.com/rcarriga/nvim-dap-ui',",
-    "  'https://github.com/folke/which-key.nvim',",
-    '}',
-    "require('custom.debug').setup()",
-    "local dap = require 'dap'",
-    'vim.api.nvim_cmd({ cmd = "edit", args = { ' .. vim.json.encode(block) .. ' } }, {})',
-    'vim.api.nvim_win_set_cursor(0, { 4, 0 })',
-    'dap.set_breakpoint()',
-    'dap.run(vim.deepcopy(dap.configurations.python[1]))',
-    'assert(vim.wait(10000, function() return dap.session() and dap.session().stopped_thread_id and dap.session().current_frame end))',
-    'local debuggee_pid',
-    'dap.session():evaluate("os.getpid()", function(err, body) assert(not err); debuggee_pid = body.result end)',
-    'assert(vim.wait(5000, function() return debuggee_pid ~= nil end))',
-    'local pids = { debuggee_pid }',
-    'local pid = vim.fn.getpid()',
-    'for child in table.concat(vim.fn.readfile(("/proc/%d/task/%d/children"):format(pid, pid)), " "):gmatch "%d+" do',
-    '  table.insert(pids, child)',
-    'end',
-    'assert(vim.fn.writefile(pids, ' .. vim.json.encode(exit_pid_file) .. ') == 0)',
-    'vim.cmd "qa!"',
-  })
+  local exit_pid_file = vim.fs.joinpath(fixture.project, 'exit-pids')
   local exit_child_result
   local exit_child = vim.system(
-    { vim.v.progpath, '--headless', '-u', 'NONE', '-l', exit_script },
-    { text = true, timeout = 20000 },
+    { vim.v.progpath, '--headless', "+lua dofile(vim.fn.stdpath('config') .. '/tests/fixtures/debug_exit.lua')" },
+    { text = true, timeout = 20000, env = { NVIM2_DEBUG_CHECK_FILE = block, NVIM2_DEBUG_CHECK_PID_FILE = exit_pid_file } },
     function(result) exit_child_result = result end
   )
   table.insert(children, exit_child)
@@ -336,14 +307,16 @@ local function run()
   for _, child_pid in ipairs(vim.fn.readfile(exit_pid_file)) do
     wait_for(function() return not vim.uv.kill(tonumber(child_pid), 0) end, 'Neovim exit left a launched Python/adapter process running')
   end
+end
 
+local function check_attach(fixture)
   local socket = assert(vim.uv.new_tcp())
   assert(socket:bind('127.0.0.1', 0))
   local port = socket:getsockname().port
   socket:close()
-  local ready = vim.fs.joinpath(project, 'attach-ready')
-  local finish = vim.fs.joinpath(project, 'attach-finish')
-  local attach_file = vim.fs.joinpath(project, 'attach.py')
+  local ready = vim.fs.joinpath(fixture.project, 'attach-ready')
+  local finish_file = vim.fs.joinpath(fixture.project, 'attach-finish')
+  local attach_file = vim.fs.joinpath(fixture.project, 'attach.py')
   write(attach_file, {
     'import debugpy',
     'import os',
@@ -359,26 +332,42 @@ local function run()
   })
   local child_result
   local child = vim.system(
-    { adapter_python, '-I', '-B', '-X', 'frozen_modules=off', attach_file, tostring(port), ready, finish },
+    { fixture.adapter_python, '-I', '-B', '-X', 'frozen_modules=off', attach_file, tostring(port), ready, finish_file },
     { text = true, timeout = 30000, env = { PYTHONDONTWRITEBYTECODE = '1' } },
     function(result) child_result = result end
   )
   table.insert(children, child)
   wait_for(function() return vim.uv.fs_stat(ready) ~= nil or child_result ~= nil end, 'loopback debugpy server did not start')
   assert(not child_result, 'loopback server exited: ' .. vim.inspect(child_result))
-  breakpoint(attach_file, 10)
-  local attach = vim.deepcopy(dap.configurations.python[4])
-  attach.connect = { host = '127.0.0.1', port = port }
-  dap.run(attach)
-  stopped(10)
+  start(attach_file, 10, 'attach to loopback', { connect = { host = '127.0.0.1', port = port } })
   assert(evaluate 'value' == '42', 'attach did not expose the stopped Python frame')
   vim.fn.maparg('<leader>dd', 'n', false, true).callback()
   closed()
   assert(vim.uv.kill(child.pid, 0), 'disconnect killed the externally owned attach process')
-  write(finish, { '' })
+  write(finish_file, { '' })
   wait_for(function() return child_result ~= nil end, 'attached process did not finish after disconnect')
   assert(child_result.code == 0, 'attached process failed: ' .. vim.inspect(child_result))
-  dap.listeners.after.event_exited['nvim2.checks'] = nil
+end
+
+local function run()
+  if vim.env.NVIM2_CHECK_TOOLS == '0' then
+    io.stdout:write 'Nvim2 debugger checks skipped because tools are disabled\n'
+    return
+  end
+
+  for _, name in ipairs { 'VIRTUAL_ENV', 'CONDA_PREFIX', 'NVIM2_DEBUG_PYTHON', 'NVIM2_DEBUG_CHECK_ENV', 'NVIM2_DEBUG_CHECK_OUTSIDE' } do
+    vim.env[name] = nil
+  end
+  python.test_runner = nil
+  dap.listeners.after.event_exited['nvim2.checks'] = function(_, event) exit_code = event.exitCode end
+  local fixture = fixtures()
+  check_selection(fixture)
+  check_launch(fixture)
+  check_environment(fixture)
+  check_tests(fixture)
+  check_exception(fixture)
+  check_termination(fixture)
+  check_attach(fixture)
   io.stdout:write 'Nvim2 Python debugger checks passed (launch, venv, project env, variables, step, module, isolated unittest, runner overrides, exception, terminate, Neovim exit, attach)\n'
 end
 
@@ -394,11 +383,6 @@ for _, client_id in ipairs(lsp_clients) do
   local client = vim.lsp.get_client_by_id(client_id)
   if client then client:stop(true) end
 end
-python.test_runner = saved_test_runner
-for _, name in ipairs(environment) do
-  vim.env[name] = saved_environment[name]
-end
-vim.fn.chdir(original_cwd)
 if temporary then vim.fn.delete(temporary, 'rf') end
 if not ok then
   io.stderr:write(message .. '\n')
