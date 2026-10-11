@@ -1,0 +1,135 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: preview-config
+data:
+  MESSAGE: hello from the k9s skin preview
+  ENVIRONMENT: disposable
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: preview-secret
+type: Opaque
+stringData:
+  DEMO_TOKEN: not-a-real-token
+  DEMO_PASSWORD: not-a-real-password
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preview-logger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: preview-logger
+  template:
+    metadata:
+      labels:
+        app: preview-logger
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: logger
+          image: busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              trap 'exit 0' TERM INT
+              tick=0
+              while :; do
+                tick=$((tick + 1))
+                printf '%s INFO tick=%s message="%s" environment=%s token=%s\n' \
+                  "$(date -u +%FT%TZ)" "$tick" "$MESSAGE" "$ENVIRONMENT" "$DEMO_TOKEN"
+                if [ "$((tick % 5))" -eq 0 ]; then
+                  printf '%s WARN simulated retry, no real failure\n' "$(date -u +%FT%TZ)"
+                fi
+                if [ "$((tick % 7))" -eq 0 ]; then
+                  printf '%s ERROR simulated log entry, pod remains healthy\n' "$(date -u +%FT%TZ)" >&2
+                fi
+                sleep 2
+              done
+          envFrom:
+            - configMapRef:
+                name: preview-config
+            - secretRef:
+                name: preview-secret
+          resources:
+            requests:
+              cpu: 10m
+              memory: 8Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: preview-random
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 30
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 45
+      template:
+        metadata:
+          labels:
+            app: preview-random
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: coin-flip
+              image: busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  printf '%s INFO job started; choosing an outcome in 10 seconds\n' "$(date -u +%FT%TZ)"
+                  sleep 10
+                  coin=$(od -An -N1 -tu1 /dev/urandom)
+                  if [ "$((coin % 2))" -eq 0 ]; then
+                    printf '%s INFO simulated success\n' "$(date -u +%FT%TZ)"
+                    exit 0
+                  fi
+                  printf '%s ERROR simulated failure\n' "$(date -u +%FT%TZ)" >&2
+                  exit 1
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 8Mi
+                limits:
+                  cpu: 100m
+                  memory: 32Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]

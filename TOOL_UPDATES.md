@@ -30,14 +30,16 @@ Edit only the intended records in `candidate/tools.env`, validator records
 in `candidate/validation.env`, or builder images in
 `candidate/release.env`. `TOOL_RELEASES` and `VALIDATOR_RELEASES`
 store ordered `version|full_URL|SHA256` records. The first record is the
-default and cannot fall back if its artifact is absent. Task belongs only to
-`VALIDATOR_RELEASES`. `ASDF_PLUGINS` owns plugin repository and commit pins,
-while runtime versions still come from `TOOL_RELEASES`.
+default and cannot fall back if its artifact is absent. Task is included in
+both `TOOLS` and `OFFLINE_RELEASE_TOOLS`; its single release record lives in
+`VALIDATOR_RELEASES` and is shared with repository validation.
+`ASDF_PLUGINS` owns plugin repository and commit pins, while runtime versions
+still come from `TOOL_RELEASES`.
 For a tmux plugin bump, change its `*_COMMIT` in `tools.env`; change the
 adjacent `*_REPO` only when deliberately moving to a different repository.
 
 For a normal dependency bump, edit only its first record in `tools.env`,
-or in `validation.env` for validation Task and the other validators. Run the
+or in `validation.env` for Task and repository validators. Run the
 focused setup in the disposable candidate, then `task validate` and the
 affected platform build and offline checks. To go back, restore the earlier
 record as the first record and rerun the same checks. Do not edit generated
@@ -106,9 +108,11 @@ run this command from that reviewed revision:
 If the retained installation is intact, the script reuses it without a new
 download. If it is absent, the script downloads the pinned release again.
 The same procedure applies to `gh`, `oh-my-posh`, `rg` and the complete
-`nvim-VERSION` executable tree. Change `validation.env` for Task's private
-validation bootstrap. A daily ShellCheck change belongs in `tools.env`;
-Task validation and Mason keep their own pins.
+`nvim-VERSION` executable tree. For Task, run `./setup-tools task` with the
+earlier record first in `VALIDATOR_RELEASES` in `validation.env`. The same
+record supplies offline builds and the private validation bootstrap.
+A daily ShellCheck change belongs in `tools.env`; validation ShellCheck and
+Mason ShellCheck keep their own pins.
 
 A temporary switch may update only an existing managed relative link. Check
 both the current target and requested executable first:
@@ -128,6 +132,146 @@ The next `setup-tools k9s` selects the first catalog record again. Keep the
 older complete record in `tools.env` for a persistent rollback. Treat `uv`
 with `uvx`, `kubectx` with `kubens`, and the complete Go SDK with `gofmt`, as
 paired selections. Do not switch only one of the Go SDK links.
+
+## Isolated k9s and MC skin previews
+
+Run these Bash commands from the root of a dotfiles clone. They copy the
+candidate configuration rather than stowing it or pointing a writable app
+directly at the checkout. Only the child processes receive the temporary
+environment; normal host settings and the shell's current directory are not
+changed.
+
+Prepare a private preview directory:
+
+```bash
+preview_checkout=$(pwd -P)
+preview_root=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-skin-preview.XXXXXX")
+mkdir -p "$preview_root/.config/mc" "$preview_root/.cache" \
+  "$preview_root/.local/share/mc" "$preview_root/.local/state"
+cp -R "$preview_checkout/k9s/.config/k9s" "$preview_root/.config/"
+cp "$preview_checkout/mc/.config/mc/ini" "$preview_root/.config/mc/"
+cp -R "$preview_checkout/mc/.local/share/mc/skins" "$preview_root/.local/share/mc/"
+printf 'Preview directory: %s\n' "$preview_root"
+```
+
+### k9s with disposable workloads
+
+Use only a disposable cluster where you are allowed to create and delete a
+namespace. Do not use a production context. Set its explicit context below;
+the commands never change the original kubeconfig's current context.
+Flattening a private, single-context copy also preserves relative certificate
+paths and works when `KUBECONFIG` names multiple files. This copy contains
+credentials; keep it private and remove it after the preview.
+
+```bash
+preview_context='REPLACE-WITH-DISPOSABLE-CONTEXT'
+kubectl --context "$preview_context" config view --minify --flatten --raw \
+  >"$preview_root/kubeconfig"
+
+preview_kubectl() {
+  command kubectl --kubeconfig "$preview_root/kubeconfig" \
+    --cache-dir "$preview_root/.cache/kube" \
+    --context "$preview_context" --namespace dotfiles-k9s-preview "$@"
+}
+
+preview_kubectl create namespace dotfiles-k9s-preview &&
+  preview_kubectl apply -f "$preview_checkout/tests/k9s-preview.yaml" &&
+  preview_kubectl rollout status deployment/preview-logger --timeout=90s
+```
+
+Namespace creation must succeed. If it already exists, stop and inspect it;
+do not reuse or delete someone else's namespace. The fixture contains a
+logging Deployment, a ConfigMap and Secret with deliberately fake values, and
+a CronJob scheduled every minute. Each Job stays running for ten seconds,
+then randomly exits with 0 or 1. Retries are disabled; five successful and five
+failed scheduled Jobs are retained so their different states remain visible.
+Several runs may be needed to see both outcomes. No Service, persistent volume,
+privileged container or Kubernetes API access from a Pod is required.
+
+After successful deployment, optionally start a Job immediately rather than
+waiting for the next minute:
+
+```bash
+preview_kubectl create job preview-now --from=cronjob/preview-random
+```
+
+The pinned BusyBox image must be available to the cluster. In a disconnected
+cluster, preload it using that cluster's image import mechanism. This fixture
+is opt-in; setup and offline-release installation do not deploy it.
+
+Launch the copied skin and config:
+
+```bash
+env XDG_CONFIG_HOME="$preview_root/.config" \
+  XDG_DATA_HOME="$preview_root/.local/share" \
+  XDG_CACHE_HOME="$preview_root/.cache" \
+  XDG_STATE_HOME="$preview_root/.local/state" \
+  K9S_CONFIG_DIR="$preview_root/.config/k9s" \
+  K9S_LOGS_DIR="$preview_root/.local/state/k9s" \
+  KUBECACHEDIR="$preview_root/.cache/kube" \
+  k9s --kubeconfig "$preview_root/kubeconfig" --context "$preview_context" \
+  --namespace dotfiles-k9s-preview --readonly
+```
+
+Use `:pods`, `:deployments`, `:jobs`, `:cronjobs`, `:configmaps`,
+`:secrets` and `:events`. In Pods, press `l` for logs; use `y` for YAML,
+`d` for describe and `?` for the available keys in each view. Inspect running,
+completed and failed rows, selected rows, headers, dialogs, logs and YAML.
+Read-only mode is a UI guard, not an RBAC or filesystem sandbox.
+
+Edit the copied `$preview_root/.config/k9s/skins/surb.yaml` to experiment, or
+edit the clone and copy the changed skin over again. To try another bundled
+skin, change `k9s.ui.skin` in the copied `config.yaml`. Restart k9s with the
+same command after each change; this does not depend on live reload being
+enabled. Config, context history, dumps and logs remain under the preview root.
+The Kubernetes discovery cache is also isolated; XDG variables alone do not
+redirect its default `~/.kube/cache` location.
+
+### Midnight Commander
+
+MC stores its skin and history under the data directory, not just its config
+directory. `MC_PROFILE_ROOT` explicitly isolates all three MC directories;
+`--skin` selects the copied skin even if the host has an `MC_SKIN` override.
+`--nosubshell` avoids sourcing the host's Bash startup files. Run the executable
+through `env` so shell aliases/functions are not used.
+
+Prepare a scratch file list so preview operations cannot accidentally change
+files in the checkout:
+
+```bash
+mkdir -p "$preview_root/files/directory"
+touch "$preview_root/files/regular.txt" "$preview_root/files/source.py"
+cp "$preview_checkout/tests/fixtures/bash/command" "$preview_root/files/executable"
+chmod +x "$preview_root/files/executable"
+ln -s regular.txt "$preview_root/files/symlink"
+ln -s missing "$preview_root/files/broken-symlink"
+
+env MC_PROFILE_ROOT="$preview_root" \
+  XDG_CONFIG_HOME="$preview_root/.config" \
+  XDG_DATA_HOME="$preview_root/.local/share" \
+  XDG_CACHE_HOME="$preview_root/.cache" \
+  XDG_STATE_HOME="$preview_root/.local/state" \
+  mc --nosubshell --skin="$preview_root/.local/share/mc/skins/surb.ini" \
+  "$preview_root/files" "$preview_root/files"
+```
+
+Use Insert to mark files, F9 for menus, F1 for help and F10 to exit.
+F5/F6/F8 and confirmation dialogs can be tried only on the scratch files.
+Edit the copied `surb.ini`, or copy it again after editing the clone, then
+restart MC with the same command. MC remains a file manager with ordinary user
+permissions; temporary config is not a filesystem sandbox.
+
+### Cleanup
+
+After closing both applications, delete only the namespace created above and
+the private preview directory. Skip the namespace command for an MC-only trial.
+
+```bash
+preview_kubectl delete namespace dotfiles-k9s-preview --wait=true --timeout=90s
+unset -f preview_kubectl
+find "$preview_root" -depth -delete
+unset preview_checkout preview_context preview_root
+```
 
 ## Go SDK and editor tools
 

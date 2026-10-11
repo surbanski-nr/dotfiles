@@ -39,9 +39,11 @@ It stores direct releases in `TOOL_RELEASES`. Each tool has ordered
 `version|full_URL|SHA256` records, and the first record is the default. A
 required default without an artifact is an error, with no fallback to a later
 record. `validation.env` uses the same record format in
-`VALIDATOR_RELEASES`, and `VALIDATOR_TOOLS` is the installer's authoritative
-tool list. Task exists only there. Online ShellCheck, validation ShellCheck and
-Mason ShellCheck remain independent pins.
+`VALIDATOR_RELEASES`, and `VALIDATOR_TOOLS` selects repository check tools.
+Task is also a development tool in `TOOLS` and `OFFLINE_RELEASE_TOOLS`;
+all three installation routes share its single release record in
+`VALIDATOR_RELEASES`. Online ShellCheck, validation ShellCheck and Mason
+ShellCheck remain independent pins.
 
 Yamllint is a Python package installed in an isolated validation venv, not a
 prebuilt executable archive. Its PyYAML dependency parses YAML, and pathspec
