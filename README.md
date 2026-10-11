@@ -98,20 +98,21 @@ remaining conflict, including a foreign symlink.
 Existing Homebrew installations and private shell configuration are left
 alone. Setup does not install Homebrew or initialize it from Bash.
 
-Release data is explicit: `versions.env` contains ordered
+Release data is explicit: `tools.env` contains ordered
 `version|full_URL|SHA256` records for online tools and project runtimes, while
 `validation.env` owns the validator list and records, including the only Task
 pin. `TOOLS` and `OFFLINE_RELEASE_TOOLS` select the tools for each route,
-including `fd`. Online setup installs kubectl and Helm directly by default.
+including `fd` and the complete Go SDK. Online setup installs kubectl, Helm
+and Go directly by default.
 The first record is the default. `ASDF_PLUGINS` is the sole asdf tool list and
 pins plugin repositories and commits; asdf keeps responsibility for fetching and verifying
 its plugins.
 Asdf remains an optional online provider, independent of offline releases.
-The tmux plugin `*_REPO` and `*_COMMIT` pairs also live in `versions.env`.
+The tmux plugin `*_REPO` and `*_COMMIT` pairs also live in `tools.env`.
 
 `system.env` owns OS package lists, installation checks and host setup
 prerequisites. OS packages use the current repository candidates without
-version pins. `probes.env` supplies version command arguments for both
+version pins. `tools-probes.env` supplies version command arguments for both
 installation, shell diagnostics and offline release health. Builder image pins live in
 `release.env`.
 
@@ -132,6 +133,11 @@ generated plugin lock and explicitly pinned external tools. Start it with:
 ```bash
 NVIM_APPNAME=nvim2 nvim
 ```
+
+Go uses gopls, goimports, project-configured golangci-lint and Delve with the
+existing debugger UI. Connected setup supplies `go` and `gofmt`; complete
+offline releases also include the SDK, tools and parsers. Python debugging
+remains enabled; no frontend/browser debug adapter is installed.
 
 See the [Nvim2 guide](nvim2/.config/nvim2/README.md) for normal use and clean
 rebuilds. The [offline release runbook](nvim2/.config/nvim2/offline-releases.md)

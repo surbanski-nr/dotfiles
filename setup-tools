@@ -216,6 +216,10 @@ state_owns_link_target() {
       version=${target#nvim-}
       version=${version%/bin/nvim}
       ;;
+    go:go-*/bin/go | gofmt:go-*/bin/gofmt)
+      version=${target#go-}
+      version=${version%/bin/*}
+      ;;
     "$command_name:$command_name-"*)
       version=${target#"$command_name-"}
       ;;
@@ -366,12 +370,15 @@ verify_staged() {
   local executable
 
   case $name in
-    nvim) executable="$STAGE_DIR/${SPEC_DESTS[0]}/bin/nvim" ;;
+    nvim | go) executable="$STAGE_DIR/${SPEC_DESTS[0]}/bin/$name" ;;
     *) executable="$STAGE_DIR/${SPEC_DESTS[0]}" ;;
   esac
   verify_executable "$name" "$executable" "$version"
   if [[ $name == uv ]]; then
     verify_executable uvx "$STAGE_DIR/${SPEC_DESTS[1]}" "$version"
+  fi
+  if [[ $name == go ]]; then
+    [[ -x $STAGE_DIR/${SPEC_DESTS[0]}/bin/gofmt ]] || report_error 'Go SDK is missing gofmt'
   fi
 }
 

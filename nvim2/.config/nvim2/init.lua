@@ -670,6 +670,7 @@ do
   }
 
   custom_lsp.setup_tools()
+  require('custom.go').setup_lsp()
 
   for name, server in pairs(servers) do
     vim.lsp.config(name, server)

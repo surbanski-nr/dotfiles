@@ -34,6 +34,7 @@ function M.setup()
         bash = true,
         css = true,
         dockerfile = true,
+        go = true,
         graphql = true,
         handlebars = true,
         html = true,
@@ -64,9 +65,13 @@ function M.setup()
     default_format_opts = {
       lsp_format = 'fallback',
     },
+    formatters = {
+      goimports = { env = require('custom.go').env },
+    },
     formatters_by_ft = {
       bash = { 'shfmt' },
       css = { 'prettier' },
+      go = { 'goimports' },
       graphql = { 'prettier' },
       handlebars = { 'prettier' },
       html = { 'prettier' },

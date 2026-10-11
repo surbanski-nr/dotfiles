@@ -110,7 +110,7 @@ load_build_config() {
     # These need compilation, a runtime tree, or multiple versions. Other
     # direct binaries are derived from the configured release tool list.
     case $tool in
-      nvim | nodejs | python | tmux | kubectl | helm) ;;
+      nvim | nodejs | python | go | tmux | kubectl | helm) ;;
       *) SIMPLE_RELEASE_TOOLS+=("$tool") ;;
     esac
   done
@@ -184,7 +184,7 @@ if [[ $NVIM_APPNAME == nvim2 ]]; then
     export DOTFILES_OFFLINE_RELEASE_ROOT="$release"
   fi
   # Keep the original user environment across nested launches. Bash restores it.
-  for name in XDG_CONFIG_HOME XDG_DATA_HOME _ZO_DATA_DIR; do
+  for name in XDG_CONFIG_HOME XDG_DATA_HOME _ZO_DATA_DIR GOROOT GOTOOLCHAIN; do
     marker=DOTFILES_LAUNCHER_${name#_}_SET
     value=DOTFILES_LAUNCHER_${name#_}
     [[ ! -v $marker ]] || continue
@@ -199,6 +199,10 @@ if [[ $NVIM_APPNAME == nvim2 ]]; then
   fi
   export XDG_CONFIG_HOME="$release/config"
   export XDG_DATA_HOME="$release/share"
+  if [[ -x $release/tools/go/bin/go ]]; then
+    unset GOROOT
+    export GOTOOLCHAIN=local
+  fi
   ansible_bin="$release/share/nvim2/mason/packages/ansible-lint/venv/bin"
   export PATH="$ansible_bin:$release/bin:$release/share/nvim2/mason/bin${PATH:+:$PATH}"
 fi
@@ -224,6 +228,7 @@ BASH
     install -m 0755 "$release/dotfiles/scripts/offline-kubernetes-client" \
       "$release/bin/$tool" || return
   done
+  install -m 0755 "$release/dotfiles/scripts/offline-go" "$release/bin/go" || return
 }
 
 install_release_tools() {
@@ -252,6 +257,10 @@ install_release_tools() {
   mv -- "$PREPARED_ARTIFACT" "$release/tools/python-$python_version" || return
   ln -s "../tools/python-$python_version/bin/python3" "$release/bin/python" || return
   ln -s "../tools/python-$python_version/bin/python3" "$release/bin/python3" || return
+
+  prepare_release_artifact TOOL_RELEASES go "${BUILD_VERSIONS[go]}" "$inputs" || return
+  mv -- "$PREPARED_ARTIFACT" "$release/tools/go" || return
+  ln -s ../tools/go/bin/gofmt "$release/bin/gofmt" || return
 
   for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do
     catalog=TOOL_RELEASES
@@ -397,6 +406,8 @@ prepare_nvim_payload() {
   export PATH="$release/bin:$release/tools/python-${BUILD_VERSIONS[python]}/bin:$release/tools/node/bin:$release/tools/bin:/usr/local/bin:/usr/bin:/bin"
   export NVIM_APPNAME=nvim2
   export XDG_CACHE_HOME=$build_home/.cache
+  export GOTOOLCHAIN=local
+  export CGO_ENABLED=0
   if [[ $platform == amzn-2023-x86_64 ]]; then
     timeout 2400s "$release/bin/nvim" --headless '+MasonToolsInstallSync' '+qa!' || return
     tree_sitter_version=$("$release/bin/nvim" --headless \
@@ -418,6 +429,9 @@ prepare_nvim_payload() {
     ln -s "../packages/ansible-lint/venv/bin/$command_name" \
       "$data/mason/bin/$command_name" || return
   done
+  install -m 0755 "$release/dotfiles/scripts/offline-eslint-d" "$data/mason/packages/eslint_d/eslint_d" || return
+  unlink "$data/mason/bin/eslint_d" || return
+  ln -s ../packages/eslint_d/eslint_d "$data/mason/bin/eslint_d" || return
   NVIM2_BENCHMARK_RUNS=3 timeout 1200s \
     bash "$release/config/nvim2/tests/check.sh" || return
   link_list=$(mktemp) || return
@@ -501,6 +515,7 @@ write_release_metadata() {
     "NODE_UPSTREAM_NPM_VERSION=$NODE_UPSTREAM_NPM_VERSION" \
     "PYTHON_VERSION=${BUILD_VERSIONS[python]}" \
     "PYTHON_BUILD=$PYTHON_STANDALONE_BUILD" \
+    "GO_VERSION=${BUILD_VERSIONS[go]}" \
     "TMUX_VERSION=${BUILD_VERSIONS[tmux]}" \
     >"$release/release.env" || return
   for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do
@@ -534,6 +549,7 @@ write_release_metadata() {
     printf 'npm_runtime=%s\n' "$value" || return
     printf 'npm_upstream=%s\n' "$NODE_UPSTREAM_NPM_VERSION"
     "$release/tools/python-${BUILD_VERSIONS[python]}/bin/python3" --version || return
+    "$release/bin/go" version || return
     "$release/bin/tmux" -V || return
     printf 'tmux_configure=--prefix=tools/tmux\n'
     ldd "$release/tools/tmux/bin/tmux" || return

@@ -292,10 +292,14 @@ launcher_environment_output=$(
     DOTFILES_LAUNCHER_XDG_DATA_HOME_SET=1 \
     DOTFILES_LAUNCHER_XDG_DATA_HOME="$test_root/user data" \
     DOTFILES_LAUNCHER_ZO_DATA_DIR_SET=0 \
+    GOTOOLCHAIN=local \
+    DOTFILES_LAUNCHER_GOROOT_SET=1 DOTFILES_LAUNCHER_GOROOT="$test_root/project SDK" \
+    DOTFILES_LAUNCHER_GOTOOLCHAIN_SET=1 DOTFILES_LAUNCHER_GOTOOLCHAIN=auto \
     bash --noprofile --norc -i
 )
 assert_contains "$launcher_environment_output" \
   "xdg-config=$test_root/user config xdg-data=$test_root/user data zoxide=unset markers="
+assert_contains "$launcher_environment_output" "go-root=$test_root/project SDK go-toolchain=auto go-markers="
 
 launcher_unset_output=$(
   run_scenario launcher-environment \
@@ -305,10 +309,13 @@ launcher_unset_output=$(
     DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET=0 \
     DOTFILES_LAUNCHER_XDG_DATA_HOME_SET=0 \
     DOTFILES_LAUNCHER_ZO_DATA_DIR_SET=0 \
+    GOROOT="$transition_a/tools/go" GOTOOLCHAIN=local \
+    DOTFILES_LAUNCHER_GOROOT_SET=0 DOTFILES_LAUNCHER_GOTOOLCHAIN_SET=0 \
     bash --noprofile --norc -i
 )
 assert_contains "$launcher_unset_output" \
   'xdg-config=unset xdg-data=unset zoxide=unset markers='
+assert_contains "$launcher_unset_output" 'go-root=unset go-toolchain=unset go-markers='
 
 path_home=$test_root/path-home
 mkdir -p "$path_home/.venv/bin" "$path_home/.asdf/shims" "$path_home/bin"

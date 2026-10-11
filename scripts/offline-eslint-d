@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+self=$(readlink -f -- "$0")
+package=${self%/eslint_d}/node_modules/eslint_d
+case ${1:-} in
+  --version | -v | --help | -h) exec node "$package/bin/eslint_d.js" "$@" ;;
+esac
+
+# eslint_d stores daemon state beside ESLint. The bundled copy is immutable.
+bundled=$(node --input-type=module --eval '
+  import { pathToFileURL } from "node:url";
+  const { createResolver } = await import(pathToFileURL(process.argv[1] + "/lib/resolver.js"));
+  const resolver = createResolver();
+  if (typeof resolver !== "string" && resolver.bundled) process.stdout.write(resolver.base + "/bin/eslint.js");
+' "$package")
+if [[ -n $bundled ]]; then
+  case ${1:-} in
+    start | restart | stop | status)
+      printf 'eslint_d: bundled ESLint runs without a daemon\n'
+      exit 0
+      ;;
+  esac
+  exec node "$bundled" "$@"
+fi
+exec node "$package/bin/eslint_d.js" "$@"

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+self=$(readlink -f -- "$0")
+release=${self%/bin/go}
+if [[ -v DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET ]]; then
+  export XDG_CONFIG_HOME=${DOTFILES_LAUNCHER_XDG_CONFIG_HOME:-$HOME/.config}
+fi
+# The SDK is relocatable. Never reuse another provider's GOROOT or download
+# a different toolchain while running a disconnected release.
+exec env -u GOROOT GOTOOLCHAIN=local "$release/tools/go/bin/go" "$@"

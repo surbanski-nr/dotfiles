@@ -441,6 +441,12 @@ artifact_layout() {
       SPEC_DESTS=("nvim-$version")
       SPEC_LINKS=("nvim:nvim-$version/bin/nvim")
       ;;
+    go)
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER=go
+      SPEC_DESTS=("go-$version")
+      SPEC_LINKS=("go:go-$version/bin/go" "gofmt:go-$version/bin/gofmt")
+      ;;
     helm)
       SPEC_FORMAT=gz-member
       SPEC_MEMBER=linux-amd64/helm

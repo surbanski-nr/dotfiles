@@ -8,6 +8,15 @@ app_name=$(basename -- "$config_dir")
 timeout_seconds=${NVIM2_CHECK_TIMEOUT_SECONDS:-60}
 runs=${NVIM2_BENCHMARK_RUNS:-5}
 
+if [[ ! -v DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET ]]; then
+  if [[ -v XDG_CONFIG_HOME ]]; then
+    export DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET=1
+    export DOTFILES_LAUNCHER_XDG_CONFIG_HOME=$XDG_CONFIG_HOME
+  else
+    export DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET=0
+  fi
+fi
+
 if ! [[ $runs =~ ^[1-9][0-9]*$ ]]; then
   printf 'NVIM2_BENCHMARK_RUNS must be a positive integer\n' >&2
   exit 2
@@ -17,7 +26,7 @@ if [[ -n ${NVIM2_MAX_STARTUP_MS:-} ]] && ! [[ $NVIM2_MAX_STARTUP_MS =~ ^[0-9]+([
   exit 2
 fi
 
-for test_file in dependency_checks.lua feature_checks.lua smoke.lua buffer_checks.lua language_checks.lua debug_checks.lua; do
+for test_file in dependency_checks.lua feature_checks.lua smoke.lua buffer_checks.lua language_checks.lua go_checks.lua go_lint_checks.lua debug_checks.lua go_debug_checks.lua; do
   timeout --signal=TERM --kill-after=10s "$timeout_seconds" env \
   XDG_CONFIG_HOME="$xdg_config_home" \
   NVIM_APPNAME="$app_name" \

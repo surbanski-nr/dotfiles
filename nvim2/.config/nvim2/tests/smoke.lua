@@ -552,6 +552,11 @@ local function run()
     vim.wait(5000, function() return #vim.diagnostic.get(0, { namespace = eslint_namespace }) > 0 end),
     'eslint_d did not diagnose TypeScript in a configured project'
   )
+  if vim.env.DOTFILES_OFFLINE_RELEASE_ROOT then
+    local daemon_state =
+      vim.fs.joinpath(vim.fn.stdpath 'data', 'mason', 'packages', 'eslint_d', 'node_modules', 'eslint_d', 'node_modules', 'eslint', '.eslint_d')
+    assert(not vim.uv.fs_stat(daemon_state), 'offline ESLint wrote daemon state into the immutable payload')
+  end
   assert(vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()], 'Treesitter highlighting did not attach to TypeScript')
   vim.cmd.bwipeout { bang = true }
   vim.fn.delete(eslint_root, 'rf')

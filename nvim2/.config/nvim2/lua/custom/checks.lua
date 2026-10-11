@@ -170,6 +170,7 @@ local function check_tool_probes()
   for _, probe in ipairs(probes) do
     local executable = vim.fs.joinpath(mason_bin, probe[1])
     local command = vim.list_extend({ executable }, vim.list_slice(probe, 2))
+    if probe[1] == 'dlv' or probe[1] == 'gopls' or probe[1] == 'golangci-lint' then command = require('custom.go').command(unpack(command)) end
     run_command(command, ('Mason executable probe %s'):format(table.concat(probe, ' ')))
   end
   return ('%d Mason executables started successfully'):format(#probes)
@@ -205,6 +206,13 @@ function M.run(opts)
   end)
   add_check(results, 'Tool declarations', check_tool_declarations)
   if opts.tools ~= false then
+    add_check(results, 'Go SDK', function()
+      local version = run_command(require('custom.go').command('go', 'version'), 'Go SDK version')
+      local root = run_command(require('custom.go').command('go', 'env', 'GOROOT'), 'Go SDK root')
+      assert(vim.fn.executable(vim.fs.joinpath(root, 'bin', 'gofmt')) == 1, 'Go SDK is missing gofmt')
+      assert(vim.uv.fs_stat(vim.fs.joinpath(root, 'src', 'fmt', 'print.go')), 'Go SDK standard library is missing')
+      return version
+    end)
     add_check(results, 'Mason tools', check_mason_tools)
     add_check(results, 'Mason executable probes', check_tool_probes)
     add_check(results, 'Treesitter parsers', check_treesitter_parsers)

@@ -45,7 +45,7 @@ if [[ \${1:-} == hold ]]; then
 fi
 case \$(basename -- "\$0") in
   k9s) [[ \$* == 'version --short' ]] || exit 93 ;;
-  oh-my-posh | terraform) [[ \$* == version ]] || exit 94 ;;
+  oh-my-posh | terraform | go) [[ \$* == version ]] || exit 94 ;;
   tmux) [[ \$* == -V ]] || exit 95 ;;
 esac
 printf '%s fixture $version\n' "\$(basename -- "\$0")"
@@ -102,6 +102,7 @@ make_artifact() {
   local commit=$1 marker=$2 destination=$3
   local release_version=${4:-1.0}
   local include_fd=${5:-true}
+  local include_go=${6:-true}
   local offline_profile=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm
   local id=dotfiles-${commit:0:12}
   local stage=$test_root/stage-$marker release=$test_root/stage-$marker/$id
@@ -144,6 +145,13 @@ make_artifact() {
     write_fake_tool "$release/tools/bin/fd" "$release_version"
     ln -s ../tools/bin/fd "$release/bin/fd"
     offline_profile+=,fd
+  fi
+  if [[ $include_go == true ]]; then
+    write_fake_tool "$release/tools/go/bin/go" "$release_version"
+    write_fake_tool "$release/tools/go/bin/gofmt" "$release_version"
+    install -m 0755 "$repo_dir/scripts/offline-go" "$release/bin/go"
+    ln -s ../tools/go/bin/gofmt "$release/bin/gofmt"
+    offline_profile+=,go
   fi
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python"
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python3"
@@ -241,6 +249,9 @@ make_artifact() {
   if [[ $include_fd == true ]]; then
     printf 'FD_VERSION=%s\n' "$release_version" >>"$release/release.env"
   fi
+  if [[ $include_go == true ]]; then
+    printf 'GO_VERSION=%s\n' "$release_version" >>"$release/release.env"
+  fi
   printf 'marker=%s\n' "$marker" >"$release/build-manifest.txt"
   (
     cd "$release"
@@ -278,9 +289,69 @@ id_three=dotfiles-${commit_three:0:12}
 artifact_one=$test_root/one.tar.gz
 artifact_two=$test_root/two.tar.gz
 artifact_three=$test_root/three.tar.gz
-make_artifact "$commit_one" one "$artifact_one" 1.0 false
+make_artifact "$commit_one" one "$artifact_one" 1.0 false false
 make_artifact "$commit_two" two "$artifact_two" 2.0
 make_artifact "$commit_three" three "$artifact_three"
+
+test_home=$test_root/go-validation-home
+mkdir -p "$test_home"
+go_broken=$test_root/go-broken.tar.gz
+make_artifact "$commit_three" go-missing-pin "$go_broken"
+sed -i '/^GO_VERSION=/d' "$test_root/stage-go-missing-pin/$id_three/release.env"
+repack_artifact go-missing-pin "$id_three" "$go_broken"
+if run_manager install "$go_broken" >"$test_root/go-missing-pin.log" 2>&1; then
+  fail 'Go profile was accepted without its version pin'
+fi
+for command_name in go gofmt; do
+  make_artifact "$commit_three" "go-missing-$command_name" "$go_broken"
+  rm "$test_root/stage-go-missing-$command_name/$id_three/tools/go/bin/$command_name"
+  repack_artifact "go-missing-$command_name" "$id_three" "$go_broken"
+  if run_manager install "$go_broken" >"$test_root/go-missing-$command_name.log" 2>&1; then
+    fail "Go release was installed without $command_name"
+  fi
+done
+make_artifact "$commit_three" go-wrong-version "$go_broken"
+sed -i 's/^GO_VERSION=.*/GO_VERSION=9.9/' "$test_root/stage-go-wrong-version/$id_three/release.env"
+repack_artifact go-wrong-version "$id_three" "$go_broken"
+if run_manager install "$go_broken" >"$test_root/go-wrong-version.log" 2>&1; then
+  fail 'Go release was installed with an unexpected executable version'
+fi
+[[ ! -e $test_home/dotfiles-releases/current ]] || fail 'failed Go release became active'
+
+test_home=$test_root/go-old-profile-home
+mkdir -p "$test_home"
+old_go_artifact=$test_root/old-go-profile.tar.gz
+make_artifact "$commit_one" old-go-profile "$old_go_artifact" 1.0 true false
+run_manager install "$old_go_artifact" >/dev/null
+run_manager install "$artifact_two" >/dev/null
+[[ $("$test_home/bin/go" version) == *'fixture 2.0'* && -x $test_home/bin/gofmt ]] ||
+  fail 'Go SDK commands did not follow the active release'
+run_manager rollback >/dev/null
+[[ ! -x $test_home/bin/go && ! -x $test_home/bin/gofmt ]] ||
+  fail 'rollback to the pre-Go profile retained executable Go launchers'
+[[ -x $test_home/bin/fd ]] || fail 'pre-Go rollback removed fd'
+
+test_home=$test_root/go-connected-migration-home
+mkdir -p "$test_home/bin/go-0.9/bin" "$test_home/.local/state/dotfiles/setup-tools"
+for command_name in go gofmt; do
+  write_fake_tool "$test_home/bin/go-0.9/bin/$command_name" 0.9
+  ln -s "go-0.9/bin/$command_name" "$test_home/bin/$command_name"
+done
+go_content=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+  -C "$test_home/bin" -cf - -- go-0.9 | sha256sum | awk '{print $1}')
+printf 'complete\t%s\t%s\n' \
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  "$go_content" >"$test_home/.local/state/dotfiles/setup-tools/go-0.9.state"
+run_manager install "$artifact_two" >/dev/null
+[[ $("$test_home/bin/go" version) == *'fixture 2.0'* ]] || fail 'offline release did not adopt the owned SDK'
+run_manager uninstall >/dev/null
+assert_link "$test_home/bin/go" go-0.9/bin/go
+assert_link "$test_home/bin/gofmt" go-0.9/bin/gofmt
+printf '\nmodified\n' >>"$test_home/bin/go-0.9/bin/gofmt"
+if run_manager install "$artifact_two" >"$test_root/go-modified-provider.log" 2>&1; then
+  fail 'offline release adopted a modified connected Go SDK'
+fi
+assert_link "$test_home/bin/go" go-0.9/bin/go
 
 test_home=$test_root/fd-validation-home
 fd_broken=$test_root/fd-broken.tar.gz
@@ -1092,6 +1163,8 @@ grep -F "$id_one/tools/nvim/bin/nvim" "$process_record" >/dev/null ||
 assert_link "$test_home/dotfiles-releases/current" "$id_one"
 assert_link "$test_home/dotfiles-releases/previous" "$id_two"
 [[ ! -e $test_home/bin/fd ]] || fail 'legacy rollback retained an executable from the newer release'
+[[ ! -e $test_home/bin/go && ! -e $test_home/bin/gofmt ]] ||
+  fail 'legacy rollback retained Go commands from the newer release'
 [[ $("$test_home/bin/kubectl") == *'fixture 1.0'* &&
   $("$test_home/bin/helm") == *'fixture 1.0'* ]] ||
   fail 'client launchers did not follow rollback'

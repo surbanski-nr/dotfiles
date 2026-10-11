@@ -39,11 +39,18 @@ only the no-venv offline fallback uses `release/bin/python`.
 Project dependencies and application-specific Python versions are not bundled.
 There is no TypeScript/Node or browser debug adapter.
 
+Go uses the full official SDK plus Mason's pinned gopls, goimports,
+golangci-lint and Delve. The connected builder performs the normal Mason Go
+builds with CGO disabled, and the target runs their packaged binaries without
+installing or compiling tools. `nvim-dap-go` uses the shared DAP/UI plugins.
+Go/manifest parsers and queries are included. Project modules, alternate SDKs
+and CGO C libraries are not part of the artifact.
+
 The release `nvim` launcher resolves its physical release root once. For the
 `nvim2` app it sets physical `XDG_CONFIG_HOME` and `XDG_DATA_HOME` plus a
 private tool path, while leaving `XDG_STATE_HOME` under user control. An
 explicit different `NVIM_APPNAME` is passed through without those overrides.
-The launcher saves the caller's XDG and zoxide settings before the overrides;
+The launcher saves the caller's XDG, zoxide and Go SDK settings before the overrides;
 terminal Bash restores them so user data stays outside the immutable release.
 Therefore a Nvim process started from release A keeps configuration, plugins
 and tools from A after `current` changes to B. A new process uses B.
@@ -62,6 +69,12 @@ original environment before initializing zoxide and the other integrations.
 The markers survive nested Nvim launches without replacing the first user
 values and are consumed only by the release Bash startup.
 
+For Go-bearing releases, the launcher clears an inherited `GOROOT` and selects
+`GOTOOLCHAIN=local`. Go and the Go editor tools use that physical release's SDK
+and cannot auto-download a different version. Bash terminals restore the
+original Go environment together with the XDG values. The newer manager also
+supports original and fd-only retained releases that have no Go metadata.
+
 ## Mutable data
 
 The immutable payload never owns ShaDa, undo files, project marks or
@@ -75,6 +88,16 @@ lua-language-server writes its log below the Nvim2 state directory. Health uses
 a disposable HOME, state and cache, so it does not modify the operator's
 history, kubeconfig or editor data.
 
+Go's build/module caches use the user's normal writable locations. Go settings
+and local telemetry, plus Delve's configuration, use the caller's original
+`XDG_CONFIG_HOME` (or `~/.config`), not the editor's release configuration.
+Only child-tool environments are changed; Neovim keeps its pinned config path.
+
+eslint_d normally stores its daemon state beside the resolved ESLint package.
+The offline launcher uses ordinary ESLint CLI for the immutable bundled
+fallback, preserving its diagnostics without daemon files. Project-installed
+ESLint keeps the native eslint_d behavior and environment settings.
+
 The offline tmux launcher records its physical config in `@dotfiles-config`.
 The connected config records its own loaded path. In both cases `prefix` +
 `Shift-R` invokes `source-file -F '#{@dotfiles-config}'`. An existing server A
@@ -87,6 +110,8 @@ not `FILE`; see [TPM and Krew](../../../SETUP.md#tpm-and-krew).
 
 `dotfiles-release health [ID]` verifies the local content record, file modes,
 symlink targets, source metadata, Python isolation and all runtime versions.
+It verifies the installed content again after functional checks, so tool writes
+into the payload fail the same health invocation.
 The full mode then runs functional rg, fzf, zoxide, Task, Terraform and tfvars
 operations, an embedded-library `helm-ls` lint without Helm, isolated
 kubectx/kubens and k9s checks, a private tmux socket with all three plugins,
@@ -101,6 +126,10 @@ The Nvim2 suite covers plugin HEAD and cleanliness, Mason receipts and probes,
 Treesitter parsers, feature behavior, LSP, diagnostics, formatting and linting,
 plus real Python breakpoint/step, venv, module/unittest, exception, terminate,
 Neovim-exit and loopback attach/disconnect sessions.
+Go checks compile/run/test a multi-file package and an offline vendored module,
+exercise gopls navigation/hover/completion, goimports and configured async
+golangci-lint, then run real Delve package and cursor-test sessions, goroutines,
+locals, stepping and adapter/debuggee cleanup.
 Terraform and tfvars continue to use `terraform fmt`. The local Helm chart test
 uses helm-ls without a Helm executable. No plugin, parser, language server or
 formatter is installed or updated by health. The release launcher uses the

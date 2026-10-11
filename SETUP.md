@@ -53,6 +53,11 @@ one tool per line. Both include `fd`, installed from its verified official
 Linux musl archive rather than an OS package. GNU `find` remains a system
 prerequisite for scripts that depend on its semantics.
 
+Both tool profiles also include the full official Go SDK, verified with its
+upstream SHA-256. Connected setup keeps it under `~/bin/go-VERSION` and selects
+`go` and `gofmt` together with relative links. The SDK includes its compiler,
+tools and standard library. No asdf Go plugin or OS Go package is required.
+
 `setup-tools` downloads and installs the selected online tools from these exact
 official release records. It supports only connected installation; offline
 deployment uses the complete release described below. Without names, it
@@ -110,7 +115,8 @@ relative, so an older retained installation can be selected again by running
 the setup command from the matching reviewed repository revision. An intact
 retained installation is reused without downloading it again.
 Terraform and Terragrunt use optional `setup-asdf` in this connected flow.
-`htop` remains an operating-system package, and Go is not a setup dependency.
+`htop` remains an operating-system package. The Go SDK is now a direct setup
+tool so the editor and offline builds use the same reviewed runtime.
 
 ### Reruns and recovery
 
@@ -150,7 +156,8 @@ install those optional clients.
 For a restricted host, use the complete platform artifact. This is the only
 supported offline installation route; `setup-tools` and `setup-asdf` are not
 used. The artifact contains one immutable dotfiles snapshot together
-with Neovim and its complete profile, Node.js, private standalone Python,
+with Neovim and its complete profile, Node.js, private standalone Python, the
+complete Go SDK,
 ripgrep, fd, tmux and plugins, Oh My Posh, k9s, zoxide, kubectx, kubens, Task, fzf
 and Terraform, plus every kubectl and Helm version listed in `tools.env`.
 Each release owns its complete tool payload, even when another retained release
@@ -158,7 +165,8 @@ contains the same versions. Asdf, its plugins and its shims are not part of the
 offline package. Optional online `setup-asdf` remains available independently.
 
 The current manager can check and select retained releases from before `fd`
-was bundled. Selecting one makes `fd` unavailable through the release launcher.
+or Go was bundled. Selecting one makes its absent tools unavailable through
+the release launcher. It supports both the original and fd-only profiles.
 Keep a copy of the newer manager when rolling back across that boundary:
 older managers do not understand the newer release metadata.
 
@@ -194,17 +202,30 @@ archive. The standalone CPython runtime contains the standard library but not
 ansible-lint, yamllint, ansible-core or debugpy. Separate generated hashed locks and a
 complete wheelhouse supply those dependencies. The target installer creates
 ordinary isolated venvs at their final retained paths using only those wheels.
-It does not need sudo, a distribution Python, a compiler or network access.
+It does not need sudo, a distribution Python, a host C compiler or network
+access. Go projects compile with the bundled SDK; CGO projects still require
+their own compatible C toolchain and libraries.
 
 Python debugging adds four locked Neovim plugins and Mason's pinned `debugpy`
 package. The builder supplies its hashed wheel and portable launchers; the
 existing installer recreates its isolated venv at the final retained path.
-`setup-system`, `setup-tools`, `setup-asdf` and their OS/runtime inventories do
-not change. For a connected Nvim2 installation, run
+It adds no Python-specific OS packages or project runtimes. For a connected
+Nvim2 installation, run
 `:Nvim2ToolsInstallSync` after installing the profile. The debugger's Python
 is separate from a project's `.venv`; project dependencies still belong to the
 project and are not bundled. No browser, GPU or TypeScript debug adapter is
 required. See the [Python debugger guide](nvim2/.config/nvim2/guide.md#python-debugger).
+
+Go adds pinned gopls, goimports, golangci-lint and Delve through Mason, the
+locked `nvim-dap-go` plugin and Go/manifest Treesitter parsers. Mason builds
+gopls, goimports and Delve with the bundled SDK in the connected builder;
+golangci-lint uses its upstream binary. These tools are built with CGO disabled
+and arrive ready to run on the restricted host. No additional OS package or
+`setup-asdf` dependency is added. The Go launcher pins the physical SDK with
+`GOTOOLCHAIN=local`, preventing automatic toolchain downloads. Application
+modules and a project's different SDK version are not bundled: prepare vendor
+or module-cache dependencies separately before disconnecting. See the
+[Go guide](nvim2/.config/nvim2/guide.md#go-development-and-debugger).
 
 `scripts/build-dotfiles-release` is the connected build and runtime-image
 preparation entry point. `scripts/dotfiles-release` is the standalone manager
@@ -329,6 +350,11 @@ Direct Nvim jobs use an explicit `_ZO_DATA_DIR`, defaulting to the user's
 original data home, so zoxide never writes into retained release data. Explicit
 `_ZO_DATA_DIR`, paths with spaces, nested launches and another `NVIM_APPNAME`
 remain supported.
+
+The offline eslint_d launcher runs its bundled ESLint fallback without a daemon,
+because native daemon state would modify the immutable installation. A project's
+own ESLint still uses the native daemon. Full health verifies installed content
+both before and after its functional checks.
 
 The release does not own `~/bin/python` or `~/bin/python3`; standalone Python
 is private to its tool payload. kubectl and Helm are public release commands.

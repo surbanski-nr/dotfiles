@@ -133,6 +133,7 @@ validate_scripts() {
     tests/install_validation_tool_test.sh
     tests/dotfiles_release_test.sh
     tests/offline_debug_adapter_test.sh
+    tests/offline_go_test.sh
     tests/scripts_test.sh
     tests/setup_asdf_test.sh
     tests/setup_system_test.sh
@@ -173,6 +174,7 @@ validate_scripts() {
   timeout 30s bash tests/install_validation_tool_test.sh
   timeout 300s bash tests/dotfiles_release_test.sh
   timeout 30s bash tests/offline_debug_adapter_test.sh
+  timeout 30s bash tests/offline_go_test.sh
   timeout 120s bash tests/scripts_test.sh
   timeout 30s bash tests/setup_asdf_test.sh
   timeout 30s bash tests/setup_system_test.sh
@@ -184,14 +186,14 @@ validate_nvim2() {
   need jq
   need shellcheck
   need stylua
-  local check_script=nvim2/.config/nvim2/tests/check.sh
+  local -a test_scripts=(nvim2/.config/nvim2/tests/check.sh nvim2/.config/nvim2/tests/fixtures/*.sh)
   local lock_file=nvim2/.config/nvim2/nvim-pack-lock.json
 
   stylua --check \
     --config-path nvim2/.config/nvim2/.stylua.toml \
     nvim2/.config/nvim2
-  bash -n "$check_script"
-  shellcheck "$check_script"
+  check_shell_syntax bash "${test_scripts[@]}"
+  shellcheck "${test_scripts[@]}"
   jq -e '
     type == "object" and
     (keys == ["plugins"]) and

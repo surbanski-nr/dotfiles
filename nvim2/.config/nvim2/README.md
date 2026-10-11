@@ -61,8 +61,11 @@ bash ~/.config/nvim2/tests/check.sh
 ```
 
 Plugins are restored from `nvim-pack-lock.json` when Neovim starts. External
-tools and Treesitter parsers are deliberately not installed in the background;
-provision or synchronize their pinned versions explicitly with:
+tools and Treesitter parsers are deliberately not installed in the background.
+
+On a connected machine, first install the full Go SDK with
+`./setup-tools go` from the repository root. gopls and the Go tools require it
+both during Mason installation and when working on projects. Then run:
 
 ```vim
 :Nvim2ToolsInstallSync
@@ -119,6 +122,7 @@ marks, ShaDa marks and registers, and persistent undo files:
 )
 
 cd "$HOME/github.com/surbanski/dotfiles"
+./setup-tools go
 timeout 1200s env NVIM_APPNAME=nvim2 \
   nvim --headless '+qa!'
 timeout 1200s env NVIM_APPNAME=nvim2 \
@@ -150,7 +154,7 @@ needed.
 ## Transfer to a machine without internet access
 
 Nvim2 is deployed as a versioned platform release containing Neovim, Node.js,
-ripgrep, the exact dotfiles commit, locked plugins, pinned Mason tools,
+standalone Python, the full Go SDK, ripgrep, the exact dotfiles commit, locked plugins, pinned Mason tools,
 compiled Treesitter parsers, parser revision metadata and queries. Build a
 separate release for each exact target platform and architecture. The
 authoritative supported-platform and pinned-builder-image matrix is maintained
@@ -161,6 +165,10 @@ rollback runbook is in
 [Nvim2 offline releases](offline-releases.md). It also
 explains the four-platform artifact matrix and why releases must be built from an empty
 data directory.
+
+The [Go development guide](guide.md#go-development-and-debugger) covers gopls,
+goimports, project-configured golangci-lint and Delve using the shared DAP UI.
+No browser, GPU or extra Go framework plugin is needed.
 
 Do not copy a developer's existing `~/.local/share/nvim2`, run update commands
 on the restricted machine, or extract a new archive over the active release.

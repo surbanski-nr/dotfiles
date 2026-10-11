@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'go=%s\nGOROOT=%s\nGOTOOLCHAIN=%s\nXDG_CONFIG_HOME=%s\nGOPATH=%s\n' \
+  "$0" "${GOROOT-unset}" "${GOTOOLCHAIN-unset}" "${XDG_CONFIG_HOME-unset}" "${GOPATH-unset}"
+printf '<%s>\n' "$@"
+exit "${FIXTURE_GO_EXIT_CODE:-0}"

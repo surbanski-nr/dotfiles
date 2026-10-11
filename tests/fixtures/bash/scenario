@@ -158,6 +158,8 @@ case $TEST_SCENARIO in
       "${XDG_CONFIG_HOME:-unset}" "${XDG_DATA_HOME:-unset}" \
       "${_ZO_DATA_DIR:-unset}" \
       "${DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET:-}${DOTFILES_LAUNCHER_XDG_DATA_HOME_SET:-}${DOTFILES_LAUNCHER_ZO_DATA_DIR_SET:-}"
+    printf 'go-root=%s go-toolchain=%s go-markers=%s\n' "${GOROOT:-unset}" "${GOTOOLCHAIN:-unset}" \
+      "${DOTFILES_LAUNCHER_GOROOT_SET:-}${DOTFILES_LAUNCHER_GOTOOLCHAIN_SET:-}"
     ;;
   path-order)
     load_bashrc

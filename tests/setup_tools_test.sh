@@ -32,6 +32,7 @@ write_fake() {
 #!/usr/bin/env bash
 if [[ '$name' == k9s && \$* != 'version --short' ]]; then exit 93; fi
 if [[ '$name' == oh-my-posh && \$* != version ]]; then exit 94; fi
+if [[ '$name' == go && \$* != version ]]; then exit 95; fi
 printf '%s\\n' '$name $version'
 EOF
   chmod 0755 "$path"
@@ -60,6 +61,7 @@ load_test_versions() {
   select_default_release TOOL_RELEASES nvim; NVIM_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES tmux; TMUX_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES fd; FD_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES go; GO_VERSION=$RELEASE_VERSION
 }
 
 make_test_repo() {
@@ -137,6 +139,16 @@ make_archives() {
   digest=$(sha256sum "$archive_root/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" | awk '{print $1}')
   append_release "$repository/tools.env" TOOL_RELEASES nvim "$NVIM_VERSION" \
     "https://example.invalid/nvim/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" "$digest"
+
+  write_fake "$work/go/bin/go" go "$GO_VERSION"
+  write_fake "$work/go/bin/gofmt" gofmt "$GO_VERSION"
+  mkdir -p "$work/go/src/fmt" "$work/go/pkg/tool/linux_amd64" "$archive_root/go/$GO_VERSION"
+  printf 'standard library fixture\n' >"$work/go/src/fmt/print.go"
+  printf 'compiler fixture\n' >"$work/go/pkg/tool/linux_amd64/compile"
+  tar -C "$work" -czf "$archive_root/go/$GO_VERSION/go.linux-amd64.tar.gz" go
+  digest=$(sha256sum "$archive_root/go/$GO_VERSION/go.linux-amd64.tar.gz" | awk '{print $1}')
+  append_release "$repository/tools.env" TOOL_RELEASES go "$GO_VERSION" \
+    "https://example.invalid/go/$GO_VERSION/go.linux-amd64.tar.gz" "$digest"
 }
 
 test_repository="$test_root/repository"
@@ -185,7 +197,7 @@ test_xdg=$test_root/'xdg elsewhere'
 
 before=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
 XDG_CONFIG_HOME="$test_xdg" run_setup "$test_home" "$test_repository" "$archive_root" \
-  k9s gh oh-my-posh uv nvim fd
+  k9s gh oh-my-posh uv nvim fd go
 after=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
 [[ $before == "$after" ]] || fail 'setup-tools changed a download fixture'
 cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
@@ -204,6 +216,12 @@ assert_link "$test_home/bin/uv" "uv-$UV_VERSION"
 assert_link "$test_home/bin/uvx" "uvx-$UV_VERSION"
 assert_link "$test_home/bin/nvim" "nvim-$NVIM_VERSION/bin/nvim"
 assert_link "$test_home/bin/fd" "fd-$FD_VERSION"
+assert_link "$test_home/bin/go" "go-$GO_VERSION/bin/go"
+assert_link "$test_home/bin/gofmt" "go-$GO_VERSION/bin/gofmt"
+"$test_home/bin/go" version | grep -F "$GO_VERSION" >/dev/null
+[[ -f $test_home/bin/go-$GO_VERSION/src/fmt/print.go &&
+  -f $test_home/bin/go-$GO_VERSION/pkg/tool/linux_amd64/compile ]] ||
+  fail 'Go SDK standard library or compiler tree was not retained'
 "$test_home/bin/fd" --version | grep -F "$FD_VERSION" >/dev/null
 [[ -f $test_home/bin/nvim-$NVIM_VERSION/share/nvim/runtime/syntax/test.vim ]] ||
   fail 'Neovim runtime tree was not retained'
@@ -214,9 +232,9 @@ default_repository=$test_root/default-repository
 default_home=$test_root/default-home
 make_test_repo "$default_repository"
 cp "$test_repository/tools.env" "$default_repository/tools.env"
-printf 'TOOLS=(fd k9s gh oh-my-posh uv nvim)\n' >>"$default_repository/tools.env"
+printf 'TOOLS=(fd k9s gh oh-my-posh uv nvim go)\n' >>"$default_repository/tools.env"
 run_setup "$default_home" "$default_repository" "$archive_root"
-for tool in fd k9s gh oh-my-posh uv nvim; do
+for tool in fd k9s gh oh-my-posh uv nvim go gofmt; do
   [[ -x $default_home/bin/$tool ]] || fail "default online install omitted $tool"
 done
 
@@ -287,6 +305,35 @@ set -e
 assert_link "$foreign_nvim_home/bin/nvim" nvim-v999/bin/nvim
 [[ $(sha256sum "$foreign_nvim_home/bin/nvim-v999/bin/nvim") == "$foreign_nvim_hash" ]] ||
   fail 'foreign nvim-v* target was changed'
+
+foreign_go_home=$test_root/foreign-go-home
+mkdir -p "$foreign_go_home/bin"
+write_fake "$foreign_go_home/bin/gofmt" gofmt manual
+foreign_go_hash=$(sha256sum "$foreign_go_home/bin/gofmt")
+if run_setup "$foreign_go_home" "$test_repository" "$archive_root" go \
+  >"$test_root/foreign-go.log" 2>&1; then
+  fail 'Go SDK install overwrote a foreign gofmt'
+fi
+[[ ! -e $foreign_go_home/bin/go && $(sha256sum "$foreign_go_home/bin/gofmt") == "$foreign_go_hash" ]] ||
+  fail 'Go SDK pair conflict changed the prior selection'
+
+go_upgrade_repository=$test_root/go-upgrade-repository
+go_upgrade_archives=$test_root/go-upgrade-archives
+go_baseline_version=$GO_VERSION
+go_candidate_version=99.1.0
+make_test_repo "$go_upgrade_repository"
+append_release "$go_upgrade_repository/tools.env" TOOL_RELEASES go "$go_candidate_version" \
+  https://example.invalid/placeholder "$(printf '%064d' 0)"
+make_archives "$go_upgrade_repository" "$go_upgrade_archives"
+run_setup "$test_home" "$go_upgrade_repository" "$go_upgrade_archives" go
+assert_link "$test_home/bin/go" "go-$go_candidate_version/bin/go"
+assert_link "$test_home/bin/gofmt" "go-$go_candidate_version/bin/gofmt"
+[[ -x $test_home/bin/go-$go_baseline_version/bin/go ]] || fail 'Go SDK upgrade removed the prior tree'
+run_setup "$test_home" "$test_repository" "$archive_root" go
+assert_link "$test_home/bin/go" "go-$go_baseline_version/bin/go"
+assert_link "$test_home/bin/gofmt" "go-$go_baseline_version/bin/gofmt"
+[[ -x $test_home/bin/go-$go_candidate_version/bin/go ]] || fail 'Go SDK rollback removed the other tree'
+load_test_versions "$test_repository"
 
 unsafe_repository=$test_root/unsafe-repository
 unsafe_archives=$test_root/unsafe-archives
@@ -470,7 +517,7 @@ assert_link "$single_home/bin/k9s" "k9s-$K9S_VERSION"
 
 find "$archive_root" -depth -delete
 XDG_CONFIG_HOME="$test_xdg" run_setup "$test_home" "$test_repository" "$archive_root" \
-  k9s gh uv nvim
+  k9s gh uv nvim go
 cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
   fail 'setup-tools reconciliation changed kube-backup-contexts.txt'
 cmp "$test_root/kube-prefix-before" "$test_home/kube-log-prefixes.txt" ||

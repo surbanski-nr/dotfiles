@@ -991,6 +991,46 @@ Remote/container debugging needs an explicit project-specific configuration
 and, if needed, a trusted SSH tunnel and `pathMappings`; it is not enabled by
 the default loopback configuration.
 
+## Go development and debugger
+
+Go uses gopls for navigation, diagnostics, hover and completion, goimports for
+formatting and import fixes, and golangci-lint v2 for project-selected checks.
+The full SDK supplies `go`, `gofmt`, the compiler and standard library.
+Connected installations run `./setup-tools go` and `:Nvim2ToolsInstallSync`;
+offline releases already contain everything. Go, go.mod, go.sum and go.work
+have Treesitter support. Existing LSP mappings work unchanged.
+
+Save a `.go` file to run goimports. golangci-lint runs asynchronously only when
+the project has `.golangci.yml`, `.golangci.yaml`, `.golangci.toml` or
+`.golangci.json`. Keep that configuration and the desired checks in the project.
+For example, a minimal v2 YAML configuration can contain `version: "2"`.
+Without one, gopls still provides compiler diagnostics but no additional linter
+is forced on the project. Concurrent buffer saves can run independently.
+Removing the configuration clears linter diagnostics and discards pending results.
+
+Delve and `nvim-dap-go` reuse the existing debugger panels and controls.
+Set `<leader>db` on a saved line, press `<F5>`, and choose a package launch,
+package launch with arguments, or package test. Launches build the entire
+current file's package, not just one file. The working directory is the nearest
+go.mod, go.work or Git root, even when Neovim started outside the project.
+Test binaries run from their package directory, like `go test`, so relative
+`testdata` paths work in subpackages.
+
+In `.go` buffers, `<leader>dt` debugs the test near the cursor and `<leader>dT`
+debugs the whole current package. The Python test shortcuts remain unchanged
+in Python buffers. Breakpoint, stepping, evaluation, REPL, panel and terminate
+keys are the same as in the [Python debugger table](#python-debugger).
+Delve's threads panel lists goroutines. The adapter listens on loopback only.
+Project-specific launch settings can be supplied in `.vscode/launch.json`.
+
+An offline release uses its own physical SDK with `GOTOOLCHAIN=local`, so a
+project cannot silently download a different toolchain. Module dependencies
+must already be vendored or available in the user's module cache. CGO requires
+a separately prepared C toolchain and libraries. Go caches, telemetry/settings
+and Delve configuration stay in user directories, outside the release payload.
+Debugging requires permission to trace the child process; hardened VM/container
+policies can prohibit it even though no browser or GPU is required.
+
 ## Formatting, linting and tools
 
 The main day-to-day language stacks are:
@@ -999,6 +1039,7 @@ The main day-to-day language stacks are:
 | ----------------------------------- | -------------------------- | ---------------------------------- | ------------------------- |
 | TypeScript, TSX, JavaScript and JSX | TypeScript Language Server | Prettier                           | ESLint through `eslint_d` |
 | Python                              | Pyright and Ruff           | Ruff import sorting and formatting | Ruff                      |
+| Go                                  | gopls                      | goimports                          | Project-configured golangci-lint v2 |
 | Bash and POSIX shell                | Bash Language Server       | shfmt                              | ShellCheck                |
 
 | Action                                              | Keys or command                 |
@@ -1446,6 +1487,7 @@ provisioning live in [lua/custom/lsp.lua](lua/custom/lsp.lua),
 | Dockerfile | Docker Language Server/parser and Hadolint | No separately configured Dockerfile formatter |
 | GitHub Actions | YAML support plus Actionlint under `.github/workflows/` | Actionlint does not run on every YAML file |
 | Bash/POSIX shell | BashLS/parser, shfmt, ShellCheck, Matchit | Quote/WORD objects are textual, not safe shell refactoring |
+| Go | gopls/parser, goimports, golangci-lint and Delve | Project modules and CGO dependencies are not bundled |
 | Markdown runbooks | Rendering, spelling, prose editing, snippets and configured LSP | Rendering is not document conversion |
 
 Useful short flows:

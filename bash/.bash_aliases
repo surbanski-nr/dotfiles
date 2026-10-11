@@ -120,6 +120,13 @@ dotfiles-check() (
         return 1
       }
     done
+    for command_name in go gofmt; do
+      [[ -x $release_root/bin/$command_name ]] || continue
+      [[ $(readlink -f -- "$HOME/bin/$command_name" 2>/dev/null) == "$release_root/"* ]] || {
+        printf '  MISMATCH active release command: %s\n' "$command_name" >&2
+        return 1
+      }
+    done
     return 0
   fi
   if [[ -r $manifest_dir/tools.env && -r $manifest_dir/validation.env ]]; then
@@ -182,6 +189,7 @@ dotfiles-check() (
     _dotfiles_check_release_version zoxide zoxide TOOL_RELEASES zoxide || missing=1
     _dotfiles_check_release_version uv uv TOOL_RELEASES uv || missing=1
     _dotfiles_check_release_version Neovim nvim TOOL_RELEASES nvim || missing=1
+    _dotfiles_check_release_version Go go TOOL_RELEASES go || missing=1
     _dotfiles_check_release_version Terraform terraform TOOL_RELEASES terraform || missing=1
     _dotfiles_check_release_version kubectl kubectl TOOL_RELEASES kubectl || missing=1
     _dotfiles_check_release_version Helm helm TOOL_RELEASES helm || missing=1

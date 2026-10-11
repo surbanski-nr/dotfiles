@@ -45,7 +45,7 @@ add_to_path() {
 _dotfiles_restore_launcher_environment() {
   local name marker value
 
-  for name in XDG_CONFIG_HOME XDG_DATA_HOME _ZO_DATA_DIR; do
+  for name in XDG_CONFIG_HOME XDG_DATA_HOME _ZO_DATA_DIR GOROOT GOTOOLCHAIN; do
     marker=DOTFILES_LAUNCHER_${name#_}_SET
     value=DOTFILES_LAUNCHER_${name#_}
     if [[ ${!marker:-} == 1 ]]; then

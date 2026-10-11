@@ -126,7 +126,32 @@ k9s version --short
 
 The next `setup-tools k9s` selects the first catalog record again. Keep the
 older complete record in `tools.env` for a persistent rollback. Treat `uv`
-with `uvx`, and `kubectx` with `kubens`, as paired selections.
+with `uvx`, `kubectx` with `kubens`, and the complete Go SDK with `gofmt`, as
+paired selections. Do not switch only one of the Go SDK links.
+
+## Go SDK and editor tools
+
+The SDK version, official archive and SHA-256 live in `tools.env`. Go is a
+direct `setup-tools go` installation, not an asdf runtime. Keep the full
+`go-VERSION` tree when testing an upgrade or rollback; it contains the compiler
+and standard library, not just two executables.
+
+The gopls, goimports, golangci-lint and Delve pins live in
+`nvim2/.config/nvim2/lua/custom/lsp.lua`. Keep their supported Go versions
+compatible with the SDK. Mason performs its normal Go package builds in the
+connected builder with `CGO_ENABLED=0` and `GOTOOLCHAIN=local`; no separate Go
+installer or dependency-building logic is duplicated in shell or Lua. The
+upstream golangci-lint binary must also support the selected project Go version.
+Go changes do not require regenerating Python locks.
+
+Run `task validate`, rebuild all four complete artifacts, and qualify them
+with network access disabled as ordinary users. The tool-enabled Nvim2 suite
+checks a real multi-file package, SDK compile/run/test, offline vendoring,
+gopls diagnostics/navigation/hover/completion, import formatting, configured
+golangci-lint diagnostics and real Delve breakpoint/variables/goroutines/step,
+nearest-test and process cleanup. Test rollback to a retained pre-Go release
+using the newer manager. Projects requiring another SDK, uncached modules or
+CGO libraries need their own separately prepared dependencies.
 
 ## Python environments
 
