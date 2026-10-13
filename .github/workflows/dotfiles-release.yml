@@ -25,14 +25,22 @@ concurrency:
 
 jobs:
   preflight:
-    name: Find release and missing assets
+    name: Find release and incomplete assets
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     outputs:
       commit_sha: ${{ steps.release.outputs.commit_sha }}
       platforms: ${{ steps.release.outputs.platforms }}
       release_tag: ${{ steps.release.outputs.release_tag }}
-      should_build: ${{ steps.release.outputs.should_build }}
+      should_run: ${{ steps.release.outputs.should_run }}
     steps:
+      - name: Check out workflow tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: ci
+
       - name: Resolve release
         id: release
         env:
@@ -41,277 +49,59 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           TAG_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-
-          if [[ $EVENT_NAME == workflow_dispatch ]]; then
-            release_tag=$INPUT_RELEASE_TAG
-          else
-            release_tag=$TAG_NAME
-          fi
-          [[ $release_tag =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
-            printf 'Invalid release tag: %s\n' "$release_tag" >&2
-            exit 1
-          }
-
-          release_file=$RUNNER_TEMP/release.json
-          error_file=$RUNNER_TEMP/release-error.txt
-          attempts=1
-          [[ $EVENT_NAME == push ]] && attempts=6
-          release_found=false
-          for ((attempt = 1; attempt <= attempts; attempt++)); do
-            if timeout 30s gh api \
-              "repos/$REPOSITORY/releases/tags/$release_tag" \
-              >"$release_file" 2>"$error_file"; then
-              release_found=true
-              break
-            fi
-            if ! grep -q 'HTTP 404' "$error_file"; then
-              cat "$error_file" >&2
-              exit 1
-            fi
-            ((attempt == attempts)) || sleep 10
-          done
-          if [[ $release_found != true ]]; then
-            printf 'Release %s does not exist; skipping build.\n' "$release_tag"
-            printf '%s\n' \
-              "release_tag=$release_tag" \
-              'platforms=[]' \
-              'should_build=false' \
-              >>"$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          object_file=$RUNNER_TEMP/tag-object.json
-          timeout 30s gh api \
-            "repos/$REPOSITORY/git/ref/tags/$release_tag" \
-            >"$object_file"
-          object_type=$(jq -r '.object.type' "$object_file")
-          commit_sha=$(jq -r '.object.sha' "$object_file")
-          while [[ $object_type == tag ]]; do
-            timeout 30s gh api \
-              "repos/$REPOSITORY/git/tags/$commit_sha" \
-              >"$object_file"
-            object_type=$(jq -r '.object.type' "$object_file")
-            commit_sha=$(jq -r '.object.sha' "$object_file")
-          done
-          [[ $object_type == commit ]] || {
-            printf 'Tag %s does not resolve to a commit.\n' "$release_tag" >&2
-            exit 1
-          }
-          [[ $release_tag == "dotfiles-${commit_sha:0:12}" ]] || {
-            printf 'Tag does not match target commit %s.\n' "$commit_sha" >&2
-            exit 1
-          }
-
-          platforms=(
-            debian-13-x86_64
-            ubuntu-24.04-x86_64
-            ubuntu-26.04-x86_64
-            amzn-2023-x86_64
-          )
-          selected=()
-          for platform in "${platforms[@]}"; do
-            asset="$release_tag-$platform.tar.gz"
-            if ! jq -e --arg asset "$asset" \
-              '.assets[]? | select(.name == $asset)' \
-              "$release_file" >/dev/null; then
-              selected+=("$platform")
-              continue
-            fi
-            existing_dir=$RUNNER_TEMP/existing-$platform
-            mkdir -p "$existing_dir"
-            timeout 300s gh release download "$release_tag" \
-              --repo "$REPOSITORY" --pattern "$asset" --dir "$existing_dir"
-            root=$(tar -tzf "$existing_dir/$asset" | sed -n '1p')
-            root=${root%%/*}
-            [[ $root == "dotfiles-${commit_sha:0:12}" ]] || {
-              printf 'Existing %s has unexpected root %s.\n' "$asset" "$root" >&2
-              exit 1
-            }
-            while IFS= read -r member; do
-              [[ $member == "$root" || $member == "$root/"* ]] || {
-                printf 'Existing %s has unsafe member %s.\n' "$asset" "$member" >&2
-                exit 1
-              }
-            done < <(tar -tzf "$existing_dir/$asset")
-            tar -xzf "$existing_dir/$asset" -C "$existing_dir"
-            grep -Fx "SOURCE_COMMIT=$commit_sha" \
-              "$existing_dir/$root/release.env" >/dev/null
-            (cd "$existing_dir/$root" &&
-              sha256sum --check --strict SHA256SUMS >/dev/null)
-          done
-          matrix=$(printf '%s\n' "${selected[@]}" |
-            jq -Rsc 'split("\n") | map(select(length > 0))')
-          should_build=false
-          ((${#selected[@]} > 0)) && should_build=true
-          printf '%s\n' \
-            "release_tag=$release_tag" \
-            "commit_sha=$commit_sha" \
-            "platforms=$matrix" \
-            "should_build=$should_build" \
-            >>"$GITHUB_OUTPUT"
+        run: bash ci/scripts/dotfiles-release-ci preflight
 
   build:
-    name: Build and qualify ${{ matrix.platform }}
+    name: Build or complete ${{ matrix.platform }}
     needs: preflight
-    if: needs.preflight.outputs.should_build == 'true'
+    if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: write  # Required to upload release assets.
     strategy:
       fail-fast: false
       matrix:
-        platform: ${{ fromJSON(needs.preflight.outputs.platforms) }}
+        include: ${{ fromJSON(needs.preflight.outputs.platforms) }}
+    env:
+      COMMIT_SHA: ${{ needs.preflight.outputs.commit_sha }}
+      PLATFORM: ${{ matrix.platform }}
+      RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
     steps:
-      - name: Check out release commit
+      - name: Check out workflow tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: ci
+
+      - name: Check out release commit
+        if: matrix.build_archive
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
           persist-credentials: false
           ref: ${{ needs.preflight.outputs.commit_sha }}
+          path: release-source
 
-      - name: Select builder image and test identity
-        id: image
+      - name: Build archive and verify offline installation
+        if: matrix.build_archive
+        run: >-
+          bash ci/scripts/dotfiles-release-ci build
+          "$GITHUB_WORKSPACE/release-source" "$RUNNER_TEMP/dotfiles-output"
+
+      - name: Publish archive and checksum
         env:
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          set -euo pipefail
-          source release.env
-          case "$PLATFORM" in
-            debian-13-x86_64)
-              image=$DEBIAN_13_IMAGE; uid=23131; home='/srv/debian offline'
-              ;;
-            ubuntu-24.04-x86_64)
-              image=$UBUNTU_2404_IMAGE; uid=24141; home=/opt/ubuntu2404
-              ;;
-            ubuntu-26.04-x86_64)
-              image=$UBUNTU_2604_IMAGE; uid=26161; home=/srv/ubuntu2604
-              ;;
-            amzn-2023-x86_64)
-              image=$AMZN_2023_IMAGE; uid=23171; home=/opt/amazon2023
-              ;;
-            *) printf 'Unsupported platform: %s\n' "$PLATFORM" >&2; exit 1 ;;
-          esac
-          printf '%s\n' \
-            "image=$image" \
-            "uid=$uid" \
-            "home=$home" \
-            >>"$GITHUB_OUTPUT"
-
-      - name: Build complete platform artifact
-        env:
-          BUILDER_IMAGE: ${{ steps.image.outputs.image }}
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          set -euo pipefail
-          output=$RUNNER_TEMP/dotfiles-output
-          evidence=$RUNNER_TEMP/dotfiles-evidence/$PLATFORM
-          mkdir -p "$output"
-          mkdir -p "$evidence"
-          timeout 300s docker pull "$BUILDER_IMAGE"
-          timeout --signal=TERM --kill-after=30s 5400s docker run --rm \
-            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
-            --volume "$output:/out" \
-            --env BUILDER_IMAGE="$BUILDER_IMAGE" \
-            "$BUILDER_IMAGE" \
-            bash /workspace/scripts/build-dotfiles-release \
-              build "$PLATFORM" /workspace /out 2>&1 | tee "$evidence/build.log"
-
-      - name: Qualify install and health without network
-        env:
-          BUILDER_IMAGE: ${{ steps.image.outputs.image }}
-          PLATFORM: ${{ matrix.platform }}
-          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
-          TEST_HOME: ${{ steps.image.outputs.home }}
-          TEST_UID: ${{ steps.image.outputs.uid }}
-        run: |
-          set -euo pipefail
-          container="dotfiles-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM"
-          image="dotfiles-runtime:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM"
-          cleanup() {
-            docker rm --force "$container" >/dev/null 2>&1 || true
-            docker image rm "$image" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
-          docker run --detach --name "$container" "$BUILDER_IMAGE" sleep infinity
-          docker cp scripts/build-dotfiles-release \
-            "$container:/usr/local/bin/build-dotfiles-release"
-          docker exec "$container" mkdir -p /usr/local/lib/dotfiles
-          docker cp scripts/setup-lib \
-            "$container:/usr/local/lib/dotfiles/setup-lib"
-          docker cp system.env \
-            "$container:/usr/local/lib/dotfiles/system.env"
-          timeout --signal=TERM --kill-after=15s 900s docker exec "$container" \
-            bash /usr/local/bin/build-dotfiles-release prepare-runtime \
-              "$PLATFORM" offline-test "$TEST_UID" "$TEST_HOME"
-          timeout 300s docker commit "$container" "$image"
-          docker rm --force "$container"
-
-          archive="$RUNNER_TEMP/dotfiles-output/$RELEASE_TAG-$PLATFORM.tar.gz"
-          evidence=$RUNNER_TEMP/dotfiles-evidence/$PLATFORM
-          (cd "$(dirname -- "$archive")" &&
-            sha256sum --check --strict "$(basename -- "$archive").sha256")
-          root=$(tar -tzf "$archive" | sed -n '1p')
-          root=${root%%/*}
-          delivered_manager=$RUNNER_TEMP/dotfiles-release
-          tar -xOzf "$archive" "$root/dotfiles-release" >"$delivered_manager"
-          chmod 0755 "$delivered_manager"
-          timeout --signal=TERM --kill-after=30s 1800s docker run --rm \
-            --network none \
-            --user "$TEST_UID:$TEST_UID" \
-            --env HOME="$TEST_HOME" \
-            --volume "$archive:/artifact.tar.gz:ro" \
-            --volume "$delivered_manager:/usr/local/bin/dotfiles-release:ro" \
-            "$image" \
-            bash /usr/local/bin/dotfiles-release \
-              verify "$PLATFORM" /artifact.tar.gz 2>&1 | tee "$evidence/offline-verify.log"
-          tar -xOzf "$archive" "$root/release.env" >"$evidence/release.env"
-          tar -xOzf "$archive" "$root/build-manifest.txt" \
-            >"$evidence/build-manifest.txt"
-          cp "$archive.sha256" "$evidence/archive.sha256"
-
-      - name: Record artifact
-        id: asset
-        env:
-          PLATFORM: ${{ matrix.platform }}
-          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/dotfiles-output/$RELEASE_TAG-$PLATFORM.tar.gz"
-          size=$(stat --format=%s "$archive")
-          ((size < 2147483648)) || {
-            printf 'Release asset is %s bytes; GitHub limit is below 2 GiB.\n' \
-              "$size" >&2
-            exit 1
-          }
-          digest=$(sha256sum "$archive" | cut -d ' ' -f 1)
-          printf 'archive=%s\n' "$archive" >>"$GITHUB_OUTPUT"
-          {
-            printf '### %s\n\n' "$PLATFORM"
-            printf -- '- Size: %s bytes\n' "$size"
-            printf -- '- SHA-256: %s\n' "$digest"
-          } >>"$GITHUB_STEP_SUMMARY"
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: >-
+          bash ci/scripts/dotfiles-release-ci publish
+          "$RUNNER_TEMP/dotfiles-output"
 
       - name: Preserve qualification evidence
+        if: ${{ !cancelled() && matrix.build_archive }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: dotfiles-qualification-${{ matrix.platform }}
           path: ${{ runner.temp }}/dotfiles-evidence/${{ matrix.platform }}
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
-
-      - name: Upload qualified release asset
-        env:
-          ARCHIVE: ${{ steps.asset.outputs.archive }}
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
-        run: |
-          set -euo pipefail
-          timeout 300s gh release upload \
-            --repo "$REPOSITORY" \
-            "$RELEASE_TAG" \
-            "$ARCHIVE"

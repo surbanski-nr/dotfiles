@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+printf '%s\n' "$*" >>"$TEST_DOCKER_LOG"
+case $1 in
+  run)
+    if [[ " $* " == *' build '* ]]; then
+      if [[ ${TEST_BUILD_FAIL:-0} == 1 ]]; then printf 'fixture build failure\n'; exit 81; fi
+      for arg in "$@"; do
+        if [[ $arg == *:/out ]]; then output_dir=${arg%:/out}; fi
+      done
+      cp "$TEST_BUILD_ARCHIVE" "$output_dir/$RELEASE_TAG-$PLATFORM.tar.gz"
+      (cd "$output_dir" && sha256sum "$RELEASE_TAG-$PLATFORM.tar.gz" >"$RELEASE_TAG-$PLATFORM.tar.gz.sha256")
+      printf 'fixture build succeeded\n'
+    elif [[ " $* " == *' verify '* ]]; then
+      [[ " $* " == *' --init '* && " $* " == *' --network none '* && " $* " == *' --user '* ]] || exit 2
+      if [[ ${TEST_VERIFY_FAIL:-0} == 1 ]]; then printf 'fixture offline failure\n'; exit 82; fi
+      printf 'fixture offline health succeeded\n'
+    else
+      printf 'fixture container started\n'
+    fi
+    ;;
+  pull) printf 'fixture image pulled\n' ;;
+  exec)
+    if [[ ${TEST_PREPARE_FAIL:-0} == 1 && " $* " == *' prepare-runtime '* ]]; then
+      printf 'fixture runtime preparation failure\n'
+      exit 83
+    fi
+    ;;
+  cp | commit | rm | image) ;;
+  *) exit 2 ;;
+esac

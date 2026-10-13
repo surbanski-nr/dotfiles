@@ -16,6 +16,8 @@ tool=$1
 
 # shellcheck source=setup-lib
 source "$repo_dir/scripts/setup-lib"
+# shellcheck source=../tools.env
+source "$repo_dir/tools.env"
 # shellcheck source=../validation.env
 source "$repo_dir/validation.env"
 validate_profile VALIDATOR_TOOLS
@@ -41,12 +43,18 @@ tool_version() {
 }
 
 if [[ $tool == yamllint ]]; then
-  for variable in YAMLLINT_VERSION YAMLLINT_PATHSPEC_VERSION YAMLLINT_PYYAML_VERSION; do
-    validate_version "$variable" "${!variable:-}"
-  done
-  version=$YAMLLINT_VERSION
+  yamllint_input=$repo_dir/nvim2/.config/nvim2/python-locks/yamllint.in
+  yamllint_lock=$repo_dir/nvim2/.config/nvim2/python-locks/yamllint.lock
+  [[ -f $yamllint_input && ! -L $yamllint_input && -f $yamllint_lock && ! -L $yamllint_lock ]] ||
+    die 'yamllint Python lock is missing'
+  requirement=$(awk '!/^#/ && NF { print; exit }' "$yamllint_input")
+  [[ $requirement =~ ^yamllint==(.+)$ ]] || die 'invalid yamllint Python input'
+  version=${BASH_REMATCH[1]}
+  validate_version YAMLLINT_VERSION "$version"
 else
-  select_default_release VALIDATOR_RELEASES "$tool"
+  catalog=TOOL_RELEASES
+  [[ -v VALIDATOR_RELEASES[$tool] ]] && catalog=VALIDATOR_RELEASES
+  select_default_release "$catalog" "$tool"
   version=$RELEASE_VERSION
   url=$RELEASE_URL
 fi
@@ -123,22 +131,20 @@ activate_yamllint() {
 }
 
 if [[ $tool == yamllint ]]; then
-  venv="$tools_dir/yamllint-$YAMLLINT_VERSION"
+  venv="$tools_dir/yamllint-$version"
   if [[ -e $venv || -L $venv ]]; then
-    venv=$tools_dir/yamllint-$YAMLLINT_VERSION-${stage##*.}
+    venv=$tools_dir/yamllint-$version-${stage##*.}
   fi
   staged_venv=$venv
   python3 -m venv "$venv"
   "$venv/bin/python" -m pip install --disable-pip-version-check \
-    "pathspec==$YAMLLINT_PATHSPEC_VERSION" \
-    "PyYAML==$YAMLLINT_PYYAML_VERSION" \
-    "yamllint==$YAMLLINT_VERSION"
+    --require-hashes --requirement "$yamllint_lock"
   activate_yamllint "$venv"
 else
   archive=$stage/$RELEASE_ASSET
   prepared=$stage/prepared
   download_file "$url" "$archive"
-  prepare_artifact VALIDATOR_RELEASES "$tool" "$version" "$archive" "$prepared"
+  prepare_artifact "$catalog" "$tool" "$version" "$archive" "$prepared"
   activate_binary "$prepared/${SPEC_DESTS[0]}"
 fi
 

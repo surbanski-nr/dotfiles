@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+command_name=${0##*/}
+{
+  printf '%s' "$command_name"
+  printf '\t%s' "$@"
+  printf '\n'
+} >>"$TEST_DOCKER_LOG"
+
+case $command_name in
+  curl)
+    [[ ${TEST_DOCKER_FAIL:-} != curl ]] || exit 75
+    while (($#)); do
+      case $1 in
+        --output)
+          printf 'fixture Docker signing key\n' >"$2"
+          exit 0
+          ;;
+        *) shift ;;
+      esac
+    done
+    exit 1
+    ;;
+  dpkg-query)
+    [[ ${*: -1} == "${TEST_DOCKER_CONFLICT:-}" ]] || exit 1
+    printf 'installed'
+    ;;
+  rpm)
+    if [[ ${2:-} == gnupg2-minimal ]]; then
+      [[ ${TEST_RPM_MINIMAL:-0} == 1 ]]
+    else
+      [[ ${2:-} == "${TEST_DOCKER_CONFLICT:-}" ]]
+    fi
+    ;;
+  systemctl)
+    [[ ${TEST_DOCKER_FAIL:-} != systemctl ]] || exit 73
+    ;;
+  gpg)
+    [[ ${TEST_DOCKER_FAIL:-} != gpg ]] || exit 76
+    ;;
+  docker)
+    [[ ${TEST_DOCKER_FAIL:-} != docker ]] || exit 74
+    ;;
+  groupadd | usermod) ;;
+  *) exit 1 ;;
+esac

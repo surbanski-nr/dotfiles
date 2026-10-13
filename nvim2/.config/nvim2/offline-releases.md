@@ -2,8 +2,8 @@
 
 The authoritative multi-application build, prerequisite, installation,
 ownership, rollback and uninstall procedure is in
-[SETUP.md](../../../SETUP.md#complete-offline-release). This page documents the
-Neovim-specific parts of that release.
+[setup.md](../../../maintenance/setup.md#complete-offline-release).
+This page documents the Neovim-specific parts of that release.
 
 ## Editor payload and process identity
 
@@ -104,7 +104,7 @@ The connected config records its own loaded path. In both cases `prefix` +
 therefore reloads A after `current` selects B; a newly started server uses B.
 An explicit `tmux -f FILE` remains authoritative.
 Connected TPM still reads plugin declarations from the default config location,
-not `FILE`; see [TPM and Krew](../../../SETUP.md#tpm-and-krew).
+not `FILE`; see [TPM and Krew](../../../maintenance/setup.md#tpm-and-krew).
 
 ## Offline health
 
@@ -112,6 +112,13 @@ not `FILE`; see [TPM and Krew](../../../SETUP.md#tpm-and-krew).
 symlink targets, source metadata, Python isolation and all runtime versions.
 It verifies the installed content again after functional checks, so tool writes
 into the payload fail the same health invocation.
+New releases also bundle kind, uv/uvx, actionlint, ShellCheck, gh, htop,
+kubeconform, Kyverno and Trivy. Yamllint is exposed from its locked Python
+environment. Health checks their versions and
+creates a disposable uv venv using the bundled Python with downloads disabled.
+It does not create a cluster, pull images or install project dependencies.
+Docker and container images remain separate prerequisites for kind.
+
 The full mode then runs functional rg, fzf, zoxide, Task, Terraform and tfvars
 operations, an embedded-library `helm-ls` lint without Helm, isolated
 kubectx/kubens and k9s checks, a private tmux socket with all three plugins,
@@ -153,9 +160,23 @@ The final runtime check uses a fresh prepared container, a read-only artifact,
 an ordinary user and `--network none`.
 
 `.github/workflows/dotfiles-release.yml` accepts an existing
-`dotfiles-COMMIT12` release, verifies any existing asset identity, and builds
-only missing platform assets. It never creates a tag or release. A qualified
-asset is uploaded only after offline install and full health have passed.
+`dotfiles-COMMIT12` release and uses `scripts/dotfiles-release-ci` for planning,
+qualification and publication. The workflow tooling comes from the commit
+containing the workflow; the separate read-only build checkout is the resolved
+release commit, so dispatching an older release does not require newer CI
+scripts in that release.
+
+Existing archives are checked with the trusted checkout's
+`dotfiles-release inspect PLATFORM ARCHIVE COMMIT`: archive paths and links,
+complete metadata, expected platform and full commit ID, and internal checksums.
+Only missing archives are built. Each archive is published together with its
+`.tar.gz.sha256` sidecar. A retry verifies existing assets and publishes only a
+missing checksum without rebuilding or overwriting the archive. A mismatched
+existing checksum fails rather than being replaced. The workflow never creates
+a tag or release. A new archive is uploaded only after offline install and full
+health have passed. Qualification logs and metadata are retained even if a
+build, verification or upload fails; containers use `--init` to reap debugger
+processes and are removed on exit.
 
 Expected assets are:
 
@@ -171,4 +192,4 @@ For a plugin or configuration change, edit the source checkout, regenerate
 build a new complete release. Never edit the installed snapshot or use it as a
 Git working tree. Keep A and B until their health, representative editing,
 rollback and process-pinning checks have passed, then remove an inactive ID as
-described in `SETUP.md`.
+described in `maintenance/setup.md`.

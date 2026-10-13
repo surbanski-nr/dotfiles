@@ -216,20 +216,25 @@ validate_profile() {
 }
 
 validate_validator_config() {
-  local tool version seen=' '
+  local catalog tool version seen=' '
 
   validate_profile VALIDATOR_TOOLS || return
   validate_release_catalog VALIDATOR_RELEASES || return
   for tool in "${VALIDATOR_TOOLS[@]}"; do
     seen+="$tool "
-    [[ $tool == yamllint ]] && continue
-    if ! [[ -v VALIDATOR_RELEASES[$tool] ]]; then
-      report_error "VALIDATOR_RELEASES has no releases for $tool"
+    if [[ $tool == yamllint ]]; then
+      continue
+    elif [[ -v VALIDATOR_RELEASES[$tool] ]]; then
+      catalog=VALIDATOR_RELEASES
+    elif [[ -v TOOL_RELEASES[$tool] ]]; then
+      catalog=TOOL_RELEASES
+    else
+      report_error "no release catalog contains validator $tool"
       return 1
     fi
-    release_versions VALIDATOR_RELEASES "$tool" || return
+    release_versions "$catalog" "$tool" || return
     for version in "${RELEASE_VERSIONS[@]}"; do
-      select_release VALIDATOR_RELEASES "$tool" "$version" || return
+      select_release "$catalog" "$tool" "$version" || return
       if [[ $RELEASE_URL == - ]]; then
         report_error "validation release $tool $version requires an artifact"
         return 1
@@ -243,9 +248,6 @@ validate_validator_config() {
       return 1
     fi
   done
-  for version in YAMLLINT_VERSION YAMLLINT_PATHSPEC_VERSION YAMLLINT_PYYAML_VERSION; do
-    validate_version "$version" "${!version:-}" || return
-  done
 }
 
 validate_tool_config() {
@@ -258,7 +260,7 @@ validate_tool_config() {
   for profile in TOOLS OFFLINE_RELEASE_TOOLS; do
     local -n profile_tools=$profile
     for tool in "${profile_tools[@]}"; do
-      [[ $tool == task ]] && continue
+      [[ $profile == OFFLINE_RELEASE_TOOLS && $tool == yamllint ]] && continue
       if ! [[ -v TOOL_RELEASES[$tool] ]]; then
         report_error "$profile references unknown tool $tool"
         return 1
@@ -266,13 +268,8 @@ validate_tool_config() {
     done
     unset -n profile_tools
   done
-  if [[ -v TOOL_RELEASES[task] ]]; then
-    report_error 'task must be pinned only in validation.env'
-    return 1
-  fi
-
   for tool in "${OFFLINE_RELEASE_TOOLS[@]}"; do
-    [[ $tool == task ]] && continue
+    [[ $tool == yamllint ]] && continue
     select_default_release TOOL_RELEASES "$tool" || return
     if [[ $RELEASE_URL == - ]]; then
       report_error "offline default $tool $RELEASE_VERSION requires an artifact"
@@ -281,7 +278,8 @@ validate_tool_config() {
     artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   done
   for tool in "${TOOLS[@]}"; do
-    [[ $tool == task ]] && continue
+    # Online Python versions are provider-managed; its archive is for offline builds.
+    [[ $tool == python ]] && continue
     release_versions TOOL_RELEASES "$tool" || return
     for version in "${RELEASE_VERSIONS[@]}"; do
       select_release TOOL_RELEASES "$tool" "$version" || return
@@ -410,7 +408,7 @@ artifact_layout() {
       SPEC_DESTS=("shellcheck-$version")
       SPEC_LINKS=("shellcheck:shellcheck-$version")
       ;;
-    oh-my-posh | kubectl)
+    oh-my-posh | kubectl | kind)
       SPEC_FORMAT=raw
       SPEC_MEMBER=
       SPEC_DESTS=("$name-$version")
@@ -487,12 +485,41 @@ artifact_layout() {
       SPEC_FORMAT=gz-tree
       SPEC_MEMBER="tmux-$version"
       SPEC_DESTS=("tmux-$version")
-      # setup-tools does not install tmux, but release artifact preparation does.
-      # shellcheck disable=SC2034
-      SPEC_LINKS=()
+      SPEC_LINKS=("tmux:tmux-$version/bin/tmux")
+      ;;
+    htop)
+      SPEC_FORMAT=xz-tree
+      SPEC_MEMBER="htop-$version"
+      SPEC_DESTS=("htop-$version")
+      SPEC_LINKS=("htop:htop-$version/bin/htop")
       ;;
     *) report_error "missing artifact mapping for $name" ;;
   esac
+}
+
+compile_tool_source() {
+  local name=$1 source=$2 prefix=$3 jobs
+  local -a configure_args=("--prefix=$prefix")
+
+  case $name in
+    htop)
+      configure_args+=(
+        --disable-capabilities
+        --disable-delayacct
+        --disable-sensors
+      )
+      ;;
+    tmux) ;;
+    *) report_error "unsupported source build: $name"; return 1 ;;
+  esac
+  jobs=$(getconf _NPROCESSORS_ONLN) || return
+  [[ $jobs =~ ^[1-9][0-9]*$ ]] || { report_error "invalid processor count: $jobs"; return 1; }
+  (
+    cd "$source" || exit
+    ./configure "${configure_args[@]}" || exit
+    make -j"$jobs" || exit
+    make install || exit
+  )
 }
 
 validate_tar_archive() {

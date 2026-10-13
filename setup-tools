@@ -43,11 +43,7 @@ load_setup_config() {
   source "$REPO_DIR/system.env"
   # shellcheck source=tools-probes.env
   source "$REPO_DIR/tools-probes.env"
-  # Task deliberately keeps its only editable pin in validation.env.
-  # shellcheck source=validation.env
-  source "$REPO_DIR/validation.env"
   validate_tool_config
-  validate_validator_config
 
   BIN_DIR=${SETUP_TOOLS_BIN_DIR:-$HOME/bin}
   STATE_DIR=${SETUP_TOOLS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup-tools}
@@ -77,6 +73,11 @@ select_requested_tools() {
       return 1
     fi
     if [[ $seen != *" $name "* ]]; then
+      # Python setup always uses our reviewed uv, including when uv is requested later.
+      if [[ $name == python && $seen != *' uv '* ]]; then
+        SELECTED_TOOLS+=(uv)
+        seen+='uv '
+      fi
       SELECTED_TOOLS+=("$name")
       seen+="$name "
     fi
@@ -84,21 +85,14 @@ select_requested_tools() {
 }
 
 load_tool_versions() {
-  local catalog=TOOL_RELEASES
-
-  # Task has one shared pin for setup and repository validation.
-  if [[ $1 == task ]]; then catalog=VALIDATOR_RELEASES; fi
-  release_versions "$catalog" "$1" || return
+  release_versions TOOL_RELEASES "$1" || return
   TOOL_VERSIONS=("${RELEASE_VERSIONS[@]}")
 }
 
 load_tool_release() {
   local name=$1
   local version=$2
-  local catalog=TOOL_RELEASES
-
-  if [[ $name == task ]]; then catalog=VALIDATOR_RELEASES; fi
-  select_release "$catalog" "$name" "$version" || return
+  select_release TOOL_RELEASES "$name" "$version" || return
   if [[ $RELEASE_URL == - ]]; then
     report_error "$name $version has no direct artifact"
     return 1
@@ -212,9 +206,9 @@ state_owns_link_target() {
   local actual
 
   case "$command_name:$target" in
-    nvim:nvim-*/bin/nvim)
-      version=${target#nvim-}
-      version=${version%/bin/nvim}
+    nvim:nvim-*/bin/nvim | htop:htop-*/bin/htop | tmux:tmux-*/bin/tmux)
+      version=${target#"$command_name-"}
+      version=${version%/bin/"$command_name"}
       ;;
     go:go-*/bin/go | gofmt:go-*/bin/gofmt)
       version=${target#go-}
@@ -271,6 +265,7 @@ preflight_link() {
 }
 
 preflight() {
+  local build_command
   local name
   local version
   local entry
@@ -291,6 +286,12 @@ preflight() {
   mapfile -t lock_names < <(printf '%s\n' "$@" | LC_ALL=C sort)
   for name in "${lock_names[@]}"; do acquire_lock "$name"; done
   for name in "$@"; do
+    if [[ $name == htop || $name == tmux ]]; then
+      for build_command in cc getconf make pkg-config; do
+        require_command "$build_command" || return
+      done
+    fi
+    [[ $name == python ]] && continue
     load_tool_versions "$name"
     for version in "${TOOL_VERSIONS[@]}"; do
       load_tool_release "$name" "$version"
@@ -370,7 +371,7 @@ verify_staged() {
   local executable
 
   case $name in
-    nvim | go) executable="$STAGE_DIR/${SPEC_DESTS[0]}/bin/$name" ;;
+    nvim | go | htop | tmux) executable="$STAGE_DIR/${SPEC_DESTS[0]}/bin/$name" ;;
     *) executable="$STAGE_DIR/${SPEC_DESTS[0]}" ;;
   esac
   verify_executable "$name" "$executable" "$version"
@@ -388,7 +389,7 @@ install_version() {
   local version=$2
   local input
   local content
-  local destination
+  local destination source_tree built_tree
 
   load_tool_release "$name" "$version"
   classify_installation "$name" "$version" "$RELEASE_SHA256"
@@ -412,6 +413,13 @@ install_version() {
   download_file "$RELEASE_URL" "$input"
   verify_sha256 "$input" "$RELEASE_SHA256"
   extract_artifact "$input" "$STAGE_DIR"
+  if [[ $name == htop || $name == tmux ]]; then
+    source_tree=$STAGE_DIR/${SPEC_DESTS[0]}
+    built_tree=$STAGE_DIR/.built-$name-$version
+    compile_tool_source "$name" "$source_tree" "$built_tree"
+    find "$source_tree" -depth -delete
+    mv -- "$built_tree" "$source_tree"
+  fi
   verify_staged "$name" "$version"
 
   content=$(content_digest "$STAGE_DIR" "${SPEC_DESTS[@]}")
@@ -486,6 +494,12 @@ install_selected_tools() {
   for name in "$@"; do
     load_tool_versions "$name"
     selected=${TOOL_VERSIONS[0]}
+    if [[ $name == python ]]; then
+      "$BIN_DIR/uv" python install --no-config --no-bin "${TOOL_VERSIONS[@]}"
+      "$BIN_DIR/uv" python pin --no-config --no-project --global "$selected"
+      printf 'setup-tools: selected Python %s through uv\n' "$selected"
+      continue
+    fi
     for version in "${TOOL_VERSIONS[@]}"; do
       install_version "$name" "$version"
     done

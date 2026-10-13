@@ -56,21 +56,25 @@ set -e
   fail 'Bash syntax failure did not identify the invalid later file'
 
 cp "$repo_dir/bash/.bash_profile" "$syntax_repo/bash/.bash_profile"
-cat >"$syntax_repo/SETUP.md" <<'EOF'
+mkdir -p "$syntax_repo/maintenance"
+for document in maintenance/setup.md maintenance/tool-updates.md; do
+  cat >"$syntax_repo/$document" <<'EOF'
 ```bash
 if then
 ```
 EOF
-set +e
-syntax_output=$(
-  PATH="$test_bin" VALIDATION_TOOLS_DIR="$repo_dir/.cache/validation-tools" \
-    /bin/bash "$syntax_repo/scripts/validate" bash 2>&1
-)
-syntax_status=$?
-set -e
-[[ $syntax_status -ne 0 ]] || fail 'documentation gate accepted invalid Bash syntax'
-[[ $syntax_output == *'SETUP.md block starting at line 2'* ]] ||
-  fail 'documentation syntax failure did not identify its source block'
+  set +e
+  syntax_output=$(
+    PATH="$test_bin" VALIDATION_TOOLS_DIR="$repo_dir/.cache/validation-tools" \
+      /bin/bash "$syntax_repo/scripts/validate" bash 2>&1
+  )
+  syntax_status=$?
+  set -e
+  [[ $syntax_status -ne 0 ]] || fail "documentation gate accepted invalid Bash syntax in $document"
+  [[ $syntax_output == *"$document block starting at line 2"* ]] ||
+    fail 'documentation syntax failure did not identify its source block'
+  rm "$syntax_repo/$document"
+done
 
 real_tmux=$(command -v tmux)
 rm "$test_bin/tmux"

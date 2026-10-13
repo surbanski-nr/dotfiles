@@ -1,123 +1,102 @@
-# Stock Calm with restrained Neovim default accents.
-foreground: &foreground '#b8bbc2'
-strong: &strong '#d7dae1'
-bright: &bright '#eef1f8'
-# Preserve the terminal background. The configured Kitty background is #22272e.
-background: &background default
-selectedText: &selectedText '#22272e'
-surface: &surface '#2c2e33'
-selection: &selection '#004c73'
-# K9s also uses status colors as active-row backgrounds.
-tableRow: &tableRow '#b3f6c0'
-completed: &completed '#898c93'
-muted: &muted '#4f5258'
-green: &green '#b3f6c0'
-cyan: &cyan '#8cf8f7'
-orange: &orange '#ff9e64'
-yellow: &yellow '#fce094'
-purple: &purple '#ffcaff'
-red: &red '#ff5f5f'
+# -----------------------------------------------------------------------------
+# BlackAndWtf skin
+# -----------------------------------------------------------------------------
 
+# Styles...
+fg: &fg "white"
+# Preserve the terminal background instead of forcing black.
+bg: &bg default
+mark: &mark "darkgoldenrod"
+active: &active "dimgray"
+text: &text "navajowhite"
+white: &white "whitesmoke"
+ghost: &ghost "ghostwhite"
+dslate: &dslate "darkslategray"
+err: &err "pink"
+slate: &slate "slategray"
+gray: &gray "gray"
+
+# Skin...
 k9s:
   body:
-    fgColor: *foreground
-    bgColor: *background
-    logoColor: *cyan
+    fgColor: *fg
+    bgColor: *bg
+    logoColor: *fg
   prompt:
-    fgColor: *foreground
-    bgColor: *surface
-    suggestColor: *green
-  help:
-    fgColor: *foreground
-    bgColor: *background
-    sectionColor: *green
-    keyColor: *cyan
-    numKeyColor: *green
-  frame:
-    title:
-      fgColor: *cyan
-      bgColor: *background
-      highlightColor: *orange
-      counterColor: *green
-      filterColor: *cyan
-    border:
-      fgColor: *muted
-      focusColor: *cyan
-    menu:
-      fgColor: *strong
-      fgStyle: normal  # K9s stock uses dim here.
-      keyColor: *cyan
-      numKeyColor: *green
-    crumbs:
-      fgColor: *foreground
-      bgColor: *surface
-      activeColor: *selection
-    status:
-      newColor: *tableRow
-      modifyColor: *cyan
-      addColor: *green
-      pendingColor: *yellow
-      errorColor: *red
-      # Current/active resources can become the selected-row background.
-      highlightColor: *orange
-      killColor: *red
-      completedColor: *completed
+    fgColor: *fg
+    bgColor: *bg
+    suggestColor: *gray
   info:
-    fgColor: *cyan
-    sectionColor: *strong
+    fgColor: *text
+    sectionColor: *fg
+  dialog:
+    fgColor: *fg
+    bgColor: *bg
+    buttonFgColor: *fg
+    buttonBgColor: *bg
+    buttonFocusFgColor: *slate
+    buttonFocusBgColor: *white
+    labelFgColor: *ghost
+    fieldFgColor: *white
+  frame:
+    border:
+      fgColor: *fg
+      focusColor: *fg
+    menu:
+      fgColor: *fg
+      keyColor: *fg
+      numKeyColor: *text
+    crumbs:
+      fgColor: *fg
+      bgColor: *bg
+      activeColor: *active
+    status:
+      newColor: *white
+      modifyColor: *text
+      addColor: *ghost
+      errorColor: *err
+      highlightColor: *dslate
+      killColor: *slate
+      completedColor: *gray
+    title:
+      fgColor: *fg
+      highlightColor: *active
+      counterColor: *text
+      filterColor: *slate
   views:
     table:
-      fgColor: *foreground
-      bgColor: *background
-      cursorFgColor: *selectedText
-      cursorBgColor: *selection
-      markColor: *green
+      fgColor: *fg
+      bgColor: *bg
+      cursorBgColor: *fg
+      cursorFgColor: *bg
+      markColor: *mark
       header:
-        fgColor: *strong
-        bgColor: *surface
-        sorterColor: *green
-        selectedSortColumnColor: *cyan
+        fgColor: *dslate
+        bgColor: *bg
+        sorterColor: *fg
     xray:
-      fgColor: *foreground
-      bgColor: *background
-      cursorColor: *selection
-      cursorTextColor: *strong
-      graphicColor: *green
-    charts:
-      bgColor: *background
-      chartBgColor: *background
-      dialBgColor: *background
-      defaultDialColors:
-        - *green
-        - *red
-      defaultChartColors:
-        - *green
-        - *cyan
-      resourceColors:
-        cpu:
-          - *green
-          - *yellow
-        mem:
-          - *cyan
-          - *purple
+      fgColor: *fg
+      bgColor: *bg
+      cursorColor: *ghost
+      graphicColor: *gray
+      showIcons: false
     yaml:
-      keyColor: *cyan
-      valueColor: *bright
-      colonColor: *muted
+      keyColor: *ghost
+      colorColor: *slate
+      valueColor: *text
     logs:
-      fgColor: *bright
-      bgColor: *background
+      fgColor: *ghost
+      bgColor: *bg
       indicator:
-        fgColor: *bright
-        bgColor: *selection
-        toggleOnColor: *green
-        toggleOffColor: *muted
-  dialog:
-    fgColor: *foreground
-    bgColor: *surface
-    buttonFgColor: *strong
-    buttonBgColor: *selection
-    buttonFocusFgColor: *selectedText
-    buttonFocusBgColor: *cyan
-    labelFgColor: *green
-    fieldFgColor: *strong
+        fgColor: *ghost
+        bgColor: *bg
+        toggleOnColor: *mark
+        toggleOffColor: *gray
+    charts:
+      bgColor: default
+      defaultDialColors:
+        - *white
+        - *err
+      defaultChartColors:
+        - *white
+        - *err

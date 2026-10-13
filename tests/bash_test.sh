@@ -74,6 +74,32 @@ editor_output=$(
 [[ $editor_output == 'app=nvim2 argc=1 first=file with space' ]] ||
   fail 'v did not preserve the Nvim2 profile or argument quoting'
 
+python_home=$test_root/python-home
+python_xdg=$test_root/'python config'
+mkdir -p "$python_home/bin" "$python_xdg/uv" "$python_home/project"
+cat >"$python_home/bin/uv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $1 == python && $2 == find && $3 == --directory ]]
+[[ " $* " == *' --offline '* && " $* " == *' --managed-python '* ]]
+printf '%s\n' "$(<"$4/.python-version")"
+EOF
+chmod 0755 "$python_home/bin/uv"
+printf '3.12.12\n' >"$python_xdg/uv/.python-version"
+printf '3.10.0\n' >"$python_home/project/.python-version"
+python_output=$(
+  cd "$python_home/project"
+  run_scenario uv-python-selection env HOME="$python_home" XDG_CONFIG_HOME="$python_xdg" \
+    PATH="$python_home/bin:$original_path"
+)
+assert_contains "$python_output" 'OK      uv Python'
+printf '3.11.0\n' >"$python_xdg/uv/.python-version"
+if run_scenario uv-python-selection env HOME="$python_home" XDG_CONFIG_HOME="$python_xdg" \
+  PATH="$python_home/bin:$original_path" >"$test_root/python-mismatch.log"; then
+  fail 'version diagnostics accepted the wrong global Python'
+fi
+assert_contains "$(<"$test_root/python-mismatch.log")" 'MISMATCH uv Python'
+
 set +e
 missing_output=$(
   run_scenario missing-kubectl \

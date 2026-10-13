@@ -31,9 +31,13 @@ run_installer() {
 }
 
 mkdir -p "$test_repo/scripts" "$test_bin" "$tools_dir/bin"
+mkdir -p "$test_repo/nvim2/.config/nvim2/python-locks"
 cp "$repo_dir/scripts/install-validation-tool" "$test_repo/scripts/"
 cp "$repo_dir/scripts/setup-lib" "$test_repo/scripts/"
+cp "$repo_dir/tools.env" "$test_repo/tools.env"
 cp "$repo_dir/validation.env" "$test_repo/validation.env"
+cp "$repo_dir/nvim2/.config/nvim2/python-locks/yamllint."{in,lock} \
+  "$test_repo/nvim2/.config/nvim2/python-locks/"
 ln -s "$repo_dir/tests/fixtures/scripts/curl-copy" "$test_bin/curl"
 
 cat >"$tools_dir/bin/actionlint" <<'EOF'
@@ -54,8 +58,8 @@ candidate_archive=$test_root/actionlint.tar.gz
 tar -czf "$candidate_archive" -C "$candidate_dir" actionlint
 candidate_hash=$(sha256sum "$candidate_archive")
 candidate_hash=${candidate_hash%% *}
-cat >>"$test_repo/validation.env" <<EOF
-VALIDATOR_RELEASES[actionlint]='
+cat >>"$test_repo/tools.env" <<EOF
+TOOL_RELEASES[actionlint]='
 2.0.0|https://example.invalid/actionlint.tar.gz|$candidate_hash
 '
 EOF
@@ -76,9 +80,9 @@ bad_archive=$test_root/not-a-tar.gz
 printf 'not an archive\n' >"$bad_archive"
 bad_hash=$(sha256sum "$bad_archive")
 bad_hash=${bad_hash%% *}
-cp "$repo_dir/validation.env" "$test_repo/validation.env"
-cat >>"$test_repo/validation.env" <<EOF
-VALIDATOR_RELEASES[actionlint]='
+cp "$repo_dir/tools.env" "$test_repo/tools.env"
+cat >>"$test_repo/tools.env" <<EOF
+TOOL_RELEASES[actionlint]='
 2.0.0|https://example.invalid/actionlint.tar.gz|$bad_hash
 '
 EOF
@@ -89,9 +93,9 @@ run_installer actionlint
 [[ $(sha256sum "$tools_dir/bin/actionlint") == "$old_actionlint_hash" ]] ||
   fail 'failed extraction replaced the existing actionlint'
 
-cp "$repo_dir/validation.env" "$test_repo/validation.env"
-cat >>"$test_repo/validation.env" <<EOF
-VALIDATOR_RELEASES[actionlint]='
+cp "$repo_dir/tools.env" "$test_repo/tools.env"
+cat >>"$test_repo/tools.env" <<EOF
+TOOL_RELEASES[actionlint]='
 2.0.0|https://example.invalid/actionlint.tar.gz|$candidate_hash
 '
 EOF
@@ -110,12 +114,10 @@ printf 'yamllint 1.0.0\n'
 EOF
 chmod +x "$tools_dir/bin/yamllint"
 old_yamllint_hash=$(sha256sum "$tools_dir/bin/yamllint")
-cp "$repo_dir/validation.env" "$test_repo/validation.env"
-cat >>"$test_repo/validation.env" <<'EOF'
-YAMLLINT_VERSION=2.0.0
-YAMLLINT_PATHSPEC_VERSION=0.12.1
-YAMLLINT_PYYAML_VERSION=6.0.2
-EOF
+printf 'yamllint==2.0.0\n' \
+  >"$test_repo/nvim2/.config/nvim2/python-locks/yamllint.in"
+printf 'yamllint==2.0.0 --hash=sha256:%064d\n' 0 \
+  >"$test_repo/nvim2/.config/nvim2/python-locks/yamllint.lock"
 ln -s "$repo_dir/tests/fixtures/scripts/python3-venv" "$test_bin/python3"
 TEST_VENV_PIP_FAIL=1
 TEST_YAMLLINT_VERSION=2.0.0
@@ -147,9 +149,9 @@ task_archive=$test_root/task.tar.gz
 tar -czf "$task_archive" -C "$task_candidate_dir" task
 task_hash=$(sha256sum "$task_archive")
 task_hash=${task_hash%% *}
-cp "$repo_dir/validation.env" "$test_repo/validation.env"
-cat >>"$test_repo/validation.env" <<EOF
-VALIDATOR_RELEASES[task]='
+cp "$repo_dir/tools.env" "$test_repo/tools.env"
+cat >>"$test_repo/tools.env" <<EOF
+TOOL_RELEASES[task]='
 $task_version|https://example.invalid/task.tar.gz|$task_hash
 '
 EOF

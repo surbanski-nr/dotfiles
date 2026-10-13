@@ -106,7 +106,7 @@ validate_bash() {
   )
 
   check_shell_syntax bash "${files[@]}" release.env validation.env tools.env system.env tools-probes.env
-  check_markdown_bash README.md SETUP.md TOOL_UPDATES.md \
+  check_markdown_bash README.md maintenance/setup.md maintenance/tool-updates.md \
     nvim2/.config/nvim2/offline-releases.md
   shellcheck --shell=bash --external-sources --source-path=SCRIPTDIR \
     "${files[@]}"
@@ -132,6 +132,7 @@ validate_scripts() {
     tests/bstow_test.sh
     tests/install_validation_tool_test.sh
     tests/dotfiles_release_test.sh
+    tests/dotfiles_release_ci_test.sh
     tests/offline_debug_adapter_test.sh
     tests/offline_go_test.sh
     tests/scripts_test.sh
@@ -172,7 +173,8 @@ validate_scripts() {
   done
   timeout 120s bash tests/bstow_test.sh
   timeout 30s bash tests/install_validation_tool_test.sh
-  timeout 300s bash tests/dotfiles_release_test.sh
+  timeout 600s bash tests/dotfiles_release_test.sh
+  timeout 120s bash tests/dotfiles_release_ci_test.sh
   timeout 30s bash tests/offline_debug_adapter_test.sh
   timeout 30s bash tests/offline_go_test.sh
   timeout 120s bash tests/scripts_test.sh

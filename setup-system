@@ -9,8 +9,14 @@ Usage: setup-system [--offline-release]
 Install the approved operating-system packages on Debian 13, Ubuntu 24.04,
 Ubuntu 26.04 or Amazon Linux 2023. This is the only setup entry point that
 uses root privileges. With no flag, install packages for normal host setup.
+Normal setup also installs Docker when absent, starts its services and adds
+the invoking ordinary user (SUDO_USER when run through sudo) to the
+root-equivalent docker group. Log out and back in afterwards to activate membership.
+Existing Docker/container runtime installations are left unchanged; other
+system packages are still installed.
 --offline-release installs only system prerequisites for a prepared release.
-Both profiles need access to the operating-system package repositories.
+Both profiles need access to OS repositories; a new Docker installation on
+Debian/Ubuntu also needs Docker's official package repository.
 EOF
 }
 
@@ -35,6 +41,7 @@ main() {
   source "$REPO_DIR/system.env"
   validate_host
   install_packages "$package_profile"
+  if [[ $package_profile == setup ]]; then install_docker; fi
   verify_packages "$package_profile"
 }
 
@@ -52,15 +59,113 @@ validate_host() {
       ;;
     *) report_error "unsupported distribution: ${ID:-unknown} ${VERSION_ID:-unknown}" ;;
   esac
-  if ((EUID != 0)); then require_command sudo; fi
+  ROOT_COMMAND=()
+  if ((EUID != 0)); then
+    require_command sudo
+    ROOT_COMMAND=(sudo --)
+  fi
 }
 
 install_packages() {
   local package_profile=$1
-  local -a root_command=()
 
-  if ((EUID != 0)); then root_command=(sudo --); fi
-  install_system_packages "$PLATFORM" "$package_profile" false "${root_command[@]}"
+  install_system_packages "$PLATFORM" "$package_profile" false "${ROOT_COMMAND[@]}"
+}
+
+existing_docker_installation() {
+  local package
+  case $PLATFORM in
+    debian:* | ubuntu:*)
+      for package in "${SYSTEM_DEBIAN_DOCKER_PACKAGES[@]}" "${SYSTEM_DEBIAN_DOCKER_CONFLICTS[@]}"; do
+        if [[ $(dpkg-query -W -f '${db:Status-Status}' -- "$package" 2>/dev/null || true) == installed ]]; then
+          printf 'package %s\n' "$package"
+          return 0
+        fi
+      done
+      ;;
+    amzn:2023)
+      for package in "${SYSTEM_AMZN_DOCKER_PACKAGES[@]}" "${SYSTEM_AMZN_DOCKER_CONFLICTS[@]}"; do
+        if rpm -q "$package" >/dev/null 2>&1; then
+          printf 'package %s\n' "$package"
+          return 0
+        fi
+      done
+      ;;
+  esac
+  if command -v docker >/dev/null 2>&1; then
+    printf 'command %s\n' "$(command -v docker)"
+    return 0
+  fi
+  return 1
+}
+
+install_docker_repository() (
+  local distribution suite stage
+  local etc_dir=${SETUP_SYSTEM_ETC_DIR:-/etc}
+  local key_file=$etc_dir/apt/keyrings/docker.asc
+  local source_file=$etc_dir/apt/sources.list.d/docker.sources
+
+  case $PLATFORM in
+    debian:13) distribution=debian; suite=trixie ;;
+    ubuntu:24.04) distribution=ubuntu; suite=noble ;;
+    ubuntu:26.04) distribution=ubuntu; suite=resolute ;;
+  esac
+  [[ ! -e $etc_dir/apt/sources.list.d/docker.list && ! -L $etc_dir/apt/sources.list.d/docker.list ]] ||
+    report_error 'legacy Docker repository docker.list exists; review and migrate it before rerunning'
+
+  stage=$(mktemp -d)
+  trap 'find "$stage" -depth -delete' EXIT
+  printf '%s\n' \
+    'Types: deb' \
+    "URIs: https://download.docker.com/linux/$distribution" \
+    "Suites: $suite" \
+    'Components: stable' \
+    'Architectures: amd64' \
+    "Signed-By: $key_file" >"$stage/docker.sources"
+  if [[ -e $source_file || -L $source_file ]]; then
+    if [[ -L $source_file ]] || ! cmp -s "$stage/docker.sources" "$source_file"; then
+      report_error "existing Docker repository differs: $source_file; review it before rerunning"
+    fi
+  fi
+  curl --fail --silent --show-error --location --max-time 120 \
+    "https://download.docker.com/linux/$distribution/gpg" --output "$stage/docker.asc"
+  gpg --batch --no-options --homedir "$stage" --show-keys "$stage/docker.asc" >/dev/null
+  "${ROOT_COMMAND[@]}" install -m 0755 -d "$etc_dir/apt/keyrings" "$etc_dir/apt/sources.list.d"
+  "${ROOT_COMMAND[@]}" install -m 0644 "$stage/docker.asc" "$key_file"
+  "${ROOT_COMMAND[@]}" install -m 0644 "$stage/docker.sources" "$source_file"
+)
+
+install_docker() {
+  local existing user_id
+  if existing=$(existing_docker_installation); then
+    printf 'setup-system: skipping Docker setup (%s already present); leaving packages, services and user groups unchanged\n' "$existing"
+    return 0
+  fi
+  if ((EUID == 0)); then
+    SETUP_USER=${SUDO_USER:-}
+    [[ -n $SETUP_USER ]] || report_error 'run Docker installation as the intended ordinary user, directly or through sudo'
+  else
+    SETUP_USER=$(id -un)
+  fi
+  user_id=$(id -u -- "$SETUP_USER") || report_error "unknown setup user: $SETUP_USER"
+  [[ $user_id != 0 ]] || report_error 'Docker installation needs an ordinary user for group membership'
+
+  case $PLATFORM in
+    debian:* | ubuntu:*)
+      install_docker_repository
+      "${ROOT_COMMAND[@]}" env DEBIAN_FRONTEND=noninteractive apt-get update
+      "${ROOT_COMMAND[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        "${SYSTEM_DEBIAN_DOCKER_PACKAGES[@]}"
+      ;;
+    amzn:2023)
+      "${ROOT_COMMAND[@]}" dnf install -y "${SYSTEM_AMZN_DOCKER_PACKAGES[@]}"
+      ;;
+  esac
+  "${ROOT_COMMAND[@]}" groupadd --force docker
+  "${ROOT_COMMAND[@]}" usermod --append --groups docker -- "$SETUP_USER"
+  "${ROOT_COMMAND[@]}" timeout 180s systemctl enable --now containerd.service docker.service
+  "${ROOT_COMMAND[@]}" timeout 30s docker --host unix:///var/run/docker.sock info
+  printf 'setup-system: %s added to docker (root-equivalent); log out and back in before using Docker without sudo\n' "$SETUP_USER"
 }
 
 verify_packages() {

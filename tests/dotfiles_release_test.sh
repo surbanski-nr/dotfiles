@@ -45,7 +45,7 @@ if [[ \${1:-} == hold ]]; then
 fi
 case \$(basename -- "\$0") in
   k9s) [[ \$* == 'version --short' ]] || exit 93 ;;
-  oh-my-posh | terraform | go) [[ \$* == version ]] || exit 94 ;;
+  oh-my-posh | terraform | go | kind) [[ \$* == version ]] || exit 94 ;;
   tmux) [[ \$* == -V ]] || exit 95 ;;
 esac
 printf '%s fixture $version\n' "\$(basename -- "\$0")"
@@ -103,6 +103,7 @@ make_artifact() {
   local release_version=${4:-1.0}
   local include_fd=${5:-true}
   local include_go=${6:-true}
+  local include_current_tools=${7:-false}
   local offline_profile=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm
   local id=dotfiles-${commit:0:12}
   local stage=$test_root/stage-$marker release=$test_root/stage-$marker/$id
@@ -152,6 +153,17 @@ make_artifact() {
     install -m 0755 "$repo_dir/scripts/offline-go" "$release/bin/go"
     ln -s ../tools/go/bin/gofmt "$release/bin/gofmt"
     offline_profile+=,go
+  fi
+  if [[ $include_current_tools == true ]]; then
+    for command_name in kind uv uvx actionlint shellcheck gh kubeconform kyverno trivy; do
+      write_fake_tool "$release/tools/bin/$command_name" "$release_version"
+      ln -s "../tools/bin/$command_name" "$release/bin/$command_name"
+    done
+    write_fake_tool "$release/tools/htop/bin/htop" "$release_version"
+    ln -s ../tools/htop/bin/htop "$release/bin/htop"
+    ln -s ../share/nvim2/mason/packages/yamllint/venv/bin/yamllint \
+      "$release/bin/yamllint"
+    offline_profile+=,kind,uv,actionlint,shellcheck,yamllint,gh,htop,kubeconform,kyverno,trivy
   fi
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python"
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python3"
@@ -252,6 +264,19 @@ make_artifact() {
   if [[ $include_go == true ]]; then
     printf 'GO_VERSION=%s\n' "$release_version" >>"$release/release.env"
   fi
+  if [[ $include_current_tools == true ]]; then
+    printf '%s\n' \
+      "KIND_VERSION=$release_version" \
+      "UV_VERSION=$release_version" \
+      "ACTIONLINT_VERSION=$release_version" \
+      "SHELLCHECK_VERSION=$release_version" \
+      "GH_VERSION=$release_version" \
+      "HTOP_VERSION=$release_version" \
+      "KUBECONFORM_VERSION=$release_version" \
+      "KYVERNO_VERSION=$release_version" \
+      "TRIVY_VERSION=$release_version" \
+      >>"$release/release.env"
+  fi
   printf 'marker=%s\n' "$marker" >"$release/build-manifest.txt"
   (
     cd "$release"
@@ -291,7 +316,78 @@ artifact_two=$test_root/two.tar.gz
 artifact_three=$test_root/three.tar.gz
 make_artifact "$commit_one" one "$artifact_one" 1.0 false false
 make_artifact "$commit_two" two "$artifact_two" 2.0
-make_artifact "$commit_three" three "$artifact_three"
+make_artifact "$commit_three" three "$artifact_three" 3.0 true true true
+
+test_home=$test_root/current-profile-validation-home
+mkdir -p "$test_home"
+for command_name in kind uv uvx; do
+  candidate=$test_root/current-profile-missing-$command_name.tar.gz
+  make_artifact "$commit_three" "current-profile-missing-$command_name" "$candidate" 3.0 true true true
+  rm "$test_root/stage-current-profile-missing-$command_name/$id_three/bin/$command_name"
+  repack_artifact "current-profile-missing-$command_name" "$id_three" "$candidate"
+  if run_manager install "$candidate" >"$test_root/current-profile-missing-$command_name.log" 2>&1; then
+    fail "release was installed without $command_name"
+  fi
+done
+for field in KIND_VERSION UV_VERSION; do
+  candidate=$test_root/current-profile-missing-$field.tar.gz
+  make_artifact "$commit_three" "current-profile-missing-$field" "$candidate" 3.0 true true true
+  sed -i "/^$field=/d" "$test_root/stage-current-profile-missing-$field/$id_three/release.env"
+  repack_artifact "current-profile-missing-$field" "$id_three" "$candidate"
+  if run_manager install "$candidate" >"$test_root/current-profile-missing-$field.log" 2>&1; then
+    fail 'current profile was installed without its version metadata'
+  fi
+done
+[[ ! -e $test_home/dotfiles-releases/current ]] || fail 'invalid current-profile release became active'
+
+test_home=$test_root/current-profile-rollback-home
+mkdir -p "$test_home"
+run_manager install "$artifact_two" >/dev/null
+run_manager install "$artifact_three" >/dev/null
+for command_name in kind uv uvx actionlint shellcheck yamllint gh htop kubeconform kyverno trivy; do
+  [[ -x $test_home/bin/$command_name ]] || fail "release did not publish $command_name"
+done
+run_manager health "$id_two" >/dev/null
+run_manager rollback >/dev/null
+for command_name in kind uv uvx actionlint shellcheck yamllint gh htop kubeconform kyverno trivy; do
+  [[ ! -x $test_home/bin/$command_name ]] || fail "legacy rollback retained $command_name"
+done
+run_manager rollback "$id_three" >/dev/null
+run_manager uninstall >/dev/null
+for command_name in kind uv uvx actionlint shellcheck yamllint gh htop kubeconform kyverno trivy; do
+  [[ ! -e $test_home/bin/$command_name && ! -L $test_home/bin/$command_name ]] ||
+    fail "uninstall retained $command_name"
+done
+
+test_home=$test_root/current-profile-connected-home
+mkdir -p "$test_home/bin" "$test_home/.local/state/dotfiles/setup-tools"
+for command_name in kind uv uvx gh; do
+  write_fake_tool "$test_home/bin/$command_name-0.9" 0.9
+  ln -s "$command_name-0.9" "$test_home/bin/$command_name"
+done
+write_fake_tool "$test_home/bin/htop-0.9/bin/htop" 0.9
+ln -s htop-0.9/bin/htop "$test_home/bin/htop"
+for tool in kind uv gh htop; do
+  destinations=("$tool-0.9")
+  [[ $tool != uv ]] || destinations+=(uvx-0.9)
+  content=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+    -C "$test_home/bin" -cf - -- "${destinations[@]}" | sha256sum | awk '{print $1}')
+  printf 'complete\t%s\t%s\n' \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$content" \
+    >"$test_home/.local/state/dotfiles/setup-tools/$tool-0.9.state"
+done
+run_manager install "$artifact_three" >/dev/null
+run_manager uninstall >/dev/null
+for command_name in kind uv uvx gh; do
+  assert_link "$test_home/bin/$command_name" "$command_name-0.9"
+done
+assert_link "$test_home/bin/htop" htop-0.9/bin/htop
+printf '\nmodified\n' >>"$test_home/bin/uvx-0.9"
+if run_manager install "$artifact_three" >"$test_root/uv-modified-provider.log" 2>&1; then
+  fail 'offline release adopted a uv pair with a modified uvx'
+fi
+assert_link "$test_home/bin/uv" uv-0.9
+assert_link "$test_home/bin/uvx" uvx-0.9
 
 test_home=$test_root/go-validation-home
 mkdir -p "$test_home"

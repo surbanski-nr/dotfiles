@@ -2,7 +2,7 @@
 
 The supported setup target is Linux x86-64 on Debian 13, Ubuntu 24.04,
 Ubuntu 26.04 or Amazon Linux 2023. Run the scripts as the intended ordinary
-user. Only `setup-system` uses `sudo`.
+user, from the repository root. Only `setup-system` uses `sudo`.
 
 ## Connected machine
 
@@ -13,7 +13,7 @@ cd "$HOME/github.com/surbanski/dotfiles"
 ./setup-system
 ./setup-tools
 # Optional online project runtimes:
-./setup-asdf terraform python nodejs terragrunt
+./setup-asdf terraform nodejs terragrunt
 
 for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
   if [[ -f $file && ! -L $file && ! -e $file.before-dotfiles && ! -L $file.before-dotfiles ]]; then
@@ -34,21 +34,19 @@ The setup sequence moves regular distribution-provided Bash startup files
 aside without overwriting an existing backup. `bstow --dry-run` reports any
 remaining conflict, including a foreign symlink.
 
-`tools.env` owns tool profiles, release records and asdf/tmux plugin pins.
-It stores direct releases in `TOOL_RELEASES`. Each tool has ordered
+`tools.env` owns tool profiles, shared release records and asdf/tmux plugin
+pins. It stores direct releases in `TOOL_RELEASES`. Each tool has ordered
 `version|full_URL|SHA256` records, and the first record is the default. A
 required default without an artifact is an error, with no fallback to a later
-record. `validation.env` uses the same record format in
-`VALIDATOR_RELEASES`, and `VALIDATOR_TOOLS` selects repository check tools.
-Task is also a development tool in `TOOLS` and `OFFLINE_RELEASE_TOOLS`;
-all three installation routes share its single release record in
-`VALIDATOR_RELEASES`. Online ShellCheck, validation ShellCheck and Mason
-ShellCheck remain independent pins.
+record. `validation.env` selects repository checks in `VALIDATOR_TOOLS` and
+keeps only validator-specific archives in `VALIDATOR_RELEASES`. Actionlint,
+ShellCheck and Task are regular development tools, so setup, validation and
+offline releases share their records from `TOOL_RELEASES`. Mason ShellCheck
+remains an independent editor pin.
 
-Yamllint is a Python package installed in an isolated validation venv, not a
-prebuilt executable archive. Its PyYAML dependency parses YAML, and pathspec
-handles ignore patterns. All three versions are pinned in `validation.env`
-to keep validator behavior consistent.
+Yamllint has no prebuilt executable archive. Validation installs it in an
+isolated venv from the checked-in hashed Nvim Python lock. Offline releases
+use that same lock and expose the resulting executable in `release/bin`.
 
 `TOOLS` and `OFFLINE_RELEASE_TOOLS` are the authoritative tool profiles, with
 one tool per line. Both include `fd`, installed from its verified official
@@ -60,8 +58,9 @@ upstream SHA-256. Connected setup keeps it under `~/bin/go-VERSION` and selects
 `go` and `gofmt` together with relative links. The SDK includes its compiler,
 tools and standard library. No asdf Go plugin or OS Go package is required.
 
-`setup-tools` downloads and installs the selected online tools from these exact
-official release records. It supports only connected installation; offline
+`setup-tools` downloads and installs direct online tools from these exact
+official release records. Python runtime management delegates to uv as described
+below. It supports only connected installation; offline
 deployment uses the complete release described below. Without names, it
 installs all of `TOOLS`, including kubectl and Helm. Optional online
 `setup-asdf` reads runtime versions from the same catalog, but plugin repository
@@ -89,8 +88,9 @@ remains part of the connected installation procedure.
 The runtime role is the minimal OS baseline for running a prepared offline
 release. The build role adds compilers and libraries for disposable release
 builders. The setup role is the normal host setup: download and
-verification tools, interactive utilities such as tmux, htop and mc, and
-headers needed by asdf to compile Python and other project runtimes. It is
+verification tools, interactive utilities such as mc, and
+headers for remaining asdf runtime builds and native project dependencies, plus
+Docker Engine for local containers and release builds. It is
 not a second release-builder role; builder-only packages stay out of it.
 
 `tools-probes.env` owns tool version arguments shared by `setup-tools`, shell
@@ -100,11 +100,8 @@ so it works outside the checkout and can check older releases that did not
 include the shared configuration file. Edit the source configuration and
 rebuild; do not edit generated managers.
 
-Kubectl and Helm use direct installation by default. Do not install both
-direct and asdf providers for either tool in the same home. To use asdf for
-them instead, explicitly select the other online tools when running
-`setup-tools`, then run `setup-asdf kubectl helm`. Direct installation also
-supports selecting just those tools:
+Kubectl and Helm are installed directly by `setup-tools`, not `setup-asdf`.
+You can select just those tools:
 
 ```bash
 ./setup-tools kubectl helm
@@ -117,12 +114,95 @@ relative, so an older retained installation can be selected again by running
 the setup command from the matching reviewed repository revision. An intact
 retained installation is reused without downloading it again.
 Terraform and Terragrunt use optional `setup-asdf` in this connected flow.
-`htop` remains an operating-system package. The Go SDK is now a direct setup
-tool so the editor and offline builds use the same reviewed runtime.
+Htop and tmux are compiled by `setup-tools` from their checksum-verified
+official source archives. The Go SDK is a direct setup tool so the editor and
+offline builds use the same reviewed runtime.
+
+### Python through uv
+
+`./setup-tools python` installs the pinned uv/uvx pair and every Python version
+listed in `TOOL_RELEASES[python]`. The first record sets uv's global default in
+`${XDG_CONFIG_HOME:-$HOME/.config}/uv/.python-version`. uv uses its own
+release-frozen download catalog and verifies its prebuilt standalone Python
+downloads; the Python archive URL and SHA-256 in `tools.env` continue to supply
+the immutable offline build. No Python compilation or asdf plugin is needed.
+Normal `./setup-tools` includes this step.
+
+Setup never edits project `.tool-versions`, `.python-version` or dependency
+files. uv does not read asdf's Python entries. Existing uv project pins and
+`requires-python` constraints still take precedence over the global default;
+without those project overrides, the catalog's first version is used. Use uv
+or activate an ordinary project environment:
+
+```bash
+uv venv
+source .venv/bin/activate
+python --version
+```
+
+Setup uses `uv python install --no-bin`, so it does not create extra Python
+links or shims and does not replace the OS Python. Outside a venv, use
+`uv run --no-project python` for the uv-selected interpreter. Bash still
+preserves active venv precedence. Old asdf interpreters, shims and dependent
+venvs are not deleted: review them before removing the old provider. Recreate
+old project or Mason venvs before deleting an interpreter they still reference.
+
+Neovim's Python debugger and Pyright use the existing project `.venv`; no uv
+resolver is added to Neovim. Connected Mason can keep using OS `python3` from
+`setup-system` for its isolated tool venvs. Ruff is a standalone executable,
+and Pyright runs on Node.js. Offline editor venvs keep using the bundled private
+Python and hashed wheels independently of uv or any project.
+
+### Docker
+
+When Docker is absent, normal `./setup-system` installs Docker Engine and enables
+and starts its Docker and containerd systemd services. Debian and Ubuntu use Docker's
+[official apt repository](https://docs.docker.com/engine/install/debian/),
+including the Compose and Buildx plugins. Amazon Linux 2023 uses the
+[distribution's Docker package](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-docker.html)
+as recommended by AWS; it does not include those separate plugins. Docker
+packages use current repository candidates, like other OS packages.
+
+For a new installation, the script adds the invoking ordinary user to the
+`docker` group, preserving existing groups. When invoked through `sudo`, it
+uses `SUDO_USER`; a new installation run directly as root without an ordinary
+target user is rejected. Membership grants
+root-equivalent access to the host. Log out and back in, then verify:
+
+```bash
+docker info
+docker run --rm hello-world
+```
+
+The installer checks the local daemon through its Unix socket without pulling
+images. It does not open a TCP listener or modify Docker daemon settings.
+An existing Docker command or installed Docker/container runtime package makes
+the script skip Docker setup and continue with the other system packages. It
+does not change that installation's packages, services or user groups, and it
+does not require a working Docker daemon to complete setup. This includes a
+conflicting provider such as distribution Docker, Podman compatibility or a
+standalone containerd. Configure access to an existing runtime separately.
+Without an installed runtime, a legacy `docker.list` or differing
+`docker.sources` still stops new Docker installation rather than being
+overwritten.
+Existing images, containers and volumes are not deleted.
+
+The Debian/Ubuntu installation packages follow Docker's current documentation;
+the shared conflict list is the union of their documented incompatible packages.
+Amazon Linux's conflict list is a local protection against replacing another
+provider, not an upstream Docker instruction.
+
+Full VM installations use systemd by default. Normal setup explicitly ensures
+the `systemctl` prerequisite, then starts the services; installing the package
+does not make a minimal container boot systemd. Use a VM for normal host setup.
+`./setup-system --offline-release` and release builders deliberately do not
+install Docker or systemd. Docker and container images are not bundled; kind
+is included as a CLI tool and needs a separately available container runtime.
 
 ### Reruns and recovery
 
-`setup-system` repeats the package-manager operation. `setup-tools` reuses
+`setup-system` repeats the ordinary package-manager operation and skips Docker
+once it is present. `setup-tools` reuses
 intact recorded payloads, completes intact pending payloads without downloading,
 and reinstalls inactive partial payloads. A failed multi-command selection
 attempt restores the prior links; after a killed process, rerunning reconciles
@@ -153,6 +233,15 @@ System `vi` is explicitly installed in the runtime baseline; normal setup adds
 `jq`, and `postgres-db-list` needs `psql`. The minimal offline baseline does not
 install those optional clients.
 
+### Optional local k9s skin preview
+
+The [isolated skin preview guide](tool-updates.md#isolated-k9s-and-mc-skin-previews)
+can create a disposable single-node kind cluster when no existing cluster is
+available. It uses the installed kind and a private kubeconfig, then removes its
+cluster and app profiles. Normal `./setup-system` provides Docker; log out and
+back in before using it without sudo. `./setup-tools kind` and offline releases
+provide kind. Cluster creation and container image downloads remain opt-in.
+
 ## Complete offline release
 
 For a restricted host, use the complete platform artifact. This is the only
@@ -160,15 +249,17 @@ supported offline installation route; `setup-tools` and `setup-asdf` are not
 used. The artifact contains one immutable dotfiles snapshot together
 with Neovim and its complete profile, Node.js, private standalone Python, the
 complete Go SDK,
-ripgrep, fd, tmux and plugins, Oh My Posh, k9s, zoxide, kubectx, kubens, Task, fzf
-and Terraform, plus every kubectl and Helm version listed in `tools.env`.
+ripgrep, fd, tmux and plugins, htop, Oh My Posh, gh, k9s, kind, uv/uvx, zoxide,
+kubectx, kubens, kubeconform, Kyverno, Trivy, Task, actionlint, ShellCheck,
+yamllint, fzf and Terraform,
+plus every kubectl and Helm version listed in `tools.env`.
 Each release owns its complete tool payload, even when another retained release
 contains the same versions. Asdf, its plugins and its shims are not part of the
 offline package. Optional online `setup-asdf` remains available independently.
 
-The current manager can check and select retained releases from before `fd`
-or Go was bundled. Selecting one makes its absent tools unavailable through
-the release launcher. It supports both the original and fd-only profiles.
+The current manager can check and select retained releases from before `fd`,
+Go, kind, uv or the expanded operations-tool set was bundled. Selecting one makes its absent tools unavailable
+through the release launcher. It supports the original, fd-only and fd/Go profiles.
 Keep a copy of the newer manager when rolling back across that boundary:
 older managers do not understand the newer release metadata.
 
@@ -187,7 +278,7 @@ output=${1:-"$PWD/offline-output"}
 mkdir -p "$output"
 
 docker pull "$image"
-timeout --signal=TERM --kill-after=30s 5400s docker run --rm \
+timeout --signal=TERM --kill-after=30s 5400s docker run --rm --init \
   --volume "$PWD:/workspace:ro" \
   --volume "$output:/out" \
   --env BUILDER_IMAGE="$image" \
@@ -196,7 +287,7 @@ timeout --signal=TERM --kill-after=30s 5400s docker run --rm \
     build "$platform" /workspace /out
 ```
 
-The builder verifies every downloaded archive, compiles tmux against the
+The builder verifies every downloaded archive, compiles tmux and htop against the
 target distribution libraries, starts from empty Neovim data, and runs the
 tool-enabled profile checks. The official Node archive initially contains its
 upstream npm, then the builder installs the separately pinned and hashed npm
@@ -216,7 +307,7 @@ Nvim2 installation, run
 `:Nvim2ToolsInstallSync` after installing the profile. The debugger's Python
 is separate from a project's `.venv`; project dependencies still belong to the
 project and are not bundled. No browser, GPU or TypeScript debug adapter is
-required. See the [Python debugger guide](nvim2/.config/nvim2/guide.md#python-debugger).
+required. See the [Python debugger guide](../nvim2/.config/nvim2/guide.md#python-debugger).
 
 Go adds pinned gopls, goimports, golangci-lint and Delve through Mason, the
 locked `nvim-dap-go` plugin and Go/manifest Treesitter parsers. Mason builds
@@ -227,7 +318,7 @@ and arrive ready to run on the restricted host. No additional OS package or
 `GOTOOLCHAIN=local`, preventing automatic toolchain downloads. Application
 modules and a project's different SDK version are not bundled: prepare vendor
 or module-cache dependencies separately before disconnecting. See the
-[Go guide](nvim2/.config/nvim2/guide.md#go-development-and-debugger).
+[Go guide](../nvim2/.config/nvim2/guide.md#go-development-and-debugger).
 
 `scripts/build-dotfiles-release` is the connected build and runtime-image
 preparation entry point. `scripts/dotfiles-release` is the standalone manager
@@ -455,8 +546,8 @@ MiB estimate. Allocated retained sizes, unlike the earlier apparent-only
 figures, are within the original 1.65-1.90 GiB estimate per release. These
 measurements predate bundled kubectl and Helm; refresh them for the new payload.
 
-The [Nvim2 offline notes](nvim2/.config/nvim2/offline-releases.md) describe the
-editor-specific runtime, health checks and state behavior. `TOOL_UPDATES.md`
+The [Nvim2 offline notes](../nvim2/.config/nvim2/offline-releases.md) describe the
+editor-specific runtime, health checks and state behavior. `tool-updates.md`
 describes how a new source revision becomes a separately qualified immutable
 release.
 
@@ -504,7 +595,8 @@ helm template local ./chart
 kyverno apply ./policy.yaml --resource ./resource.yaml
 KUBECONFIG="$HOME/disposable-kubeconfig" kubectx
 KUBECONFIG="$HOME/disposable-kubeconfig" kubens NAMESPACE --force
-uv venv --python /usr/bin/python3 "$HOME/offline-venv"
+uv venv --offline --no-python-downloads \
+  --python "$HOME/dotfiles-releases/current/bin/python" "$HOME/offline-venv"
 uv pip install --python "$HOME/offline-venv/bin/python" \
   --offline --no-index --find-links "$HOME/wheels" PACKAGE
 uvx --offline --no-index --from "$HOME/wheels/TOOL.whl" TOOL

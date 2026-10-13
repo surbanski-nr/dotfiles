@@ -90,27 +90,41 @@ cp "$repo_dir/scripts/setup-lib" "$test_repo/scripts/setup-lib"
 cp "$repo_dir/tools.env" "$test_repo/tools.env"
 cp "$repo_dir/system.env" "$test_repo/system.env"
 
-cat >"$test_home/bin/kubectl" <<'EOF'
+for tool in kubectl helm python; do
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$test_home/bin/$tool"
+  chmod 0755 "$test_home/bin/$tool"
+  set +e
+  unsupported_output=$(HOME="$test_home" "$test_repo/setup-asdf" "$tool" 2>&1)
+  unsupported_status=$?
+  set -e
+  [[ $unsupported_status -ne 0 && $unsupported_output == *"unknown project tool: $tool"* ]] ||
+    fail "setup-asdf still accepts $tool"
+  [[ ! -e $test_home/bin/asdf && ! -e $test_home/.asdf &&
+    ! -e $test_home/.local/state/dotfiles/setup-asdf ]] ||
+    fail 'unsupported tool request changed the asdf installation'
+done
+
+cat >"$test_home/bin/terraform" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod 0755 "$test_home/bin/kubectl"
+chmod 0755 "$test_home/bin/terraform"
 set +e
-conflict_output=$(HOME="$test_home" "$test_repo/setup-asdf" kubectl 2>&1)
+conflict_output=$(HOME="$test_home" "$test_repo/setup-asdf" terraform 2>&1)
 conflict_status=$?
 set -e
-[[ $conflict_status -ne 0 ]] || fail 'direct kubectl launcher conflict was accepted'
+[[ $conflict_status -ne 0 ]] || fail 'direct terraform launcher conflict was accepted'
 [[ $conflict_output == *'conflicts with the direct launcher'* ]] ||
   fail 'direct launcher conflict was not reported'
 [[ ! -e $test_home/bin/asdf && ! -e $test_home/.asdf ]] ||
   fail 'provider conflict changed the asdf installation'
 
-rm "$test_home/bin/kubectl"
+rm "$test_home/bin/terraform"
 mkdir -p "$test_home/.local/state/dotfiles/setup-asdf"
 exec {test_lock_fd}>"$test_home/.local/state/dotfiles/setup-asdf/lock"
 flock -n "$test_lock_fd"
 set +e
-lock_output=$(HOME="$test_home" "$test_repo/setup-asdf" kubectl 2>&1)
+lock_output=$(HOME="$test_home" "$test_repo/setup-asdf" terraform 2>&1)
 lock_status=$?
 set -e
 [[ $lock_status -ne 0 ]] || fail 'concurrent setup-asdf lock was ignored'
@@ -290,31 +304,36 @@ done
 write_asdf_fixture "$default_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
 ln -s "asdf-$ASDF_VERSION" "$default_home/bin/asdf"
 record_asdf_fixture "$default_home" "asdf-$ASDF_VERSION"
+for tool in kubectl helm; do
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$default_home/bin/$tool"
+  chmod 0755 "$default_home/bin/$tool"
+done
 HOME="$default_home" TEST_ASDF_LOG="$default_log" "$default_repo/setup-asdf"
-[[ $(grep -c '^install' "$default_log") -eq 10 ]] ||
+[[ $(grep -c '^install' "$default_log") -eq 4 ]] ||
   fail 'default setup-asdf did not install every catalog runtime version'
-[[ $(grep -c '^set' "$default_log") -eq 6 ]] ||
+[[ $(grep -c '^set' "$default_log") -eq 3 ]] ||
   fail 'default setup-asdf did not select every home default'
 for expected in \
   $'set\tterraform\t1.16.4' \
-  $'set\tkubectl\t1.36.0' \
-  $'set\thelm\t4.3.0' \
-  $'set\tpython\t3.12.12' \
   $'set\tnodejs\t22.23.2' \
   $'set\tterragrunt\t1.1.6'; do
   grep -Fx "$expected" "$default_log" >/dev/null ||
     fail "default setup-asdf omitted: $expected"
 done
 
-printf 'unset "ASDF_PLUGINS[helm]"\n' >>"$default_repo/tools.env"
+[[ ! -e $default_home/.asdf/installs/kubectl && ! -e $default_home/.asdf/installs/helm &&
+  ! -e $default_home/.asdf/installs/python ]] ||
+  fail 'default setup-asdf installed a directly managed runtime or client'
+
+printf 'unset "ASDF_PLUGINS[terragrunt]"\n' >>"$default_repo/tools.env"
 subset_log=$test_root/subset.log
 HOME="$default_home" TEST_ASDF_LOG="$subset_log" "$default_repo/setup-asdf"
-[[ $(grep -c '^set' "$subset_log") -eq 5 ]] ||
+[[ $(grep -c '^set' "$subset_log") -eq 2 ]] ||
   fail 'default setup-asdf ignored a removed plugin mapping'
-if grep -q $'\thelm\t' "$subset_log"; then
+if grep -q $'\tterragrunt\t' "$subset_log"; then
   fail 'default setup-asdf installed a tool without a plugin mapping'
 fi
-if HOME="$default_home" TEST_ASDF_LOG="$subset_log" "$default_repo/setup-asdf" helm \
+if HOME="$default_home" TEST_ASDF_LOG="$subset_log" "$default_repo/setup-asdf" terragrunt \
   >"$test_root/removed-plugin.log" 2>&1; then
   fail 'setup-asdf accepted a removed plugin mapping'
 fi

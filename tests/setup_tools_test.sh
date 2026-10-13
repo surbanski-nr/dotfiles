@@ -33,9 +33,50 @@ write_fake() {
 if [[ '$name' == k9s && \$* != 'version --short' ]]; then exit 93; fi
 if [[ '$name' == oh-my-posh && \$* != version ]]; then exit 94; fi
 if [[ '$name' == go && \$* != version ]]; then exit 95; fi
+if [[ '$name' == kind && \$* != version ]]; then exit 96; fi
+if [[ '$name' == uv && \${1:-} == python ]]; then
+  printf '%s\\n' "\$*" >>"\$TEST_UV_LOG"
+  case \${2:-} in
+    install)
+      [[ " \$* " == *' --no-bin '* && " \$* " == *' --no-config '* ]] || exit 97
+      for target in "\${@:3}"; do
+        [[ \$target != --* ]] || continue
+        [[ \$target != \${TEST_UV_FAIL_VERSION:-} ]] || exit 65
+        mkdir -p "\$HOME/.local/share/uv/python/\$target"
+      done
+      ;;
+    pin)
+      [[ " \$* " == *' --global '* && " \$* " == *' --no-project '* ]] || exit 98
+      mkdir -p "\${XDG_CONFIG_HOME:-\$HOME/.config}/uv"
+      printf '%s\\n' "\${!#}" >"\${XDG_CONFIG_HOME:-\$HOME/.config}/uv/.python-version"
+      ;;
+    *) exit 99 ;;
+  esac
+  exit 0
+fi
 printf '%s\\n' '$name $version'
 EOF
   chmod 0755 "$path"
+}
+
+write_source_fixture() {
+  local path=$1 name=$2 version=$3
+
+  mkdir -p "$path"
+  write_fake "$path/fixture-bin" "$name" "$version"
+  cat >"$path/configure" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+prefix=
+for argument in "\$@"; do
+  case \$argument in --prefix=*) prefix=\${argument#*=} ;; esac
+done
+[[ -n \$prefix ]]
+mkdir -p "\$prefix/bin"
+cp fixture-bin "\$prefix/bin/$name"
+printf 'all:\n\t@:\ninstall:\n\t@:\n' >Makefile
+EOF
+  chmod 0755 "$path/configure"
 }
 
 append_release() {
@@ -55,7 +96,9 @@ load_test_versions() {
   # shellcheck disable=SC1090
   source "$repository/scripts/setup-lib"
   select_default_release TOOL_RELEASES gh; GH_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES htop; HTOP_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES k9s; K9S_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES kind; KIND_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES oh-my-posh; OMP_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES uv; UV_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES nvim; NVIM_VERSION=$RELEASE_VERSION
@@ -116,6 +159,11 @@ make_archives() {
   append_release "$repository/tools.env" TOOL_RELEASES k9s "$K9S_VERSION" \
     "https://example.invalid/k9s/$K9S_VERSION/k9s_Linux_amd64.tar.gz" "$digest"
 
+  write_fake "$archive_root/kind/$KIND_VERSION/kind-linux-amd64" kind "$KIND_VERSION"
+  digest=$(sha256sum "$archive_root/kind/$KIND_VERSION/kind-linux-amd64" | awk '{print $1}')
+  append_release "$repository/tools.env" TOOL_RELEASES kind "$KIND_VERSION" \
+    "https://example.invalid/kind/$KIND_VERSION/kind-linux-amd64" "$digest"
+
   write_fake "$archive_root/oh-my-posh/$OMP_VERSION/posh-linux-amd64" oh-my-posh "$OMP_VERSION"
   digest=$(sha256sum "$archive_root/oh-my-posh/$OMP_VERSION/posh-linux-amd64" | awk '{print $1}')
   append_release "$repository/tools.env" TOOL_RELEASES oh-my-posh "$OMP_VERSION" \
@@ -149,6 +197,22 @@ make_archives() {
   digest=$(sha256sum "$archive_root/go/$GO_VERSION/go.linux-amd64.tar.gz" | awk '{print $1}')
   append_release "$repository/tools.env" TOOL_RELEASES go "$GO_VERSION" \
     "https://example.invalid/go/$GO_VERSION/go.linux-amd64.tar.gz" "$digest"
+
+  write_source_fixture "$work/htop-$HTOP_VERSION" htop "$HTOP_VERSION"
+  mkdir -p "$archive_root/htop/$HTOP_VERSION"
+  tar -C "$work" -cJf "$archive_root/htop/$HTOP_VERSION/htop-$HTOP_VERSION.tar.xz" \
+    "htop-$HTOP_VERSION"
+  digest=$(sha256sum "$archive_root/htop/$HTOP_VERSION/htop-$HTOP_VERSION.tar.xz" | awk '{print $1}')
+  append_release "$repository/tools.env" TOOL_RELEASES htop "$HTOP_VERSION" \
+    "https://example.invalid/htop/$HTOP_VERSION/htop-$HTOP_VERSION.tar.xz" "$digest"
+
+  write_source_fixture "$work/tmux-$TMUX_VERSION" tmux "$TMUX_VERSION"
+  mkdir -p "$archive_root/tmux/$TMUX_VERSION"
+  tar -C "$work" -czf "$archive_root/tmux/$TMUX_VERSION/tmux-$TMUX_VERSION.tar.gz" \
+    "tmux-$TMUX_VERSION"
+  digest=$(sha256sum "$archive_root/tmux/$TMUX_VERSION/tmux-$TMUX_VERSION.tar.gz" | awk '{print $1}')
+  append_release "$repository/tools.env" TOOL_RELEASES tmux "$TMUX_VERSION" \
+    "https://example.invalid/tmux/$TMUX_VERSION/tmux-$TMUX_VERSION.tar.gz" "$digest"
 }
 
 test_repository="$test_root/repository"
@@ -157,11 +221,12 @@ test_home="$test_root/home"
 make_test_repo "$test_repository"
 make_archives "$test_repository" "$archive_root"
 
-# Native validator catalog must not silently accept entries outside its profile.
+# Validator-only catalog must not silently accept entries outside its profile.
 for validator in foreign-validator yamllint; do
   if (
+    source "$test_repository/tools.env"
     source "$test_repository/validation.env"
-    VALIDATOR_RELEASES[$validator]=${VALIDATOR_RELEASES[actionlint]}
+    VALIDATOR_RELEASES[$validator]=${VALIDATOR_RELEASES[stylua]}
     validate_validator_config
   ) >"$test_root/invalid-validator.log" 2>&1; then
     fail "validator catalog accepted unsupported native tool: $validator"
@@ -197,7 +262,7 @@ test_xdg=$test_root/'xdg elsewhere'
 
 before=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
 XDG_CONFIG_HOME="$test_xdg" run_setup "$test_home" "$test_repository" "$archive_root" \
-  k9s gh oh-my-posh uv nvim fd go
+  k9s gh htop oh-my-posh uv nvim fd go kind tmux
 after=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
 [[ $before == "$after" ]] || fail 'setup-tools changed a download fixture'
 cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
@@ -210,7 +275,9 @@ cmp "$test_root/kube-prefix-before" "$test_home/kube-log-prefixes.txt" ||
 
 load_test_versions "$test_repository"
 assert_link "$test_home/bin/k9s" "k9s-$K9S_VERSION"
+assert_link "$test_home/bin/kind" "kind-$KIND_VERSION"
 assert_link "$test_home/bin/gh" "gh-$GH_VERSION"
+assert_link "$test_home/bin/htop" "htop-$HTOP_VERSION/bin/htop"
 assert_link "$test_home/bin/oh-my-posh" "oh-my-posh-$OMP_VERSION"
 assert_link "$test_home/bin/uv" "uv-$UV_VERSION"
 assert_link "$test_home/bin/uvx" "uvx-$UV_VERSION"
@@ -218,6 +285,7 @@ assert_link "$test_home/bin/nvim" "nvim-$NVIM_VERSION/bin/nvim"
 assert_link "$test_home/bin/fd" "fd-$FD_VERSION"
 assert_link "$test_home/bin/go" "go-$GO_VERSION/bin/go"
 assert_link "$test_home/bin/gofmt" "go-$GO_VERSION/bin/gofmt"
+assert_link "$test_home/bin/tmux" "tmux-$TMUX_VERSION/bin/tmux"
 "$test_home/bin/go" version | grep -F "$GO_VERSION" >/dev/null
 [[ -f $test_home/bin/go-$GO_VERSION/src/fmt/print.go &&
   -f $test_home/bin/go-$GO_VERSION/pkg/tool/linux_amd64/compile ]] ||
@@ -226,17 +294,65 @@ assert_link "$test_home/bin/gofmt" "go-$GO_VERSION/bin/gofmt"
 [[ -f $test_home/bin/nvim-$NVIM_VERSION/share/nvim/runtime/syntax/test.vim ]] ||
   fail 'Neovim runtime tree was not retained'
 "$test_home/bin/k9s" version --short | grep -F "$K9S_VERSION" >/dev/null
+"$test_home/bin/kind" version | grep -F "$KIND_VERSION" >/dev/null
 "$test_home/bin/uvx" --version | grep -F "$UV_VERSION" >/dev/null
+"$test_home/bin/htop" --version | grep -F "$HTOP_VERSION" >/dev/null
+"$test_home/bin/tmux" -V | grep -F "$TMUX_VERSION" >/dev/null
 
 default_repository=$test_root/default-repository
 default_home=$test_root/default-home
 make_test_repo "$default_repository"
 cp "$test_repository/tools.env" "$default_repository/tools.env"
-printf 'TOOLS=(fd k9s gh oh-my-posh uv nvim go)\n' >>"$default_repository/tools.env"
-run_setup "$default_home" "$default_repository" "$archive_root"
-for tool in fd k9s gh oh-my-posh uv nvim go gofmt; do
+printf 'TOOLS=(fd k9s gh oh-my-posh python uv nvim go kind)\n' >>"$default_repository/tools.env"
+TEST_UV_LOG="$test_root/default-python.log" XDG_CONFIG_HOME="$default_home/.config" \
+  run_setup "$default_home" "$default_repository" "$archive_root"
+for tool in fd k9s gh oh-my-posh uv uvx nvim go gofmt kind; do
   [[ -x $default_home/bin/$tool ]] || fail "default online install omitted $tool"
 done
+[[ $(<"$default_home/.config/uv/.python-version") == 3.12.12 ]] ||
+  fail 'default setup-tools did not select catalog Python through uv'
+
+python_repository=$test_root/python-repository
+python_home=$test_root/python-home
+python_xdg=$test_root/python-xdg
+python_log=$test_root/python.log
+make_test_repo "$python_repository"
+cp "$test_repository/tools.env" "$python_repository/tools.env"
+printf 'TOOL_RELEASES[python]=%q\n' \
+  $'\n3.12.11|https://example.invalid/python-3.12.11.tar.gz|1111111111111111111111111111111111111111111111111111111111111111\n3.12.12|https://example.invalid/python-3.12.12.tar.gz|2222222222222222222222222222222222222222222222222222222222222222\n' \
+  >>"$python_repository/tools.env"
+printf 'python 3.10.0\nnodejs 20.0.0\n' >"$python_repository/.tool-versions"
+printf '3.10.0\n' >"$python_repository/.python-version"
+cp "$python_repository/.tool-versions" "$test_root/python-tool-versions-before"
+cp "$python_repository/.python-version" "$test_root/python-version-before"
+(
+  cd "$python_repository"
+  TEST_UV_LOG="$python_log" XDG_CONFIG_HOME="$python_xdg" \
+    run_setup "$python_home" "$python_repository" "$archive_root" python
+)
+[[ -x $python_home/bin/uv && -d $python_home/.local/share/uv/python/3.12.11 &&
+  -d $python_home/.local/share/uv/python/3.12.12 ]] ||
+  fail 'Python setup did not install uv and all catalog versions'
+[[ $(<"$python_xdg/uv/.python-version") == 3.12.11 ]] ||
+  fail 'Python global pin did not select the first catalog record'
+cmp "$python_repository/.tool-versions" "$test_root/python-tool-versions-before" ||
+  fail 'Python setup changed project .tool-versions'
+cmp "$python_repository/.python-version" "$test_root/python-version-before" ||
+  fail 'Python setup changed project .python-version'
+[[ ! -e $python_home/.asdf && ! -e $python_home/bin/python && ! -e $python_home/bin/python3 ]] ||
+  fail 'Python setup introduced asdf or extra public interpreter links'
+TEST_UV_LOG="$python_log" XDG_CONFIG_HOME="$python_xdg" \
+  run_setup "$python_home" "$python_repository" "$test_root/no-downloads" python
+[[ $(<"$python_xdg/uv/.python-version") == 3.12.11 ]] ||
+  fail 'Python setup rerun changed the catalog default'
+printf '3.9.0\n' >"$python_xdg/uv/.python-version"
+if TEST_UV_LOG="$python_log" TEST_UV_FAIL_VERSION=3.12.12 XDG_CONFIG_HOME="$python_xdg" \
+  run_setup "$python_home" "$python_repository" "$test_root/no-downloads" python \
+  >"$test_root/python-install-failed.log" 2>&1; then
+  fail 'Python setup hid a provider installation failure'
+fi
+[[ $(<"$python_xdg/uv/.python-version") == 3.9.0 ]] ||
+  fail 'Python installation failure changed the global pin'
 
 prerequisite_repository=$test_root/prerequisite-repository
 prerequisite_home=$test_root/prerequisite-home
@@ -400,7 +516,6 @@ pin_home=$test_root/pin-home
 pin_work=$test_root/pin-work
 make_test_repo "$pin_repository"
 daily_shellcheck=0.10.0
-validation_shellcheck=0.11.0
 write_fake "$pin_work/shellcheck-v$daily_shellcheck/shellcheck" shellcheck "$daily_shellcheck"
 mkdir -p "$pin_archives/shellcheck/$daily_shellcheck"
 tar -C "$pin_work" -cJf \
@@ -413,10 +528,6 @@ append_release "$pin_repository/tools.env" TOOL_RELEASES shellcheck \
   "$daily_shellcheck" \
   "https://example.invalid/shellcheck/$daily_shellcheck/shellcheck-v$daily_shellcheck.linux.x86_64.tar.xz" \
   "$daily_shellcheck_digest"
-append_release "$pin_repository/validation.env" VALIDATOR_RELEASES shellcheck \
-  "$validation_shellcheck" \
-  "https://example.invalid/shellcheck-v$validation_shellcheck.linux.x86_64.tar.xz" \
-  "$(printf '%064d' 0)"
 run_setup "$pin_home" "$pin_repository" "$pin_archives" shellcheck
 assert_link "$pin_home/bin/shellcheck" "shellcheck-$daily_shellcheck"
 "$pin_home/bin/shellcheck" --version | grep -F "$daily_shellcheck" >/dev/null
@@ -517,7 +628,7 @@ assert_link "$single_home/bin/k9s" "k9s-$K9S_VERSION"
 
 find "$archive_root" -depth -delete
 XDG_CONFIG_HOME="$test_xdg" run_setup "$test_home" "$test_repository" "$archive_root" \
-  k9s gh uv nvim go
+  k9s gh htop uv nvim go tmux
 cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
   fail 'setup-tools reconciliation changed kube-backup-contexts.txt'
 cmp "$test_root/kube-prefix-before" "$test_home/kube-log-prefixes.txt" ||

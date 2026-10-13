@@ -26,10 +26,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Task
+      - name: Bootstrap pinned Task
         run: bash scripts/install-validation-tool task
 
-      - name: Validate
+      - name: Validate with Task-managed tools
         env:
           GH_TOKEN: ${{ github.token }}
           VALIDATE_BASE_SHA: ${{ github.event.before }}

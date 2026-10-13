@@ -66,8 +66,16 @@ records package ownership under `$HOME/.local/state/bstow`, and protects regular
 Use `restow` after pulling deletions or renames. Preview `--force` before using
 it to adopt foreign links.
 
-`tools.env` contains ordered `version|full_URL|SHA256` fixed records for tools and runtimes to be used,
-while `validation.env` owns the validator list.
+`tools.env` contains ordered `version|full_URL|SHA256` records for shared tools
+and runtimes, while `validation.env` owns the repository validator list and
+validator-only archives.
+
+Python versions use uv through `setup-tools`, with the first catalog version
+as uv's global default. Project version files are not migrated. Create a venv
+with `uv venv`, then activate it; Node.js, Terraform and Terragrunt keep asdf.
+The connected and offline profiles both include gh, Go, htop, ShellCheck,
+Helm, k9s, kubeconform, kubectx, kubens, Kyverno, Task, tmux and Trivy. Docker
+and container images are separate prerequisites for a local kind cluster.
 
 `tools-probes.env` supplies version command arguments for both installation,
 shell diagnostics and offline release health. Builder image pins live in `release.env`.

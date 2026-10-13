@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+platforms=(debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64)
+containers=()
+runtime_image=
+work=
+
+die() {
+  printf 'dotfiles-release-ci: %s\n' "$*" >&2
+  return 1
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT
+  set +e
+  if ((${#containers[@]})); then docker rm --force "${containers[@]}" >/dev/null 2>&1; fi
+  if [[ -n $runtime_image ]]; then docker image rm "$runtime_image" >/dev/null 2>&1; fi
+  if [[ -n $work ]]; then find "$work" -depth -delete; fi
+  exit "$status"
+}
+trap cleanup EXIT
+
+asset_exists() {
+  jq -e --arg asset "$1" '.assets[]? | select(.name == $asset)' "$2" >/dev/null
+}
+
+download_asset() {
+  timeout 300s gh release download "$RELEASE_TAG" --repo "$REPOSITORY" \
+    --pattern "$1" --dir "$2"
+}
+
+check_checksum() {
+  local archive=$1 checksum=$2 expected
+  expected=$(cd "$(dirname -- "$archive")" && sha256sum "${archive##*/}")
+  [[ $(<"$checksum") == "$expected" ]] || die "checksum does not match ${archive##*/}"
+}
+
+inspect_asset() {
+  bash "$script_dir/dotfiles-release" inspect "$1" "$2" "$COMMIT_SHA" >/dev/null
+}
+
+preflight() {
+  local release_file=$work/release.json error_file=$work/release-error.txt
+  local object_file=$work/tag-object.json attempts=1 attempt object_type
+  local platform asset existing checksum build_archive matrix
+  local release_found=false
+  local -a selected=()
+
+  if [[ $EVENT_NAME == workflow_dispatch ]]; then RELEASE_TAG=$INPUT_RELEASE_TAG; else RELEASE_TAG=$TAG_NAME; fi
+  [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{12}$ ]] || die "invalid release tag: $RELEASE_TAG"
+  [[ $EVENT_NAME != push ]] || attempts=6
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if timeout 30s gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
+      >"$release_file" 2>"$error_file"; then
+      release_found=true
+      break
+    fi
+    if ! grep -q 'HTTP 404' "$error_file"; then cat "$error_file" >&2; return 1; fi
+    ((attempt == attempts)) || sleep 10
+  done
+  if [[ $release_found != true ]]; then
+    printf 'Release %s does not exist; skipping.\n' "$RELEASE_TAG"
+    printf '%s\n' "release_tag=$RELEASE_TAG" 'platforms=[]' 'should_run=false' >>"$GITHUB_OUTPUT"
+    return
+  fi
+  jq -e '.assets | type == "array"' "$release_file" >/dev/null
+  timeout 30s gh api "repos/$REPOSITORY/git/ref/tags/$RELEASE_TAG" >"$object_file"
+  object_type=$(jq -r '.object.type' "$object_file")
+  COMMIT_SHA=$(jq -r '.object.sha' "$object_file")
+  while [[ $object_type == tag ]]; do
+    timeout 30s gh api "repos/$REPOSITORY/git/tags/$COMMIT_SHA" >"$object_file"
+    object_type=$(jq -r '.object.type' "$object_file")
+    COMMIT_SHA=$(jq -r '.object.sha' "$object_file")
+  done
+  [[ $object_type == commit && $COMMIT_SHA =~ ^[0-9a-f]{40}$ ]] || die 'tag does not resolve to a full commit ID'
+  [[ $RELEASE_TAG == "dotfiles-${COMMIT_SHA:0:12}" ]] || die "tag does not match target commit $COMMIT_SHA"
+
+  for platform in "${platforms[@]}"; do
+    asset=$RELEASE_TAG-$platform.tar.gz
+    build_archive=true
+    if asset_exists "$asset" "$release_file"; then
+      existing=$work/$platform
+      mkdir -p "$existing"
+      download_asset "$asset" "$existing"
+      inspect_asset "$platform" "$existing/$asset"
+      checksum=$asset.sha256
+      if asset_exists "$checksum" "$release_file"; then
+        download_asset "$checksum" "$existing"
+        check_checksum "$existing/$asset" "$existing/$checksum"
+        continue
+      fi
+      build_archive=false
+    fi
+    selected+=("$(jq -cn --arg platform "$platform" --argjson build_archive "$build_archive" \
+      '{platform: $platform, build_archive: $build_archive}')")
+  done
+  matrix=$(printf '%s\n' "${selected[@]}" | jq -s '.')
+  printf '%s\n' "release_tag=$RELEASE_TAG" "commit_sha=$COMMIT_SHA" \
+    "platforms=$(jq -c '.' <<<"$matrix")" \
+    "should_run=$([[ ${#selected[@]} -gt 0 ]] && printf true || printf false)" >>"$GITHUB_OUTPUT"
+}
+
+select_platform() {
+  local source_dir=$1
+  # shellcheck source=../release.env
+  source "$source_dir/release.env"
+  case $PLATFORM in
+    debian-13-x86_64) builder_image=$DEBIAN_13_IMAGE; test_uid=23131; test_home='/srv/debian offline' ;;
+    ubuntu-24.04-x86_64) builder_image=$UBUNTU_2404_IMAGE; test_uid=24141; test_home=/opt/ubuntu2404 ;;
+    ubuntu-26.04-x86_64) builder_image=$UBUNTU_2604_IMAGE; test_uid=26161; test_home=/srv/ubuntu2604 ;;
+    amzn-2023-x86_64) builder_image=$AMZN_2023_IMAGE; test_uid=23171; test_home=/opt/amazon2023 ;;
+    *) die "unsupported platform: $PLATFORM" ;;
+  esac
+}
+
+build_and_qualify() {
+  local source_dir=$1 output_dir=$2 archive root delivered_manager size digest
+  local builder_image test_uid test_home builder container verifier
+  local evidence=$RUNNER_TEMP/dotfiles-evidence/$PLATFORM
+  local run_key=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM
+
+  select_platform "$source_dir"
+  [[ $(git -C "$source_dir" rev-parse HEAD) == "$COMMIT_SHA" ]] || die 'checkout does not match release commit'
+  [[ $RELEASE_TAG == "dotfiles-${COMMIT_SHA:0:12}" ]] || die 'release tag does not match commit'
+  mkdir -p "$output_dir" "$evidence"
+  builder=dotfiles-builder-$run_key
+  container=dotfiles-runtime-$run_key
+  verifier=dotfiles-verify-$run_key
+  containers=("$builder" "$container" "$verifier")
+  runtime_image=dotfiles-runtime:$run_key
+  timeout 300s docker pull "$builder_image" 2>&1 | tee "$evidence/pull.log"
+  timeout --signal=TERM --kill-after=30s 5400s docker run --rm --init --name "$builder" \
+    --volume "$source_dir:/workspace:ro" --volume "$output_dir:/out" \
+    --env BUILDER_IMAGE="$builder_image" "$builder_image" \
+    bash /workspace/scripts/build-dotfiles-release build "$PLATFORM" /workspace /out \
+    2>&1 | tee "$evidence/build.log"
+
+  archive=$output_dir/$RELEASE_TAG-$PLATFORM.tar.gz
+  check_checksum "$archive" "$archive.sha256"
+  root=$(bash "$script_dir/dotfiles-release" inspect "$PLATFORM" "$archive" "$COMMIT_SHA")
+  tar -xOzf "$archive" "$root/release.env" >"$evidence/release.env"
+  tar -xOzf "$archive" "$root/build-manifest.txt" >"$evidence/build-manifest.txt"
+  cp "$archive.sha256" "$evidence/archive.sha256"
+  delivered_manager=$work/dotfiles-release
+  tar -xOzf "$archive" "$root/dotfiles-release" >"$delivered_manager"
+  chmod 0755 "$delivered_manager"
+
+  {
+    docker run --detach --init --name "$container" "$builder_image" sleep infinity
+    docker cp "$source_dir/scripts/build-dotfiles-release" "$container:/usr/local/bin/build-dotfiles-release"
+    docker exec "$container" mkdir -p /usr/local/lib/dotfiles
+    docker cp "$source_dir/scripts/setup-lib" "$container:/usr/local/lib/dotfiles/setup-lib"
+    docker cp "$source_dir/system.env" "$container:/usr/local/lib/dotfiles/system.env"
+    timeout --signal=TERM --kill-after=15s 900s docker exec "$container" \
+      bash /usr/local/bin/build-dotfiles-release prepare-runtime "$PLATFORM" offline-test "$test_uid" "$test_home"
+    timeout 300s docker commit "$container" "$runtime_image"
+    docker rm --force "$container"
+  } 2>&1 | tee "$evidence/prepare-runtime.log"
+  timeout --signal=TERM --kill-after=30s 1800s docker run --rm --init --name "$verifier" \
+    --network none --user "$test_uid:$test_uid" --env HOME="$test_home" \
+    --volume "$archive:/artifact.tar.gz:ro" \
+    --volume "$delivered_manager:/usr/local/bin/dotfiles-release:ro" "$runtime_image" \
+    bash /usr/local/bin/dotfiles-release verify "$PLATFORM" /artifact.tar.gz \
+    2>&1 | tee "$evidence/offline-verify.log"
+
+  size=$(stat --format=%s "$archive")
+  ((size < 2147483648)) || die "release asset is $size bytes; GitHub limit is below 2 GiB"
+  digest=$(sha256sum "$archive" | cut -d ' ' -f 1)
+  {
+    printf '### %s\n\n' "$PLATFORM"
+    printf -- '- Size: %s bytes\n' "$size"
+    printf -- '- SHA-256: %s\n' "$digest"
+  } >>"$GITHUB_STEP_SUMMARY"
+}
+
+publish() {
+  local output_dir=$1 asset=$RELEASE_TAG-$PLATFORM.tar.gz
+  local release_file=$work/release.json archive checksum
+  local -a uploads=()
+
+  timeout 30s gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_file"
+  jq -e '.assets | type == "array"' "$release_file" >/dev/null
+  if asset_exists "$asset" "$release_file"; then
+    download_asset "$asset" "$work"
+    archive=$work/$asset
+  else
+    archive=$output_dir/$asset
+    uploads+=("$archive")
+  fi
+  inspect_asset "$PLATFORM" "$archive"
+  checksum=$work/$asset.sha256
+  if asset_exists "$asset.sha256" "$release_file"; then
+    download_asset "$asset.sha256" "$work"
+    check_checksum "$archive" "$checksum"
+  else
+    (cd "$(dirname -- "$archive")" && sha256sum "$asset") >"$checksum"
+    uploads+=("$checksum")
+  fi
+  if ((${#uploads[@]})); then
+    timeout 300s gh release upload "$RELEASE_TAG" --repo "$REPOSITORY" "${uploads[@]}"
+  else
+    printf 'Release assets for %s are already complete.\n' "$PLATFORM"
+  fi
+}
+
+main() {
+  work=$(mktemp -d "$RUNNER_TEMP/dotfiles-ci.XXXXXX")
+  case ${1:-} in
+    preflight) (($# == 1)) || return 2; preflight ;;
+    build | publish)
+      PLATFORM=${PLATFORM:?PLATFORM is required}
+      COMMIT_SHA=${COMMIT_SHA:?COMMIT_SHA is required}
+      RELEASE_TAG=${RELEASE_TAG:?RELEASE_TAG is required}
+      if [[ $1 == build ]]; then
+        (($# == 3)) || return 2
+        build_and_qualify "$2" "$3"
+      else
+        (($# == 2)) || return 2
+        publish "$2"
+      fi
+      ;;
+    *) die 'usage: dotfiles-release-ci preflight | build SOURCE_DIR OUTPUT_DIR | publish OUTPUT_DIR'; return 2 ;;
+  esac
+}
+
+main "$@"

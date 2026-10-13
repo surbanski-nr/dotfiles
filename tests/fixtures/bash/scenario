@@ -25,6 +25,15 @@ case $TEST_SCENARIO in
     load_aliases
     dotfiles-check
     ;;
+  uv-python-selection)
+    load_aliases
+    source "$TEST_REPO_DIR/tools.env"
+    source "$TEST_REPO_DIR/scripts/setup-lib"
+    source "$TEST_REPO_DIR/tools-probes.env"
+    _dotfiles_check_release_version 'uv Python' uv TOOL_RELEASES python \
+      python find --directory "${XDG_CONFIG_HOME:-$HOME/.config}/uv" \
+      --no-project --managed-python --offline --show-version
+    ;;
   check-mc-wrapper)
     load_aliases
     shopt -s expand_aliases

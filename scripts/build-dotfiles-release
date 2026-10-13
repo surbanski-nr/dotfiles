@@ -83,7 +83,6 @@ load_build_config() {
   [[ -f $source_dir/tools.env ]] || { die "missing $source_dir/tools.env"; return 1; }
   [[ -f $source_dir/release.env ]] ||
     { die "missing $source_dir/release.env"; return 1; }
-  [[ -f $source_dir/validation.env ]] || { die "missing $source_dir/validation.env"; return 1; }
   [[ -f $source_dir/scripts/setup-lib ]] ||
     { die "missing $source_dir/scripts/setup-lib"; return 1; }
   # shellcheck source=setup-lib
@@ -95,22 +94,18 @@ load_build_config() {
   # shellcheck source=../tools-probes.env
   source "$source_dir/tools-probes.env" || return
   validate_tool_config || return
-  # shellcheck source=../validation.env
-  source "$source_dir/validation.env" || return
-  validate_validator_config || return
-  local tool catalog
+  local tool
   SIMPLE_RELEASE_TOOLS=()
   for tool in "${OFFLINE_RELEASE_TOOLS[@]}"; do
-    catalog=TOOL_RELEASES
-    if [[ $tool == task ]]; then catalog=VALIDATOR_RELEASES; fi
-    select_default_release "$catalog" "$tool" || return
+    [[ $tool == yamllint ]] && continue
+    select_default_release TOOL_RELEASES "$tool" || return
     [[ $RELEASE_URL != - ]] ||
       { die "offline default $tool $RELEASE_VERSION has no artifact"; return 1; }
     BUILD_VERSIONS[$tool]=$RELEASE_VERSION
     # These need compilation, a runtime tree, or multiple versions. Other
     # direct binaries are derived from the configured release tool list.
     case $tool in
-      nvim | nodejs | python | go | tmux | kubectl | helm) ;;
+      nvim | nodejs | python | go | htop | tmux | kubectl | helm) ;;
       *) SIMPLE_RELEASE_TOOLS+=("$tool") ;;
     esac
   done
@@ -263,11 +258,13 @@ install_release_tools() {
   ln -s ../tools/go/bin/gofmt "$release/bin/gofmt" || return
 
   for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do
-    catalog=TOOL_RELEASES
-    if [[ $tool == task ]]; then catalog=VALIDATOR_RELEASES; fi
     version=${BUILD_VERSIONS[$tool]}
-    prepare_release_artifact "$catalog" "$tool" "$version" "$inputs" || return
+    prepare_release_artifact TOOL_RELEASES "$tool" "$version" "$inputs" || return
     install -m 0755 "$PREPARED_ARTIFACT" "$release/tools/bin/$tool" || return
+    if [[ $tool == uv ]]; then
+      install -m 0755 "${PREPARED_ARTIFACT%/*}/${SPEC_DESTS[1]}" "$release/tools/bin/uvx" || return
+      ln -s ../tools/bin/uvx "$release/bin/uvx" || return
+    fi
   done
 
   for tool in kubectl helm; do
@@ -280,13 +277,11 @@ install_release_tools() {
     ln -s "$tool-${BUILD_VERSIONS[$tool]}" "$release/tools/bin/$tool" || return
   done
 
-  prepare_release_artifact TOOL_RELEASES tmux "${BUILD_VERSIONS[tmux]}" "$inputs" || return
-  (
-    cd "$PREPARED_ARTIFACT" || exit
-    ./configure --prefix="$release/tools/tmux" >/dev/null || exit
-    make -j"$(getconf _NPROCESSORS_ONLN)" >/dev/null || exit
-    make install >/dev/null || exit
-  ) || return
+  for tool in htop tmux; do
+    prepare_release_artifact TOOL_RELEASES "$tool" "${BUILD_VERSIONS[$tool]}" "$inputs" || return
+    compile_tool_source "$tool" "$PREPARED_ARTIFACT" "$release/tools/$tool" || return
+  done
+  ln -s ../tools/htop/bin/htop "$release/bin/htop" || return
 
   for command_name in node npm npx corepack; do
     ln -s "../tools/node/bin/$command_name" "$release/bin/$command_name" || return
@@ -478,6 +473,8 @@ BASH
       --only-binary=:all: --dest "$release/python-wheelhouse" \
       -r "$release/python-locks/$package.lock" || return
   done <<<"$package_output"
+  ln -s ../share/nvim2/mason/packages/yamllint/venv/bin/yamllint \
+    "$release/bin/yamllint" || return
 }
 
 verify_release_symlinks() {
@@ -516,6 +513,7 @@ write_release_metadata() {
     "PYTHON_VERSION=${BUILD_VERSIONS[python]}" \
     "PYTHON_BUILD=$PYTHON_STANDALONE_BUILD" \
     "GO_VERSION=${BUILD_VERSIONS[go]}" \
+    "HTOP_VERSION=${BUILD_VERSIONS[htop]}" \
     "TMUX_VERSION=${BUILD_VERSIONS[tmux]}" \
     >"$release/release.env" || return
   for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do

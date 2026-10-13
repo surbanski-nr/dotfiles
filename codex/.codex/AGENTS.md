@@ -12,8 +12,6 @@
   at `docs/session_logs/<repo-or-workspace>/YYYY-MM-DD_session_NNN.md`, never
   inside child repositories. Record the full commands used for investigation,
   debugging and operational checks.
-- Keep one workspace-level `AGENTS.md`. Do not add nested `AGENTS.md` files to
-  child repositories.
 - Prefer a repository's documented task runner, such as `Taskfile.yml`, when
   available. Keep its tasks aligned with the actual workflow.
 - When scanning with ripgrep, include hidden and ignored files with `-uu` and
@@ -85,9 +83,3 @@
   lowercase present-tense verb and do not end it with a period.
 - When code and its supporting tests or documentation change together, use the
   code's scope instead of adding separate `tests` or `docs` scopes.
-
-## Maintaining agent guidance
-
-- Keep only guidance useful across most future sessions.
-- Point to authoritative documentation or commands instead of duplicating them.
-- Rewrite or remove obsolete guidance instead of continually appending new rules.

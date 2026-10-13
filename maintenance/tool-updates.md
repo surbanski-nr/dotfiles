@@ -5,6 +5,8 @@ candidate needs an exact version, a SHA-256 digest from the upstream release,
 and the same checks used for a normal installation. Keep the current and the
 candidate installations until rollback has been tested.
 
+Run the commands below from the repository root.
+
 ## Disposable candidate
 
 Start from an independent clone. The build scripts require a real `.git`
@@ -26,24 +28,29 @@ git -C "$candidate_root/current" status --short
 cp -a "$candidate_root/current" "$candidate_root/candidate"
 ```
 
-Edit only the intended records in `candidate/tools.env`, validator records
-in `candidate/validation.env`, or builder images in
+Edit only the intended shared records in `candidate/tools.env`,
+validator-specific records in `candidate/validation.env`, or builder images in
 `candidate/release.env`. `TOOL_RELEASES` and `VALIDATOR_RELEASES`
 store ordered `version|full_URL|SHA256` records. The first record is the
-default and cannot fall back if its artifact is absent. Task is included in
-both `TOOLS` and `OFFLINE_RELEASE_TOOLS`; its single release record lives in
-`VALIDATOR_RELEASES` and is shared with repository validation.
+default and cannot fall back if its artifact is absent. Actionlint, ShellCheck
+and Task use `TOOL_RELEASES` for setup, repository validation and offline
+releases. Yamllint validation and offline packaging share its generated Python
+lock under `nvim2/.config/nvim2/python-locks`.
 `ASDF_PLUGINS` owns plugin repository and commit pins, while runtime versions
 still come from `TOOL_RELEASES`.
 For a tmux plugin bump, change its `*_COMMIT` in `tools.env`; change the
 adjacent `*_REPO` only when deliberately moving to a different repository.
 
 For a normal dependency bump, edit only its first record in `tools.env`,
-or in `validation.env` for Task and repository validators. Run the
+or in `validation.env` for validator-only native tools. Run the
 focused setup in the disposable candidate, then `task validate` and the
 affected platform build and offline checks. To go back, restore the earlier
 record as the first record and rerun the same checks. Do not edit generated
 Python locks for an unrelated tool bump.
+
+Htop and tmux records point to official source archives. Both connected setup
+and offline release builds compile them through the shared source-build helper,
+so test both paths when changing either record.
 
 For a daily tool, install the current selection first, record its version and
 canonical link, then run the candidate from the other read-only checkout. This
@@ -80,7 +87,7 @@ Delete a rejected candidate with `rm -rf -- "$candidate_root"`; it cannot have
 changed the normal selection.
 
 For an offline candidate, build and verify a complete platform release using
-[SETUP.md](SETUP.md#complete-offline-release). Do not assemble or import
+[setup.md](setup.md#complete-offline-release). Do not assemble or import
 individual tool archives with `setup-tools`; that script is connected-only.
 
 After the disposable trial, run the setup qualification on Debian 13, Ubuntu
@@ -107,12 +114,10 @@ run this command from that reviewed revision:
 
 If the retained installation is intact, the script reuses it without a new
 download. If it is absent, the script downloads the pinned release again.
-The same procedure applies to `gh`, `oh-my-posh`, `rg` and the complete
-`nvim-VERSION` executable tree. For Task, run `./setup-tools task` with the
-earlier record first in `VALIDATOR_RELEASES` in `validation.env`. The same
-record supplies offline builds and the private validation bootstrap.
-A daily ShellCheck change belongs in `tools.env`; validation ShellCheck and
-Mason ShellCheck keep their own pins.
+The same procedure applies to `gh`, `oh-my-posh`, `rg`, Task, actionlint,
+ShellCheck and the complete `nvim-VERSION` executable tree. Their shared
+records also supply offline builds and the private validation bootstrap.
+Mason ShellCheck keeps its own editor pin.
 
 A temporary switch may update only an existing managed relative link. Check
 both the current target and requested executable first:
@@ -146,6 +151,7 @@ Prepare a private preview directory:
 ```bash
 preview_checkout=$(pwd -P)
 preview_root=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-skin-preview.XXXXXX")
+preview_kind_cluster=
 mkdir -p "$preview_root/.config/mc" "$preview_root/.cache" \
   "$preview_root/.local/share/mc" "$preview_root/.local/state"
 cp -R "$preview_checkout/k9s/.config/k9s" "$preview_root/.config/"
@@ -155,6 +161,54 @@ printf 'Preview directory: %s\n' "$preview_root"
 ```
 
 ### k9s with disposable workloads
+
+Choose one cluster preparation below, then use the shared fixture and k9s
+commands. Both routes keep credentials in the private preview directory.
+
+#### New local cluster with kind
+
+If you do not have a disposable cluster, use a single-node
+[kind](https://kind.sigs.k8s.io/docs/user/quick-start/) cluster inside Docker.
+It needs no browser, GPU or extra VM. Have `kubectl` and a running Docker
+Engine and kind available first; `docker info` must succeed for the intended user.
+When Docker is absent, normal `./setup-system` installs and starts it and adds
+the invoking user to its group; log out and back in after running it. See the
+[Docker setup notes](setup.md#docker). Docker daemon access is root-equivalent;
+the preview commands themselves do not change group membership or install a
+system service.
+
+Budget roughly two CPUs, 2 GiB of available memory and a few GiB of disk space.
+The kind executable is about 10 MB; the pinned node image is about
+1.3 GB unpacked. The first start downloads the image and may take a few minutes.
+`./setup-tools kind` and the offline payload include kind. Docker is provided
+only by normal `setup-system`; node and workload images are not bundled.
+
+Install the catalog-selected kind and create a uniquely named cluster. The
+explicit kubeconfig is important during both creation and cleanup:
+kind must not merge this context into the host's kubeconfig.
+
+```bash
+./setup-tools kind
+kind version
+
+preview_kind_cluster="dotfiles-k9s-preview-$(date +%s)-$$"
+env KIND_EXPERIMENTAL_PROVIDER=docker \
+  timeout --signal=TERM --kill-after=10s 300s \
+  kind create cluster --name "$preview_kind_cluster" \
+  --image kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed \
+  --kubeconfig "$preview_root/kubeconfig" --wait 120s &&
+  preview_context="kind-$preview_kind_cluster"
+```
+
+Continue only after cluster creation succeeds. On failure, use the kind
+cleanup command below before deleting the preview directory.
+`KIND_EXPERIMENTAL_PROVIDER=docker` explicitly chooses Docker instead of kind's
+automatic Docker/Podman/nerdctl detection. It is redundant with Docker as the
+only runtime; here it makes creation and cleanup use the same provider without
+exporting a global setting. Keep the kind
+version and its documented compatible node-image digest together when updating.
+
+#### Existing disposable cluster
 
 Use only a disposable cluster where you are allowed to create and delete a
 namespace. Do not use a production context. Set its explicit context below;
@@ -167,7 +221,11 @@ credentials; keep it private and remove it after the preview.
 preview_context='REPLACE-WITH-DISPOSABLE-CONTEXT'
 kubectl --context "$preview_context" config view --minify --flatten --raw \
   >"$preview_root/kubeconfig"
+```
 
+#### Deploy the fixture
+
+```bash
 preview_kubectl() {
   command kubectl --kubeconfig "$preview_root/kubeconfig" \
     --cache-dir "$preview_root/.cache/kube" \
@@ -196,8 +254,12 @@ preview_kubectl create job preview-now --from=cronjob/preview-random
 ```
 
 The pinned BusyBox image must be available to the cluster. In a disconnected
-cluster, preload it using that cluster's image import mechanism. This fixture
-is opt-in; setup and offline-release installation do not deploy it.
+cluster, preload it using that cluster's image import mechanism. Starting kind
+without network access additionally requires Docker and the pinned node image
+to be prepared in advance. The dotfiles offline archive includes kind, not
+Docker or container images. This fixture is opt-in; setup and offline-release
+installation do not deploy it. A metrics-server is not required for skin
+previews; without one, CPU and memory columns show unavailable values.
 
 Launch the copied skin and config:
 
@@ -264,13 +326,21 @@ permissions; temporary config is not a filesystem sandbox.
 ### Cleanup
 
 After closing both applications, delete only the namespace created above and
-the private preview directory. Skip the namespace command for an MC-only trial.
+the private preview directory. The conditional kind command also deletes the
+cluster when this preview created it, without changing the host's kubeconfig.
+Skip the namespace command for an MC-only trial or a failed cluster creation.
 
 ```bash
 preview_kubectl delete namespace dotfiles-k9s-preview --wait=true --timeout=90s
+if [[ -n ${preview_kind_cluster:-} ]]; then
+  env KIND_EXPERIMENTAL_PROVIDER=docker \
+    timeout --signal=TERM --kill-after=10s 120s \
+    kind delete cluster --name "$preview_kind_cluster" \
+    --kubeconfig "$preview_root/kubeconfig"
+fi
 unset -f preview_kubectl
 find "$preview_root" -depth -delete
-unset preview_checkout preview_context preview_root
+unset preview_checkout preview_context preview_kind_cluster preview_root
 ```
 
 ## Go SDK and editor tools
@@ -365,24 +435,33 @@ set until you unset it, so it must also exist in the selected release.
 
 ## Online project runtime rollback
 
-Optional online project runtimes remain under asdf. Offline releases do not
+Python uses uv; Node.js, Terraform and Terragrunt remain under asdf. Offline releases do not
 install or use asdf. Put the earlier release record first for
 the tool in `TOOL_RELEASES`, then reconcile it:
 
 ```bash
-./setup-asdf terraform python nodejs terragrunt
+./setup-tools python
+uv python find --show-version
+./setup-asdf terraform nodejs terragrunt
 asdf current
 ```
 
-The first version becomes the home default. A project's `.tool-versions` and
+Python setup installs the configured versions without public interpreter links,
+then pins the first globally for uv. It does not migrate project version files.
+Recreate a project's `.venv` deliberately when changing its interpreter; a
+global pin does not replace an existing venv. Python artifacts are managed by
+the pinned uv release's own download catalog, while offline builds keep their
+explicit URL/SHA-256-pinned standalone runtime.
+
+For asdf, the first version becomes the home default. A project's `.tool-versions` and
 an `ASDF_<TOOL>_VERSION` environment override still take precedence. Keep all
 required project versions in the list, use the asdf shims, and do not add
 same-named launchers in `~/bin`. After changing Node.js or global npm tools,
 run `asdf reshim nodejs VERSION` and check both `node --version` and
 `npm --version`.
 
-Kubectl and Helm are installed directly by the default `TOOLS` profile.
-Include them in `setup-asdf` only in a home without their direct launchers.
+Kubectl and Helm are installed directly by `setup-tools` and included in the
+default `TOOLS` profile, not managed by `setup-asdf`.
 
 Outside complete releases, online direct kubectl and Helm installations are
 the multi-version case in `setup-tools`. Run a version-qualified executable
@@ -473,7 +552,7 @@ Use `dotfiles-release rollback` to select the retained previous unit, including
 all tools, configuration, plugins and language support. Existing Neovim and
 tmux processes remain pinned to the physical release from which they started.
 Follow
-[the offline release runbook](nvim2/.config/nvim2/offline-releases.md) for
+[the offline release runbook](../nvim2/.config/nvim2/offline-releases.md) for
 checksum verification, activation and exact-ID uninstall. Older artifacts may
 use their documented `~/.local/opt` executable roots; retain those roots during
 migration.

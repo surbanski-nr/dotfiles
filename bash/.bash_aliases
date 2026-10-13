@@ -96,7 +96,11 @@ _dotfiles_check_release_version() {
   shift 4
 
   select_default_release "$catalog" "$tool" || return 1
-  read -r -a arguments <<<"${TOOL_PROBE_ARGS[$command_name]:---version}"
+  if (($#)); then
+    arguments=("$@")
+  else
+    read -r -a arguments <<<"${TOOL_PROBE_ARGS[$command_name]:---version}"
+  fi
   _dotfiles_check_version "$label" "$command_name" "$RELEASE_VERSION" "${arguments[@]}"
 }
 
@@ -120,7 +124,8 @@ dotfiles-check() (
         return 1
       }
     done
-    for command_name in go gofmt; do
+    for command_name in go gofmt kind uv uvx actionlint shellcheck yamllint \
+      gh htop kubeconform kyverno trivy; do
       [[ -x $release_root/bin/$command_name ]] || continue
       [[ $(readlink -f -- "$HOME/bin/$command_name" 2>/dev/null) == "$release_root/"* ]] || {
         printf '  MISMATCH active release command: %s\n' "$command_name" >&2
@@ -162,6 +167,7 @@ dotfiles-check() (
   _dotfiles_check_tool kubectx kubectx || true
   _dotfiles_check_tool kubens kubens || true
   _dotfiles_check_tool k9s k9s || true
+  _dotfiles_check_tool kind kind || true
   _dotfiles_check_tool helm helm || true
   _dotfiles_check_tool terraform terraform || true
   _dotfiles_check_tool ansible ansible || true
@@ -176,10 +182,13 @@ dotfiles-check() (
   if declare -p TOOL_RELEASES VALIDATOR_RELEASES >/dev/null 2>&1; then
     printf '\nSelected versions:\n'
     _dotfiles_check_release_version gh gh TOOL_RELEASES gh || missing=1
+    _dotfiles_check_release_version htop htop TOOL_RELEASES htop || missing=1
     _dotfiles_check_release_version kyverno kyverno TOOL_RELEASES kyverno || missing=1
-    _dotfiles_check_release_version Task task VALIDATOR_RELEASES task || missing=1
+    _dotfiles_check_release_version actionlint actionlint TOOL_RELEASES actionlint || missing=1
+    _dotfiles_check_release_version Task task TOOL_RELEASES task || missing=1
     _dotfiles_check_release_version Trivy trivy TOOL_RELEASES trivy || missing=1
     _dotfiles_check_release_version k9s k9s TOOL_RELEASES k9s || missing=1
+    _dotfiles_check_release_version kind kind TOOL_RELEASES kind || missing=1
     _dotfiles_check_release_version kubeconform kubeconform TOOL_RELEASES kubeconform || missing=1
     _dotfiles_check_release_version ShellCheck shellcheck TOOL_RELEASES shellcheck || missing=1
     _dotfiles_check_release_version 'Oh My Posh' oh-my-posh TOOL_RELEASES oh-my-posh || missing=1
@@ -189,12 +198,15 @@ dotfiles-check() (
     _dotfiles_check_release_version zoxide zoxide TOOL_RELEASES zoxide || missing=1
     _dotfiles_check_release_version uv uv TOOL_RELEASES uv || missing=1
     _dotfiles_check_release_version Neovim nvim TOOL_RELEASES nvim || missing=1
+    _dotfiles_check_release_version tmux tmux TOOL_RELEASES tmux || missing=1
     _dotfiles_check_release_version Go go TOOL_RELEASES go || missing=1
     _dotfiles_check_release_version Terraform terraform TOOL_RELEASES terraform || missing=1
     _dotfiles_check_release_version kubectl kubectl TOOL_RELEASES kubectl || missing=1
     _dotfiles_check_release_version Helm helm TOOL_RELEASES helm || missing=1
     _dotfiles_check_release_version Node.js node TOOL_RELEASES nodejs || missing=1
-    _dotfiles_check_release_version Python python TOOL_RELEASES python || missing=1
+    _dotfiles_check_release_version 'uv Python' uv TOOL_RELEASES python \
+      python find --directory "${XDG_CONFIG_HOME:-$HOME/.config}/uv" \
+      --no-project --managed-python --offline --show-version || missing=1
     _dotfiles_check_release_version Terragrunt terragrunt TOOL_RELEASES terragrunt || missing=1
   fi
 
