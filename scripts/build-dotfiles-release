@@ -199,7 +199,7 @@ if [[ $NVIM_APPNAME == nvim2 ]]; then
     export GOTOOLCHAIN=local
   fi
   ansible_bin="$release/share/nvim2/mason/packages/ansible-lint/venv/bin"
-  export PATH="$ansible_bin:$release/bin:$release/share/nvim2/mason/bin${PATH:+:$PATH}"
+  export PATH="$HOME/bin:$ansible_bin:$release/bin:$release/share/nvim2/mason/bin${PATH:+:$PATH}"
 fi
 exec "$release/tools/nvim/bin/nvim" "$@"
 BASH

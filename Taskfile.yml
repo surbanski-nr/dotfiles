@@ -16,7 +16,6 @@ tasks:
       - validate:bash
       - validate:configs
       - validate:nvim2
-      - validate:old-nvim
       - validate:repo
       - validate:scripts
       - validate:workflows
@@ -38,12 +37,6 @@ tasks:
     deps: [tools:shellcheck, tools:stylua]
     cmds:
       - bash scripts/validate nvim2
-
-  validate:old-nvim:
-    desc: Validate legacy Nvim configuration
-    deps: [tools:stylua]
-    cmds:
-      - bash scripts/validate old-nvim
 
   validate:repo:
     desc: Validate repository invariants and changed whitespace

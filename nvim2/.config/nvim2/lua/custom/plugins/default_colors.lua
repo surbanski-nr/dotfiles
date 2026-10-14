@@ -5,7 +5,6 @@ local class_module_color = { fg = '#c58fa3', ctermfg = 175 } -- Muted rose.
 
 local overrides = {
   Boolean = { fg = '#ffcaff', ctermfg = 13 },
-  CursorLine = { bg = '#343842', ctermbg = 237 },
   CursorLineNr = { fg = '#ff9e64', ctermfg = 214 },
   MatchParen = { fg = '#ff9e64', bg = '#3f342d', ctermfg = 214, ctermbg = 237 },
   Nvim2MatrixBright = { fg = '#eef1f8', ctermfg = 15 },

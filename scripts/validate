@@ -9,7 +9,7 @@ die() {
 
 usage() {
   printf '%s\n' \
-    'usage: validate {bash|configs|nvim2|old-nvim|repo|scripts|workflows}' \
+    'usage: validate {bash|configs|nvim2|repo|scripts|workflows}' \
     >&2
   exit 2
 }
@@ -105,7 +105,7 @@ validate_bash() {
     tests/bash_test.sh
   )
 
-  check_shell_syntax bash "${files[@]}" release.env validation.env tools.env system.env tools-probes.env
+  check_shell_syntax bash "${files[@]}" release.env tools.env system.env tools-probes.env
   check_markdown_bash README.md maintenance/setup.md maintenance/tool-updates.md \
     nvim2/.config/nvim2/offline-releases.md
   shellcheck --shell=bash --external-sources --source-path=SCRIPTDIR \
@@ -208,13 +208,6 @@ validate_nvim2() {
       ($plugin.value.rev | type == "string" and test("^[0-9a-f]{40}$"))
     ] | all)
   ' "$lock_file" >/dev/null
-}
-
-validate_old_nvim() {
-  need stylua
-  stylua --check \
-    --config-path old-nvim/.config/old-nvim/stylua.toml \
-    old-nvim/.config/old-nvim
 }
 
 validate_configs() {
@@ -365,11 +358,9 @@ validate_repo() {
   local image
   local variable
 
-  check_shell_syntax bash release.env validation.env tools.env system.env tools-probes.env
+  check_shell_syntax bash release.env tools.env system.env tools-probes.env
   # shellcheck source=../tools.env
   source tools.env
-  # shellcheck source=../validation.env
-  source validation.env
   # shellcheck source=setup-lib
   source scripts/setup-lib
   validate_tool_config
@@ -380,7 +371,7 @@ validate_repo() {
   [[ ! -e offline ]] || die 'legacy offline source directory still exists'
   if grep -Eq \
     '^(ASDF|GH|K9S|TRIVY|KYVERNO|KUBECONFORM|SHELLCHECK|RG|ZOXIDE|UV|OMP|NVIM|NPM|TMUX|FZF|KREW|ACTIONLINT|STYLUA|ZIZMOR|TASK)_(VERSION|SHA256)=' \
-    tools.env validation.env; then
+    tools.env; then
     die 'legacy editable release scalars remain in the catalogs'
   else
     grep_status=$?
@@ -423,7 +414,6 @@ case ${1:-} in
   bash) validate_bash ;;
   configs) validate_configs ;;
   nvim2) validate_nvim2 ;;
-  old-nvim) validate_old_nvim ;;
   repo) validate_repo ;;
   scripts) validate_scripts ;;
   workflows) validate_workflows ;;

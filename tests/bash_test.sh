@@ -381,8 +381,8 @@ stale_vz_output=$(
   run_scenario stale-vz \
     env HOME="$reload_home" PATH="$test_root/bin:$original_path"
 )
-[[ $stale_vz_output == 'editors=v,vold vz=removed' ]] ||
-  fail 'alias reload did not remove stale vz while preserving v and vold'
+[[ $stale_vz_output == 'editor=v stale=removed' ]] ||
+  fail 'alias reload did not remove stale editor helpers while preserving v'
 
 posh_log=$test_root/oh-my-posh.log
 posh_state=$test_root/kubectl-prompt-disabled

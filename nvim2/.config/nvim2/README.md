@@ -16,9 +16,8 @@ NVIM_APPNAME=nvim2 nvim
 
 The stowed Bash configuration sets `NVIM_APPNAME=nvim2`. The `v` and FZF-based
 `ffv` helpers start this profile; `EDITOR`, `VISUAL` and Git use system `vi`.
-It deliberately leaves `vi` and `vim` as independent recovery editors. Use
-`vold` only when the archived `~/.config/old-nvim` profile has been stowed
-explicitly and is needed for reference. To start directly from a checkout:
+It deliberately leaves `vi` and `vim` as independent recovery editors. To
+start directly from a checkout:
 
 ```bash
 cd /path/to/dotfiles
@@ -138,18 +137,6 @@ Treesitter parsers. Keep the backup until the checks and normal editing work.
 Do not use this procedure for an offline platform release, where
 `~/.local/share/nvim2` is an activation symlink; use the
 [offline release runbook](offline-releases.md) instead.
-
-Legacy profiles use separate application directories and do not affect Nvim2.
-If neither plain `nvim` nor `vold` is needed anymore, inspect and archive their
-old downloads and caches separately:
-
-```bash
-find "$HOME/.local/share" "$HOME/.local/state" "$HOME/.cache" \
-  -maxdepth 1 \( -name nvim -o -name old-nvim \) -print
-```
-
-Do not remove a listed directory until its corresponding profile is no longer
-needed.
 
 ## Transfer to a machine without internet access
 

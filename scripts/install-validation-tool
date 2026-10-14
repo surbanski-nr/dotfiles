@@ -18,8 +18,6 @@ tool=$1
 source "$repo_dir/scripts/setup-lib"
 # shellcheck source=../tools.env
 source "$repo_dir/tools.env"
-# shellcheck source=../validation.env
-source "$repo_dir/validation.env"
 validate_profile VALIDATOR_TOOLS
 
 supported=false
@@ -52,9 +50,7 @@ if [[ $tool == yamllint ]]; then
   version=${BASH_REMATCH[1]}
   validate_version YAMLLINT_VERSION "$version"
 else
-  catalog=TOOL_RELEASES
-  [[ -v VALIDATOR_RELEASES[$tool] ]] && catalog=VALIDATOR_RELEASES
-  select_default_release "$catalog" "$tool"
+  select_default_release TOOL_RELEASES "$tool"
   version=$RELEASE_VERSION
   url=$RELEASE_URL
 fi
@@ -144,7 +140,7 @@ else
   archive=$stage/$RELEASE_ASSET
   prepared=$stage/prepared
   download_file "$url" "$archive"
-  prepare_artifact "$catalog" "$tool" "$version" "$archive" "$prepared"
+  prepare_artifact TOOL_RELEASES "$tool" "$version" "$archive" "$prepared"
   activate_binary "$prepared/${SPEC_DESTS[0]}"
 fi
 

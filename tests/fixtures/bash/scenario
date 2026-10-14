@@ -194,12 +194,14 @@ case $TEST_SCENARIO in
     ;;
   stale-vz)
     vz() { printf 'stale-vz\n'; }
+    vold() { printf 'stale-vold\n'; }
     vz >/dev/null
+    vold >/dev/null
     load_aliases
     [[ $(type -t vz || true) != function ]]
+    [[ $(type -t vold || true) != function ]]
     declare -F v >/dev/null
-    declare -F vold >/dev/null
-    printf 'editors=v,vold vz=removed\n'
+    printf 'editor=v stale=removed\n'
     ;;
   *)
     printf 'unknown test scenario: %s\n' "$TEST_SCENARIO" >&2

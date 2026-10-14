@@ -134,9 +134,7 @@ dotfiles-check() (
     done
     return 0
   fi
-  if [[ -r $manifest_dir/tools.env && -r $manifest_dir/validation.env ]]; then
-    # shellcheck source=../validation.env
-    source "$manifest_dir/validation.env"
+  if [[ -r $manifest_dir/tools.env ]]; then
     # shellcheck source=../tools.env
     source "$manifest_dir/tools.env"
     # Loaded only when dotfiles-check runs, never during normal shell startup.
@@ -179,7 +177,7 @@ dotfiles-check() (
   _dotfiles_check_tool ssh-agent ssh-agent || true
   _dotfiles_check_tool ssh-add ssh-add || true
 
-  if declare -p TOOL_RELEASES VALIDATOR_RELEASES >/dev/null 2>&1; then
+  if declare -p TOOL_RELEASES >/dev/null 2>&1; then
     printf '\nSelected versions:\n'
     _dotfiles_check_release_version gh gh TOOL_RELEASES gh || missing=1
     _dotfiles_check_release_version htop htop TOOL_RELEASES htop || missing=1
@@ -241,11 +239,7 @@ ffv() {
 }
 
 unalias vz vold v zz kc kn k tp t 2>/dev/null || true
-unset -f vz 2>/dev/null || true
-vold() {
-  _dotfiles_require vold nvim || return
-  NVIM_APPNAME=old-nvim command nvim "$@"
-}
+unset -f vz vold 2>/dev/null || true
 v() {
   _dotfiles_require v nvim || return
   NVIM_APPNAME=nvim2 command nvim "$@"

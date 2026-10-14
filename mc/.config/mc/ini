@@ -20,7 +20,6 @@
 # F1 opens full help. The bottom keybar always shows the current F-key actions.
 
 [Midnight-Commander]
-# Keep comments and reviewed settings stable. Use this file for permanent changes.
 auto_save_setup=false
 skin=surb
 
@@ -28,16 +27,13 @@ skin=surb
 use_internal_view=true
 use_internal_edit=false
 
-# Confirm destructive or replacing operations, but do not prompt merely to exit.
 confirm_delete=true
 confirm_overwrite=true
 confirm_exit=false
 
-# Accurate progress for directory operations is worth the small initial scan.
 verbose=true
 file_op_compute_totals=true
 
-# Scroll the internal viewer by lines and remember where each file was left.
 mouse_move_pages_viewer=false
 mcview_remember_file_position=true
 
@@ -53,7 +49,6 @@ clear_before_exec=true
 pause_after_run=1
 
 [Layout]
-# Keep the UI self-explanatory while learning MC.
 menubar_visible=true
 keybar_visible=true
 message_visible=true
@@ -64,7 +59,6 @@ horizontal_split=false
 vertical_equal=true
 
 [Panels]
-# Dotfiles matter in development; editor backup files ending in ~ usually do not.
 show_dot_files=true
 show_backups=false
 show_mini_info=true
@@ -72,7 +66,6 @@ mix_all_files=false
 filetype_mode=true
 permission_mode=false
 
-# Match Nvim2's calmer navigation instead of jumping half a panel at a time.
 navigate_with_arrows=true
 panel_scroll_pages=false
 panel_scroll_center=true
@@ -88,6 +81,5 @@ timeformat_recent=%b %e %H:%M
 timeformat_old=%b %e  %Y
 
 [Panelize]
-# F9, Command, External panelize turns command output into an actionable panel.
 Modified Git files=git ls-files --modified
 Untracked Git files=git ls-files --others --exclude-standard

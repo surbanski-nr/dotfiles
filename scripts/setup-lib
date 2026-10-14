@@ -216,37 +216,29 @@ validate_profile() {
 }
 
 validate_validator_config() {
-  local catalog tool version seen=' '
+  local tool version
 
   validate_profile VALIDATOR_TOOLS || return
-  validate_release_catalog VALIDATOR_RELEASES || return
+  if [[ -v TOOL_RELEASES[yamllint] ]]; then
+    report_error 'TOOL_RELEASES must not contain lock-backed validator yamllint'
+    return 1
+  fi
   for tool in "${VALIDATOR_TOOLS[@]}"; do
-    seen+="$tool "
     if [[ $tool == yamllint ]]; then
       continue
-    elif [[ -v VALIDATOR_RELEASES[$tool] ]]; then
-      catalog=VALIDATOR_RELEASES
-    elif [[ -v TOOL_RELEASES[$tool] ]]; then
-      catalog=TOOL_RELEASES
-    else
-      report_error "no release catalog contains validator $tool"
+    elif ! [[ -v TOOL_RELEASES[$tool] ]]; then
+      report_error "TOOL_RELEASES has no releases for validator $tool"
       return 1
     fi
-    release_versions "$catalog" "$tool" || return
+    release_versions TOOL_RELEASES "$tool" || return
     for version in "${RELEASE_VERSIONS[@]}"; do
-      select_release "$catalog" "$tool" "$version" || return
+      select_release TOOL_RELEASES "$tool" "$version" || return
       if [[ $RELEASE_URL == - ]]; then
         report_error "validation release $tool $version requires an artifact"
         return 1
       fi
       artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
     done
-  done
-  for tool in "${!VALIDATOR_RELEASES[@]}"; do
-    if [[ $tool == yamllint || $seen != *" $tool "* ]]; then
-      report_error "VALIDATOR_RELEASES contains unsupported tool $tool"
-      return 1
-    fi
   done
 }
 

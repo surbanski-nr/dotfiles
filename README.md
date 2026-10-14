@@ -66,9 +66,8 @@ records package ownership under `$HOME/.local/state/bstow`, and protects regular
 Use `restow` after pulling deletions or renames. Preview `--force` before using
 it to adopt foreign links.
 
-`tools.env` contains ordered `version|full_URL|SHA256` records for shared tools
-and runtimes, while `validation.env` owns the repository validator list and
-validator-only archives.
+`tools.env` contains tool profiles and ordered `version|full_URL|SHA256`
+records for development tools, repository validators and runtimes.
 
 Python versions use uv through `setup-tools`, with the first catalog version
 as uv's global default. Project version files are not migrated. Create a venv
@@ -107,5 +106,4 @@ Workflow validation runs locally without GitHub credentials. Set `GH_TOKEN`,
 online audits. The GitHub Actions workflow supplies its repository token.
 
 Focused tasks include `validate:bash`, `validate:configs`, `validate:nvim2`,
-`validate:old-nvim`, `validate:repo`, `validate:scripts` and
-`validate:workflows`.
+`validate:repo`, `validate:scripts` and `validate:workflows`.

@@ -34,15 +34,15 @@ The setup sequence moves regular distribution-provided Bash startup files
 aside without overwriting an existing backup. `bstow --dry-run` reports any
 remaining conflict, including a foreign symlink.
 
-`tools.env` owns tool profiles, shared release records and asdf/tmux plugin
-pins. It stores direct releases in `TOOL_RELEASES`. Each tool has ordered
+`tools.env` owns tool profiles, release records and asdf/tmux plugin pins. It
+stores direct releases in `TOOL_RELEASES`. Each tool has ordered
 `version|full_URL|SHA256` records, and the first record is the default. A
 required default without an artifact is an error, with no fallback to a later
-record. `validation.env` selects repository checks in `VALIDATOR_TOOLS` and
-keeps only validator-specific archives in `VALIDATOR_RELEASES`. Actionlint,
-ShellCheck and Task are regular development tools, so setup, validation and
-offline releases share their records from `TOOL_RELEASES`. Mason ShellCheck
-remains an independent editor pin.
+record. `VALIDATOR_TOOLS` selects repository checks from the same catalog.
+Actionlint, ShellCheck and Task are also regular development tools, so setup,
+validation and offline releases share their records. StyLua and Zizmor remain
+validator-only because they are absent from `TOOLS` and
+`OFFLINE_RELEASE_TOOLS`. Mason ShellCheck remains an independent editor pin.
 
 Yamllint has no prebuilt executable archive. Validation installs it in an
 isolated venv from the checked-in hashed Nvim Python lock. Offline releases

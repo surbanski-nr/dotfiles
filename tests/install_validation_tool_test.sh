@@ -35,7 +35,6 @@ mkdir -p "$test_repo/nvim2/.config/nvim2/python-locks"
 cp "$repo_dir/scripts/install-validation-tool" "$test_repo/scripts/"
 cp "$repo_dir/scripts/setup-lib" "$test_repo/scripts/"
 cp "$repo_dir/tools.env" "$test_repo/tools.env"
-cp "$repo_dir/validation.env" "$test_repo/validation.env"
 cp "$repo_dir/nvim2/.config/nvim2/python-locks/yamllint."{in,lock} \
   "$test_repo/nvim2/.config/nvim2/python-locks/"
 ln -s "$repo_dir/tests/fixtures/scripts/curl-copy" "$test_bin/curl"

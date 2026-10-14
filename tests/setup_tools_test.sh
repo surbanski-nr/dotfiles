@@ -90,8 +90,6 @@ load_test_versions() {
   local repository=$1
 
   # shellcheck disable=SC1090
-  source "$repository/validation.env"
-  # shellcheck disable=SC1090
   source "$repository/tools.env"
   # shellcheck disable=SC1090
   source "$repository/scripts/setup-lib"
@@ -116,7 +114,6 @@ make_test_repo() {
   cp "$repo_dir/tools.env" "$destination/tools.env"
   cp "$repo_dir/system.env" "$destination/system.env"
   cp "$repo_dir/tools-probes.env" "$destination/tools-probes.env"
-  cp "$repo_dir/validation.env" "$destination/validation.env"
 }
 
 run_setup() {
@@ -221,17 +218,21 @@ test_home="$test_root/home"
 make_test_repo "$test_repository"
 make_archives "$test_repository" "$archive_root"
 
-# Validator-only catalog must not silently accept entries outside its profile.
-for validator in foreign-validator yamllint; do
-  if (
-    source "$test_repository/tools.env"
-    source "$test_repository/validation.env"
-    VALIDATOR_RELEASES[$validator]=${VALIDATOR_RELEASES[stylua]}
-    validate_validator_config
-  ) >"$test_root/invalid-validator.log" 2>&1; then
-    fail "validator catalog accepted unsupported native tool: $validator"
-  fi
-done
+# Validator profile entries must have an artifact, except lock-backed yamllint.
+if (
+  source "$test_repository/tools.env"
+  VALIDATOR_TOOLS+=(foreign-validator)
+  validate_validator_config
+) >"$test_root/invalid-validator.log" 2>&1; then
+  fail 'validator profile accepted a missing native tool'
+fi
+if (
+  source "$test_repository/tools.env"
+  TOOL_RELEASES[yamllint]=${TOOL_RELEASES[stylua]}
+  validate_validator_config
+) >"$test_root/invalid-validator.log" 2>&1; then
+  fail 'validator profile accepted a native yamllint release'
+fi
 
 mkdir -p "$test_root/shim"
 cat >"$test_root/shim/curl" <<'EOF'

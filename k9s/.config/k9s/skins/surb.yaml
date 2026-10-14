@@ -6,15 +6,16 @@
 fg: &fg "white"
 # Preserve the terminal background instead of forcing black.
 bg: &bg default
-mark: &mark "darkgoldenrod"
-active: &active "dimgray"
+mark: &mark "#daaa3f"
+active: &active "#adbac7"
 text: &text "navajowhite"
 white: &white "whitesmoke"
 ghost: &ghost "ghostwhite"
-dslate: &dslate "darkslategray"
+dslate: &dslate "#cdd9e5"
 err: &err "pink"
-slate: &slate "slategray"
-gray: &gray "gray"
+slate: &slate "#909dab"
+gray: &gray "#a8a8a8"
+focus: &focus "#22272e"
 
 # Skin...
 k9s:
@@ -34,7 +35,7 @@ k9s:
     bgColor: *bg
     buttonFgColor: *fg
     buttonBgColor: *bg
-    buttonFocusFgColor: *slate
+    buttonFocusFgColor: *focus
     buttonFocusBgColor: *white
     labelFgColor: *ghost
     fieldFgColor: *white

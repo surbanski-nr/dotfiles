@@ -28,10 +28,9 @@ git -C "$candidate_root/current" status --short
 cp -a "$candidate_root/current" "$candidate_root/candidate"
 ```
 
-Edit only the intended shared records in `candidate/tools.env`,
-validator-specific records in `candidate/validation.env`, or builder images in
-`candidate/release.env`. `TOOL_RELEASES` and `VALIDATOR_RELEASES`
-store ordered `version|full_URL|SHA256` records. The first record is the
+Edit only the intended records in `candidate/tools.env` or builder images in
+`candidate/release.env`. `TOOL_RELEASES` stores ordered
+`version|full_URL|SHA256` records. The first record is the
 default and cannot fall back if its artifact is absent. Actionlint, ShellCheck
 and Task use `TOOL_RELEASES` for setup, repository validation and offline
 releases. Yamllint validation and offline packaging share its generated Python
@@ -41,9 +40,8 @@ still come from `TOOL_RELEASES`.
 For a tmux plugin bump, change its `*_COMMIT` in `tools.env`; change the
 adjacent `*_REPO` only when deliberately moving to a different repository.
 
-For a normal dependency bump, edit only its first record in `tools.env`,
-or in `validation.env` for validator-only native tools. Run the
-focused setup in the disposable candidate, then `task validate` and the
+For a normal dependency bump, edit only its first record in `tools.env`. Run
+the focused setup in the disposable candidate, then `task validate` and the
 affected platform build and offline checks. To go back, restore the earlier
 record as the first record and rerun the same checks. Do not edit generated
 Python locks for an unrelated tool bump.
@@ -401,8 +399,8 @@ do not resolve dependencies again. The target installs only the locked binary
 wheels with `--no-index --require-hashes --only-binary=:all:` and runs
 `pip check`; the standalone interpreter alone does not contain ansible-core,
 ansible-lint, yamllint or debugpy. The resulting venv executables remain below the
-Mason package tree; the release launcher puts the ansible-lint venv,
-`release/bin` and `mason/bin` on `PATH` in that order.
+Mason package tree. The release launcher keeps `~/bin` ahead of the private
+release paths, followed by the ansible-lint venv, `release/bin` and `mason/bin`.
 
 The Python debugger uses Mason's `debugpy` venv to run its adapter, not the
 interpreter selected for the project. After changing the debugpy pin, regenerate
