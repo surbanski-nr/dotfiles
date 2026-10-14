@@ -25,15 +25,6 @@ case $TEST_SCENARIO in
     load_aliases
     dotfiles-check
     ;;
-  uv-python-selection)
-    load_aliases
-    source "$TEST_REPO_DIR/tools.env"
-    source "$TEST_REPO_DIR/scripts/setup-lib"
-    source "$TEST_REPO_DIR/tools-probes.env"
-    _dotfiles_check_release_version 'uv Python' uv TOOL_RELEASES python \
-      python find --directory "${XDG_CONFIG_HOME:-$HOME/.config}/uv" \
-      --no-project --managed-python --offline --show-version
-    ;;
   check-mc-wrapper)
     load_aliases
     shopt -s expand_aliases
@@ -65,17 +56,22 @@ case $TEST_SCENARIO in
     kpl api
     ;;
   reload)
-    unset PROMPT_COMMAND
     load_bashrc
     load_bashrc
     load_bashrc
-    declare -p PROMPT_COMMAND
-    printf 'settings=%s:%s:%s:%s:%s:%s\n' \
-      "$HISTSIZE" "$HISTFILESIZE" "$IGNOREEOF" \
-      "$(set -o | awk '$1 == "pipefail" { print $2 }')" \
-      "$(shopt -q histverify && printf on || printf off)" \
-      "$(shopt -q checkjobs && printf on || printf off)"
-    printf 'venv_disable_prompt=%s\n' "$VIRTUAL_ENV_DISABLE_PROMPT"
+    ;;
+  prompt-history)
+    set +o history
+    PROMPT_COMMAND='printf "user\n" >>"$TEST_PROMPT_LOG"'
+    load_bashrc
+    load_bashrc
+    load_bashrc
+    history -c
+    history -s 'command from first shell'
+    for prompt_command in "${PROMPT_COMMAND[@]}"; do eval "$prompt_command"; done
+    printf 'command from second shell\n' >>"$HISTFILE"
+    for prompt_command in "${PROMPT_COMMAND[@]}"; do eval "$prompt_command"; done
+    HISTTIMEFORMAT='' history
     ;;
   broken-integration)
     zoxide() { return 9; }

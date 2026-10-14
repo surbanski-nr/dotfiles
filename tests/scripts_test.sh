@@ -248,27 +248,14 @@ run_command env PATH="$fixture_bin:$PATH" TEST_KUBECTL_SCENARIO=curr-namespace-f
   "$repo_dir/scripts/curr"
 [[ $status -ne 0 ]] || fail 'curr hid namespace failure'
 
-psql_log=$test_root/psql.log
-database_json='["alpha","quote\"db"]'
-run_command env PATH="$fixture_bin:$PATH" TEST_COMMAND_LOG="$psql_log" \
-  TEST_PSQL_OUTPUT="$database_json" "$repo_dir/scripts/postgres-db-list"
-assert_status 0 'postgres-db-list JSON output'
-[[ $output == "$database_json" ]] || fail 'postgres-db-list changed JSON output'
-grep -Fx $'ARG\t-X' "$psql_log" >/dev/null || fail 'postgres-db-list omitted -X'
-grep -Fx $'ARG\tON_ERROR_STOP=1' "$psql_log" >/dev/null ||
-  fail 'postgres-db-list omitted ON_ERROR_STOP'
-grep -F 'json_agg(datname ORDER BY datname)' "$psql_log" >/dev/null ||
-  fail 'postgres-db-list does not generate JSON in SQL'
-run_command env PATH="$fixture_bin:$PATH" TEST_PSQL_OUTPUT='[]' \
-  "$repo_dir/scripts/postgres-db-list"
-assert_status 0 'postgres-db-list empty list'
-[[ $output == '[]' ]] || fail 'postgres-db-list changed an empty list'
 run_command env PATH="$fixture_bin:$PATH" TEST_PSQL_OUTPUT= \
   "$repo_dir/scripts/postgres-db-list"
 [[ $status -ne 0 ]] || fail 'postgres-db-list accepted missing query output'
+assert_contains "$output" 'database query returned no output' 'postgres-db-list empty result error'
 run_command env PATH="$fixture_bin:$PATH" TEST_PSQL_FAIL=1 \
   "$repo_dir/scripts/postgres-db-list"
 [[ $status -ne 0 ]] || fail 'postgres-db-list hid a query failure'
+assert_contains "$output" 'database query failed' 'postgres-db-list query error'
 
 notes_root=$test_root/'notes with spaces'
 mkdir -p "$notes_root"

@@ -76,26 +76,33 @@ editor_output=$(
 
 python_home=$test_root/python-home
 python_xdg=$test_root/'python config'
-mkdir -p "$python_home/bin" "$python_xdg/uv" "$python_home/project"
-cat >"$python_home/bin/uv" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-[[ $1 == python && $2 == find && $3 == --directory ]]
-[[ " $* " == *' --offline '* && " $* " == *' --managed-python '* ]]
-printf '%s\n' "$(<"$4/.python-version")"
-EOF
-chmod 0755 "$python_home/bin/uv"
-printf '3.12.12\n' >"$python_xdg/uv/.python-version"
+python_manifest=$test_root/python-manifest
+mkdir -p "$python_home/bin" "$python_xdg/uv" "$python_home/project" "$python_manifest/scripts"
+cp "$repo_dir/tools.env" "$python_manifest/tools.env"
+printf 'TOOL_RELEASES[python]=%q\n' \
+  $'\n3.9.7|https://example.invalid/python-3.9.7.tar.gz|0000000000000000000000000000000000000000000000000000000000000000\n' \
+  >>"$python_manifest/tools.env"
+ln -s "$repo_dir/scripts/setup-lib" "$python_manifest/scripts/setup-lib"
+ln -s "$repo_dir/tools-probes.env" "$python_manifest/tools-probes.env"
+for command_name in bash grep timeout; do
+  ln -s "$(command -v "$command_name")" "$python_home/bin/$command_name"
+done
+for command_name in git nvim tmux less mc node python rg uv; do
+  ln -s "$command_fixture" "$python_home/bin/$command_name"
+done
+printf '3.9.7\n' >"$python_xdg/uv/.python-version"
 printf '3.10.0\n' >"$python_home/project/.python-version"
 python_output=$(
   cd "$python_home/project"
-  run_scenario uv-python-selection env HOME="$python_home" XDG_CONFIG_HOME="$python_xdg" \
-    PATH="$python_home/bin:$original_path"
+  TEST_COMMAND_MODE=versions run_scenario check-tools \
+    env HOME="$python_home" XDG_CONFIG_HOME="$python_xdg" DOTFILES="$python_manifest" \
+    PATH="$python_home/bin"
 )
 assert_contains "$python_output" 'OK      uv Python'
 printf '3.11.0\n' >"$python_xdg/uv/.python-version"
-if run_scenario uv-python-selection env HOME="$python_home" XDG_CONFIG_HOME="$python_xdg" \
-  PATH="$python_home/bin:$original_path" >"$test_root/python-mismatch.log"; then
+if TEST_COMMAND_MODE=versions run_scenario check-tools \
+  env HOME="$python_home" XDG_CONFIG_HOME="$python_xdg" DOTFILES="$python_manifest" \
+  PATH="$python_home/bin" >"$test_root/python-mismatch.log"; then
   fail 'version diagnostics accepted the wrong global Python'
 fi
 assert_contains "$(<"$test_root/python-mismatch.log")" 'MISMATCH uv Python'
@@ -145,23 +152,24 @@ mkdir -p "$test_root/logs"
 reload_home=$test_root/reload-home
 mkdir -p "$reload_home"
 ln -s "$repo_dir/bash/.bash_aliases" "$reload_home/.bash_aliases"
+link_command zoxide
 reload_output=$(
   timeout 15 env HOME="$reload_home" PATH="$test_root/bin:$original_path" \
-    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=reload \
+    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=prompt-history \
+    TEST_COMMAND_MODE=reload TEST_PROMPT_LOG="$test_root/prompts.log" \
     bash --noprofile --norc -i "$scenario_fixture" 2>&1
 )
-[[ $(grep -o '_dotfiles_history_sync' <<<"$reload_output" | wc -l) -eq 1 ]] ||
-  fail 'history prompt hook was duplicated on reload'
-[[ $(grep -o '__zoxide_hook' <<<"$reload_output" | wc -l) -le 1 ]] ||
-  fail 'zoxide prompt hook was duplicated on reload'
-[[ $reload_output != *'history -r'* ]] ||
-  fail 'legacy full history reload remains in PROMPT_COMMAND'
-[[ $reload_output != *'_dotfiles_sync_virtual_env_prompt'* ]] ||
-  fail 'removed virtual environment prompt hook remains in PROMPT_COMMAND'
-assert_contains "$reload_output" 'settings=100000:100000:3:on:on:on'
-assert_contains "$reload_output" 'venv_disable_prompt=1'
+for origin in first second; do
+  [[ $(grep -c "command from $origin shell" <<<"$reload_output") -eq 1 ]] ||
+    fail "history did not retain exactly one command from the $origin shell"
+done
+[[ $(grep -cx 'command from first shell' "$reload_home/.histfile") -eq 1 ]] ||
+  fail 'prompt did not append the local command to shared history'
+for hook in user zoxide; do
+  [[ $(grep -cx "$hook" "$test_root/prompts.log") -eq 2 ]] ||
+    fail "$hook prompt ran more than once per prompt after reload"
+done
 
-link_command zoxide
 broken_output=$(
   timeout 15 env HOME="$reload_home" PATH="$test_root/bin:$original_path" \
     TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=broken-integration \

@@ -65,6 +65,17 @@ tasks:
     cmds:
       - bash scripts/update-offline-python-locks
 
+  test:postgres:
+    desc: Test postgres-db-list against a disposable PostgreSQL server
+    cmds:
+      - >-
+        timeout --signal=TERM --kill-after=10s 180s
+        docker run --rm --init --network none --user postgres
+        --mount "type=bind,src={{.ROOT_DIR}},dst=/dotfiles,readonly"
+        --entrypoint bash
+        postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
+        /dotfiles/tests/postgres_db_list_test.sh
+
   tools:actionlint:
     internal: true
     run: once

@@ -135,6 +135,8 @@ validate_scripts() {
     tests/dotfiles_release_ci_test.sh
     tests/offline_debug_adapter_test.sh
     tests/offline_go_test.sh
+    tests/offline_launchers_test.sh
+    tests/postgres_db_list_test.sh
     tests/scripts_test.sh
     tests/setup_asdf_test.sh
     tests/setup_system_test.sh
@@ -147,6 +149,9 @@ validate_scripts() {
   while IFS= read -r -d '' file; do
     files+=("$file")
   done < <(find scripts -maxdepth 1 -type f -print0 | sort -z)
+  while IFS= read -r -d '' file; do
+    files+=("$file")
+  done < <(find tests/dotfiles_release tests/setup_tools -type f -name '*.sh' -print0 | sort -z)
   if [[ -d tests/fixtures ]]; then
     while IFS= read -r -d '' file; do
       files+=("$file")
@@ -177,6 +182,7 @@ validate_scripts() {
   timeout 120s bash tests/dotfiles_release_ci_test.sh
   timeout 30s bash tests/offline_debug_adapter_test.sh
   timeout 30s bash tests/offline_go_test.sh
+  timeout 30s bash tests/offline_launchers_test.sh
   timeout 120s bash tests/scripts_test.sh
   timeout 30s bash tests/setup_asdf_test.sh
   timeout 30s bash tests/setup_system_test.sh
@@ -392,8 +398,11 @@ validate_repo() {
     die 'offline release files retain a legacy name or baked target identity'
   fi
 
-  [[ ! -x scripts/setup-lib ]] || die 'source-only library is executable: scripts/setup-lib'
+  for file in scripts/setup-lib tests/dotfiles_release/fixture.sh tests/setup_tools/fixture.sh; do
+    [[ ! -x $file ]] || die "source-only library is executable: $file"
+  done
   for file in scripts/* tests/fixtures/*/* \
+    tests/dotfiles_release/*_test.sh tests/setup_tools/*_test.sh \
     bstow vim/setup nvim2/.config/nvim2/tests/check.sh; do
     [[ $file == scripts/setup-lib ]] && continue
     [[ -x $file ]] || die "executable bit is missing: $file"

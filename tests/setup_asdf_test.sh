@@ -19,8 +19,7 @@ fail() {
 source "$repo_dir/tools.env"
 # shellcheck source=../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
-select_default_release TOOL_RELEASES asdf
-ASDF_VERSION=$RELEASE_VERSION
+ASDF_VERSION=9.9.0
 
 append_release() {
   local file=$1 tool=$2 version=$3 url=$4 digest=$5 value
@@ -28,6 +27,27 @@ append_release() {
   value=$'\n'"$version|$url|$digest"$'\n'
   printf 'TOOL_RELEASES[%q]=%q\n' "$tool" "$value" >>"$file"
 }
+
+test_catalog=$test_root/tools.env
+cp "$repo_dir/tools.env" "$test_catalog"
+append_release "$test_catalog" asdf "$ASDF_VERSION" \
+  https://example.invalid/asdf.tar.gz "$(printf '%064d' 0)"
+printf 'TOOL_RELEASES[terraform]=%q\n' \
+  $'\n9.2.0|https://example.invalid/terraform-9.2.0.zip|0000000000000000000000000000000000000000000000000000000000000000\n9.1.0|https://example.invalid/terraform-9.1.0.zip|1111111111111111111111111111111111111111111111111111111111111111\n' \
+  >>"$test_catalog"
+append_release "$test_catalog" nodejs 89.1.0 \
+  https://example.invalid/node-v89.1.0-linux-x64.tar.xz "$(printf '%064d' 0)"
+append_release "$test_catalog" terragrunt 9.3.0 \
+  https://example.invalid/terragrunt_linux_amd64 "$(printf '%064d' 0)"
+cat >>"$test_catalog" <<'EOF'
+ASDF_PLUGINS=(
+  [terraform]='https://example.invalid/terraform.git|0000000000000000000000000000000000000000'
+  [nodejs]='https://example.invalid/nodejs.git|0000000000000000000000000000000000000000'
+  [terragrunt]='https://example.invalid/terragrunt.git|0000000000000000000000000000000000000000'
+)
+EOF
+# shellcheck disable=SC1090
+source "$test_catalog"
 
 write_asdf_fixture() {
   local path=$1 version=$2
@@ -87,7 +107,7 @@ test_home="$test_root/home"
 mkdir -p "$test_repo/scripts" "$test_home/bin"
 cp "$repo_dir/setup-asdf" "$test_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$test_repo/scripts/setup-lib"
-cp "$repo_dir/tools.env" "$test_repo/tools.env"
+cp "$test_catalog" "$test_repo/tools.env"
 cp "$repo_dir/system.env" "$test_repo/system.env"
 
 for tool in kubectl helm python; do
@@ -152,7 +172,7 @@ legacy_archive=$test_root/asdf.tar.gz
 mkdir -p "$legacy_repo/scripts" "$legacy_home/bin" "$legacy_archive_root"
 cp "$repo_dir/setup-asdf" "$legacy_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$legacy_repo/scripts/setup-lib"
-cp "$repo_dir/tools.env" "$legacy_repo/tools.env"
+cp "$test_catalog" "$legacy_repo/tools.env"
 cp "$repo_dir/system.env" "$legacy_repo/system.env"
 prepare_plugin "$legacy_home" "$legacy_repo"
 write_asdf_fixture "$legacy_archive_root/asdf" "$ASDF_VERSION"
@@ -246,13 +266,13 @@ reconcile_log=$test_root/reconcile.log
 mkdir -p "$reconcile_repo/scripts" "$reconcile_home/bin"
 cp "$repo_dir/setup-asdf" "$reconcile_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$reconcile_repo/scripts/setup-lib"
-cp "$repo_dir/tools.env" "$reconcile_repo/tools.env"
+cp "$test_catalog" "$reconcile_repo/tools.env"
 cp "$repo_dir/system.env" "$reconcile_repo/system.env"
 prepare_plugin "$reconcile_home" "$reconcile_repo"
-write_asdf_fixture "$reconcile_home/bin/asdf-0.19.0" 0.19.0
+write_asdf_fixture "$reconcile_home/bin/asdf-0.0.1" 0.0.1
 write_asdf_fixture "$reconcile_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
-ln -s asdf-0.19.0 "$reconcile_home/bin/asdf"
-record_asdf_fixture "$reconcile_home" asdf-0.19.0
+ln -s asdf-0.0.1 "$reconcile_home/bin/asdf"
+record_asdf_fixture "$reconcile_home" asdf-0.0.1
 sha256sum "$reconcile_home/bin/asdf-$ASDF_VERSION" | awk '{print $1}' \
   >"$reconcile_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256"
 
@@ -260,7 +280,7 @@ HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
   "$reconcile_repo/setup-asdf" terraform
 [[ $(readlink -- "$reconcile_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
   fail 'managed asdf was not upgraded to the selected version'
-[[ -x $reconcile_home/bin/asdf-0.19.0 ]] || fail 'previous asdf binary was removed'
+[[ -x $reconcile_home/bin/asdf-0.0.1 ]] || fail 'previous asdf binary was removed'
 [[ $(<"$reconcile_home/.local/state/dotfiles/setup-asdf/asdf-target") == "asdf-$ASDF_VERSION" ]] ||
   fail 'selected asdf target was not recorded'
 HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
@@ -276,18 +296,18 @@ order_log=$test_root/order.log
 mkdir -p "$order_repo/scripts" "$order_home/bin"
 cp "$repo_dir/setup-asdf" "$order_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$order_repo/scripts/setup-lib"
-cp "$repo_dir/tools.env" "$order_repo/tools.env"
+cp "$test_catalog" "$order_repo/tools.env"
 cp "$repo_dir/system.env" "$order_repo/system.env"
 prepare_plugin "$order_home" "$order_repo"
 write_asdf_fixture "$order_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
 ln -s "asdf-$ASDF_VERSION" "$order_home/bin/asdf"
 record_asdf_fixture "$order_home" "asdf-$ASDF_VERSION"
 printf 'TOOL_RELEASES[terraform]=%q\n' \
-  $'\n1.15.9|https://example.invalid/terraform-1.15.9.zip|0000000000000000000000000000000000000000000000000000000000000000\n1.16.4|https://example.invalid/terraform-1.16.4.zip|1111111111111111111111111111111111111111111111111111111111111111\n' \
+  $'\n9.1.0|https://example.invalid/terraform-9.1.0.zip|0000000000000000000000000000000000000000000000000000000000000000\n9.2.0|https://example.invalid/terraform-9.2.0.zip|1111111111111111111111111111111111111111111111111111111111111111\n' \
   >>"$order_repo/tools.env"
 HOME="$order_home" TEST_ASDF_LOG="$order_log" "$order_repo/setup-asdf" terraform
-[[ $(grep '^install' "$order_log") == $'install\tterraform\t1.15.9\ninstall\tterraform\t1.16.4' &&
-  $(tail -n 1 "$order_log") == $'set\tterraform\t1.15.9' ]] ||
+[[ $(grep '^install' "$order_log") == $'install\tterraform\t9.1.0\ninstall\tterraform\t9.2.0' &&
+  $(tail -n 1 "$order_log") == $'set\tterraform\t9.1.0' ]] ||
   fail 'record order did not control installation order and home default'
 
 default_repo=$test_root/default-repository
@@ -296,7 +316,7 @@ default_log=$test_root/default.log
 mkdir -p "$default_repo/scripts" "$default_home/bin"
 cp "$repo_dir/setup-asdf" "$default_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$default_repo/scripts/setup-lib"
-cp "$repo_dir/tools.env" "$default_repo/tools.env"
+cp "$test_catalog" "$default_repo/tools.env"
 cp "$repo_dir/system.env" "$default_repo/system.env"
 for tool in "${!ASDF_PLUGINS[@]}"; do
   prepare_plugin "$default_home" "$default_repo" "$tool"
@@ -309,14 +329,14 @@ for tool in kubectl helm; do
   chmod 0755 "$default_home/bin/$tool"
 done
 HOME="$default_home" TEST_ASDF_LOG="$default_log" "$default_repo/setup-asdf"
-[[ $(grep -c '^install' "$default_log") -eq 4 ]] ||
-  fail 'default setup-asdf did not install every catalog runtime version'
-[[ $(grep -c '^set' "$default_log") -eq 3 ]] ||
-  fail 'default setup-asdf did not select every home default'
+for installation in terraform/9.2.0 terraform/9.1.0 nodejs/89.1.0 terragrunt/9.3.0; do
+  [[ -d $default_home/.asdf/installs/$installation ]] ||
+    fail "default setup-asdf did not install $installation"
+done
 for expected in \
-  $'set\tterraform\t1.16.4' \
-  $'set\tnodejs\t22.23.2' \
-  $'set\tterragrunt\t1.1.6'; do
+  $'set\tterraform\t9.2.0' \
+  $'set\tnodejs\t89.1.0' \
+  $'set\tterragrunt\t9.3.0'; do
   grep -Fx "$expected" "$default_log" >/dev/null ||
     fail "default setup-asdf omitted: $expected"
 done
@@ -344,7 +364,7 @@ failure_log=$test_root/failure.log
 mkdir -p "$failure_repo/scripts" "$failure_home/bin"
 cp "$repo_dir/setup-asdf" "$failure_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$failure_repo/scripts/setup-lib"
-cp "$repo_dir/tools.env" "$failure_repo/tools.env"
+cp "$test_catalog" "$failure_repo/tools.env"
 cp "$repo_dir/system.env" "$failure_repo/system.env"
 prepare_plugin "$failure_home" "$failure_repo"
 write_asdf_fixture "$failure_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
@@ -352,7 +372,7 @@ ln -s "asdf-$ASDF_VERSION" "$failure_home/bin/asdf"
 record_asdf_fixture "$failure_home" "asdf-$ASDF_VERSION"
 set +e
 HOME="$failure_home" TEST_ASDF_LOG="$failure_log" \
-  TEST_ASDF_FAIL_VERSION=1.15.9 \
+  TEST_ASDF_FAIL_VERSION=9.1.0 \
   "$failure_repo/setup-asdf" terraform >/dev/null 2>&1
 failure_status=$?
 set -e
@@ -363,7 +383,7 @@ set -e
 HOME="$failure_home" TEST_ASDF_LOG="$failure_log" \
   "$failure_repo/setup-asdf" terraform >/dev/null
 [[ $(grep -c '^install' "$failure_log") -eq 3 &&
-  $(tail -n 1 "$failure_log") == $'set\tterraform\t1.16.4' ]] ||
+  $(tail -n 1 "$failure_log") == $'set\tterraform\t9.2.0' ]] ||
   fail 'runtime retry did not reuse success and finish the failed version'
 
 # Interrupt each publication boundary, then retry with downloads disabled once

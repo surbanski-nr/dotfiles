@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+self=$(readlink -f -- "$0")
+release=${self%/bin/tmux}
+config="$release/dotfiles/tmux/.tmux.conf"
+export TMUX_OFFLINE_RELEASE_ROOT="$release"
+export TMUX_OFFLINE_CONFIG="$config"
+for argument in "$@"; do
+  if [[ $argument == -f ]]; then
+    exec "$release/tools/tmux/bin/tmux" "$@"
+  fi
+done
+exec "$release/tools/tmux/bin/tmux" -f "$config" "$@"

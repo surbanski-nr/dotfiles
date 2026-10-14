@@ -94,7 +94,7 @@ NVIM_APPNAME=nvim2 nvim
 
 or `v` alias.## Validation
 
-Bootstrap the pinned Task executable and run every repository check with:
+Bootstrap the pinned Task executable and run repository validation with:
 
 ```bash
 bash scripts/install-validation-tool task
@@ -107,3 +107,7 @@ online audits. The GitHub Actions workflow supplies its repository token.
 
 Focused tasks include `validate:bash`, `validate:configs`, `validate:nvim2`,
 `validate:repo`, `validate:scripts` and `validate:workflows`.
+
+The PostgreSQL query test runs in CI through `test:postgres`. Run this task
+locally with Docker access after changing `scripts/postgres-db-list`.
+See [maintenance/setup.md](maintenance/setup.md#validation) for focused test scenarios.

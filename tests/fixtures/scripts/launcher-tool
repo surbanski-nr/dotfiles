@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ ${1:-} == fixture-shell ]]; then
+  exec bash --noprofile --norc -i "$TEST_REPO_DIR/tests/fixtures/bash/scenario"
+fi
+
+printf 'tool=%s\napp=%s\nconfig=%s\ndata=%s\nGOROOT=%s\nGOTOOLCHAIN=%s\ntmux-config=%s\n' \
+  "$(readlink -f -- "$0")" "${NVIM_APPNAME:-unset}" \
+  "${XDG_CONFIG_HOME:-unset}" "${XDG_DATA_HOME:-unset}" \
+  "${GOROOT:-unset}" "${GOTOOLCHAIN:-unset}" "${TMUX_OFFLINE_CONFIG:-unset}"
+printf '<%s>\n' "$@"
+exit "${FIXTURE_LAUNCHER_EXIT_CODE:-0}"

@@ -6,6 +6,35 @@ command_name=${0##*/}
 mode=${TEST_COMMAND_MODE:-ok}
 
 case "$command_name:$mode" in
+  *:versions)
+    if [[ $command_name == uv && ${1:-} == python ]]; then
+      [[ ${2:-} == find ]] || exit 2
+      shift 2
+      directory=$PWD
+      while (($#)); do
+        case $1 in
+          --directory) directory=$2; shift 2 ;;
+          *) shift ;;
+        esac
+      done
+      printf '%s\n' "$(<"$directory/.python-version")"
+    else
+      # shellcheck source=../../../tools.env
+      source "$DOTFILES/tools.env"
+      # shellcheck source=../../../scripts/setup-lib
+      source "$DOTFILES/scripts/setup-lib"
+      tool=$command_name
+      [[ $tool != node ]] || tool=nodejs
+      select_default_release TOOL_RELEASES "$tool"
+      printf '%s %s\n' "$command_name" "$RELEASE_VERSION"
+    fi
+    ;;
+  zoxide:reload)
+    # shellcheck disable=SC2016
+    printf '%s\n' \
+      '__zoxide_hook() { printf "zoxide\n" >>"$TEST_PROMPT_LOG"; }' \
+      'PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }__zoxide_hook"'
+    ;;
   zoxide:broken-integration)
     exit 9
     ;;

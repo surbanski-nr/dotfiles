@@ -168,62 +168,13 @@ prepare_release_artifact() {
 write_launchers() {
   local release=$1 tool
 
-  cat >"$release/bin/nvim" <<'BASH' || return
-#!/usr/bin/env bash
-set -euo pipefail
-self=$(readlink -f -- "$0")
-release=${self%/bin/nvim}
-export NVIM_APPNAME=${NVIM_APPNAME:-nvim2}
-if [[ $NVIM_APPNAME == nvim2 ]]; then
-  if [[ -f $release/installed.sha256 ]]; then
-    export DOTFILES_OFFLINE_RELEASE_ROOT="$release"
-  fi
-  # Keep the original user environment across nested launches. Bash restores it.
-  for name in XDG_CONFIG_HOME XDG_DATA_HOME _ZO_DATA_DIR GOROOT GOTOOLCHAIN; do
-    marker=DOTFILES_LAUNCHER_${name#_}_SET
-    value=DOTFILES_LAUNCHER_${name#_}
-    [[ ! -v $marker ]] || continue
-    if [[ -v $name ]]; then
-      export "$marker=1" "$value=${!name}"
-    else
-      export "$marker=0"
-    fi
+  for tool in nvim tmux go; do
+    install -m 0755 "$release/dotfiles/scripts/offline-$tool" "$release/bin/$tool" || return
   done
-  if [[ ! -v _ZO_DATA_DIR ]]; then
-    export _ZO_DATA_DIR=${XDG_DATA_HOME:-$HOME/.local/share}/zoxide
-  fi
-  export XDG_CONFIG_HOME="$release/config"
-  export XDG_DATA_HOME="$release/share"
-  if [[ -x $release/tools/go/bin/go ]]; then
-    unset GOROOT
-    export GOTOOLCHAIN=local
-  fi
-  ansible_bin="$release/share/nvim2/mason/packages/ansible-lint/venv/bin"
-  export PATH="$HOME/bin:$ansible_bin:$release/bin:$release/share/nvim2/mason/bin${PATH:+:$PATH}"
-fi
-exec "$release/tools/nvim/bin/nvim" "$@"
-BASH
-  cat >"$release/bin/tmux" <<'BASH' || return
-#!/usr/bin/env bash
-set -euo pipefail
-self=$(readlink -f -- "$0")
-release=${self%/bin/tmux}
-config="$release/dotfiles/tmux/.tmux.conf"
-export TMUX_OFFLINE_RELEASE_ROOT="$release"
-export TMUX_OFFLINE_CONFIG="$config"
-for argument in "$@"; do
-  if [[ $argument == -f ]]; then
-    exec "$release/tools/tmux/bin/tmux" "$@"
-  fi
-done
-exec "$release/tools/tmux/bin/tmux" -f "$config" "$@"
-BASH
-  chmod 0755 "$release/bin/nvim" "$release/bin/tmux" || return
   for tool in kubectl helm; do
     install -m 0755 "$release/dotfiles/scripts/offline-kubernetes-client" \
       "$release/bin/$tool" || return
   done
-  install -m 0755 "$release/dotfiles/scripts/offline-go" "$release/bin/go" || return
 }
 
 install_release_tools() {
