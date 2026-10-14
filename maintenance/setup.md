@@ -749,17 +749,6 @@ bash tests/dotfiles_release_test.sh lifecycle
 bash tests/setup_tools_test.sh recovery
 ```
 
-After changing `scripts/postgres-db-list`, also run its query against PostgreSQL:
-
-```bash
-.cache/validation-tools/bin/task test:postgres
-```
-
-CI runs this test after repository validation. The task requires Docker access.
-It runs the pinned PostgreSQL image from the
-Taskfile with networking disabled, a read-only repository mount and a temporary
-database cluster that is removed on exit.
-
 Repository-owned shell sources are linted from their real checked-in paths.
 The Bash startup also conditionally loads distribution-owned Midnight
 Commander, bash-completion and fzf files. Their paths differ by supported

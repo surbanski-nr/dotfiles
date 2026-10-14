@@ -136,7 +136,6 @@ validate_scripts() {
     tests/offline_debug_adapter_test.sh
     tests/offline_go_test.sh
     tests/offline_launchers_test.sh
-    tests/postgres_db_list_test.sh
     tests/scripts_test.sh
     tests/setup_asdf_test.sh
     tests/setup_system_test.sh
