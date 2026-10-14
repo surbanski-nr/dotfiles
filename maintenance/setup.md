@@ -1,4 +1,4 @@
-# Dotfiles setup
+# Dotfiles setup notes
 
 The supported setup target is Linux x86-64 on Debian 13, Ubuntu 24.04,
 Ubuntu 26.04 or Amazon Linux 2023. Run the scripts as the intended ordinary
@@ -38,15 +38,15 @@ remaining conflict, including a foreign symlink.
 stores direct releases in `TOOL_RELEASES`. Each tool has ordered
 `version|full_URL|SHA256` records, and the first record is the default. A
 required default without an artifact is an error, with no fallback to a later
-record. `VALIDATOR_TOOLS` selects repository checks from the same catalog.
-Actionlint, ShellCheck and Task are also regular development tools, so setup,
-validation and offline releases share their records. StyLua and Zizmor remain
-validator-only because they are absent from `TOOLS` and
-`OFFLINE_RELEASE_TOOLS`. Mason ShellCheck remains an independent editor pin.
+record. Actionlint, ShellCheck and Task are also regular development tools;
+their records supply connected setup and offline releases. `dotfiles-check`
+checks this development catalog. Repository validation has independent pins
+in `validation.env`. Mason ShellCheck remains an independent editor pin.
 
-Yamllint has no prebuilt executable archive. Validation installs it in an
-isolated venv from the checked-in hashed Nvim Python lock. Offline releases
-use that same lock and expose the resulting executable in `release/bin`.
+Yamllint has no prebuilt executable archive. Repository validation installs
+the exact `YAMLLINT_VERSION` from `validation.env` with pip in an isolated
+venv. Offline releases use the Nvim Python lock and expose that executable
+in `release/bin`.
 
 `TOOLS` and `OFFLINE_RELEASE_TOOLS` are the authoritative tool profiles, with
 one tool per line. Both include `fd`, installed from its verified official
@@ -727,6 +727,12 @@ transfer the manager and each complete plugin installation; a copied kubectl
 executable does not include plugins.
 
 ## Validation
+
+`validation.env` owns `VALIDATION_TOOLS`, `VALIDATION_RELEASES` and
+`YAMLLINT_VERSION`. Task and GitHub Actions install their check tools from
+this manifest under `.cache/validation-tools`. Changes to development tools
+in `tools.env` or editor Python locks do not select new repository validation
+versions.
 
 Run the repository checks through Task:
 

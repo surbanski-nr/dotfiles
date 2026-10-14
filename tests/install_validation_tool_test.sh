@@ -24,7 +24,6 @@ run_installer() {
     TEST_DOWNLOAD_FILE="${TEST_DOWNLOAD_FILE:-}" \
     TEST_DOWNLOAD_FAIL="${TEST_DOWNLOAD_FAIL:-0}" \
     TEST_VENV_PIP_FAIL="${TEST_VENV_PIP_FAIL:-0}" \
-    TEST_YAMLLINT_VERSION="${TEST_YAMLLINT_VERSION:-}" \
     bash "$test_repo/scripts/install-validation-tool" "$1" 2>&1)
   status=$?
   set -e
@@ -35,9 +34,22 @@ mkdir -p "$test_repo/nvim2/.config/nvim2/python-locks"
 cp "$repo_dir/scripts/install-validation-tool" "$test_repo/scripts/"
 cp "$repo_dir/scripts/setup-lib" "$test_repo/scripts/"
 cp "$repo_dir/tools.env" "$test_repo/tools.env"
-cp "$repo_dir/nvim2/.config/nvim2/python-locks/yamllint."{in,lock} \
-  "$test_repo/nvim2/.config/nvim2/python-locks/"
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
 ln -s "$repo_dir/tests/fixtures/scripts/curl-copy" "$test_bin/curl"
+
+printf 'VALIDATION_TOOLS+=(missing-validation-tool)\n' >>"$test_repo/validation.env"
+run_installer task
+[[ $status -ne 0 && $output == *'has no releases for validation tool missing-validation-tool'* ]] ||
+  fail 'validation profile accepted a missing native tool'
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
+
+cat >>"$test_repo/validation.env" <<'EOF'
+VALIDATION_RELEASES[yamllint]=${VALIDATION_RELEASES[stylua]}
+EOF
+run_installer yamllint
+[[ $status -ne 0 && $output == *'yamllint version belongs in YAMLLINT_VERSION'* ]] ||
+  fail 'validation profile accepted a native yamllint release'
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
 
 cat >"$tools_dir/bin/actionlint" <<'EOF'
 #!/usr/bin/env bash
@@ -57,8 +69,8 @@ candidate_archive=$test_root/actionlint.tar.gz
 tar -czf "$candidate_archive" -C "$candidate_dir" actionlint
 candidate_hash=$(sha256sum "$candidate_archive")
 candidate_hash=${candidate_hash%% *}
-cat >>"$test_repo/tools.env" <<EOF
-TOOL_RELEASES[actionlint]='
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[actionlint]='
 2.0.0|https://example.invalid/actionlint.tar.gz|$candidate_hash
 '
 EOF
@@ -79,9 +91,9 @@ bad_archive=$test_root/not-a-tar.gz
 printf 'not an archive\n' >"$bad_archive"
 bad_hash=$(sha256sum "$bad_archive")
 bad_hash=${bad_hash%% *}
-cp "$repo_dir/tools.env" "$test_repo/tools.env"
-cat >>"$test_repo/tools.env" <<EOF
-TOOL_RELEASES[actionlint]='
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[actionlint]='
 2.0.0|https://example.invalid/actionlint.tar.gz|$bad_hash
 '
 EOF
@@ -92,9 +104,9 @@ run_installer actionlint
 [[ $(sha256sum "$tools_dir/bin/actionlint") == "$old_actionlint_hash" ]] ||
   fail 'failed extraction replaced the existing actionlint'
 
-cp "$repo_dir/tools.env" "$test_repo/tools.env"
-cat >>"$test_repo/tools.env" <<EOF
-TOOL_RELEASES[actionlint]='
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[actionlint]='
 2.0.0|https://example.invalid/actionlint.tar.gz|$candidate_hash
 '
 EOF
@@ -113,14 +125,14 @@ printf 'yamllint 1.0.0\n'
 EOF
 chmod +x "$tools_dir/bin/yamllint"
 old_yamllint_hash=$(sha256sum "$tools_dir/bin/yamllint")
-printf 'yamllint==2.0.0\n' \
+printf 'YAMLLINT_VERSION=2.0.0\n' >>"$test_repo/validation.env"
+printf 'yamllint==8.0.0\n' \
   >"$test_repo/nvim2/.config/nvim2/python-locks/yamllint.in"
-printf 'yamllint==2.0.0 --hash=sha256:%064d\n' 0 \
+printf 'yamllint==8.0.0 --hash=sha256:%064d\n' 0 \
   >"$test_repo/nvim2/.config/nvim2/python-locks/yamllint.lock"
 ln -s "$repo_dir/tests/fixtures/scripts/python3-venv" "$test_bin/python3"
 TEST_VENV_PIP_FAIL=1
-TEST_YAMLLINT_VERSION=2.0.0
-export TEST_VENV_PIP_FAIL TEST_YAMLLINT_VERSION
+export TEST_VENV_PIP_FAIL
 run_installer yamllint
 [[ $status -ne 0 ]] || fail 'installer accepted a failed Yamllint pip install'
 [[ $(sha256sum "$tools_dir/bin/yamllint") == "$old_yamllint_hash" ]] ||
@@ -134,9 +146,9 @@ run_installer yamllint
 [[ $status -eq 0 ]] || fail "valid Yamllint activation failed: $output"
 [[ -L $tools_dir/bin/yamllint ]] || fail 'Yamllint activation did not publish a link'
 [[ $("$tools_dir/bin/yamllint" --version) == 'yamllint 2.0.0' ]] ||
-  fail 'activated Yamllint does not run from its final environment'
+  fail 'activated Yamllint did not use the validation pin independently of the editor pin'
 
-task_version=3.53.1
+task_version=9.8.7
 task_candidate_dir=$test_root/task-candidate
 mkdir "$task_candidate_dir"
 cat >"$task_candidate_dir/task" <<EOF
@@ -148,10 +160,15 @@ task_archive=$test_root/task.tar.gz
 tar -czf "$task_archive" -C "$task_candidate_dir" task
 task_hash=$(sha256sum "$task_archive")
 task_hash=${task_hash%% *}
-cp "$repo_dir/tools.env" "$test_repo/tools.env"
+cp "$repo_dir/validation.env" "$test_repo/validation.env"
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[task]='
+$task_version|https://example.invalid/task.tar.gz|$task_hash
+'
+EOF
 cat >>"$test_repo/tools.env" <<EOF
 TOOL_RELEASES[task]='
-$task_version|https://example.invalid/task.tar.gz|$task_hash
+9.8.6|https://example.invalid/development-task.tar.gz|$task_hash
 '
 EOF
 cat >"$test_bin/task" <<EOF
@@ -164,7 +181,7 @@ TEST_DOWNLOAD_FILE=$task_archive
 TEST_DOWNLOAD_FAIL=0
 export TEST_DOWNLOAD_FILE TEST_DOWNLOAD_FAIL
 run_installer task
-[[ $status -eq 0 ]] || fail "matching external Task blocked private installation: $output"
+[[ $status -eq 0 ]] || fail "validation Task pin was not installed independently of the development pin: $output"
 [[ -x $tools_dir/bin/task ]] || fail 'matching external Task was reused instead of installing privately'
 [[ $("$tools_dir/bin/task" --version) == "Task version: v$task_version" ]] ||
   fail 'privately installed Task does not run'

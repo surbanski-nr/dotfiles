@@ -143,7 +143,6 @@ dotfiles-check() (
     # shellcheck source=../tools-probes.env
     source "$manifest_dir/tools-probes.env"
     validate_tool_config || return
-    validate_validator_config || return
   fi
 
   printf 'Required:\n'

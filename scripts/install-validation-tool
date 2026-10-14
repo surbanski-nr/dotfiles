@@ -16,12 +16,12 @@ tool=$1
 
 # shellcheck source=setup-lib
 source "$repo_dir/scripts/setup-lib"
-# shellcheck source=../tools.env
-source "$repo_dir/tools.env"
-validate_profile VALIDATOR_TOOLS
+# shellcheck source=../validation.env
+source "$repo_dir/validation.env"
+validate_validation_config
 
 supported=false
-for configured_tool in "${VALIDATOR_TOOLS[@]}"; do
+for configured_tool in "${VALIDATION_TOOLS[@]}"; do
   if [[ $tool == "$configured_tool" ]]; then
     supported=true
     break
@@ -41,16 +41,10 @@ tool_version() {
 }
 
 if [[ $tool == yamllint ]]; then
-  yamllint_input=$repo_dir/nvim2/.config/nvim2/python-locks/yamllint.in
-  yamllint_lock=$repo_dir/nvim2/.config/nvim2/python-locks/yamllint.lock
-  [[ -f $yamllint_input && ! -L $yamllint_input && -f $yamllint_lock && ! -L $yamllint_lock ]] ||
-    die 'yamllint Python lock is missing'
-  requirement=$(awk '!/^#/ && NF { print; exit }' "$yamllint_input")
-  [[ $requirement =~ ^yamllint==(.+)$ ]] || die 'invalid yamllint Python input'
-  version=${BASH_REMATCH[1]}
+  version=${YAMLLINT_VERSION:-}
   validate_version YAMLLINT_VERSION "$version"
 else
-  select_default_release TOOL_RELEASES "$tool"
+  select_default_release VALIDATION_RELEASES "$tool"
   version=$RELEASE_VERSION
   url=$RELEASE_URL
 fi
@@ -134,13 +128,13 @@ if [[ $tool == yamllint ]]; then
   staged_venv=$venv
   python3 -m venv "$venv"
   "$venv/bin/python" -m pip install --disable-pip-version-check \
-    --require-hashes --requirement "$yamllint_lock"
+    "yamllint==$version"
   activate_yamllint "$venv"
 else
   archive=$stage/$RELEASE_ASSET
   prepared=$stage/prepared
   download_file "$url" "$archive"
-  prepare_artifact TOOL_RELEASES "$tool" "$version" "$archive" "$prepared"
+  prepare_artifact VALIDATION_RELEASES "$tool" "$version" "$archive" "$prepared"
   activate_binary "$prepared/${SPEC_DESTS[0]}"
 fi
 

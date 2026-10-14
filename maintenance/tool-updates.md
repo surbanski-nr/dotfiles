@@ -1,4 +1,4 @@
-# Tool updates and rollback
+# Tool updates and rollback notes
 
 Use this runbook to test a new version before changing the normal setup. Every
 candidate needs an exact version, a SHA-256 digest from the upstream release,
@@ -32,9 +32,10 @@ Edit only the intended records in `candidate/tools.env` or builder images in
 `candidate/release.env`. `TOOL_RELEASES` stores ordered
 `version|full_URL|SHA256` records. The first record is the
 default and cannot fall back if its artifact is absent. Actionlint, ShellCheck
-and Task use `TOOL_RELEASES` for setup, repository validation and offline
-releases. Yamllint validation and offline packaging share its generated Python
-lock under `nvim2/.config/nvim2/python-locks`.
+and Task use `TOOL_RELEASES` for setup and offline releases. Repository
+validation and GitHub Actions use independent `VALIDATION_RELEASES` in
+`validation.env`. Yamllint's validation pin is independent of its editor
+and offline-package Python locks.
 `ASDF_PLUGINS` owns plugin repository and commit pins, while runtime versions
 still come from `TOOL_RELEASES`.
 For a tmux plugin bump, change its `*_COMMIT` in `tools.env`; change the
@@ -45,6 +46,9 @@ the focused setup in the disposable candidate, then `task validate` and the
 affected platform build and offline checks. To go back, restore the earlier
 record as the first record and rerun the same checks. Do not edit generated
 Python locks for an unrelated tool bump.
+
+For a repository validation tool bump, edit its record in `validation.env`
+and run `task validate`. For yamllint, edit `YAMLLINT_VERSION` in that file.
 
 Htop and tmux records point to official source archives. Both connected setup
 and offline release builds compile them through the shared source-build helper,
@@ -113,8 +117,9 @@ run this command from that reviewed revision:
 If the retained installation is intact, the script reuses it without a new
 download. If it is absent, the script downloads the pinned release again.
 The same procedure applies to `gh`, `oh-my-posh`, `rg`, Task, actionlint,
-ShellCheck and the complete `nvim-VERSION` executable tree. Their shared
-records also supply offline builds and the private validation bootstrap.
+ShellCheck and the complete `nvim-VERSION` executable tree. Their records
+also supply offline builds. The private validation bootstrap keeps its own
+selection in `validation.env`.
 Mason ShellCheck keeps its own editor pin.
 
 A temporary switch may update only an existing managed relative link. Check

@@ -215,24 +215,26 @@ validate_profile() {
   done
 }
 
-validate_validator_config() {
+validate_validation_config() {
   local tool version
 
-  validate_profile VALIDATOR_TOOLS || return
-  if [[ -v TOOL_RELEASES[yamllint] ]]; then
-    report_error 'TOOL_RELEASES must not contain lock-backed validator yamllint'
+  validate_profile VALIDATION_TOOLS || return
+  validate_release_catalog VALIDATION_RELEASES || return
+  validate_version YAMLLINT_VERSION "${YAMLLINT_VERSION:-}" || return
+  if [[ -v VALIDATION_RELEASES[yamllint] ]]; then
+    report_error 'yamllint version belongs in YAMLLINT_VERSION'
     return 1
   fi
-  for tool in "${VALIDATOR_TOOLS[@]}"; do
+  for tool in "${VALIDATION_TOOLS[@]}"; do
     if [[ $tool == yamllint ]]; then
       continue
-    elif ! [[ -v TOOL_RELEASES[$tool] ]]; then
-      report_error "TOOL_RELEASES has no releases for validator $tool"
+    elif ! [[ -v VALIDATION_RELEASES[$tool] ]]; then
+      report_error "VALIDATION_RELEASES has no releases for validation tool $tool"
       return 1
     fi
-    release_versions TOOL_RELEASES "$tool" || return
+    release_versions VALIDATION_RELEASES "$tool" || return
     for version in "${RELEASE_VERSIONS[@]}"; do
-      select_release TOOL_RELEASES "$tool" "$version" || return
+      select_release VALIDATION_RELEASES "$tool" "$version" || return
       if [[ $RELEASE_URL == - ]]; then
         report_error "validation release $tool $version requires an artifact"
         return 1

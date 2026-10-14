@@ -10,9 +10,17 @@ fi
 
 [[ ${1:-} == -m && ${2:-} == pip ]] || exit 62
 [[ ${TEST_VENV_PIP_FAIL:-0} == 0 ]] || exit 63
+version=
+for requirement in "$@"; do
+  if [[ $requirement == yamllint==* ]]; then
+    version=${requirement#yamllint==}
+    break
+  fi
+done
+[[ -n $version ]] || exit 62
 bin_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 printf '%s\n' \
   '#!/usr/bin/env bash' \
-  "printf 'yamllint %s\\n' '${TEST_YAMLLINT_VERSION:?}'" \
+  "printf 'yamllint %s\\n' '$version'" \
   >"$bin_dir/yamllint"
 chmod +x "$bin_dir/yamllint"

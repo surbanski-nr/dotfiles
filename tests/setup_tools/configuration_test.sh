@@ -6,22 +6,6 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/fixture.sh"
 create_fixture
 
-# Validator profile entries must have an artifact, except lock-backed yamllint.
-if (
-  source "$test_repository/tools.env"
-  VALIDATOR_TOOLS+=(foreign-validator)
-  validate_validator_config
-) >"$test_root/invalid-validator.log" 2>&1; then
-  fail 'validator profile accepted a missing native tool'
-fi
-if (
-  source "$test_repository/tools.env"
-  TOOL_RELEASES[yamllint]=${TOOL_RELEASES[stylua]}
-  validate_validator_config
-) >"$test_root/invalid-validator.log" 2>&1; then
-  fail 'validator profile accepted a native yamllint release'
-fi
-
 prerequisite_repository=$test_root/prerequisite-repository
 prerequisite_home=$test_root/prerequisite-home
 make_test_repo "$prerequisite_repository"

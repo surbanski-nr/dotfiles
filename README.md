@@ -1,14 +1,11 @@
 # Dotfiles
 
-Personal Bash, tmux, Neovim, Oh My Posh, etc., configuration for Linux x86-64.
-The targets are Debian 13, Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2023.
+Personal bash, tmux, neovim, oh my posh, etc., configuration for Linux x86-64.
+Current targets are Debian 13, Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2023.
 
-The intetion is to have a version controlled and easly reproducable and version
-controlled development environment across my computers.
+The intetion is to have a version controlled and easly reproducable development environment across my computers.
 
-### GitHub SSH access
-
-Generate a key if you do not already have one:
+### New machine setup
 
 ```bash
 mkdir -p "$HOME/.ssh"
@@ -33,9 +30,7 @@ git clone git@github.com:surbanski-nr/dotfiles.git "$HOME/github.com/surbanski/d
 pushd "$HOME/github.com/surbanski/dotfiles"
 ```
 
-### Deployment
-
-The preferred deployment is a built offline release attached to a release.
+The preferred deployment of this dotfiles is a built offline release attached to GitHub release.
 No asdf installation or shims are needed for this route.
 Prepare the target's system prerequisites with `./setup-system --offline-release`
 while its package repositories are reachable, then install the complete archive
@@ -53,46 +48,24 @@ for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
     mv -- "$file" "$file.before-dotfiles"
   fi
 done
-./bstow -v -t "$HOME" stow \
-  git tmux bash mc oh-my-posh k9s nvim2 gnupg
+./bstow -v -t "$HOME" stow git tmux bash mc oh-my-posh k9s nvim2 gnupg
 
 source "$HOME/.bashrc"
 hash -r
 dotfiles-check
 ```
 
-`bstow` is an alternative to GNU Stow and manages package files as individual links,
-records package ownership under `$HOME/.local/state/bstow`, and protects regular files and foreign links.
-Use `restow` after pulling deletions or renames. Preview `--force` before using
-it to adopt foreign links.
+`bstow` is my alternative to GNU Stow that manages package files as individual symlinks,
+records package ownership under `$HOME/.local/state/bstow`, and protects existing regular files and foreign links.
+Use `restow` after pulling deletions or renames. Preview `--force` before using it to adopt foreign links.
 
-`tools.env` contains tool profiles and ordered `version|full_URL|SHA256`
-records for development tools, repository validators and runtimes.
-
-Python versions use uv through `setup-tools`, with the first catalog version
-as uv's global default. Project version files are not migrated. Create a venv
-with `uv venv`, then activate it; Node.js, Terraform and Terragrunt keep asdf.
-The connected and offline profiles both include gh, Go, htop, ShellCheck,
-Helm, k9s, kubeconform, kubectx, kubens, Kyverno, Task, tmux and Trivy. Docker
-and container images are separate prerequisites for a local kind cluster.
-
-`tools-probes.env` supplies version command arguments for both installation,
-shell diagnostics and offline release health. Builder image pins live in `release.env`.
+`tools.env` contains tool lists and their fixed versions `version|full_URL|SHA256`
 
 `system.env` owns OS package lists, installation checks and host setup
 prerequisites. OS packages use the current repository candidates without
-version pins (the only place I trust with unfixed versions).
+version pins (the only place I trust with unfixed versions as distros are relatively stable and well tested).
 
-## Neovim
-
-The active editor profile uses Neovim 0.12.5 or newer, built-in `vim.pack`, a
-generated plugin lock and explicitly pinned external tools. Start it with:
-
-```bash
-NVIM_APPNAME=nvim2 nvim
-```
-
-or `v` alias.## Validation
+## Testing
 
 Bootstrap the pinned Task executable and run repository validation with:
 
@@ -107,7 +80,3 @@ online audits. The GitHub Actions workflow supplies its repository token.
 
 Focused tasks include `validate:bash`, `validate:configs`, `validate:nvim2`,
 `validate:repo`, `validate:scripts` and `validate:workflows`.
-
-The PostgreSQL query test runs in CI through `test:postgres`. Run this task
-locally with Docker access after changing `scripts/postgres-db-list`.
-See [maintenance/setup.md](maintenance/setup.md#validation) for focused test scenarios.
