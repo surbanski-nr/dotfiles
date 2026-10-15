@@ -1172,7 +1172,7 @@ recover_pending() {
   esac
   durable_unlink "$PENDING_FILE" || return
   RECOVERED_PENDING=true
-  printf '%s: recovered interrupted installation of %s\n' "${0##*/}" "$new_id"
+  printf '%s: recovered pending installation state for %s\n' "${0##*/}" "$new_id"
 }
 
 activate_release() {
@@ -1550,24 +1550,36 @@ health_bash() {
   # shellcheck disable=SC2016
   printf '%s\n' \
     'set -e' \
-    'source "$HOME/.bashrc"' \
-    'source "$HOME/.bashrc"' \
+    '_dotfiles_health_fail() { printf "dotfiles-release: Bash health check failed: %s\n" "$*" >&2; exit 1; }' \
+    'source "$HOME/.bashrc" || _dotfiles_health_fail "first .bashrc load returned an error"' \
+    'source "$HOME/.bashrc" || _dotfiles_health_fail "second .bashrc load returned an error"' \
     'hash -r' \
-    '[[ $DOTFILES == "$EXPECTED_RELEASE/dotfiles" ]]' \
-    '[[ $(readlink -f -- "$(type -P node)") == "$EXPECTED_RELEASE/tools/node/bin/node" ]]' \
-    '[[ $(type -t __zoxide_hook) == function ]]' \
-    '[[ -n ${_DOTFILES_FZF_PROVIDER:-} ]]' \
-    '[[ ${VIRTUAL_ENV_DISABLE_PROMPT:-} == 1 ]]' \
+    '[[ $DOTFILES == "$EXPECTED_RELEASE/dotfiles" ]] || _dotfiles_health_fail "DOTFILES does not select the candidate release: ${DOTFILES:-unset}"' \
+    '[[ $(readlink -f -- "$(type -P node)") == "$EXPECTED_RELEASE/tools/node/bin/node" ]] || _dotfiles_health_fail "node does not select the candidate release"' \
+    '[[ $(type -t __zoxide_hook) == function ]] || _dotfiles_health_fail "zoxide initialization is missing"' \
+    '[[ -n ${_DOTFILES_FZF_PROVIDER:-} ]] || _dotfiles_health_fail "fzf initialization is missing"' \
+    '[[ ${VIRTUAL_ENV_DISABLE_PROMPT:-} == 1 ]] || _dotfiles_health_fail "virtual-environment prompt suppression is missing"' \
     'prompt=${PROMPT_COMMAND[*]}' \
     'without=${prompt//_dotfiles_history_sync/}' \
-    '[[ $(( (${#prompt} - ${#without}) / 22 )) -eq 1 ]]' \
-    '[[ $PS1 != *VIRTUAL_ENV* ]]' \
+    '[[ $(( (${#prompt} - ${#without}) / 22 )) -eq 1 ]] || _dotfiles_health_fail "history synchronization is missing or duplicated"' \
+    '[[ $PS1 != *VIRTUAL_ENV* ]] || _dotfiles_health_fail "the prompt embeds VIRTUAL_ENV"' \
     'printf "bash-dotfiles=%s\n" "$DOTFILES"' \
     'printf "bash-prompt-command=%s\n" "$prompt"' \
     'exit 0' >"$check" || return
-  printf -v invocation '%q ' env HOME="$health_home" EXPECTED_RELEASE="$release" \
+  printf -v invocation '%q ' env -u DOTFILES -u DOTFILES_AUTO_ROOT \
+    HOME="$health_home" EXPECTED_RELEASE="$release" \
     TERM=xterm-256color PATH=/usr/bin:/bin bash --noprofile --norc -i "$check"
-  timeout 120s script --quiet --return --command "$invocation" /dev/null || return
+  timeout 120s script --quiet --return --command "$invocation" /dev/null </dev/null || return
+}
+
+health_stage() {
+  local label=$1 status
+  shift
+
+  "$@" && return
+  status=$?
+  die "$label health check failed (status $status)" || true
+  return "$status"
 }
 
 health_version() {
@@ -1582,7 +1594,7 @@ health_version() {
 
 health_release() {
   local release_id=$1 mode=${2:-full} release command_name path check_script health_home
-  local PATH output expected field probe DOTFILES_OFFLINE_RELEASE_ROOT
+  local PATH output expected field probe DOTFILES_OFFLINE_RELEASE_ROOT status
   local KUBECTL_VERSION='' HELM_VERSION=''
   local tool version serialized
   local -a probe_args=() versions=()
@@ -1648,10 +1660,10 @@ health_release() {
   health_home=$(mktemp -d "$STATE_DIR/.health.XXXXXX")
   TEMP_PATHS+=("$health_home")
   mkdir -p "$health_home/.cache" "$health_home/.local/state"
-  health_cli_operations "$release" "$health_home" || return
-  health_kubernetes_tools "$release" "$health_home" || return
-  health_tmux "$release" "$health_home" || return
-  health_bash "$release" "$health_home" || return
+  health_stage 'CLI operations' health_cli_operations "$release" "$health_home" || return
+  health_stage 'Kubernetes tools' health_kubernetes_tools "$release" "$health_home" || return
+  health_stage tmux health_tmux "$release" "$health_home" || return
+  health_stage Bash health_bash "$release" "$health_home" || return
   check_script=$release/config/nvim2/tests/check.sh
   (
     if [[ -n ${LOCK_FD:-} ]]; then exec {LOCK_FD}>&-; fi
@@ -1660,7 +1672,11 @@ health_release() {
       DOTFILES_OFFLINE_RELEASE_ROOT="$release" \
       PYTHONDONTWRITEBYTECODE=1 NVIM_APPNAME=nvim2 NVIM2_CHECK_TOOLS=1 \
       NVIM2_BENCHMARK_RUNS=3 timeout 1200s bash "$check_script"
-  ) || return
+  ) || {
+    status=$?
+    die "Nvim health check failed (status $status)" || true
+    return "$status"
+  }
   if [[ -f $release/installed.sha256 ]]; then verify_installed_manifest "$release" || return; fi
 }
 

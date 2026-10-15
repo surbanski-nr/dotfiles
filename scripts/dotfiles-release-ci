@@ -163,6 +163,7 @@ build_and_qualify() {
   } 2>&1 | tee "$evidence/prepare-runtime.log"
   timeout --signal=TERM --kill-after=30s 1800s docker run --rm --init --name "$verifier" \
     --network none --user "$test_uid:$test_uid" --env HOME="$test_home" \
+    --env DOTFILES=/tmp/inherited-dotfiles --env DOTFILES_AUTO_ROOT=/tmp/inherited-auto-root \
     --volume "$archive:/artifact.tar.gz:ro" \
     --volume "$delivered_manager:/usr/local/bin/dotfiles-release:ro" "$runtime_image" \
     bash /usr/local/bin/dotfiles-release verify "$PLATFORM" /artifact.tar.gz \
