@@ -51,7 +51,7 @@ preflight() {
   local -a selected=()
 
   if [[ $EVENT_NAME == workflow_dispatch ]]; then RELEASE_TAG=$INPUT_RELEASE_TAG; else RELEASE_TAG=$TAG_NAME; fi
-  [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{12}$ ]] || die "invalid release tag: $RELEASE_TAG"
+  [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{7,40}$ ]] || die "invalid release tag: $RELEASE_TAG"
   [[ $EVENT_NAME != push ]] || attempts=6
   for ((attempt = 1; attempt <= attempts; attempt++)); do
     if timeout 30s gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
@@ -77,10 +77,10 @@ preflight() {
     COMMIT_SHA=$(jq -r '.object.sha' "$object_file")
   done
   [[ $object_type == commit && $COMMIT_SHA =~ ^[0-9a-f]{40}$ ]] || die 'tag does not resolve to a full commit ID'
-  [[ $RELEASE_TAG == "dotfiles-${COMMIT_SHA:0:12}" ]] || die "tag does not match target commit $COMMIT_SHA"
+  [[ $COMMIT_SHA == "${RELEASE_TAG#dotfiles-}"* ]] || die "tag does not match target commit $COMMIT_SHA"
 
   for platform in "${platforms[@]}"; do
-    asset=$RELEASE_TAG-$platform.tar.gz
+    asset=dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz
     build_archive=true
     if asset_exists "$asset" "$release_file"; then
       existing=$work/$platform
@@ -125,7 +125,8 @@ build_and_qualify() {
 
   select_platform "$source_dir"
   [[ $(git -C "$source_dir" rev-parse HEAD) == "$COMMIT_SHA" ]] || die 'checkout does not match release commit'
-  [[ $RELEASE_TAG == "dotfiles-${COMMIT_SHA:0:12}" ]] || die 'release tag does not match commit'
+  [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{7,40}$ &&
+    $COMMIT_SHA == "${RELEASE_TAG#dotfiles-}"* ]] || die 'release tag does not match commit'
   mkdir -p "$output_dir" "$evidence"
   builder=dotfiles-builder-$run_key
   container=dotfiles-runtime-$run_key
@@ -139,7 +140,7 @@ build_and_qualify() {
     bash /workspace/scripts/build-dotfiles-release build "$PLATFORM" /workspace /out \
     2>&1 | tee "$evidence/build.log"
 
-  archive=$output_dir/$RELEASE_TAG-$PLATFORM.tar.gz
+  archive=$output_dir/dotfiles-${COMMIT_SHA:0:12}-$PLATFORM.tar.gz
   check_checksum "$archive" "$archive.sha256"
   root=$(bash "$script_dir/dotfiles-release" inspect "$PLATFORM" "$archive" "$COMMIT_SHA")
   tar -xOzf "$archive" "$root/release.env" >"$evidence/release.env"
@@ -178,7 +179,7 @@ build_and_qualify() {
 }
 
 publish() {
-  local output_dir=$1 asset=$RELEASE_TAG-$PLATFORM.tar.gz
+  local output_dir=$1 asset=dotfiles-${COMMIT_SHA:0:12}-$PLATFORM.tar.gz
   local release_file=$work/release.json archive checksum
   local -a uploads=()
 

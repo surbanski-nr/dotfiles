@@ -7,7 +7,7 @@ This page documents the Neovim-specific parts of that release.
 
 ## Editor payload and process identity
 
-Each `dotfiles-COMMIT12-PLATFORM.tar.gz` artifact contains the full official
+Each `dotfiles-COMMIT-PLATFORM.tar.gz` artifact contains the full official
 Neovim tree, the matching `nvim2` configuration, exact `vim.pack` Git
 checkouts, Treesitter parsers and queries, and the complete pinned Mason tool
 inventory. The dotfiles snapshot, plugin lock and generated Mason receipts all
@@ -160,11 +160,14 @@ The final runtime check uses a fresh prepared container, a read-only artifact,
 an ordinary user and `--network none`.
 
 `.github/workflows/dotfiles-release.yml` accepts an existing
-`dotfiles-COMMIT12` release and uses `scripts/dotfiles-release-ci` for planning,
+`dotfiles-COMMIT` release and uses `scripts/dotfiles-release-ci` for planning,
 qualification and publication. The workflow tooling comes from the commit
 containing the workflow; the separate read-only build checkout is the resolved
 release commit, so dispatching an older release does not require newer CI
 scripts in that release.
+
+Tag prefixes accept 7-40 lowercase hexadecimal characters; archive names and
+retained release IDs use the first 12 characters of the full commit SHA.
 
 Existing archives are checked with the trusted checkout's
 `dotfiles-release inspect PLATFORM ARCHIVE COMMIT`: archive paths and links,
@@ -181,10 +184,10 @@ processes and are removed on exit.
 Expected assets are:
 
 ```text
-dotfiles-COMMIT12-debian-13-x86_64.tar.gz
-dotfiles-COMMIT12-ubuntu-24.04-x86_64.tar.gz
-dotfiles-COMMIT12-ubuntu-26.04-x86_64.tar.gz
-dotfiles-COMMIT12-amzn-2023-x86_64.tar.gz
+dotfiles-COMMIT-debian-13-x86_64.tar.gz
+dotfiles-COMMIT-ubuntu-24.04-x86_64.tar.gz
+dotfiles-COMMIT-ubuntu-26.04-x86_64.tar.gz
+dotfiles-COMMIT-amzn-2023-x86_64.tar.gz
 ```
 
 For a plugin or configuration change, edit the source checkout, regenerate

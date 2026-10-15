@@ -356,7 +356,7 @@ particular user name, UID or `/home` path:
 
 ```bash
 bash scripts/dotfiles-release install \
-  "$PWD/dotfiles-COMMIT12-debian-13-x86_64.tar.gz"
+  "$PWD/dotfiles-COMMIT-debian-13-x86_64.tar.gz"
 source "$HOME/.bashrc"
 hash -r
 dotfiles-release list
@@ -367,7 +367,7 @@ Verify the trusted transfer checksum before installation:
 
 ```bash
 sha256sum --check --strict \
-  dotfiles-COMMIT12-debian-13-x86_64.tar.gz.sha256
+  dotfiles-COMMIT-debian-13-x86_64.tar.gz.sha256
 ```
 
 The full qualification path runs the same install plus health in a fresh
@@ -375,10 +375,10 @@ runtime container with `--network none`:
 
 ```bash
 bash scripts/dotfiles-release verify debian-13-x86_64 \
-  "$PWD/dotfiles-COMMIT12-debian-13-x86_64.tar.gz"
+  "$PWD/dotfiles-COMMIT-debian-13-x86_64.tar.gz"
 ```
 
-Releases are retained under `~/dotfiles-releases/dotfiles-COMMIT12`.
+Releases are retained under `~/dotfiles-releases/dotfiles-COMMIT`.
 `current` controls new processes and `previous` supports whole-unit rollback.
 The first install records every managed entry and backs up an accepted prior
 file, link or provider tree beside that entry as a private
@@ -394,9 +394,9 @@ Use the manager for every selection change:
 ```bash
 dotfiles-release list
 dotfiles-release health
-dotfiles-release health dotfiles-COMMIT12
+dotfiles-release health dotfiles-COMMIT
 dotfiles-release rollback
-dotfiles-release rollback dotfiles-COMMIT12
+dotfiles-release rollback dotfiles-COMMIT
 dotfiles-release uninstall
 dotfiles-release uninstall dotfiles-INACTIVE12
 ```
@@ -407,7 +407,7 @@ baseline without deleting retained payloads. `uninstall ID` removes only an
 inactive, locally unmodified payload. Close any process still using that ID
 before removing it because the manager deliberately does not guess process
 ownership or terminate applications. Run the retained
-`dotfiles-COMMIT12/bin/dotfiles-release` directly after restoring a baseline
+`dotfiles-COMMIT/bin/dotfiles-release` directly after restoring a baseline
 that did not contain the public manager link.
 
 All manager operations share a non-blocking lock. A pending record lets the
