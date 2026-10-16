@@ -66,9 +66,7 @@ Linux musl archive rather than an OS package. GNU `find` remains a system
 prerequisite for scripts that depend on its semantics.
 
 Both profiles include Mike Farah's yq `4.52.4` as the verified upstream Go
-binary. Connected setup retains its MIT license beside `~/bin/yq-VERSION`;
-offline releases retain it under `share/licenses/yq`. This is independent of
-the Python package also named yq.
+binary, independently of the Python package also named yq.
 
 Both tool profiles also include the full official Go SDK, verified with its
 upstream SHA-256. Connected setup keeps it under `~/bin/go-VERSION` and selects
@@ -124,7 +122,7 @@ You can select just those tools:
 ```bash
 ./setup-tools kubectl helm
 "$HOME/bin/kubectl-1.27.11" version --client
-"$HOME/bin/helm-3.22.0" version --short
+"$HOME/bin/helm-3.21.0" version --short
 ```
 
 Versioned installations remain in `~/bin`. Canonical command links are
@@ -492,10 +490,10 @@ helm version --short
 
 # Select an exact version for one command:
 KUBECTL_VERSION=1.34.12 kubectl get nodes
-HELM_VERSION=3.22.0 helm list
+HELM_VERSION=3.21.0 helm list
 
 # Select versions for this shell and commands started from it:
-export KUBECTL_VERSION=1.34.12 HELM_VERSION=3.22.0
+export KUBECTL_VERSION=1.34.12 HELM_VERSION=3.21.0
 kubectl get pods
 helm list
 
@@ -506,7 +504,7 @@ unset KUBECTL_VERSION HELM_VERSION
 Unset or empty variables select the default. A version may use one optional
 leading `v`: `HELM_VERSION=v3.21.0` and
 `HELM_VERSION=3.21.0` select the same executable. The Helm default remains
-`4.3.0`; `3.22.0` and `3.21.0` are also bundled. An invalid or unbundled
+`4.3.0`; `3.21.0` is also bundled. An invalid or unbundled
 version fails clearly, without falling back to another tool
 provider. Explicit binaries such as `current/bin/kubectl-1.34.12` also work;
 only the two canonical client launchers are projected into `~/bin`.

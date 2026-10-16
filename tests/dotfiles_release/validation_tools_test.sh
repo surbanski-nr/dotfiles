@@ -16,10 +16,9 @@ run_manager uninstall >/dev/null
 test_home=$test_root/'validation tools home'
 mkdir -p "$test_home/bin" "$test_home/.local/state/dotfiles/setup-tools" "$test_root/user-plugins"
 write_fake_tool "$test_home/bin/yq-0.9" 0.9
-cp "$repo_dir/licenses/yq/LICENSE" "$test_home/bin/yq-0.9.LICENSE"
 ln -s yq-0.9 "$test_home/bin/yq"
 content=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-  -C "$test_home/bin" -cf - -- yq-0.9 yq-0.9.LICENSE | sha256sum | awk '{print $1}')
+  -C "$test_home/bin" -cf - -- yq-0.9 | sha256sum | awk '{print $1}')
 printf 'complete\t%s\t%s\n' \
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$content" \
   >"$test_home/.local/state/dotfiles/setup-tools/yq-0.9.state"

@@ -428,7 +428,7 @@ offline install and health before deploying.
 
 ```bash
 KUBECTL_VERSION=1.34.12 kubectl version --client
-HELM_VERSION=3.22.0 helm version --short
+HELM_VERSION=3.21.0 helm version --short
 unset KUBECTL_VERSION HELM_VERSION
 ```
 
@@ -437,15 +437,15 @@ rollback selects the previous payload and its defaults; a shell override stays
 set until you unset it, so it must also exist in the selected release.
 
 The offline Helm launcher accepts bare versions and one leading `v`. Its
-default stays `4.3.0`; `3.22.0` remains available and `3.21.0` is appended for
-NetReveal. Connected setup still selects direct links and does not implement
+default stays `4.3.0`; `3.21.0` is available for NetReveal.
+Connected setup still selects direct links and does not implement
 environment-based version selection.
 
 The `helm-schema` artifact record in `tools.env` pins the offline `schema`
 addon. Bump that record, then rebuild the ready binary and minimal no-hook
-manifest through `build-dotfiles-release`. Keep its upstream license and the
-tracked yq MIT license when changing those distributions. yq uses the shared
-raw-artifact path and both profiles; jq stays an OS runtime prerequisite.
+manifest through `build-dotfiles-release`. Keep the plugin's upstream license
+when changing its distribution. yq uses the shared raw-artifact path and both
+profiles; jq stays an OS runtime prerequisite.
 Do not edit generated metadata, installed plugin directories or Python locks.
 
 Qualify new candidates on all four supported platforms with the prepared OS
@@ -453,8 +453,8 @@ baseline and network disabled for release installation/health. Check every
 Helm version with the bundled plugin, actual schema generation with local
 references, yq multi-document processing and jq overlay merges. Health ignores
 caller plugin overrides and bin-extras. The tool-enabled editor checks must
-opt in explicitly when they qualify formatter output; ordinary sessions start
-with formatting disabled.
+opt in explicitly when they qualify save formatting; ordinary sessions start
+with format on save disabled. Manual formatting is a one-time action.
 
 Then run NetReveal's `task validate` and the PR `split-generate` path in a
 disposable clone with project network inputs allowed. Use the private release
@@ -502,7 +502,7 @@ temporarily, or put the required version first and rerun setup:
 
 ```bash
 "$HOME/bin/kubectl-1.27.11" version --client
-"$HOME/bin/helm-3.22.0" version --short
+"$HOME/bin/helm-3.21.0" version --short
 ./setup-tools kubectl helm
 ```
 

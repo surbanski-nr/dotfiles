@@ -17,7 +17,7 @@ local function set_disabled(disabled, buffer_only)
   end
   local state = M.is_enabled() and 'enabled' or 'disabled'
   local scope = buffer_only and 'this buffer' or 'this Neovim session'
-  vim.notify('Formatting ' .. state .. ' for ' .. scope)
+  vim.notify('Format on save ' .. state .. ' for ' .. scope)
 end
 
 function M.setup()
@@ -26,22 +26,22 @@ function M.setup()
   vim.api.nvim_create_user_command(
     'FormatDisable',
     function(args) set_disabled(true, args.bang) end,
-    { bang = true, desc = 'Disable formatting (bang: current buffer)' }
+    { bang = true, desc = 'Disable format on save (bang: current buffer)' }
   )
 
   vim.api.nvim_create_user_command(
     'FormatEnable',
     function(args) set_disabled(false, args.bang) end,
-    { bang = true, desc = 'Enable formatting (bang: current buffer)' }
+    { bang = true, desc = 'Enable format on save (bang: current buffer)' }
   )
 
   vim.api.nvim_create_user_command('FormatToggle', function(args)
     local disabled = not vim.g.disable_autoformat
     if args.bang then disabled = M.is_enabled() end
     set_disabled(disabled, args.bang)
-  end, { bang = true, desc = 'Toggle formatting (bang: current buffer)' })
+  end, { bang = true, desc = 'Toggle format on save (bang: current buffer)' })
 
-  vim.keymap.set('n', '<leader>tf', '<Cmd>FormatToggle!<CR>', { desc = '[T]oggle [F]ormatting for this buffer' })
+  vim.keymap.set('n', '<leader>tf', '<Cmd>FormatToggle<CR>', { desc = '[T]oggle [F]ormat on save for this session' })
 
   require('conform').setup {
     notify_on_error = false,
@@ -118,13 +118,9 @@ function M.setup()
   }
 
   vim.keymap.set({ 'n', 'v' }, '<leader>f', function()
-    if not M.is_enabled() then
-      vim.notify 'Enable formatting for this buffer with <leader>tf or :FormatEnable!'
-      return
-    end
     if not vim.bo.modifiable then return end
     require('conform').format { async = true }
-  end, { desc = '[F]ormat buffer or selection (when enabled)' })
+  end, { desc = '[F]ormat buffer or selection once' })
 end
 
 return M

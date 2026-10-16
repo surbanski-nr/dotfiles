@@ -45,67 +45,84 @@ local function run()
   local first = buffer 'first.fixture'
   local original = vim.api.nvim_buf_get_lines(first, 0, -1, false)
   vim.cmd 'silent write'
+  assert(count() == 0 and vim.deep_equal(vim.fn.readfile(root .. '/first.fixture'), original), 'default save changed formatting')
+  assert(#notifications == 0, 'disabled saves must be quiet')
   keys '<leader>f'
-  vim.wait(100)
-  assert(count() == 0 and vim.deep_equal(vim.fn.readfile(root .. '/first.fixture'), original), 'default save/manual formatting changed content')
-  assert(#notifications == 1 and notifications[1]:find('<leader>tf', 1, true), 'disabled saves must be quiet and manual formatting must explain opt-in')
+  assert(vim.wait(3000, function() return vim.api.nvim_buf_get_lines(first, 0, 1, false)[1] == 'local a = 1' end), 'manual formatting did not complete')
+  assert(count() == 1 and vim.deep_equal(vim.fn.readfile(root .. '/first.fixture'), original), 'manual formatting saved the buffer')
+  edit_save(first)
+  assert(count() == 1 and vim.fn.readfile(root .. '/first.fixture')[1] == 'local a=1', 'manual formatting enabled format on save')
   local second = buffer 'second.fixture'
   vim.cmd 'silent write'
   vim.api.nvim_set_current_buf(first)
   keys '<leader>tf'
-  assert(notifications[#notifications] == 'Formatting enabled for this buffer', 'toggle notification reported the wrong scope/state')
+  assert(notifications[#notifications] == 'Format on save enabled for this Neovim session', 'toggle notification reported the wrong scope/state')
   vim.api.nvim_buf_set_lines(first, 0, 1, false, { 'local a=1' })
   vim.api.nvim_buf_set_lines(second, 0, 1, false, { 'local a=1' })
   vim.api.nvim_set_current_buf(second)
   vim.cmd 'silent wall'
-  assert(count() == 1 and vim.fn.readfile(log)[1] == 'first.fixture', ':wall formatted a buffer without consent or targeted the current buffer')
+  local saved = vim.list_slice(vim.fn.readfile(log), 2)
+  table.sort(saved)
+  assert(count() == 3 and vim.deep_equal(saved, { 'first.fixture', 'second.fixture' }), ':wall did not format both buffers after the session toggle')
   assert(
-    vim.fn.readfile(root .. '/first.fixture')[1] == 'local a = 1' and vim.fn.readfile(root .. '/second.fixture')[1] == 'local a=1',
-    ':wall applied formatting to the wrong file'
+    vim.fn.readfile(root .. '/first.fixture')[1] == 'local a = 1' and vim.fn.readfile(root .. '/second.fixture')[1] == 'local a = 1',
+    ':wall did not save the formatted files'
   )
+  local third = buffer 'third.fixture'
+  vim.cmd 'silent write'
+  assert(count() == 4 and vim.fn.readfile(root .. '/third.fixture')[1] == 'local a = 1', 'new buffers did not inherit the session toggle')
+  vim.api.nvim_buf_delete(third, { force = true })
   vim.api.nvim_set_current_buf(first)
   keys '<leader>tf'
   edit_save(first)
+  edit_save(second)
+  assert(count() == 4, 'session toggle did not disable both buffers')
   keys '<leader>f'
-  vim.wait(100)
-  assert(count() == 1, 'buffer toggle did not block subsequent requests')
+  assert(
+    vim.wait(3000, function() return vim.api.nvim_buf_get_lines(second, 0, 1, false)[1] == 'local a = 1' end),
+    'manual formatting stopped after the session toggle'
+  )
+  edit_save(second)
+  assert(count() == 5, 'one-time formatting re-enabled format on save')
 
+  vim.api.nvim_set_current_buf(first)
   vim.cmd 'FormatEnable!'
   policy.setup()
   policy.setup()
   conform.formatters_by_ft.lua = { 'formatting_fixture' }
   vim.cmd 'split'
   edit_save(first)
-  assert(count() == 2, 'repeated setup lost buffer consent or duplicated save hooks')
+  assert(count() == 6, 'repeated setup lost buffer consent or duplicated save hooks')
   vim.cmd 'close'
   vim.cmd 'FormatDisable'
   edit_save(first)
   edit_save(second)
-  assert(count() == 2, 'session disable left a local opt-in active')
-  vim.cmd 'FormatToggle'
+  assert(count() == 6, 'session disable left a local opt-in active')
+  keys '<leader>tf'
   edit_save(first)
   edit_save(second)
-  assert(count() == 4, 'session toggle did not enable both buffers')
+  assert(count() == 8, 'session toggle did not enable both buffers')
   vim.cmd 'FormatDisable!'
-  keys '<leader>tf'
   edit_save(second)
-  assert(count() == 5, 'buffer toggle failed under an enabled session default')
-  vim.cmd 'FormatDisable!'
+  assert(count() == 8, 'buffer disable failed under an enabled session default')
   vim.cmd 'FormatEnable'
   edit_save(second)
-  assert(count() == 6, 'session enable did not clear a disabled override')
+  assert(count() == 9, 'session enable did not clear a disabled override')
   policy.setup()
   conform.formatters_by_ft.lua = { 'formatting_fixture' }
   edit_save(first)
-  assert(count() == 7, 'repeated setup reset the explicit session default')
+  assert(count() == 10, 'repeated setup reset the explicit session default')
   vim.cmd 'FormatDisable'
 
-  vim.cmd 'FormatEnable!'
   vim.api.nvim_buf_set_lines(first, 0, -1, false, original)
   vim.api.nvim_win_set_cursor(0, { 1, 0 })
   keys 'V<leader>f<Esc>'
-  assert(vim.wait(3000, function() return vim.api.nvim_buf_get_lines(first, 0, 1, false)[1] == 'local a = 1' end), 'enabled visual formatting did not complete')
-  assert(count() == 8 and vim.api.nvim_buf_get_lines(first, 1, 2, false)[1] == 'local b=1', 'visual formatting changed unselected lines')
+  assert(
+    vim.wait(3000, function() return vim.api.nvim_buf_get_lines(first, 0, 1, false)[1] == 'local a = 1' end),
+    'one-time visual formatting did not complete'
+  )
+  assert(count() == 11 and vim.api.nvim_buf_get_lines(first, 1, 2, false)[1] == 'local b=1', 'visual formatting changed unselected lines')
+  vim.cmd 'FormatEnable!'
   vim.bo[first].modified = false
   local name = vim.api.nvim_buf_get_name(first)
   vim.api.nvim_buf_delete(first, { force = true })
@@ -113,23 +130,23 @@ local function run()
   local reopened = vim.api.nvim_get_current_buf()
   vim.bo.filetype = 'lua'
   edit_save(reopened)
-  assert(count() == 8, 'wiping a buffer persisted its opt-in')
+  assert(count() == 11, 'wiping a buffer persisted its opt-in')
 
   local excluded = buffer 'excluded.fixture'
   vim.bo.filetype = 'helm'
   conform.formatters_by_ft.helm = { 'formatting_fixture' }
   vim.cmd 'FormatEnable!'
   vim.cmd 'silent write'
-  assert(count() == 8, 'buffer opt-in added a filetype to the save allowlist')
+  assert(count() == 11, 'buffer opt-in added a filetype to the save allowlist')
   vim.bo[excluded].modifiable = false
   keys '<leader>f'
   vim.wait(100)
-  assert(count() == 8, 'manual formatting ran on a nonmodifiable buffer')
+  assert(count() == 11, 'manual formatting ran on a nonmodifiable buffer')
   vim.bo[excluded].modifiable = true
   vim.bo.filetype = 'formatting-no-formatter'
   keys '<leader>f'
   vim.wait(100)
-  assert(count() == 8, 'unsupported filetype unexpectedly ran a formatter')
+  assert(count() == 11, 'unsupported filetype unexpectedly ran a formatter')
 
   local fallback = buffer 'fallback.fixture'
   conform.formatters_by_ft.lua = {}
@@ -173,9 +190,14 @@ local function run()
     return client and client.initialized and vim.lsp.buf_is_attached(fallback, client_id)
   end), 'formatting LSP fixture did not attach')
   edit_save(fallback)
+  assert(requests == 0 and vim.api.nvim_buf_get_lines(fallback, 0, 1, false)[1] == 'local a=1', 'disabled save used LSP formatting')
   keys '<leader>f'
-  vim.wait(100)
-  assert(requests == 0 and vim.api.nvim_buf_get_lines(fallback, 0, 1, false)[1] == 'local a=1', 'LSP fallback bypassed the disabled gate')
+  assert(
+    vim.wait(3000, function() return vim.api.nvim_buf_get_lines(fallback, 0, 1, false)[1] == 'local a = 1' end),
+    'one-time manual LSP fallback did not format'
+  )
+  edit_save(fallback)
+  assert(requests == 1, 'manual LSP formatting enabled format on save')
   vim.cmd 'FormatEnable!'
   keys '<leader>f'
   assert(
@@ -183,12 +205,15 @@ local function run()
     'enabled manual LSP fallback did not format'
   )
   edit_save(fallback)
-  assert(requests == 2, 'enabled save did not use LSP fallback')
+  assert(requests == 3, 'enabled save did not use LSP fallback')
   vim.cmd 'FormatDisable!'
   edit_save(fallback)
+  assert(requests == 3, 'buffer disable left automatic LSP formatting active')
   keys '<leader>f'
-  vim.wait(100)
-  assert(requests == 2, 'disabling a buffer left LSP fallback active')
+  assert(
+    vim.wait(3000, function() return vim.api.nvim_buf_get_lines(fallback, 0, 1, false)[1] == 'local a = 1' end) and requests == 4,
+    'buffer disable blocked one-time LSP formatting'
+  )
 
   vim.cmd 'FormatEnable'
   local fresh = root .. '/fresh.lua'
@@ -198,11 +223,8 @@ local function run()
     'assert(vim.fn.writefile(lines, file) == 0)',
     "vim.api.nvim_cmd({ cmd = 'edit', args = { file } }, {})",
     "vim.cmd 'silent write'",
-    "local manual = vim.fn.maparg('<leader>f', 'n', false, true)",
-    'manual.callback()',
-    'vim.wait(100)',
     "assert(vim.deep_equal(vim.fn.readfile(file), lines), 'new process inherited formatting consent')",
-    "assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), lines), 'fresh manual formatting bypassed the gate')",
+    "assert(vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), lines), 'fresh save changed the buffer')",
     'vim.fn.delete(file)',
     "vim.cmd 'qa!'",
   }, fresh) == 0)

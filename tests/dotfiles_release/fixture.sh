@@ -204,8 +204,6 @@ make_artifact() {
   if [[ $include_validation_tools == true ]]; then
     write_fake_tool "$release/tools/bin/yq" "$release_version"
     ln -s ../tools/bin/yq "$release/bin/yq"
-    mkdir -p "$release/share/licenses/yq"
-    cp "$repo_dir/licenses/yq/LICENSE" "$release/share/licenses/yq/LICENSE"
     plugin_dir=$release/share/helm/plugins/helm-values-schema-json
     mkdir -p "$plugin_dir"
     printf 'name: schema\nversion: "%s"\n' "$release_version" >"$plugin_dir/plugin.yaml"

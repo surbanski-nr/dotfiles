@@ -40,7 +40,6 @@ assert_link "$test_home/bin/go" "go-$GO_VERSION/bin/go"
 assert_link "$test_home/bin/gofmt" "go-$GO_VERSION/bin/gofmt"
 assert_link "$test_home/bin/tmux" "tmux-$TMUX_VERSION/bin/tmux"
 "$test_home/bin/yq" --version | grep -F "yq $YQ_VERSION" >/dev/null
-cmp "$test_home/bin/yq-$YQ_VERSION.LICENSE" "$repo_dir/licenses/yq/LICENSE" || fail 'yq license was not retained'
 "$test_home/bin/go" version | grep -F "$GO_VERSION" >/dev/null
 [[ -f $test_home/bin/go-$GO_VERSION/src/fmt/print.go &&
   -f $test_home/bin/go-$GO_VERSION/pkg/tool/linux_amd64/compile ]] ||
@@ -69,7 +68,7 @@ done
 
 find "$archive_root" -depth -delete
 XDG_CONFIG_HOME="$test_xdg" run_setup "$test_home" "$test_repository" "$archive_root" \
-  k9s gh htop uv nvim go tmux
+  k9s gh htop uv nvim go tmux yq
 cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
   fail 'setup-tools reconciliation changed kube-backup-contexts.txt'
 cmp "$test_root/kube-prefix-before" "$test_home/kube-log-prefixes.txt" ||

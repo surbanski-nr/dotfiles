@@ -1050,44 +1050,44 @@ The main day-to-day language stacks are:
 
 | Action                                              | Keys or command                 |
 | --------------------------------------------------- | ------------------------------- |
-| Format enabled buffer or visual selection           | `<leader>f`                     |
-| Toggle formatting for current buffer                | `<leader>tf` or `:FormatToggle!` |
-| Enable / disable formatting for current buffer      | `:FormatEnable!` / `:FormatDisable!` |
-| Toggle formatting for this Neovim session            | `:FormatToggle`                 |
-| Enable / disable formatting for this Neovim session  | `:FormatEnable` / `:FormatDisable` |
+| Format buffer or visual selection once              | `<leader>f`                     |
+| Toggle format on save for this Neovim session        | `<leader>tf` or `:FormatToggle`  |
+| Enable / disable format on save for this session     | `:FormatEnable` / `:FormatDisable` |
+| Toggle format on save for current buffer             | `:FormatToggle!`                |
+| Enable / disable format on save for current buffer   | `:FormatEnable!` / `:FormatDisable!` |
 | Inspect formatter selection                         | `:ConformInfo`                  |
 | Inspect external tools                              | `:Mason`                        |
 | Install all managed tools and parsers synchronously | `:Nvim2ToolsInstallSync`        |
 
-Every fresh Neovim session starts with managed formatting disabled. Editing
-and saving leave formatting and imports alone until you enable them. Use
-`<leader>tf` to enable the current buffer, then save or use `<leader>f`.
-The same gate applies to manual formatting; using `<leader>f` while disabled
-only explains how to opt in. Disabled saves are quiet. `:ConformInfo` remains
-available. Go import insertion and Ruff import sorting require the same opt-in.
+Every fresh Neovim session starts with format on save disabled. Use
+`<leader>f` to format the current buffer or visual selection once, including
+Go import insertion and Ruff import sorting. This works independently of
+format on save and does not enable it. Disabled saves are quiet.
 
-The buffer toggle applies to all windows showing that buffer and is lost when
-the buffer is wiped. Other buffers stay disabled. Session commands without
-`!` change the default and clear existing buffer overrides, so `:FormatDisable`
-disables every buffer. Newly opened buffers inherit the session default.
+`<leader>tf` enables or disables format on save for the whole session. Newly
+opened buffers inherit that default. Commands with `!` override it for the
+current buffer, across all windows showing that buffer, until it is wiped.
+Session commands without `!` clear existing buffer overrides, so
+`:FormatDisable` disables format on save in every buffer.
 Nothing persists across processes or changes repository settings. Reloading
 the setup preserves the current session's explicit choices.
 
-Enabling formatting retains the existing save filetype allowlist, including
+Enabling format on save retains the existing filetype allowlist, including
 the exclusion of Helm templates, and LSP fallback. Whole-file formatters may
 change unrelated lines; use a visual selection where range formatting is
-supported and inspect the diff. Disabling blocks new requests; it does not
-cancel an asynchronous request already started. Native `gq`, explicit
-`vim.lsp.buf.format()`, direct Conform API calls, project EditorConfig cleanup
-and user autocmds remain independent editing actions.
+supported and inspect the diff. Disabling format on save blocks new automatic
+requests; it does not cancel an asynchronous request already started.
+Native `gq`, explicit `vim.lsp.buf.format()`, direct Conform API calls,
+project EditorConfig cleanup and user autocmds remain independent editing
+actions.
 
-Diagnostics, completion, navigation and indentation still work while
-formatting is disabled. `nvim-lint` runs diagnostic CLI linters after saving;
-it does not apply fixes and has no manual mapping. Actionlint runs only for
+Diagnostics, completion, navigation and indentation still work while format
+on save is disabled. `nvim-lint` runs diagnostic CLI linters after saving; it
+does not apply fixes and has no manual mapping. Actionlint runs only for
 YAML files under `.github/workflows/`, while yamllint checks other YAML.
 Restart Neovim after a release upgrade to load this policy. Rolling back to
-an earlier configuration restores its enabled save formatting and ungated
-manual mapping; it does not preserve this opt-in default.
+an earlier configuration restores its formatting policy; it does not
+preserve this session's choice.
 
 GuessIndent detects options, indentation guides only display them, and
 Conform actually formats text. To rerun detection use `:GuessIndent`, then

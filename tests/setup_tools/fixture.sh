@@ -123,8 +123,6 @@ make_test_repo() {
   cp "$repo_dir/tools.env" "$destination/tools.env"
   cp "$repo_dir/system.env" "$destination/system.env"
   cp "$repo_dir/tools-probes.env" "$destination/tools-probes.env"
-  mkdir -p "$destination/licenses/yq"
-  cp "$repo_dir/licenses/yq/LICENSE" "$destination/licenses/yq/LICENSE"
 }
 
 run_setup() {

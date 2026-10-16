@@ -703,15 +703,10 @@ setup_tools_state_owns_link() {
       version=${target#"$command_name-"}
       destinations=("uv-$version" "uvx-$version")
       ;;
-    yq:yq-*)
-      name=yq
-      version=${target#yq-}
-      destinations=("yq-$version" "yq-$version.LICENSE")
-      ;;
     actionlint:actionlint-* | fd:fd-* | gh:gh-* | helm:helm-* | k9s:k9s-* | kind:kind-* | \
       kubeconform:kubeconform-* | kubectl:kubectl-* | kubectx:kubectx-* | kubens:kubens-* | \
       kyverno:kyverno-* | oh-my-posh:oh-my-posh-* | rg:rg-* | shellcheck:shellcheck-* | \
-      task:task-* | terraform:terraform-* | trivy:trivy-* | zoxide:zoxide-*)
+      task:task-* | terraform:terraform-* | trivy:trivy-* | yq:yq-* | zoxide:zoxide-*)
       name=$command_name
       version=${target#"$command_name-"}
       destination=$target
@@ -1629,8 +1624,7 @@ health_validation_tools() {
 
   [[ -f $HELM_PLUGINS/helm-values-schema-json/plugin.yaml &&
     -x $HELM_PLUGINS/helm-values-schema-json/schema &&
-    -s $HELM_PLUGINS/helm-values-schema-json/LICENSE &&
-    -s $release/share/licenses/yq/LICENSE ]] || { die 'validation tool payload is incomplete'; return 1; }
+    -s $HELM_PLUGINS/helm-values-schema-json/LICENSE ]] || { die 'validation tool payload is incomplete'; return 1; }
   need jq || return
   mkdir -p "$work" || return
   output=$("$release/bin/yq" --version) || return

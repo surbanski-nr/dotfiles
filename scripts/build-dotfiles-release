@@ -218,9 +218,6 @@ install_release_tools() {
     version=${BUILD_VERSIONS[$tool]}
     prepare_release_artifact TOOL_RELEASES "$tool" "$version" "$inputs" || return
     install -m 0755 "$PREPARED_ARTIFACT" "$release/tools/bin/$tool" || return
-    if [[ $tool == yq ]]; then
-      install -D -m 0644 "${PREPARED_ARTIFACT}.LICENSE" "$release/share/licenses/yq/LICENSE" || return
-    fi
     if [[ $tool == uv ]]; then
       install -m 0755 "${PREPARED_ARTIFACT%/*}/${SPEC_DESTS[1]}" "$release/tools/bin/uvx" || return
       ln -s ../tools/bin/uvx "$release/bin/uvx" || return
