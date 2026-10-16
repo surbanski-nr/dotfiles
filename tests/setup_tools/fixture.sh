@@ -104,6 +104,7 @@ load_test_versions() {
   select_default_release TOOL_RELEASES htop; HTOP_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES k9s; K9S_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES kind; KIND_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES yq; YQ_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES oh-my-posh; OMP_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES uv; UV_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES nvim; NVIM_VERSION=$RELEASE_VERSION
@@ -122,6 +123,8 @@ make_test_repo() {
   cp "$repo_dir/tools.env" "$destination/tools.env"
   cp "$repo_dir/system.env" "$destination/system.env"
   cp "$repo_dir/tools-probes.env" "$destination/tools-probes.env"
+  mkdir -p "$destination/licenses/yq"
+  cp "$repo_dir/licenses/yq/LICENSE" "$destination/licenses/yq/LICENSE"
 }
 
 run_setup() {
@@ -140,6 +143,11 @@ make_archives() {
 
   load_test_versions "$repository"
   mkdir -p "$archive_root" "$work"
+
+  write_fake "$archive_root/yq/$YQ_VERSION/yq_linux_amd64" yq "$YQ_VERSION"
+  digest=$(sha256sum "$archive_root/yq/$YQ_VERSION/yq_linux_amd64" | awk '{print $1}')
+  append_release "$repository/tools.env" TOOL_RELEASES yq "$YQ_VERSION" \
+    "https://example.invalid/yq/$YQ_VERSION/yq_linux_amd64" "$digest"
 
   write_fake "$work/fd-v${FD_VERSION}-x86_64-unknown-linux-musl/fd" fd "$FD_VERSION"
   mkdir -p "$archive_root/fd/$FD_VERSION"

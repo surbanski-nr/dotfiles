@@ -65,6 +65,11 @@ one tool per line. Both include `fd`, installed from its verified official
 Linux musl archive rather than an OS package. GNU `find` remains a system
 prerequisite for scripts that depend on its semantics.
 
+Both profiles include Mike Farah's yq `4.52.4` as the verified upstream Go
+binary. Connected setup retains its MIT license beside `~/bin/yq-VERSION`;
+offline releases retain it under `share/licenses/yq`. This is independent of
+the Python package also named yq.
+
 Both tool profiles also include the full official Go SDK, verified with its
 upstream SHA-256. Connected setup keeps it under `~/bin/go-VERSION` and selects
 `go` and `gofmt` together with relative links. The SDK includes its compiler,
@@ -98,8 +103,9 @@ Package names and command names are separate, since packages such as
 remains part of the connected installation procedure.
 
 The runtime role is the minimal OS baseline for running a prepared offline
-release. The build role adds compilers and libraries for disposable release
-builders. The setup role is the normal host setup: download and
+release, including OS-managed jq for JSON schema overlay merges. Normal setup
+inherits jq too; it is not a second bundled CLI. The build role adds compilers
+and libraries for disposable release builders. The setup role is the normal host setup: download and
 verification tools, interactive utilities such as mc, and
 headers for remaining asdf runtime builds and native project dependencies, plus
 Docker Engine for local containers and release builds. It is
@@ -263,8 +269,9 @@ with Neovim and its complete profile, Node.js, private standalone Python, the
 complete Go SDK,
 ripgrep, fd, tmux and plugins, htop, Oh My Posh, gh, k9s, kind, uv/uvx, zoxide,
 kubectx, kubens, kubeconform, Kyverno, Trivy, Task, actionlint, ShellCheck,
-yamllint, fzf and Terraform,
-plus every kubectl and Helm version listed in `tools.env`.
+yamllint, yq, fzf and Terraform,
+plus every kubectl and Helm version listed in `tools.env` and the ready-to-run
+`helm schema` plugin `2.4.0` with its license material.
 Each release owns its complete tool payload, even when another retained release
 contains the same versions. Asdf, its plugins and its shims are not part of the
 offline package. Optional online `setup-asdf` remains available independently.
@@ -273,10 +280,12 @@ The current manager can check and select retained releases from before `fd`,
 Go, kind, uv or the expanded operations-tool set was bundled. Selecting one makes its absent tools unavailable
 through the release launcher. It supports the original, fd-only and fd/Go profiles.
 Keep a copy of the newer manager when rolling back across that boundary:
-older managers do not understand the newer release metadata or SSH ownership
+older managers do not understand the newer release metadata or SSH/yq ownership
 records. Releases from before the SSH package remain selectable. On rollback
 their optional SSH links stay recorded but do not resolve, just like commands
 absent from an older tool profile; selecting a newer release restores them.
+The new yq profile requires `YQ_VERSION` and `HELM_SCHEMA_PLUGIN_VERSION`;
+retained profiles keep their original requirements and plugin discovery.
 
 The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
 `ubuntu-26.04-x86_64` and `amzn-2023-x86_64`. Build from a clean committed
@@ -494,8 +503,11 @@ helm list
 unset KUBECTL_VERSION HELM_VERSION
 ```
 
-Unset or empty variables select the default. An invalid version or a version
-not in the active release fails clearly, without falling back to another tool
+Unset or empty variables select the default. A version may use one optional
+leading `v`: `HELM_VERSION=v3.21.0` and
+`HELM_VERSION=3.21.0` select the same executable. The Helm default remains
+`4.3.0`; `3.22.0` and `3.21.0` are also bundled. An invalid or unbundled
+version fails clearly, without falling back to another tool
 provider. Explicit binaries such as `current/bin/kubectl-1.34.12` also work;
 only the two canonical client launchers are projected into `~/bin`.
 `release.env` records ordered `KUBECTL_VERSIONS` and `HELM_VERSIONS` lists.
@@ -511,6 +523,72 @@ Offline Bash does not add asdf shims and removes inherited shim paths from
 `PATH`, without modifying asdf's files or settings. Connected Bash continues
 to use asdf. Avoid overlapping providers for the same public commands in one
 HOME; there is no automatic fallback between them.
+
+### Helm schema plugin and project validation
+
+Managed Helm defaults to `share/helm/plugins` in its resolved release when
+`HELM_PLUGINS` is unset or empty. The packaged `schema` plugin is built from
+the verified `losisin/helm-values-schema-json` release with a minimal manifest
+without installation/update download hooks. Host plugins are left in place.
+A nonempty `HELM_PLUGINS` selects your own complete plugin directory; it opts
+out of the bundled default. A direct versioned Helm executable bypasses that
+launcher policy. Older releases without the plugin keep their original
+discovery and never borrow a plugin from a newer release.
+
+Health selects the bundled plugin directory explicitly, checks the version
+and manifest, generates a local schema with `$ref`, `--bundle` and
+`--bundle-without-id` for every bundled Helm version, and exercises yq YAML
+documents and jq overlay merging. These checks use no network or user plugins.
+Missing or broken validation tools prevent candidate activation.
+
+For the first upgrade from a pre-yq release, run `scripts/dotfiles-release`
+from this reviewed checkout, or extract the candidate's standalone
+`dotfiles-release` from the checksum-verified archive into a private directory.
+The installed old manager cannot read the new profile. Keep the newer manager
+outside the release links when rolling back, and use it to return to the new
+release. Let the manager update ownership and selection; do not edit retained
+payloads or `current` by hand.
+
+For NetReveal chart validation, offline means delivery of executables.
+Chart repositories, schema endpoints and project pip dependencies may still
+use the network. Run validation in a disposable project clone because it
+cleans generated outputs, builds dependencies and regenerates schemas. From
+that project's root, reread `tool-versions.env` and select its pins for the
+whole Task invocation, not just one helper:
+
+```bash
+# Create this environment only if it does not already exist.
+if [[ ! -e .venv-dotfiles ]]; then
+  "$HOME/dotfiles-releases/current/bin/python3" -m venv .venv-dotfiles
+fi
+
+(
+  export PATH="$PWD/.venv-dotfiles/bin:$HOME/bin:/usr/bin:/bin"
+  unset HELM_PLUGINS
+  export HELM_CONFIG_HOME="$PWD/.validation-helm/config"
+  export HELM_CACHE_HOME="$PWD/.validation-helm/cache"
+  export HELM_DATA_HOME="$PWD/.validation-helm/data"
+  set -a
+  source ./tool-versions.env
+  set +a
+  python3 --version
+  helm version --short
+  helm schema version
+  yq --version
+  jq --version
+  task --version
+  kubeconform -v
+  task validate
+)
+```
+
+Inspect and reuse an existing suitable `.venv-dotfiles`; never replace it
+silently. The private release interpreter is Python `3.12.12`; no public
+`~/bin/python3` link is added. For PR parity, run `task split-generate` before
+`task validate` in the same subshell; its `PyYAML==6.0.2` download is allowed.
+Task `3.53.1` and kubeconform `0.8.0` keep their defaults. Their version
+differences from project pins need a real workflow run, not an automatic
+downgrade. No chart/schema mirror, Trivy database or live cluster is added.
 
 ### User executable overrides
 

@@ -14,5 +14,6 @@ printf 'tool=%s\napp=%s\nconfig=%s\ndata=%s\nGOROOT=%s\nGOTOOLCHAIN=%s\ntmux-con
   "$(readlink -f -- "$0")" "${NVIM_APPNAME:-unset}" \
   "${XDG_CONFIG_HOME:-unset}" "${XDG_DATA_HOME:-unset}" \
   "${GOROOT:-unset}" "${GOTOOLCHAIN:-unset}" "${TMUX_OFFLINE_CONFIG:-unset}"
+printf 'helm-plugins=%s\n' "${HELM_PLUGINS-unset}"
 printf '<%s>\n' "$@"
 exit "${FIXTURE_LAUNCHER_EXIT_CODE:-0}"

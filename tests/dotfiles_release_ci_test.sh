@@ -80,6 +80,29 @@ run_preflight
 matrix | jq -e 'length == 4 and all(.[]; .build_archive == true)' >/dev/null || fail 'missing archives did not select four builds'
 grep -Fx 'should_run=true' "$GITHUB_OUTPUT" >/dev/null || fail 'missing assets did not schedule work'
 
+printf '%s\n' \
+  'FD_VERSION=1.0' 'GO_VERSION=1.0' 'KIND_VERSION=1.0' 'UV_VERSION=1.0' \
+  'ACTIONLINT_VERSION=1.0' 'SHELLCHECK_VERSION=1.0' 'GH_VERSION=1.0' 'HTOP_VERSION=1.0' \
+  'KUBECONFORM_VERSION=1.0' 'KYVERNO_VERSION=1.0' 'TRIVY_VERSION=1.0' \
+  'YQ_VERSION=4.52.4' 'HELM_SCHEMA_PLUGIN_VERSION=2.4.0' \
+  >>"$test_root/payload/$RELEASE_TAG/release.env"
+sed -i 's/^OFFLINE_TOOLS=.*/OFFLINE_TOOLS=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm,fd,go,kind,uv,actionlint,shellcheck,yamllint,gh,htop,kubeconform,kyverno,trivy,yq/' \
+  "$test_root/payload/$RELEASE_TAG/release.env"
+repack_archive
+cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
+run_preflight
+matrix | jq -e 'length == 4 and .[0].build_archive == false' >/dev/null || fail 'CI rejected the new validation tool profile'
+for field in YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION; do
+  cp "$test_root/payload/$RELEASE_TAG/release.env" "$test_root/profile.env"
+  sed -i "/^$field=/d" "$test_root/payload/$RELEASE_TAG/release.env"
+  repack_archive
+  cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
+  if run_preflight >"$test_root/missing-$field.log" 2>&1; then fail "CI accepted missing $field"; fi
+  cp "$test_root/profile.env" "$test_root/payload/$RELEASE_TAG/release.env"
+done
+find "$TEST_RELEASE_ASSETS" -maxdepth 1 -type f -delete
+make_archive
+
 TEST_RELEASE_ERROR=404 run_preflight >"$test_root/absent.log"
 grep -Fx 'should_run=false' "$GITHUB_OUTPUT" >/dev/null || fail 'missing release was not skipped'
 if TEST_RELEASE_ERROR=403 run_preflight >"$test_root/denied.log" 2>&1; then fail 'API permission failure was hidden'; fi

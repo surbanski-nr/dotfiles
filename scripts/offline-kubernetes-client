@@ -17,10 +17,14 @@ if [[ -n $version ]]; then
     printf '%s: invalid version: %s\n' "$tool" "$version" >&2
     exit 2
   }
+  version=${version#v}
   binary=$binary-$version
 fi
 [[ -x $binary ]] || {
   printf '%s: version %s is not bundled in %s\n' "$tool" "${version:-default}" "$release" >&2
   exit 127
 }
+if [[ $tool == helm && -d $release/share/helm/plugins && -z ${HELM_PLUGINS:-} ]]; then
+  export HELM_PLUGINS=$release/share/helm/plugins
+fi
 exec "$binary" "$@"

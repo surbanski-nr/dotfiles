@@ -15,7 +15,7 @@ test_xdg=$test_root/'xdg elsewhere'
 
 before=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
 XDG_CONFIG_HOME="$test_xdg" run_setup "$test_home" "$test_repository" "$archive_root" \
-  k9s gh htop oh-my-posh uv nvim fd go kind tmux
+  k9s gh htop oh-my-posh uv nvim fd go kind tmux yq
 after=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
 [[ $before == "$after" ]] || fail 'setup-tools changed a download fixture'
 cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
@@ -39,6 +39,8 @@ assert_link "$test_home/bin/fd" "fd-$FD_VERSION"
 assert_link "$test_home/bin/go" "go-$GO_VERSION/bin/go"
 assert_link "$test_home/bin/gofmt" "go-$GO_VERSION/bin/gofmt"
 assert_link "$test_home/bin/tmux" "tmux-$TMUX_VERSION/bin/tmux"
+"$test_home/bin/yq" --version | grep -F "yq $YQ_VERSION" >/dev/null
+cmp "$test_home/bin/yq-$YQ_VERSION.LICENSE" "$repo_dir/licenses/yq/LICENSE" || fail 'yq license was not retained'
 "$test_home/bin/go" version | grep -F "$GO_VERSION" >/dev/null
 [[ -f $test_home/bin/go-$GO_VERSION/src/fmt/print.go &&
   -f $test_home/bin/go-$GO_VERSION/pkg/tool/linux_amd64/compile ]] ||
@@ -56,10 +58,10 @@ default_repository=$test_root/default-repository
 default_home=$test_root/default-home
 make_test_repo "$default_repository"
 cp "$test_repository/tools.env" "$default_repository/tools.env"
-printf 'TOOLS=(fd k9s gh oh-my-posh python uv nvim go kind)\n' >>"$default_repository/tools.env"
+printf 'TOOLS=(fd k9s gh oh-my-posh python uv nvim go kind yq)\n' >>"$default_repository/tools.env"
 TEST_UV_LOG="$test_root/default-python.log" XDG_CONFIG_HOME="$default_home/.config" \
   run_setup "$default_home" "$default_repository" "$archive_root"
-for tool in fd k9s gh oh-my-posh uv uvx nvim go gofmt kind; do
+for tool in fd k9s gh oh-my-posh uv uvx nvim go gofmt kind yq; do
   [[ -x $default_home/bin/$tool ]] || fail "default online install omitted $tool"
 done
 [[ $(<"$default_home/.config/uv/.python-version") == "$PYTHON_VERSION" ]] ||

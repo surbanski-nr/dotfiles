@@ -408,6 +408,12 @@ artifact_layout() {
       SPEC_DESTS=("$name-$version")
       SPEC_LINKS=("$name:$name-$version")
       ;;
+    yq)
+      SPEC_FORMAT=raw
+      SPEC_MEMBER=
+      SPEC_DESTS=("yq-$version" "yq-$version.LICENSE")
+      SPEC_LINKS=("yq:yq-$version")
+      ;;
     rg)
       SPEC_FORMAT=gz-member
       SPEC_MEMBER="ripgrep-${version}-x86_64-unknown-linux-musl/rg"
@@ -576,7 +582,11 @@ extract_artifact() {
 
   case $SPEC_FORMAT in
     raw)
-      install -m 0755 "$archive" "$destination/${SPEC_DESTS[0]}"
+      install -m 0755 "$archive" "$destination/${SPEC_DESTS[0]}" || return
+      if ((${#SPEC_DESTS[@]} > 1)); then
+        local license=${BASH_SOURCE[0]%/*}/../licenses/yq/LICENSE
+        install -m 0644 "$license" "$destination/${SPEC_DESTS[1]}" || return
+      fi
       ;;
     gz-member | xz-member)
       validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" || return

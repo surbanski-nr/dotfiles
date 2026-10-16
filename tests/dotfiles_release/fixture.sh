@@ -52,6 +52,29 @@ if [[ \${0##*/} == tmux && \${1:-} == -f ]]; then
   [[ \$2 == "\$TMUX_OFFLINE_CONFIG" ]] || exit 98
   shift 2
 fi
+if [[ \${self##*/} == helm-* ]]; then
+  if [[ \${1:-} == schema ]]; then
+    shift
+    exec "\$HELM_PLUGINS/helm-values-schema-json/schema" "\$@"
+  elif [[ \$* == 'plugin list' ]]; then
+    printf 'NAME VERSION DESCRIPTION\\n'
+    awk '\$1 == "name:" { name = \$2 } \$1 == "version:" { gsub(/"/, "", \$2); version = \$2 } END { print name, version, "fixture" }' \\
+      "\$HELM_PLUGINS/helm-values-schema-json/plugin.yaml"
+    exit 0
+  elif [[ \${1:-} == fixture-plugins ]]; then
+    printf 'plugins=%s\\n' "\${HELM_PLUGINS-unset}"
+  fi
+fi
+if [[ \${0##*/} == yq ]]; then
+  if [[ \${1:-} == --version ]]; then
+    printf 'yq (https://github.com/mikefarah/yq/) version v$version\\n'
+  elif [[ \$* == 'eval -r .name '* ]]; then
+    awk '/^name:/ { print \$2 } /^---\$/ { print }' "\${!#}"
+  else
+    exit 93
+  fi
+  exit 0
+fi
 case \$(basename -- "\$0") in
   k9s) [[ \$* == 'version --short' ]] || exit 93 ;;
   oh-my-posh | terraform | go | kind) [[ \$* == version ]] || exit 94 ;;
@@ -115,6 +138,7 @@ make_artifact() {
   local include_fd=${5:-true}
   local include_go=${6:-true}
   local include_current_tools=${7:-false}
+  local include_validation_tools=${8:-false}
   local offline_profile=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm
   local id=dotfiles-${commit:0:12}
   local stage=$test_root/stage-$marker release=$test_root/stage-$marker/$id
@@ -176,6 +200,29 @@ make_artifact() {
     ln -s ../share/nvim2/mason/packages/yamllint/venv/bin/yamllint \
       "$release/bin/yamllint"
     offline_profile+=,kind,uv,actionlint,shellcheck,yamllint,gh,htop,kubeconform,kyverno,trivy
+  fi
+  if [[ $include_validation_tools == true ]]; then
+    write_fake_tool "$release/tools/bin/yq" "$release_version"
+    ln -s ../tools/bin/yq "$release/bin/yq"
+    mkdir -p "$release/share/licenses/yq"
+    cp "$repo_dir/licenses/yq/LICENSE" "$release/share/licenses/yq/LICENSE"
+    plugin_dir=$release/share/helm/plugins/helm-values-schema-json
+    mkdir -p "$plugin_dir"
+    printf 'name: schema\nversion: "%s"\n' "$release_version" >"$plugin_dir/plugin.yaml"
+    printf 'fixture plugin license\n' >"$plugin_dir/LICENSE"
+    cat >"$plugin_dir/schema" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ \${1:-} == version ]]; then
+  printf 'helm schema version v$release_version\\n'
+  exit 0
+fi
+[[ \$* == '-f values.yaml -o schema.json --bundle --bundle-without-id --bundle-root '* ]] || exit 93
+jq '{properties:{replicas:{type:"integer"},tls:{"\$ref":"#/\$defs/tls.schema.json"}},"\$defs":{"tls.schema.json":del(."\$id")}}' \\
+  tls.schema.json >schema.json
+EOF
+    chmod 0755 "$plugin_dir/schema"
+    offline_profile+=,yq
   fi
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python"
   ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python3"
@@ -273,6 +320,10 @@ make_artifact() {
       "KYVERNO_VERSION=$release_version" \
       "TRIVY_VERSION=$release_version" \
       >>"$release/release.env"
+  fi
+  if [[ $include_validation_tools == true ]]; then
+    printf 'YQ_VERSION=%s\nHELM_SCHEMA_PLUGIN_VERSION=%s\n' \
+      "$release_version" "$release_version" >>"$release/release.env"
   fi
   printf 'marker=%s\n' "$marker" >"$release/build-manifest.txt"
   (

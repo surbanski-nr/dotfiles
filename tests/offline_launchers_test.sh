@@ -88,4 +88,60 @@ for tool in nvim tmux; do
   fi
 done
 
+mkdir -p "$release/tools/bin" "$release/share/helm/plugins"
+for tool in helm kubectl; do
+  install -m 0755 "$repo_dir/scripts/offline-kubernetes-client" "$release/bin/$tool"
+  for version in 1.2.3 2.3.4; do
+    install -m 0755 "$repo_dir/tests/fixtures/scripts/launcher-tool" "$release/tools/bin/$tool-$version"
+  done
+  ln -s "$tool-1.2.3" "$release/tools/bin/$tool"
+  ln -s "../../current/bin/$tool" "$test_home/bin/$tool"
+  for selection in '' 1.2.3 v1.2.3 2.3.4 v2.3.4; do
+    output=$(env "${tool^^}_VERSION=$selection" "$test_home/bin/$tool" -- 'literal ; value' '')
+    [[ $output == *"tool=$release/tools/bin/$tool-${selection#v}"* ||
+      ( -z $selection && $output == *"tool=$release/tools/bin/$tool-1.2.3"* ) ]] ||
+      fail "$tool selected the wrong version: $selection"
+    [[ $output == *$'<-->\n<literal ; value>\n<>' ]] || fail "$tool changed literal arguments"
+  done
+  for selection in vv1.2.3 ../1.2.3 '1.2.3;echo' 9.8.7; do
+    if env "${tool^^}_VERSION=$selection" "$test_home/bin/$tool" >"$test_root/client-error.log" 2>&1; then
+      fail "$tool accepted invalid or unbundled version $selection"
+    else
+      status=$?
+      [[ ( $selection == 9.8.7 && $status -eq 127 ) || ( $selection != 9.8.7 && $status -eq 2 ) ]] ||
+        fail "$tool returned the wrong selector failure status"
+    fi
+  done
+  if FIXTURE_LAUNCHER_EXIT_CODE=42 "$test_home/bin/$tool" --version >/dev/null; then
+    fail "$tool hid the child exit status"
+  else
+    [[ $? -eq 42 ]] || fail "$tool changed the child exit status"
+  fi
+done
+for selection in unset empty override; do
+  case $selection in
+    unset) output=$(env -u HELM_PLUGINS "$test_home/bin/helm") ;;
+    empty) output=$(HELM_PLUGINS='' "$test_home/bin/helm") ;;
+    override) output=$(HELM_PLUGINS="$test_root/user plugins" "$test_home/bin/helm") ;;
+  esac
+  expected=$release/share/helm/plugins
+  [[ $selection != override ]] || expected=$test_root/'user plugins'
+  [[ $output == *"helm-plugins=$expected"* ]] || fail 'Helm lost its bundled or explicit plugin directory'
+done
+export HELM_PLUGINS="$test_root/user plugins"
+"$test_home/bin/helm" >/dev/null
+[[ $HELM_PLUGINS == "$test_root/user plugins" ]] || fail 'Helm launcher changed its parent environment'
+unset HELM_PLUGINS
+legacy=$test_root/'legacy release'
+mkdir -p "$legacy/bin" "$legacy/tools/bin"
+cp "$release/bin/helm" "$legacy/bin/helm"
+cp "$release/tools/bin/helm-1.2.3" "$legacy/tools/bin/helm"
+unlink "$test_root/current"
+ln -s "$legacy" "$test_root/current"
+output=$(env -u HELM_PLUGINS "$test_home/bin/helm")
+[[ $output == *"tool=$legacy/tools/bin/helm"* && $output == *'helm-plugins=unset'* ]] ||
+  fail 'legacy Helm borrowed the plugin from another release'
+output=$(HELM_PLUGINS='' "$test_home/bin/helm")
+[[ $output == *$'helm-plugins=\n'* ]] || fail 'legacy Helm changed empty plugin discovery'
+
 printf 'Offline Nvim and tmux launcher tests passed\n'

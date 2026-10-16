@@ -49,7 +49,7 @@ package_log=$test_root/packages.log
 debian_release=$test_root/debian-os-release
 amazon_release=$test_root/amazon-os-release
 mkdir -p "$fixture_bin"
-for command_name in awk bash cat chmod cmp dirname env find grep id install ln mktemp readlink sed timeout uname; do
+for command_name in awk bash cat chmod cmp dirname env find grep id install ln mktemp mv readlink sed timeout uname; do
   ln -s "$(command -v "$command_name")" "$fixture_bin/$command_name"
 done
 export TEST_DOCKER_COMMAND="$repo_dir/tests/fixtures/setup-system/docker-command"
@@ -118,6 +118,15 @@ done
   fail 'offline-release setup omitted htop ncurses runtime'
 [[ $(grep -c 'diffutils' "$package_log") -eq 2 ]] ||
   fail 'offline-release setup omitted cmp runtime'
+[[ $(grep -c $'\tjq\t' "$package_log") -eq 2 ]] || fail 'offline-release setup omitted jq'
+mv "$fixture_bin/jq" "$fixture_bin/jq.saved"
+if PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
+  SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" "$repo_dir/setup-system" --offline-release \
+  >"$test_root/jq-missing.log" 2>&1; then
+  fail 'offline runtime accepted a missing jq command'
+fi
+grep -F 'package installation did not provide jq' "$test_root/jq-missing.log" >/dev/null || fail 'missing jq was not reported'
+mv "$fixture_bin/jq.saved" "$fixture_bin/jq"
 if grep $'^apt-get\tinstall' "$package_log" | grep -Eq $'\t(python3|tmux|build-essential)(\t|$)'; then
   fail 'offline-release setup included a connected-only package'
 fi
@@ -168,6 +177,10 @@ for ubuntu_version in 24.04 26.04; do
     24.04) ubuntu_suite=noble ;;
     26.04) ubuntu_suite=resolute ;;
   esac
+  : >"$package_log"
+  PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
+    SETUP_SYSTEM_OS_RELEASE_FILE="$ubuntu_release" "$repo_dir/setup-system" --offline-release >/dev/null
+  grep -F $'\tjq\t' "$package_log" >/dev/null || fail "Ubuntu $ubuntu_version runtime omitted jq"
   PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
     SETUP_SYSTEM_OS_RELEASE_FILE="$ubuntu_release" \
     SETUP_SYSTEM_ETC_DIR="$test_root/ubuntu-$ubuntu_version-etc" \
@@ -181,6 +194,10 @@ done
 
 : >"$package_log"
 unlink "$fixture_bin/docker"
+PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
+  SETUP_SYSTEM_OS_RELEASE_FILE="$amazon_release" "$repo_dir/setup-system" --offline-release >/dev/null
+grep -F $'\tjq\t' "$package_log" >/dev/null || fail 'Amazon runtime omitted jq'
+: >"$package_log"
 for _ in 1 2; do
   PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" TEST_RPM_MINIMAL=1 \
     SETUP_SYSTEM_OS_RELEASE_FILE="$amazon_release" \

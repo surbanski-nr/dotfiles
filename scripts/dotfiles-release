@@ -37,6 +37,7 @@ RELEASE_METADATA_FIELDS=(
   FD_VERSION GO_VERSION KIND_VERSION UV_VERSION
   ACTIONLINT_VERSION SHELLCHECK_VERSION
   GH_VERSION HTOP_VERSION KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION
+  YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION
 )
 
 die() {
@@ -165,7 +166,8 @@ read_release_metadata() {
   for required in "${RELEASE_METADATA_FIELDS[@]}"; do
     case $required in
       FD_VERSION | GO_VERSION | KIND_VERSION | UV_VERSION | ACTIONLINT_VERSION | SHELLCHECK_VERSION | \
-        GH_VERSION | HTOP_VERSION | KUBECONFORM_VERSION | KYVERNO_VERSION | TRIVY_VERSION)
+        GH_VERSION | HTOP_VERSION | KUBECONFORM_VERSION | KYVERNO_VERSION | TRIVY_VERSION | \
+        YQ_VERSION | HELM_SCHEMA_PLUGIN_VERSION)
         continue
         ;;
     esac
@@ -186,7 +188,7 @@ read_release_metadata() {
     FZF_VERSION ZOXIDE_VERSION K9S_VERSION KUBECTX_VERSION OMP_VERSION TASK_VERSION \
     TERRAFORM_VERSION FD_VERSION GO_VERSION KIND_VERSION UV_VERSION \
     ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION \
-    KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION; do
+    KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION; do
     [[ -v parsed[$key] ]] || continue
     [[ ${parsed[$key]} =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] ||
       { die "invalid release tool version: $key"; return 1; }
@@ -218,11 +220,14 @@ read_release_metadata() {
     "$value,fd,go,kind,uv,actionlint,shellcheck,yamllint,gh,htop,kubeconform,kyverno,trivy")
       optional='FD_VERSION GO_VERSION KIND_VERSION UV_VERSION ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION'
       ;;
+    "$value,fd,go,kind,uv,actionlint,shellcheck,yamllint,gh,htop,kubeconform,kyverno,trivy,yq")
+      optional='FD_VERSION GO_VERSION KIND_VERSION UV_VERSION ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION'
+      ;;
     *) die 'release metadata has an invalid offline tool profile'; return 1 ;;
   esac
   for required in FD_VERSION GO_VERSION KIND_VERSION UV_VERSION \
     ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION \
-    KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION; do
+    KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION; do
     if [[ " $optional " == *" $required "* ]]; then
       [[ -v parsed[$required] ]] || { die "missing release metadata key: $required"; return 1; }
     elif [[ -v parsed[$required] ]]; then
@@ -605,7 +610,7 @@ managed_path_target_valid() {
       case $command_name in
         dotfiles-release | nvim | tmux | node | npm | npx | corepack | go | gofmt | rg | fd | zoxide | \
           k9s | kind | uv | uvx | kubectx | kubens | oh-my-posh | task | fzf | terraform | kubectl | helm | \
-          actionlint | shellcheck | yamllint | gh | htop | kubeconform | kyverno | trivy) ;;
+          actionlint | shellcheck | yamllint | gh | htop | kubeconform | kyverno | trivy | yq) ;;
         *) return 1 ;;
       esac
       [[ $target == "../dotfiles-releases/current/bin/$command_name" ]]
@@ -697,6 +702,11 @@ setup_tools_state_owns_link() {
       name=uv
       version=${target#"$command_name-"}
       destinations=("uv-$version" "uvx-$version")
+      ;;
+    yq:yq-*)
+      name=yq
+      version=${target#yq-}
+      destinations=("yq-$version" "yq-$version.LICENSE")
       ;;
     actionlint:actionlint-* | fd:fd-* | gh:gh-* | helm:helm-* | k9s:k9s-* | kind:kind-* | \
       kubeconform:kubeconform-* | kubectl:kubectl-* | kubectx:kubectx-* | kubens:kubens-* | \
@@ -1609,6 +1619,57 @@ health_version() {
   }
 }
 
+health_validation_tools() {
+  local release=$1 health_home=$2 yq_version=$3 plugin_version=$4 helm_versions=$5
+  local work=$health_home/validation-tools output version
+  local HELM_PLUGINS=$release/share/helm/plugins
+  local HELM_CONFIG_HOME=$health_home/helm/config HELM_CACHE_HOME=$health_home/helm/cache
+  local HELM_DATA_HOME=$health_home/helm/data
+  export HELM_PLUGINS HELM_CONFIG_HOME HELM_CACHE_HOME HELM_DATA_HOME
+
+  [[ -f $HELM_PLUGINS/helm-values-schema-json/plugin.yaml &&
+    -x $HELM_PLUGINS/helm-values-schema-json/schema &&
+    -s $HELM_PLUGINS/helm-values-schema-json/LICENSE &&
+    -s $release/share/licenses/yq/LICENSE ]] || { die 'validation tool payload is incomplete'; return 1; }
+  need jq || return
+  mkdir -p "$work" || return
+  output=$("$release/bin/yq" --version) || return
+  [[ $output == "yq (https://github.com/mikefarah/yq/) version v${yq_version#v}" ]] ||
+    { die 'yq is not the pinned Mike Farah implementation'; return 1; }
+  printf 'name: first\n---\nname: second\n' >"$work/documents.yaml" || return
+  output=$("$release/bin/yq" eval -r '.name' "$work/documents.yaml") || return
+  [[ $output == $'first\n---\nsecond' ]] || { die 'yq YAML document check failed'; return 1; }
+  cat >"$work/values.yaml" <<'EOF'
+replicas: 2
+tls: {} # @schema $ref: tls.schema.json
+EOF
+  cat >"$work/tls.schema.json" <<'EOF'
+{"$id":"https://offline.example/tls.schema.json","type":"object","properties":{"enabled":{"type":"boolean"}},"required":["enabled"],"additionalProperties":false}
+EOF
+  for version in ${helm_versions//,/ }; do
+    output=$(HELM_VERSION="$version" "$release/bin/helm" plugin list) || return
+    awk -v expected="${plugin_version#v}" \
+      '$1 == "schema" { count++; valid = ($2 == expected) } END { exit !(count == 1 && valid) }' \
+      <<<"$output" || { die "Helm $version schema plugin manifest has an unexpected version"; return 1; }
+    output=$(HELM_VERSION="$version" "$release/bin/helm" schema version) || return
+    [[ $output == "helm schema version v${plugin_version#v}" ]] ||
+      { die "Helm $version schema plugin reported an unexpected version: $output"; return 1; }
+    (cd "$work" && HELM_VERSION="v${version#v}" "$release/bin/helm" schema \
+      -f values.yaml -o schema.json --bundle --bundle-without-id --bundle-root "$work") || return
+    jq -e '
+      .properties.replicas.type == "integer" and
+      .properties.tls."$ref" == "#/$defs/tls.schema.json" and
+      (."$defs"."tls.schema.json" |
+        .properties.enabled.type == "boolean" and .required == ["enabled"] and (has("$id") | not))
+    ' "$work/schema.json" >/dev/null || { die "Helm $version schema generation failed"; return 1; }
+  done
+  printf '%s\n' '{"properties":{"tls":{"description":"overlay"}}}' >"$work/overlay.json" || return
+  jq -s '.[0] * .[1]' "$work/schema.json" "$work/overlay.json" >"$work/merged.json" || return
+  jq -e '.properties.tls.description == "overlay" and .properties.tls."$ref" == "#/$defs/tls.schema.json"' \
+    "$work/merged.json" >/dev/null || { die 'jq schema overlay merge failed'; return 1; }
+  printf 'validation-tools=healthy\n'
+}
+
 health_release() {
   local release_id=$1 mode=${2:-full} release command_name path check_script health_home
   local PATH output expected field probe DOTFILES_OFFLINE_RELEASE_ROOT status
@@ -1667,6 +1728,11 @@ health_release() {
       output=$(env "${tool^^}_VERSION=$version" \
         "$release/bin/$tool" "${probe_args[@]}") || return
       health_version "$tool" "$version" "$output" || return
+      if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
+        output=$(env "${tool^^}_VERSION=v${version#v}" \
+          "$release/bin/$tool" "${probe_args[@]}") || return
+        health_version "$tool" "$version" "$output" || return
+      fi
       output=$("$release/bin/$tool-$version" "${probe_args[@]}") || return
       health_version "$tool-$version" "$version" "$output" || return
     done
@@ -1675,9 +1741,18 @@ health_release() {
     [[ -d $release/share/tmux/plugins/$command_name/.git ]] ||
       { die "tmux plugin metadata is missing: $command_name"; return 1; }
   done
+  if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
+    health_home=$(mktemp -d "$STATE_DIR/.health.XXXXXX") || return
+    TEMP_PATHS+=("$health_home")
+    health_stage 'validation tools' health_validation_tools "$release" "$health_home" \
+      "${release_metadata[YQ_VERSION]}" "${release_metadata[HELM_SCHEMA_PLUGIN_VERSION]}" \
+      "${release_metadata[HELM_VERSIONS]}" || return
+  fi
   [[ $mode == quick || ${DOTFILES_RELEASE_TEST_MODE:-} == 1 ]] && return
-  health_home=$(mktemp -d "$STATE_DIR/.health.XXXXXX")
-  TEMP_PATHS+=("$health_home")
+  if [[ -z ${health_home:-} ]]; then
+    health_home=$(mktemp -d "$STATE_DIR/.health.XXXXXX") || return
+    TEMP_PATHS+=("$health_home")
+  fi
   mkdir -p "$health_home/.cache" "$health_home/.local/state"
   health_stage 'CLI operations' health_cli_operations "$release" "$health_home" || return
   health_stage 'Kubernetes tools' health_kubernetes_tools "$release" "$health_home" || return

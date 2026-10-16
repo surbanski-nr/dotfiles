@@ -114,6 +114,9 @@ load_build_config() {
   done
   select_default_release TOOL_RELEASES npm || return
   BUILD_VERSIONS[npm]=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES helm-schema || return
+  [[ $RELEASE_URL != - ]] || { die 'Helm schema plugin requires an artifact'; return 1; }
+  BUILD_VERSIONS[helm-schema]=$RELEASE_VERSION
   # shellcheck source=../release.env
   source "$source_dir/release.env" || return
 }
@@ -215,6 +218,9 @@ install_release_tools() {
     version=${BUILD_VERSIONS[$tool]}
     prepare_release_artifact TOOL_RELEASES "$tool" "$version" "$inputs" || return
     install -m 0755 "$PREPARED_ARTIFACT" "$release/tools/bin/$tool" || return
+    if [[ $tool == yq ]]; then
+      install -D -m 0644 "${PREPARED_ARTIFACT}.LICENSE" "$release/share/licenses/yq/LICENSE" || return
+    fi
     if [[ $tool == uv ]]; then
       install -m 0755 "${PREPARED_ARTIFACT%/*}/${SPEC_DESTS[1]}" "$release/tools/bin/uvx" || return
       ln -s ../tools/bin/uvx "$release/bin/uvx" || return
@@ -244,6 +250,32 @@ install_release_tools() {
     ln -s "../tools/bin/$tool" "$release/bin/$tool" || return
   done
   write_launchers "$release" || return
+}
+
+install_helm_schema_plugin() {
+  local release=$1 inputs=$2 archive plugin
+  local version=${BUILD_VERSIONS[helm-schema]}
+
+  select_release TOOL_RELEASES helm-schema "$version" || return
+  archive=$inputs/$RELEASE_ASSET
+  download_file "$RELEASE_URL" "$archive" || return
+  verify_sha256 "$archive" "$RELEASE_SHA256" || return
+  validate_tar_archive "$archive" gz || return
+  plugin=$release/share/helm/plugins/helm-values-schema-json
+  mkdir -p "$plugin" || return
+  archive_member_to_file "$archive" gz-member schema "$plugin/schema" || return
+  tar -xOzf "$archive" -- LICENSE >"$plugin/LICENSE" || return
+  [[ -s $plugin/LICENSE ]] || { die 'Helm schema plugin license is missing'; return 1; }
+  cat >"$plugin/plugin.yaml" <<EOF
+name: schema
+version: "$version"
+usage: generate values.schema.json from values yaml
+description: Helm plugin for generating values.schema.json from multiple values files.
+ignoreFlags: false
+platformCommand:
+  - os: linux
+    command: "\$HELM_PLUGIN_DIR/schema"
+EOF
 }
 
 clone_pinned() {
@@ -381,7 +413,7 @@ prepare_nvim_payload() {
   install -m 0755 "$release/dotfiles/scripts/offline-eslint-d" "$data/mason/packages/eslint_d/eslint_d" || return
   unlink "$data/mason/bin/eslint_d" || return
   ln -s ../packages/eslint_d/eslint_d "$data/mason/bin/eslint_d" || return
-  NVIM2_BENCHMARK_RUNS=3 timeout 1200s \
+  TEST_BASHRC="$release/dotfiles/bash/.bashrc" NVIM2_BENCHMARK_RUNS=3 timeout 1200s \
     bash "$release/config/nvim2/tests/check.sh" || return
   link_list=$(mktemp) || return
   TEMP_PATHS+=("$link_list")
@@ -469,6 +501,7 @@ write_release_metadata() {
     "GO_VERSION=${BUILD_VERSIONS[go]}" \
     "HTOP_VERSION=${BUILD_VERSIONS[htop]}" \
     "TMUX_VERSION=${BUILD_VERSIONS[tmux]}" \
+    "HELM_SCHEMA_PLUGIN_VERSION=${BUILD_VERSIONS[helm-schema]}" \
     >"$release/release.env" || return
   for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do
     # kubens shares the KUBECTX_VERSION field emitted for kubectx.
@@ -574,6 +607,7 @@ build_release() {
   } >"$release/dotfiles-release" || return
   chmod 0755 "$release/dotfiles-release" || return
   install_release_tools "$release" "$inputs" || return
+  install_helm_schema_plugin "$release" "$inputs" || return
   ln -s ../dotfiles-release "$release/bin/dotfiles-release" || return
   install_tmux_plugins "$release" || return
   prepare_nvim_payload "$release" "$build_home" "$platform" || return

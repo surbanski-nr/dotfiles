@@ -436,6 +436,36 @@ A missing selection fails rather than downloading or using asdf. Whole-release
 rollback selects the previous payload and its defaults; a shell override stays
 set until you unset it, so it must also exist in the selected release.
 
+The offline Helm launcher accepts bare versions and one leading `v`. Its
+default stays `4.3.0`; `3.22.0` remains available and `3.21.0` is appended for
+NetReveal. Connected setup still selects direct links and does not implement
+environment-based version selection.
+
+The `helm-schema` artifact record in `tools.env` pins the offline `schema`
+addon. Bump that record, then rebuild the ready binary and minimal no-hook
+manifest through `build-dotfiles-release`. Keep its upstream license and the
+tracked yq MIT license when changing those distributions. yq uses the shared
+raw-artifact path and both profiles; jq stays an OS runtime prerequisite.
+Do not edit generated metadata, installed plugin directories or Python locks.
+
+Qualify new candidates on all four supported platforms with the prepared OS
+baseline and network disabled for release installation/health. Check every
+Helm version with the bundled plugin, actual schema generation with local
+references, yq multi-document processing and jq overlay merges. Health ignores
+caller plugin overrides and bin-extras. The tool-enabled editor checks must
+opt in explicitly when they qualify formatter output; ordinary sessions start
+with formatting disabled.
+
+Then run NetReveal's `task validate` and the PR `split-generate` path in a
+disposable clone with project network inputs allowed. Use the private release
+Python to create a suitable project venv, and export project Helm pins for the
+entire invocation as shown in
+[setup.md](setup.md#helm-schema-plugin-and-project-validation). Keep evidence
+of Task/kubeconform compatibility; command availability alone is insufficient.
+For a first pre-yq upgrade and any later rollback/return, keep and invoke the
+newer standalone manager or reviewed source manager. An older installed
+manager does not understand the new metadata fields or yq ownership records.
+
 ## Online project runtime rollback
 
 Python uses uv; Node.js, Terraform and Terragrunt remain under asdf. Offline releases do not
