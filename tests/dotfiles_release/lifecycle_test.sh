@@ -11,6 +11,13 @@ mkdir -p "$test_home/.config/k9s" "$test_home/bin"
 printf 'original bashrc\n' >"$test_home/.bashrc"
 printf 'private contexts\n' >"$test_home/kube-backup-contexts.txt"
 printf 'private prefixes\n' >"$test_home/kube-log-prefixes.txt"
+mkdir -m 0700 "$test_home/bin-extras"
+printf '#!/usr/bin/env bash\nexit 91\n' >"$test_home/bin-extras/helm"
+chmod 0755 "$test_home/bin-extras/helm"
+ln -s helm "$test_home/bin-extras/rg"
+extras_digest=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+  -C "$test_home" -cf - bin-extras | sha256sum)
+export PATH="$test_home/bin-extras:$PATH"
 
 legacy_source="$test_root/legacy bstow source"
 legacy_data="$legacy_source/.local/share/nvim2"
@@ -236,5 +243,9 @@ run_manager uninstall "$id_one"
 run_manager uninstall "$id_three"
 [[ ! -e $test_home/dotfiles-releases/$id_one && ! -e $test_home/dotfiles-releases/$id_three ]] ||
   fail 'inactive releases were retained'
+
+[[ $(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+  -C "$test_home" -cf - bin-extras | sha256sum) == "$extras_digest" ]] ||
+  fail 'release lifecycle changed user extras, permissions or symlinks'
 
 printf 'dotfiles_release: lifecycle passed\n'

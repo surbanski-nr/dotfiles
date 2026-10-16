@@ -512,6 +512,50 @@ Offline Bash does not add asdf shims and removes inherited shim paths from
 to use asdf. Avoid overlapping providers for the same public commands in one
 HOME; there is no automatic fallback between them.
 
+### User executable overrides
+
+`~/bin-extras` is an optional user-owned directory for trusted executables and
+wrappers. Bash and Nvim2 put an active `VIRTUAL_ENV/bin` first, then extras,
+then their existing managed providers. Dotfiles never creates, packages,
+backs up or removes this directory. The private `~/.extras` configuration hook
+is separate.
+
+```bash
+mkdir -p "$HOME/bin-extras"
+# Put an executable here using the command name to override.
+source "$HOME/.bashrc"
+hash -r
+type -a helm
+type -P helm
+```
+
+An extra `helm` bypasses the release launcher's version selection and plugin
+defaults. Its owner supplies that behavior. Remove or move an override and run
+`hash -r` to return to the managed executable; reinstalling is unnecessary.
+New tmux panes load Bash normally. Existing panes need the same deliberate
+reload. Noninteractive jobs and shells that do not load this configuration
+receive their inherited PATH.
+
+To start Nvim2 without extras, use:
+
+```bash
+DOTFILES_IGNORE_BIN_EXTRAS=1 "$HOME/bin/nvim"
+```
+
+In an existing Bash session, export that variable and reload `.bashrc` to
+rebuild PATH. Prefixing an arbitrary command with the variable does not rebuild
+its inherited PATH. Release health, builds and repository checks enforce this
+setting so local replacements cannot hide a broken payload. `dotfiles-check`
+reports interactive selection and can truthfully report a version mismatch
+for an intentional override; release health checks the release itself.
+
+Aliases, absolute executable paths and project-local tools such as
+`node_modules` have their own selection rules. The offline launcher's core
+Neovim runtime remains fixed; personal `NVIM_APPNAME` profiles retain their
+own configuration. Older retained Bash/Neovim configurations can restore older
+PATH behavior, and existing processes can retain inherited extras after a
+rollback. Rollback and uninstall leave the directory untouched.
+
 The historical 2026-10-01 qualification of source commit
 `d4536234f5730fdb0e1f43335f9e0d5c0e79e935` measured the following apparent
 sizes with `du -sb`. It did not measure allocated filesystem blocks:

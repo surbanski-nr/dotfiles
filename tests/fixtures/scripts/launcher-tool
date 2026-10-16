@@ -5,6 +5,10 @@ set -euo pipefail
 if [[ ${1:-} == fixture-shell ]]; then
   exec bash --noprofile --norc -i "$TEST_REPO_DIR/tests/fixtures/bash/scenario"
 fi
+if [[ ${1:-} == fixture-path ]]; then
+  printf 'selected=%s\npath=%s\n' "$(path-probe)" "$PATH"
+  exit 0
+fi
 
 printf 'tool=%s\napp=%s\nconfig=%s\ndata=%s\nGOROOT=%s\nGOTOOLCHAIN=%s\ntmux-config=%s\n' \
   "$(readlink -f -- "$0")" "${NVIM_APPNAME:-unset}" \

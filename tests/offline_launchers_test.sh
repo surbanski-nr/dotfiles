@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+unset DOTFILES_IGNORE_BIN_EXTRAS
+
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 test_root=$(mktemp -d)
 trap 'find "$test_root" -depth -delete' EXIT
@@ -13,7 +15,7 @@ fail() {
 
 original=$test_root/original
 release=$test_root/'relocated release with spaces'
-test_home=$test_root/home
+test_home="$test_root/home with spaces"
 mkdir -p "$original/bin" "$original/tools/go/bin" "$test_home/bin"
 : >"$original/installed.sha256"
 : >"$original/tools/go/bin/go"
@@ -48,6 +50,26 @@ output=$(HOME="$test_home" NVIM_APPNAME=nvim2 XDG_CONFIG_HOME=/user/config \
 [[ $output == *'xdg-config=/user/config xdg-data=/user/data'* &&
   $output == *'go-root=/project/sdk go-toolchain=auto'* ]] ||
   fail 'a shell started from Nvim did not recover the user environment'
+
+for provider in bin bin-extras 'project venv/bin'; do
+  mkdir -p "$test_home/$provider"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" %q\n' "$provider" \
+    >"$test_home/$provider/path-probe"
+  chmod 0755 "$test_home/$provider/path-probe"
+done
+output=$(HOME="$test_home" PATH="$test_home/bin-extras:$PATH" \
+  "$test_home/bin/nvim" fixture-path)
+[[ $output == *'selected=bin-extras'* ]] || fail 'launcher demoted extras'
+output=$(HOME="$test_home" VIRTUAL_ENV="$test_home/project venv" \
+  "$test_home/bin/nvim" fixture-path)
+[[ $output == *'selected=project venv/bin'* ]] || fail 'launcher demoted the active venv'
+output=$(HOME="$test_home" DOTFILES_IGNORE_BIN_EXTRAS=1 \
+  PATH="$test_home/bin-extras:$PATH" "$test_home/bin/nvim" fixture-path)
+[[ $output == *'selected=bin'* && $output != *"$test_home/bin-extras"* ]] ||
+  fail 'launcher retained ignored extras'
+output=$(HOME="$test_home" TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=path-selection \
+  "$test_home/bin/nvim" fixture-shell 2>"$test_root/shell.log")
+[[ $output == *'selected=bin-extras'* ]] || fail 'nested Bash lost extras'
 
 config=$release/dotfiles/tmux/.tmux.conf
 output=$("$test_home/bin/tmux" new-session 'literal ; value' '')

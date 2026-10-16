@@ -93,6 +93,7 @@ IFS=: read -r -a _dotfiles_path_entries <<<"${PATH:-}"
 _dotfiles_clean_path=
 for _dotfiles_path_entry in "${_dotfiles_path_entries[@]}"; do
   case $_dotfiles_path_entry in
+    "$HOME/bin-extras") continue ;;
   "$HOME"/dotfiles-releases/dotfiles-*/bin | \
     "$HOME"/dotfiles-releases/dotfiles-*/dotfiles/scripts | \
     "$HOME"/dotfiles-releases/dotfiles-*/share/nvim2/mason/bin | \
@@ -131,6 +132,9 @@ else
   add_to_path "$HOME/.asdf/shims"
 fi
 unset _dotfiles_release_mode
+if [[ ${DOTFILES_IGNORE_BIN_EXTRAS:-} != 1 ]]; then
+  add_to_path "$HOME/bin-extras"
+fi
 if [[ -n ${VIRTUAL_ENV:-} && -d $VIRTUAL_ENV/bin ]]; then
   PATH=":$PATH:"
   PATH=${PATH//":$VIRTUAL_ENV/bin:"/:}

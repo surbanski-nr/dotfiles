@@ -63,6 +63,8 @@ EOF
     cat >>"$path" <<'EOF'
 release=${self%/tools/nvim/bin/nvim}
 [[ ${DOTFILES_OFFLINE_RELEASE_ROOT:-} == "$release" ]] || exit 96
+[[ ${DOTFILES_IGNORE_BIN_EXTRAS:-} == 1 ]] || exit 99
+[[ -z ${VIRTUAL_ENV:-} ]] || exit 98
 EOF
   fi
   if [[ ${path##*/} == kubectl-* || ${path##*/} == helm-* ]]; then

@@ -20,9 +20,10 @@ chmod 0755 "$test_root/stage-health-failure/$health_id/tools/bin/node"
 )
 tar -C "$test_root/stage-health-failure" -czf "$health_artifact" "$health_id"
 test_home=$test_root/health-failure-home
-mkdir -p "$test_home"
+mkdir -p "$test_home/bin-extras"
+write_fake_tool "$test_home/bin-extras/node"
 set +e
-health_failure_output=$(run_manager install "$health_artifact" 2>&1)
+health_failure_output=$(PATH="$test_home/bin-extras:$PATH" run_manager install "$health_artifact" 2>&1)
 health_failure_status=$?
 set -e
 [[ $health_failure_status -ne 0 && $health_failure_output != *': installed '* ]] ||
@@ -70,8 +71,14 @@ fi
   fail 'duplicate Python inventory retained partial installation state'
 
 test_home=$test_root/health-home
-mkdir -p "$test_home"
+mkdir -p "$test_home/bin-extras"
+for command_name in helm rg stylua; do
+  printf '#!/usr/bin/env bash\nexit 91\n' >"$test_home/bin-extras/$command_name"
+  chmod 0755 "$test_home/bin-extras/$command_name"
+done
+export PATH="$test_home/bin-extras:$PATH"
 run_manager install "$artifact_one" >/dev/null
+VIRTUAL_ENV="$test_home/bin-extras" run_manager health >/dev/null
 
 tampered=$test_home/dotfiles-releases/$id_one/config/nvim2/init.lua
 original_mode=$(stat -c %a "$tampered")

@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+export DOTFILES_IGNORE_BIN_EXTRAS=1
+unset VIRTUAL_ENV
+
 TEMP_PATHS=()
 NODE_UPSTREAM_NPM_VERSION=
 declare -A BUILD_VERSIONS=()

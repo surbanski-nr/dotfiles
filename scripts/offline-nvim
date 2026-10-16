@@ -31,5 +31,22 @@ if [[ $NVIM_APPNAME == nvim2 ]]; then
   fi
   ansible_bin="$release/share/nvim2/mason/packages/ansible-lint/venv/bin"
   export PATH="$HOME/bin:$ansible_bin:$release/bin:$release/share/nvim2/mason/bin${PATH:+:$PATH}"
+  IFS=: read -r -a path_entries <<<"$PATH"
+  clean_path=
+  for entry in "${path_entries[@]}"; do
+    [[ -n $entry && $entry != "$HOME/bin-extras" ]] || continue
+    if [[ -n ${VIRTUAL_ENV:-} && -d $VIRTUAL_ENV/bin && $entry == "$VIRTUAL_ENV/bin" ]]; then
+      continue
+    fi
+    clean_path+=${clean_path:+:}$entry
+  done
+  PATH=$clean_path
+  if [[ ${DOTFILES_IGNORE_BIN_EXTRAS:-} != 1 && -d $HOME/bin-extras ]]; then
+    PATH="$HOME/bin-extras${PATH:+:$PATH}"
+  fi
+  if [[ -n ${VIRTUAL_ENV:-} && -d $VIRTUAL_ENV/bin ]]; then
+    PATH="$VIRTUAL_ENV/bin${PATH:+:$PATH}"
+  fi
+  export PATH
 fi
 exec "$release/tools/nvim/bin/nvim" "$@"

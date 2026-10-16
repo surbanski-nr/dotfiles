@@ -184,6 +184,54 @@ case $TEST_SCENARIO in
     declare -F __fzf_test_binding >/dev/null
     printf 'fzf-init=yes\n'
     ;;
+  bin-extras)
+    # shellcheck disable=SC1090
+    source "$TEST_BASHRC"
+    # shellcheck disable=SC1090
+    source "$TEST_BASHRC"
+    hash -r
+    printf 'override=%s unique=%s\n' "$(path-probe)" "$(unique-extra)"
+    entries=0
+    IFS=: read -r -a paths <<<"$PATH"
+    for entry in "${paths[@]}"; do
+      [[ $entry != "$HOME/bin-extras" ]] || ((entries += 1))
+    done
+    [[ $entries -eq 1 ]] || exit 90
+    if command -v cwd-only >/dev/null; then exit 91; fi
+    export VIRTUAL_ENV="$HOME/project venv"
+    # shellcheck disable=SC1090
+    source "$TEST_BASHRC"
+    printf 'venv=%s\n' "$(path-probe)"
+    unset VIRTUAL_ENV
+    chmod 0644 "$HOME/bin-extras/path-probe"
+    # shellcheck disable=SC1090
+    source "$TEST_BASHRC"
+    hash -r
+    printf 'nonexecutable=%s\n' "$(path-probe)"
+    chmod 0755 "$HOME/bin-extras/path-probe"
+    export DOTFILES_IGNORE_BIN_EXTRAS=1
+    # shellcheck disable=SC1090
+    source "$TEST_BASHRC"
+    hash -r
+    printf 'ignored=%s\n' "$(path-probe)"
+    if command -v unique-extra >/dev/null; then exit 92; fi
+    [[ :$PATH: != *":$HOME/bin-extras:"* ]] || exit 93
+    unset DOTFILES_IGNORE_BIN_EXTRAS
+    mv "$HOME/bin-extras" "$HOME/saved-extras"
+    # shellcheck disable=SC1090
+    source "$TEST_BASHRC"
+    hash -r
+    printf 'removed=%s\n' "$(path-probe)"
+    [[ :$PATH: != *":$HOME/bin-extras:"* ]] || exit 94
+    touch "$HOME/bin-extras"
+    # shellcheck disable=SC1090
+    source "$TEST_BASHRC"
+    printf 'regular-file=%s\n' "$(path-probe)"
+    ;;
+  path-selection)
+    load_bashrc
+    printf 'selected=%s\n' "$(path-probe)"
+    ;;
   kube-prompt-init)
     unset PROMPT_COMMAND
     load_bashrc

@@ -1075,6 +1075,14 @@ inspect `:setlocal shiftwidth? tabstop? expandtab?`. A project's EditorConfig
 settings remain authoritative; detection does not replace formatting or
 language validation.
 
+Nvim2 preserves an active `VIRTUAL_ENV/bin` and optional `~/bin-extras` ahead
+of Mason after startup. PATH-resolved child commands and `:terminal` honor
+those user overrides. `DOTFILES_IGNORE_BIN_EXTRAS=1 "$HOME/bin/nvim"` starts
+the offline editor without extras; release qualification uses this setting.
+Explicit executable paths and project-local formatter selection retain their
+own rules. See the [setup guide](../../../maintenance/setup.md#user-executable-overrides)
+for ownership, shell reload and rollback behavior.
+
 Every managed Mason package has an exact version in `lua/custom/lsp.lua`.
 `mason-tool-installer.nvim` has both automatic updates and startup installation
 disabled. Change a version intentionally, then run `:Nvim2ToolsInstallSync` on

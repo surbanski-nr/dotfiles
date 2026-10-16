@@ -2,6 +2,17 @@
 
 set -euo pipefail
 
+export DOTFILES_IGNORE_BIN_EXTRAS=1
+unset VIRTUAL_ENV
+IFS=: read -r -a path_entries <<<"$PATH"
+clean_path=
+for entry in "${path_entries[@]}"; do
+  [[ -n $entry && $entry != "$HOME/bin-extras" ]] || continue
+  clean_path+=${clean_path:+:}$entry
+done
+export PATH=$clean_path
+unset path_entries entry clean_path
+
 config_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 xdg_config_home=$(dirname -- "$config_dir")
 app_name=$(basename -- "$config_dir")
@@ -26,7 +37,7 @@ if [[ -n ${NVIM2_MAX_STARTUP_MS:-} ]] && ! [[ $NVIM2_MAX_STARTUP_MS =~ ^[0-9]+([
   exit 2
 fi
 
-for test_file in dependency_checks.lua feature_checks.lua smoke.lua buffer_checks.lua language_checks.lua go_checks.lua go_lint_checks.lua debug_checks.lua go_debug_checks.lua; do
+for test_file in dependency_checks.lua path_checks.lua feature_checks.lua smoke.lua buffer_checks.lua language_checks.lua go_checks.lua go_lint_checks.lua debug_checks.lua go_debug_checks.lua; do
   timeout --signal=TERM --kill-after=10s "$timeout_seconds" env \
   XDG_CONFIG_HOME="$xdg_config_home" \
   NVIM_APPNAME="$app_name" \

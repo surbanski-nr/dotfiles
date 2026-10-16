@@ -663,6 +663,7 @@ do
 
   -- Automatically install LSPs and related tools to stdpath for Neovim
   require('mason').setup(custom_lsp.mason)
+  custom_lsp.restore_path()
 
   -- Translates between nvim-lspconfig server names and mason.nvim package names (e.g. lua_ls <-> lua-language-server)
   require('mason-lspconfig').setup {

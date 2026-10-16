@@ -1613,6 +1613,7 @@ health_release() {
   local release_id=$1 mode=${2:-full} release command_name path check_script health_home
   local PATH output expected field probe DOTFILES_OFFLINE_RELEASE_ROOT status
   local KUBECTL_VERSION='' HELM_VERSION=''
+  local DOTFILES_IGNORE_BIN_EXTRAS=1 VIRTUAL_ENV=''
   local tool version serialized
   local -a probe_args=() versions=()
   local -A release_metadata=()
@@ -1623,6 +1624,7 @@ health_release() {
   DOTFILES_OFFLINE_RELEASE_ROOT=$release
   export DOTFILES_OFFLINE_RELEASE_ROOT
   export KUBECTL_VERSION HELM_VERSION
+  export DOTFILES_IGNORE_BIN_EXTRAS VIRTUAL_ENV
   PATH="$release/bin:$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/share/nvim2/mason/bin:/usr/bin:/bin"
   export PATH
   validate_release_directory "$release" || return

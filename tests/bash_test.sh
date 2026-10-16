@@ -445,6 +445,42 @@ path_line=$(grep '^path=' <<<"$path_output")
 [[ ${path_line#path=} == "$path_home/.venv/bin:"* ]] ||
   fail 'active virtual environment lost PATH precedence'
 
+for setup_mode in connected offline; do
+  extras_home="$test_root/$setup_mode extras home"
+  for provider in bin bin-extras .asdf/shims .krew/bin .local/bin \
+    .local/share/nvim2/mason/bin 'project venv/bin'; do
+    mkdir -p "$extras_home/$provider"
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" %q\n' "$provider" \
+      >"$extras_home/$provider/path-probe"
+    chmod 0755 "$extras_home/$provider/path-probe"
+  done
+  cp "$extras_home/bin-extras/path-probe" "$extras_home/bin-extras/unique-extra"
+  printf '#!/usr/bin/env bash\nprintf "cwd\\n"\n' >"$test_root/cwd-only"
+  chmod 0755 "$test_root/cwd-only"
+  extras_bashrc=$repo_dir/bash/.bashrc
+  fallback=.asdf/shims
+  if [[ $setup_mode == offline ]]; then
+    extras_release=$extras_home/dotfiles-releases/dotfiles-cccccccccccc
+    mkdir -p "$extras_release/dotfiles/bash"
+    cp "$extras_bashrc" "$extras_release/dotfiles/bash/.bashrc"
+    printf 'RELEASE_ID=dotfiles-cccccccccccc\n' >"$extras_release/release.env"
+    extras_bashrc=$extras_release/dotfiles/bash/.bashrc
+    fallback=bin
+  fi
+  extras_output=$(
+    cd "$test_root"
+    run_scenario bin-extras \
+      env -u DOTFILES_IGNORE_BIN_EXTRAS HOME="$extras_home" TEST_BASHRC="$extras_bashrc" \
+      PATH=":$extras_home/bin-extras:$test_root/bin::$original_path:$extras_home/bin-extras:" \
+      TERM=xterm-256color bash --noprofile --norc -i
+  )
+  assert_contains "$extras_output" 'override=bin-extras unique=bin-extras'
+  assert_contains "$extras_output" 'venv=project venv/bin'
+  for phase in nonexecutable ignored removed regular-file; do
+    assert_contains "$extras_output" "$phase=$fallback"
+  done
+done
+
 brew_home=$test_root/brew-home
 brew_bin=$test_root/existing-homebrew/bin
 brew_log=$test_root/brew.log
