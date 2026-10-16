@@ -216,6 +216,83 @@ stale_output=$(
 assert_contains "$stale_output" 'dotfiles: SSH_AUTH_SOCK is not a socket: /missing/agent.sock'
 assert_contains "$stale_output" 'stale_status=0 sock=unset'
 
+shared_home=$test_root/shared-agent-home
+shared_runtime=$test_root/shared-agent-runtime
+shared_bin=$test_root/shared-agent-bin
+shared_log=$test_root/shared-agent.log
+shared_state=$test_root/shared-agent.state
+mkdir -p "$shared_home/.config/systemd/user" "$shared_runtime" "$shared_bin"
+printf '[Service]\n' >"$shared_home/.config/systemd/user/dotfiles-ssh-agent.service"
+ln -s "$command_fixture" "$shared_bin/ssh-add"
+ln -s "$command_fixture" "$shared_bin/systemctl"
+shared_output=$(
+  env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
+    XDG_RUNTIME_DIR="$shared_runtime" TERM=xterm-256color \
+    TEST_AGENT_LOG="$shared_log" TEST_AGENT_STATE="$shared_state" \
+    TEST_COMMAND_MODE=shared-agent TEST_REPO_DIR="$repo_dir" \
+    TEST_SCENARIO=shared-agent \
+    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+)
+assert_contains "$shared_output" "shared_sock=$shared_runtime/dotfiles-ssh-agent.socket pid=unset"
+[[ $(grep -cx 'systemctl --user start dotfiles-ssh-agent.service' "$shared_log") -eq 1 ]] ||
+  fail 'reloading Bash did not reuse one shared ssh-agent service'
+second_shell_output=$(
+  env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
+    XDG_RUNTIME_DIR="$shared_runtime" TERM=xterm-256color \
+    TEST_AGENT_LOG="$shared_log" TEST_AGENT_STATE="$shared_state" \
+    TEST_AGENT_STATUS=0 TEST_COMMAND_MODE=shared-agent TEST_REPO_DIR="$repo_dir" \
+    TEST_SCENARIO=shared-agent \
+    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+)
+assert_contains "$second_shell_output" \
+  "shared_sock=$shared_runtime/dotfiles-ssh-agent.socket pid=unset"
+[[ $(grep -cx 'systemctl --user start dotfiles-ssh-agent.service' "$shared_log") -eq 1 ]] ||
+  fail 'a second shell started another ssh-agent service'
+
+inherited_log=$test_root/inherited-agent.log
+inherited_socket=$test_root/inherited-agent.socket
+inherited_state=$test_root/inherited-agent.state
+inherited_output=$(
+  env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
+    XDG_RUNTIME_DIR="$shared_runtime" SSH_AUTH_SOCK="$inherited_socket" \
+    SSH_AGENT_PID=4242 TERM=xterm-256color TEST_AGENT_LOG="$inherited_log" \
+    TEST_AGENT_STATE="$inherited_state" \
+    TEST_FORWARDED_SOCKET="$inherited_socket" TEST_COMMAND_MODE=shared-agent \
+    TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=shared-agent \
+    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+)
+assert_contains "$inherited_output" \
+  "shared_sock=$inherited_socket pid=4242"
+if grep -q '^systemctl ' "$inherited_log"; then
+  fail 'a working inherited agent was replaced with the shared agent'
+fi
+
+stale_inherited_log=$test_root/stale-inherited-agent.log
+stale_inherited_output=$(
+  env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
+    XDG_RUNTIME_DIR="$shared_runtime" SSH_AUTH_SOCK=/missing/agent.sock \
+    SSH_AGENT_PID=4242 TERM=xterm-256color TEST_AGENT_LOG="$stale_inherited_log" \
+    TEST_AGENT_STATE="$shared_state" TEST_COMMAND_MODE=shared-agent \
+    TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=shared-agent \
+    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+)
+assert_contains "$stale_inherited_output" \
+  "shared_sock=$shared_runtime/dotfiles-ssh-agent.socket pid=unset"
+if grep -q '^systemctl ' "$stale_inherited_log"; then
+  fail 'a stale inherited socket prevented reuse of the running shared agent'
+fi
+
+failed_agent_output=$(
+  env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
+    XDG_RUNTIME_DIR="$shared_runtime" TERM=xterm-256color \
+    TEST_AGENT_LOG="$test_root/failed-agent.log" TEST_AGENT_STATE="$test_root/failed-agent.state" \
+    TEST_AGENT_START_FAIL=1 TEST_COMMAND_MODE=shared-agent TEST_REPO_DIR="$repo_dir" \
+    TEST_SCENARIO=shared-agent \
+    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+)
+assert_contains "$failed_agent_output" 'dotfiles: failed to start the shared ssh-agent service'
+assert_contains "$failed_agent_output" 'shared_sock=unset pid=unset'
+
 link_command vi
 link_command vim
 editor_log=$test_root/editors.log

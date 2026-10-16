@@ -278,6 +278,33 @@ local function run()
   assert(resumed.manager:get_entry(1).ordinal == 'foo', 'resumed picker selected a stale result')
   actions.close(resumed_prompt)
 
+  for _, mode in ipairs { 'i', 'n' } do
+    local selection_picker = pickers.new({}, {
+      finder = finders.new_table { results = { 'first', 'second', 'third' } },
+      sorter = require('telescope.config').values.generic_sorter {},
+      previewer = false,
+    })
+    selection_picker:find()
+    wait_for_results(selection_picker, 3, 'selection picker did not load its results')
+    assert(selection_picker.sorting_strategy == 'ascending', 'Telescope results do not run from top to bottom')
+    local prompt = selection_picker.prompt_bufnr
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(mode == 'n' and '<Esc>' or '<Ignore>', true, false, true), 'xt', false)
+    local selected_row = selection_picker:get_selection_row()
+    assert(selected_row == selection_picker:get_row(1), 'Telescope did not select its first result at the top')
+    local selected_entry = selection_picker:get_selection()
+    local tab = vim.fn.maparg('<Tab>', mode, false, true)
+    tab.callback()
+    assert(selection_picker:get_selection_row() == selected_row + 1, 'Tab did not move down in Telescope ' .. mode .. ' mode')
+    assert(selection_picker:is_multi_selected(selected_entry), 'Tab did not mark the previous entry')
+    local shift_tab = vim.fn.maparg('<S-Tab>', mode, false, true)
+    shift_tab.callback()
+    assert(selection_picker:get_selection_row() == selected_row, 'Shift-Tab did not move up in Telescope ' .. mode .. ' mode')
+    assert(#selection_picker:get_multi_selection() == 2, 'Shift-Tab did not mark its entry')
+    tab.callback()
+    assert(not selection_picker:is_multi_selected(selected_entry), 'Tab did not unmark an already marked entry')
+    actions.close(prompt)
+  end
+
   local fixture = vim.fn.tempname()
   assert(vim.fn.mkdir(vim.fs.joinpath(fixture, 'src'), 'p') == 1, 'could not create Telescope file fixture')
   assert(vim.fn.mkdir(vim.fs.joinpath(fixture, 'docs'), 'p') == 1, 'could not create Telescope docs fixture')

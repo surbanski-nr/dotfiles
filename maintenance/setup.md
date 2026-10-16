@@ -21,9 +21,9 @@ for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
   fi
 done
 ./bstow --dry-run -v -t "$HOME" stow \
-  git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
+  git ssh tmux bash mc oh-my-posh k9s nvim2 gnupg codex
 ./bstow -v -t "$HOME" stow \
-  git tmux bash mc oh-my-posh k9s nvim2 gnupg codex
+  git ssh tmux bash mc oh-my-posh k9s nvim2 gnupg codex
 
 source "$HOME/.bashrc"
 hash -r
@@ -33,6 +33,18 @@ dotfiles-check
 The setup sequence moves regular distribution-provided Bash startup files
 aside without overwriting an existing backup. `bstow --dry-run` reports any
 remaining conflict, including a foreign symlink.
+
+Interactive Bash shells preserve a working inherited agent, including SSH
+forwarding. Otherwise they use the fixed socket of `dotfiles-ssh-agent.service`.
+Starting the user service is idempotent, so Bash and tmux panes using this
+socket share keys added in any one of them. The managed SSH config selects
+`~/.ssh/github` and `~/.ssh/bitbucket`. Enter the passphrase in a terminal with
+`ssh-add ~/.ssh/github ~/.ssh/bitbucket`, or on the first SSH connection, which
+adds the key automatically. Systemd starts the empty agent and never prompts
+for passphrases. Keys remain unlocked only until the agent stops; restarting
+the agent or rebooting requires adding them again. User lingering is not
+enabled automatically. A pre-existing `~/.ssh/config` is a deliberate stow
+conflict and must be reviewed before installation.
 
 `tools.env` owns tool profiles, release records and asdf/tmux plugin pins. It
 stores direct releases in `TOOL_RELEASES`. Each tool has ordered
@@ -261,7 +273,10 @@ The current manager can check and select retained releases from before `fd`,
 Go, kind, uv or the expanded operations-tool set was bundled. Selecting one makes its absent tools unavailable
 through the release launcher. It supports the original, fd-only and fd/Go profiles.
 Keep a copy of the newer manager when rolling back across that boundary:
-older managers do not understand the newer release metadata.
+older managers do not understand the newer release metadata or SSH ownership
+records. Releases from before the SSH package remain selectable. On rollback
+their optional SSH links stay recorded but do not resolve, just like commands
+absent from an older tool profile; selecting a newer release restores them.
 
 The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
 `ubuntu-26.04-x86_64` and `amzn-2023-x86_64`. Build from a clean committed

@@ -92,7 +92,7 @@ k9s:
         toggleOnColor: *mark
         toggleOffColor: *gray
     charts:
-      bgColor: default
+      bgColor: *bg
       defaultDialColors:
         - *white
         - *err

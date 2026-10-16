@@ -174,6 +174,27 @@ local function run()
     assert(vim.api.nvim_get_current_line() == pair[3], 'automatic pair did not expand: ' .. pair[1] .. pair[2])
   end
 
+  for _, case in ipairs {
+    { '', 'i"ala"<Esc>', '"ala"' },
+    { '', 'istring = "ala"<Esc>', 'string = "ala"' },
+    { '  ', 'A"<Esc>', '  ""' },
+    { 'value', 'A"<Esc>', 'value"' },
+    { 'string = "ala', 'A"<Esc>', 'string = "ala"' },
+    { 'string = "ala ', 'A"<Esc>', 'string = "ala "' },
+    { 'string = "ala" ', 'A"<Esc>', 'string = "ala" "' },
+    { '"', 'A"<Esc>', '""' },
+    { 'string = "ala"', '$i"x<Esc>', 'string = "ala"x' },
+    { 'string = "ala\\"', '$i"<Esc>', 'string = "ala\\""' },
+  } do
+    vim.cmd.enew()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { case[1] })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(case[2], true, false, true), 'xt', false)
+    assert(
+      vim.api.nvim_get_current_line() == case[3],
+      ('double quote expanded %q to %q, expected %q'):format(case[1], vim.api.nvim_get_current_line(), case[3])
+    )
+  end
+
   vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'README.md'))
   assert(vim.fn.maparg('`', 'i') ~= '', 'Markdown fenced-block mapping is missing')
 

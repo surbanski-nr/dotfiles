@@ -43,7 +43,15 @@ function M.setup()
   add_pair('[', ']')
   add_pair('{', '}')
   add_pair("'", "'")
-  add_pair('"', '"')
+  vim.keymap.set('i', '"', function()
+    local column = vim.api.nvim_win_get_cursor(0)[2]
+    local line = vim.api.nvim_get_current_line()
+    local before = line:sub(1, column)
+    local has_quote = before:find('"', 1, true) ~= nil
+    if has_quote and before:sub(-1) ~= '\\' and line:sub(column + 1, column + 1) == '"' then return '<Right>' end
+    if not has_quote and (before == '' or before:match '%s$') then return '""<Left>' end
+    return '"'
+  end, { expr = true, desc = 'Insert double quote without duplicating closing quotes' })
 
   vim.api.nvim_create_autocmd('FileType', {
     pattern = 'markdown',

@@ -1,0 +1,11 @@
+[Unit]
+Description=Shared OpenSSH authentication agent for dotfiles shells
+Documentation=man:ssh-agent(1)
+
+[Service]
+Type=simple
+UMask=0077
+ExecStartPre=-/usr/bin/unlink %t/dotfiles-ssh-agent.socket
+ExecStart=/usr/bin/ssh-agent -D -a %t/dotfiles-ssh-agent.socket
+Restart=on-failure
+RestartSec=1

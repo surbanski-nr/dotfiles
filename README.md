@@ -48,7 +48,7 @@ for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
     mv -- "$file" "$file.before-dotfiles"
   fi
 done
-./bstow -v -t "$HOME" stow git tmux bash mc oh-my-posh k9s nvim2 gnupg
+./bstow -v -t "$HOME" stow git ssh tmux bash mc oh-my-posh k9s nvim2 gnupg
 
 source "$HOME/.bashrc"
 hash -r

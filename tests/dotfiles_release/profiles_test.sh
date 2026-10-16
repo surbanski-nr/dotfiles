@@ -6,6 +6,30 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/fixture.sh"
 create_fixture
 
+test_home=$test_root/ssh-legacy-home
+mkdir -p "$test_home"
+legacy_ssh_artifact=$test_root/pre-ssh.tar.gz
+make_artifact "$commit_one" pre-ssh "$legacy_ssh_artifact" 1.0 false false
+find "$test_root/stage-pre-ssh/$id_one/dotfiles/ssh" -depth -delete
+repack_artifact pre-ssh "$id_one" "$legacy_ssh_artifact"
+run_manager install "$legacy_ssh_artifact" >/dev/null
+[[ ! -L $test_home/.ssh/config && ! -L $test_home/.config/systemd/user/dotfiles-ssh-agent.service ]] ||
+  fail 'installing a pre-SSH release created SSH links'
+run_manager install "$artifact_two" >/dev/null
+[[ -r $test_home/.ssh/config && -r $test_home/.config/systemd/user/dotfiles-ssh-agent.service ]] ||
+  fail 'upgrading a pre-SSH release did not publish the SSH configuration'
+run_manager rollback >/dev/null
+assert_link "$test_home/dotfiles-releases/current" "$id_one"
+run_manager health >/dev/null
+[[ ! -e $test_home/.ssh/config && ! -e $test_home/.config/systemd/user/dotfiles-ssh-agent.service ]] ||
+  fail 'pre-SSH rollback still resolves SSH configuration from the newer release'
+run_manager rollback "$id_two" >/dev/null
+[[ -r $test_home/.ssh/config && -r $test_home/.config/systemd/user/dotfiles-ssh-agent.service ]] ||
+  fail 'selecting the SSH release again did not restore its configuration'
+run_manager uninstall >/dev/null
+[[ ! -L $test_home/.ssh/config && ! -L $test_home/.config/systemd/user/dotfiles-ssh-agent.service ]] ||
+  fail 'uninstall retained optional SSH links'
+
 test_home=$test_root/current-profile-validation-home
 mkdir -p "$test_home"
 for command_name in kind uv uvx; do

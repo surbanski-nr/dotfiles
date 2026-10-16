@@ -140,6 +140,51 @@ if [[ -n ${VIRTUAL_ENV:-} && -d $VIRTUAL_ENV/bin ]]; then
   export PATH
 fi
 
+_dotfiles_ssh_agent_reachable() {
+  local status
+
+  ssh-add -l >/dev/null 2>&1 && return 0
+  status=$?
+  [[ $status -eq 1 ]]
+}
+
+_dotfiles_init_ssh_agent() {
+  local attempt service socket
+
+  command -v ssh-add >/dev/null 2>&1 || return 0
+  # Keep working agents inherited from another shell or SSH forwarding.
+  if [[ -n ${SSH_AUTH_SOCK:-} ]] && _dotfiles_ssh_agent_reachable; then
+    return 0
+  fi
+  service=$HOME/.config/systemd/user/dotfiles-ssh-agent.service
+  [[ -r $service && -n ${XDG_RUNTIME_DIR:-} && -d $XDG_RUNTIME_DIR ]] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+
+  socket=$XDG_RUNTIME_DIR/dotfiles-ssh-agent.socket
+  SSH_AUTH_SOCK=$socket
+  export SSH_AUTH_SOCK
+  unset SSH_AGENT_PID
+  if _dotfiles_ssh_agent_reachable; then
+    return 0
+  fi
+
+  if ! systemctl --user start dotfiles-ssh-agent.service >/dev/null 2>&1; then
+    _dotfiles_warn 'failed to start the shared ssh-agent service'
+    unset SSH_AUTH_SOCK
+    return 0
+  fi
+  for ((attempt = 0; attempt < 20; attempt++)); do
+    _dotfiles_ssh_agent_reachable && return 0
+    sleep 0.05
+  done
+
+  _dotfiles_warn "shared ssh-agent did not create $socket"
+  unset SSH_AUTH_SOCK
+}
+
+_dotfiles_init_ssh_agent
+unset -f _dotfiles_init_ssh_agent _dotfiles_ssh_agent_reachable
+
 _dotfiles_history_sync() {
   history -a
   history -n

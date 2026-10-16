@@ -120,6 +120,7 @@ make_artifact() {
 
   mkdir -p "$release/bin" "$release/config/nvim2/tests" \
     "$release/dotfiles/bash" "$release/dotfiles/git" \
+    "$release/dotfiles/ssh/.ssh" "$release/dotfiles/ssh/.config/systemd/user" \
     "$release/dotfiles/tmux" "$release/dotfiles/vim" \
     "$release/dotfiles/oh-my-posh" \
     "$release/dotfiles/k9s/.config/k9s/skins" \
@@ -206,6 +207,9 @@ make_artifact() {
   printf 'fixture spaced target\n' >"$release/config/nvim2/tests/Lua 5.4 zh-cn utf8/target file"
   ln -s 'target file' "$release/config/nvim2/tests/Lua 5.4 zh-cn utf8/link with space"
   for file in .bashrc .bash_profile .bash_aliases; do printf '%s\n' "$marker" >"$release/dotfiles/bash/$file"; done
+  printf '%s\n' "$marker" >"$release/dotfiles/ssh/.ssh/config"
+  printf '%s\n' "$marker" \
+    >"$release/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service"
   printf '%s\n' "$marker" >"$release/dotfiles/git/.gitconfig"
   printf '%s\n' "$marker" >"$release/dotfiles/tmux/.tmux.conf"
   printf '%s\n' "$marker" >"$release/dotfiles/vim/.vimrc"

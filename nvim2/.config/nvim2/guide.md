@@ -675,10 +675,13 @@ in this profile are Telescope searches, Gitsigns (`<leader>hq` or
 
 Inside any Telescope picker:
 
+Results run from top to bottom, with the first result selected at the top.
+
 | Action                                                           | Keys               |
 | ---------------------------------------------------------------- | ------------------ |
 | Replace quickfix with all currently filtered results and open it | `<C-q>`            |
-| Mark or unmark individual results                                | `<Tab>`, `<S-Tab>` |
+| Mark or unmark a result and move down                             | `<Tab>`            |
+| Mark or unmark a result and move up                               | `<S-Tab>`          |
 | Replace quickfix with only explicitly marked results             | `<M-q>` (Alt-q)    |
 
 Both Telescope actions replace the current quickfix list; they do not append
@@ -873,7 +876,7 @@ engine. LuaSnip is not installed. The local pairs expand as soon as their
 opening delimiter is typed.
 
 The local expansions are defined in `lua/custom/plugins/snippets.lua`. These
-five pairs work in every insert-mode buffer:
+four unconditional pairs and a conditional double quote work in Insert mode:
 
 | Typed | Result |
 | ----- | ------ |
@@ -891,9 +894,12 @@ byte-correct syntax ranges. A completion menu, special buffer, missing parser,
 incomplete syntax or ambiguous language construct keeps Blink's normal
 fallback. Tab-out changes no text or registers.
 
-These local pair expansions are intentionally small and apply in every Insert
-mode context. They are not syntax-aware autopairs and do not promise smart
-quote handling, paired deletion or closing-character overtyping. The disabled
+Double quotes create a pair only at the start of a line or after whitespace,
+and only when there is no earlier double quote before the cursor on that line.
+Otherwise typing `"` inserts one quote, or moves over an existing quote on the
+right unless the previous character is a backslash. This deliberately small
+rule does not parse strings or count quote pairs. The other four expansions
+remain unconditional; paired deletion is not implemented. The disabled
 Kickstart autopairs file is only an upstream example and is not active.
 
 These six triggers work only in Markdown buffers:

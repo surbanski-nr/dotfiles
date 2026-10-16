@@ -615,6 +615,11 @@ managed_path_target_valid() {
     "$HOME/.bashrc") [[ $target == "$RELEASE_ROOT/current/dotfiles/bash/.bashrc" ]] ;;
     "$HOME/.bash_profile") [[ $target == "$RELEASE_ROOT/current/dotfiles/bash/.bash_profile" ]] ;;
     "$HOME/.bash_aliases") [[ $target == "$RELEASE_ROOT/current/dotfiles/bash/.bash_aliases" ]] ;;
+    "$HOME/.ssh/config") [[ $target == "$RELEASE_ROOT/current/dotfiles/ssh/.ssh/config" ]] ;;
+    "$HOME/.config/systemd/user/dotfiles-ssh-agent.service")
+      [[ $target == \
+        "$RELEASE_ROOT/current/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service" ]]
+      ;;
     "$HOME/.gitconfig") [[ $target == "$RELEASE_ROOT/current/dotfiles/git/.gitconfig" ]] ;;
     "$HOME/.tmux.conf") [[ $target == "$RELEASE_ROOT/current/dotfiles/tmux/.tmux.conf" ]] ;;
     "$HOME/.vimrc") [[ $target == "$RELEASE_ROOT/current/dotfiles/vim/.vimrc" ]] ;;
@@ -937,6 +942,18 @@ provision_stable_links() {
   manage_stable_link "$action" "$HOME/.bashrc" "$current/dotfiles/bash/.bashrc" "$release_id" || return
   manage_stable_link "$action" "$HOME/.bash_profile" "$current/dotfiles/bash/.bash_profile" "$release_id" || return
   manage_stable_link "$action" "$HOME/.bash_aliases" "$current/dotfiles/bash/.bash_aliases" "$release_id" || return
+  # Retained releases from before the SSH package do not contain these files.
+  if [[ -d $RELEASE_ROOT/$release_id/dotfiles/ssh ]]; then
+    [[ -f $RELEASE_ROOT/$release_id/dotfiles/ssh/.ssh/config &&
+      -f $RELEASE_ROOT/$release_id/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service ]] || {
+      die 'release has incomplete SSH agent configuration'
+      return 1
+    }
+    manage_stable_link "$action" "$HOME/.ssh/config" \
+      "$current/dotfiles/ssh/.ssh/config" "$release_id" || return
+    manage_stable_link "$action" "$HOME/.config/systemd/user/dotfiles-ssh-agent.service" \
+      "$current/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service" "$release_id" || return
+  fi
   manage_stable_link "$action" "$HOME/.gitconfig" "$current/dotfiles/git/.gitconfig" "$release_id" || return
   manage_stable_link "$action" "$HOME/.tmux.conf" "$current/dotfiles/tmux/.tmux.conf" "$release_id" || return
   manage_stable_link "$action" "$HOME/.vimrc" "$current/dotfiles/vim/.vimrc" "$release_id" || return

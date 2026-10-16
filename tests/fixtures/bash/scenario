@@ -92,6 +92,13 @@ case $TEST_SCENARIO in
     load_profile
     printf 'stale_status=%s sock=%s\n' "$?" "${SSH_AUTH_SOCK:-unset}"
     ;;
+  shared-agent)
+    load_bashrc
+    load_bashrc
+    load_bashrc
+    printf 'shared_sock=%s pid=%s\n' \
+      "${SSH_AUTH_SOCK:-unset}" "${SSH_AGENT_PID:-unset}"
+    ;;
   independent-editors)
     shopt -s expand_aliases
     vi() { command vi "$@"; }

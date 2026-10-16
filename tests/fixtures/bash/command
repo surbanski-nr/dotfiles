@@ -109,4 +109,20 @@ case "$command_name:$mode" in
     printf 'invalid key material\n' >&2
     exit 42
     ;;
+  ssh-add:shared-agent)
+    printf 'ssh-add sock=%s %s\n' "${SSH_AUTH_SOCK:-unset}" "$*" >>"$TEST_AGENT_LOG"
+    if [[ -n ${TEST_FORWARDED_SOCKET:-} && ${SSH_AUTH_SOCK:-} == "$TEST_FORWARDED_SOCKET" ]]; then
+      exit "${TEST_AGENT_STATUS:-0}"
+    fi
+    if [[ ${SSH_AUTH_SOCK:-} == "$XDG_RUNTIME_DIR/dotfiles-ssh-agent.socket" && -e $TEST_AGENT_STATE ]]; then
+      exit "${TEST_AGENT_STATUS:-1}"
+    fi
+    exit 2
+    ;;
+  systemctl:shared-agent)
+    printf 'systemctl %s\n' "$*" >>"$TEST_AGENT_LOG"
+    [[ $* == '--user start dotfiles-ssh-agent.service' ]] || exit 2
+    [[ ${TEST_AGENT_START_FAIL:-0} == 0 ]] || exit 1
+    : >"$TEST_AGENT_STATE"
+    ;;
 esac

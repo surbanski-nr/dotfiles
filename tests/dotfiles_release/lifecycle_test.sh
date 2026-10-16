@@ -80,6 +80,10 @@ done
 KUBECTL_VERSION=99.0 HELM_VERSION=99.0 run_manager health >/dev/null
 assert_link "$test_home/.config/k9s/config.yaml" \
   "$test_home/dotfiles-releases/current/dotfiles/k9s/.config/k9s/config.yaml"
+assert_link "$test_home/.ssh/config" \
+  "$test_home/dotfiles-releases/current/dotfiles/ssh/.ssh/config"
+assert_link "$test_home/.config/systemd/user/dotfiles-ssh-agent.service" \
+  "$test_home/dotfiles-releases/current/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service"
 [[ $(<"$test_home/kube-backup-contexts.txt") == 'private contexts' ]] || fail 'private contexts changed'
 [[ $(<"$test_home/kube-log-prefixes.txt") == 'private prefixes' ]] || fail 'private prefixes changed'
 [[ ! -e $test_home/bin/python && ! -e $test_home/bin/python3 ]] || fail 'global Python links were created'
@@ -206,6 +210,10 @@ set -e
 mv -T "$ownership_file.current" "$ownership_file"
 run_manager uninstall
 [[ $(<"$test_home/.bashrc") == 'original bashrc' ]] || fail 'uninstall did not restore the original bashrc'
+[[ ! -e $test_home/.ssh/config && ! -L $test_home/.ssh/config &&
+  ! -e $test_home/.config/systemd/user/dotfiles-ssh-agent.service &&
+  ! -L $test_home/.config/systemd/user/dotfiles-ssh-agent.service ]] ||
+  fail 'baseline restore retained the SSH agent configuration'
 [[ ! -e $test_home/bin/kubectl && ! -L $test_home/bin/kubectl &&
   ! -e $test_home/bin/helm && ! -L $test_home/bin/helm ]] ||
   fail 'baseline restore retained public offline client links'
