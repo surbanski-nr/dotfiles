@@ -36,8 +36,9 @@ local function run()
       filetype = 'python',
       clients = { 'pyright', 'ruff' },
       parser = 'python',
-      lines = { 'def greet( name:str)->str:', ' return name', '', 'print(missing_name)' },
+      lines = { 'import sys', 'import os', '', 'def greet( name:str)->str:', ' return name', '', 'print(missing_name)', 'print(os.getcwd(), sys.version)' },
       formatted = 'def greet(name: str) -> str:',
+      formatted_line = 5,
       diagnostic = true,
     },
     {
@@ -125,6 +126,12 @@ local function run()
     assert(vim.wait(3000, function() return vim.treesitter.highlighter.active[buffer] ~= nil end), 'Treesitter did not highlight ' .. fixture.path)
     assert(vim.wo.foldmethod == 'expr' and vim.wo.foldexpr == 'v:lua.vim.treesitter.foldexpr()', 'Treesitter folds did not attach to ' .. fixture.path)
 
+    if fixture.filetype == 'python' then
+      vim.cmd 'write'
+      assert(vim.deep_equal(vim.fn.readfile(path), fixture.lines), 'Ruff changed imports/content before opt-in')
+      assert(vim.wait(15000, function() return #vim.diagnostic.get(buffer) > 0 end), 'Python diagnostics stopped while formatting was disabled')
+    end
+    if fixture.formatted or fixture.formatter then vim.cmd 'FormatEnable!' end
     if fixture.formatted then
       require('conform').format { bufnr = buffer, async = false, timeout_ms = 10000 }
       local formatted_line = fixture.formatted_line or 1
@@ -132,6 +139,9 @@ local function run()
         vim.api.nvim_buf_get_lines(buffer, formatted_line - 1, formatted_line, false)[1] == fixture.formatted,
         ('formatter produced unexpected output for %s: %s'):format(fixture.path, vim.inspect(vim.api.nvim_buf_get_lines(buffer, 0, -1, false)))
       )
+      if fixture.filetype == 'python' then
+        assert(vim.deep_equal(vim.api.nvim_buf_get_lines(buffer, 0, 2, false), { 'import os', 'import sys' }), 'Ruff did not sort imports after opt-in')
+      end
     elseif fixture.formatter then
       local available = vim.iter(require('conform').list_formatters(buffer)):any(function(formatter) return formatter.available end)
       assert(available, 'no configured formatter is available for ' .. fixture.path)

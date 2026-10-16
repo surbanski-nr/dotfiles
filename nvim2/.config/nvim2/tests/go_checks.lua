@@ -33,6 +33,10 @@ local function run()
   assert(vim.wait(15000, function() return gopls() ~= nil end), 'gopls did not attach')
   clients[#clients + 1] = gopls().id
   assert(vim.wait(15000, function() return #vim.diagnostic.get(buffer) > 0 end), 'gopls did not report the missing import')
+  local original = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
+  vim.cmd 'write'
+  assert(vim.deep_equal(vim.fn.readfile(file), original), 'goimports changed imports/content before opt-in')
+  vim.cmd 'FormatEnable!'
   vim.cmd 'write'
   local formatted = table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), '\n')
   assert(

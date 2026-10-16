@@ -1,34 +1,52 @@
 local M = {}
 
+function M.is_enabled(bufnr)
+  local disabled = vim.b[bufnr or 0].disable_autoformat
+  if disabled == nil then disabled = vim.g.disable_autoformat end
+  return not disabled
+end
+
+local function set_disabled(disabled, buffer_only)
+  if buffer_only then
+    vim.b.disable_autoformat = disabled
+  else
+    vim.g.disable_autoformat = disabled
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+      vim.b[bufnr].disable_autoformat = nil
+    end
+  end
+  local state = M.is_enabled() and 'enabled' or 'disabled'
+  local scope = buffer_only and 'this buffer' or 'this Neovim session'
+  vim.notify('Formatting ' .. state .. ' for ' .. scope)
+end
+
 function M.setup()
-  vim.api.nvim_create_user_command('FormatDisable', function(args)
-    if args.bang then
-      vim.b.disable_autoformat = true
-    else
-      vim.g.disable_autoformat = true
-    end
-  end, { bang = true, desc = 'Disable format-on-save' })
+  if vim.g.disable_autoformat == nil then vim.g.disable_autoformat = true end
 
-  vim.api.nvim_create_user_command('FormatEnable', function(args)
-    if args.bang then
-      vim.b.disable_autoformat = false
-    else
-      vim.g.disable_autoformat = false
-    end
-  end, { bang = true, desc = 'Enable format-on-save' })
+  vim.api.nvim_create_user_command(
+    'FormatDisable',
+    function(args) set_disabled(true, args.bang) end,
+    { bang = true, desc = 'Disable formatting (bang: current buffer)' }
+  )
 
-  vim.api.nvim_create_user_command('FormatToggle', function()
-    vim.g.disable_autoformat = not vim.g.disable_autoformat
-    local state = vim.g.disable_autoformat and 'disabled' or 'enabled'
-    vim.notify('Format-on-save ' .. state .. ' for this Neovim session')
-  end, { desc = 'Toggle format-on-save for this Neovim session' })
+  vim.api.nvim_create_user_command(
+    'FormatEnable',
+    function(args) set_disabled(false, args.bang) end,
+    { bang = true, desc = 'Enable formatting (bang: current buffer)' }
+  )
 
-  vim.keymap.set('n', '<leader>tf', '<Cmd>FormatToggle<CR>', { desc = '[T]oggle [F]ormat-on-save' })
+  vim.api.nvim_create_user_command('FormatToggle', function(args)
+    local disabled = not vim.g.disable_autoformat
+    if args.bang then disabled = M.is_enabled() end
+    set_disabled(disabled, args.bang)
+  end, { bang = true, desc = 'Toggle formatting (bang: current buffer)' })
+
+  vim.keymap.set('n', '<leader>tf', '<Cmd>FormatToggle!<CR>', { desc = '[T]oggle [F]ormatting for this buffer' })
 
   require('conform').setup {
     notify_on_error = false,
     format_on_save = function(bufnr)
-      if vim.g.disable_autoformat or vim.b[bufnr].disable_autoformat then return nil end
+      if not M.is_enabled(bufnr) or not vim.bo[bufnr].modifiable then return nil end
 
       local enabled_filetypes = {
         bash = true,
@@ -60,7 +78,7 @@ function M.setup()
         ['yaml.docker-compose'] = true,
         ['yaml.helm-values'] = true,
       }
-      if enabled_filetypes[vim.bo[bufnr].filetype] then return { timeout_ms = 1000 } end
+      if enabled_filetypes[vim.bo[bufnr].filetype] then return { bufnr = bufnr, timeout_ms = 1000 } end
     end,
     default_format_opts = {
       lsp_format = 'fallback',
@@ -99,7 +117,14 @@ function M.setup()
     },
   }
 
-  vim.keymap.set({ 'n', 'v' }, '<leader>f', function() require('conform').format { async = true } end, { desc = '[F]ormat buffer' })
+  vim.keymap.set({ 'n', 'v' }, '<leader>f', function()
+    if not M.is_enabled() then
+      vim.notify 'Enable formatting for this buffer with <leader>tf or :FormatEnable!'
+      return
+    end
+    if not vim.bo.modifiable then return end
+    require('conform').format { async = true }
+  end, { desc = '[F]ormat buffer or selection (when enabled)' })
 end
 
 return M

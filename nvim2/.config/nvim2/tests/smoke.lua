@@ -565,6 +565,7 @@ local function run()
     'TypeScript Language Server did not attach to a TypeScript project'
   )
   assert(vim.api.nvim_buf_get_commands(0, {}).LspTypescriptSourceAction, 'TypeScript source-action command is unavailable')
+  vim.cmd 'FormatEnable!'
   require('conform').format { bufnr = 0, async = false, timeout_ms = 5000 }
   assert(vim.api.nvim_get_current_line() == 'const unused = { answer: 42 };', 'Prettier did not format TypeScript')
   vim.api.nvim_exec_autocmds('BufWritePost', { buffer = 0 })
@@ -619,15 +620,6 @@ local function run()
   assert(type(toggle.callback) == 'function', 'value-toggle callback is unavailable')
   toggle.callback()
   assert(vim.api.nvim_get_current_line() == 'false', 'value toggle did not change true to false')
-
-  notify = vim.notify
-  vim.notify = function() end
-  assert(not vim.g.disable_autoformat, 'format-on-save unexpectedly starts disabled')
-  vim.cmd.FormatToggle()
-  assert(vim.g.disable_autoformat, 'FormatToggle did not disable format-on-save')
-  vim.cmd.FormatToggle()
-  assert(not vim.g.disable_autoformat, 'FormatToggle did not re-enable format-on-save')
-  vim.notify = notify
 end
 
 local ok, error_message = xpcall(run, debug.traceback)

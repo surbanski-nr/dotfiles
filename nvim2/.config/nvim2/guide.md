@@ -1050,24 +1050,44 @@ The main day-to-day language stacks are:
 
 | Action                                              | Keys or command                 |
 | --------------------------------------------------- | ------------------------------- |
-| Format buffer or visual selection                   | `<leader>f`                     |
-| Toggle format-on-save for this Neovim session       | `<leader>tf` or `:FormatToggle` |
-| Disable format-on-save globally                     | `:FormatDisable`                |
-| Disable format-on-save for current buffer           | `:FormatDisable!`               |
-| Enable format-on-save globally                      | `:FormatEnable`                 |
-| Enable format-on-save for current buffer            | `:FormatEnable!`                |
+| Format enabled buffer or visual selection           | `<leader>f`                     |
+| Toggle formatting for current buffer                | `<leader>tf` or `:FormatToggle!` |
+| Enable / disable formatting for current buffer      | `:FormatEnable!` / `:FormatDisable!` |
+| Toggle formatting for this Neovim session            | `:FormatToggle`                 |
+| Enable / disable formatting for this Neovim session  | `:FormatEnable` / `:FormatDisable` |
 | Inspect formatter selection                         | `:ConformInfo`                  |
 | Inspect external tools                              | `:Mason`                        |
 | Install all managed tools and parsers synchronously | `:Nvim2ToolsInstallSync`        |
 
-Conform formats configured filetypes on save. `<leader>tf` is useful when one
-Neovim process is opened for a repository that should not be reformatted. The
-toggle lasts for that process and does not change repository files or settings.
-Manual formatting with `<leader>f` remains available while format-on-save is
-disabled. Ruff sorts imports and formats Python. `nvim-lint` runs configured
-CLI linters after saving; it has no manual mapping. Actionlint runs only for
-YAML files under `.github/workflows/`, while yamllint continues to check other
-YAML.
+Every fresh Neovim session starts with managed formatting disabled. Editing
+and saving leave formatting and imports alone until you enable them. Use
+`<leader>tf` to enable the current buffer, then save or use `<leader>f`.
+The same gate applies to manual formatting; using `<leader>f` while disabled
+only explains how to opt in. Disabled saves are quiet. `:ConformInfo` remains
+available. Go import insertion and Ruff import sorting require the same opt-in.
+
+The buffer toggle applies to all windows showing that buffer and is lost when
+the buffer is wiped. Other buffers stay disabled. Session commands without
+`!` change the default and clear existing buffer overrides, so `:FormatDisable`
+disables every buffer. Newly opened buffers inherit the session default.
+Nothing persists across processes or changes repository settings. Reloading
+the setup preserves the current session's explicit choices.
+
+Enabling formatting retains the existing save filetype allowlist, including
+the exclusion of Helm templates, and LSP fallback. Whole-file formatters may
+change unrelated lines; use a visual selection where range formatting is
+supported and inspect the diff. Disabling blocks new requests; it does not
+cancel an asynchronous request already started. Native `gq`, explicit
+`vim.lsp.buf.format()`, direct Conform API calls, project EditorConfig cleanup
+and user autocmds remain independent editing actions.
+
+Diagnostics, completion, navigation and indentation still work while
+formatting is disabled. `nvim-lint` runs diagnostic CLI linters after saving;
+it does not apply fixes and has no manual mapping. Actionlint runs only for
+YAML files under `.github/workflows/`, while yamllint checks other YAML.
+Restart Neovim after a release upgrade to load this policy. Rolling back to
+an earlier configuration restores its enabled save formatting and ungated
+manual mapping; it does not preserve this opt-in default.
 
 GuessIndent detects options, indentation guides only display them, and
 Conform actually formats text. To rerun detection use `:GuessIndent`, then

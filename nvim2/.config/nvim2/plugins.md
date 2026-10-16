@@ -56,7 +56,7 @@ under `lua/custom/` and is called from a small seam in `init.lua`:
 | `checks.lua` and `health.lua` | Inspect real locked checkouts and tools through `:Nvim2Check`; the health module only reports shared check results |
 | `lsp.lua`                     | Language-server configuration and pinned Mason tool versions                                  |
 | `debug.lua`                   | Python launch/attach configurations, interpreter selection, DAP panels and mappings |
-| `conform.lua`                 | Formatter selection and format-on-save controls                                               |
+| `conform.lua`                 | Formatting opt-in, formatter selection and save/manual controls                               |
 | `project.lua`                 | Canonical nearest-Git-root discovery shared by search and project marks                        |
 | `pairs.lua`                   | Treesitter-confirmed delimiter ranges shared by highlighting and tab-out                      |
 | `tabout.lua`                  | Bounded forward/backward navigation out of supported syntax pairs                             |
