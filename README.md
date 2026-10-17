@@ -34,7 +34,8 @@ The preferred deployment of this dotfiles is a built offline release attached to
 No asdf installation or shims are needed for this route.
 Prepare the target's system prerequisites with `./setup-system --offline-release`
 while its package repositories are reachable, then install the complete archive
-with `dotfiles-release` script. Do not run `setup-tools` or `setup-asdf` for this option.
+with the standalone `dotfiles-release` script downloaded from the same GitHub
+release. Do not run `setup-tools` or `setup-asdf` for this option.
 
 Alternatively on a machine with full internet access run below commands. Only `setup-system` uses `sudo`:
 

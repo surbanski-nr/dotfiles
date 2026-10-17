@@ -6,6 +6,19 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/fixture.sh"
 create_fixture
 
+test_home=$test_root/prerequisites-home
+mkdir -p "$test_home" "$test_root/no-sort"
+for executable in /usr/bin/*; do
+  [[ $executable != /usr/bin/sort && -f $executable && -x $executable ]] || continue
+  ln -s "$executable" "$test_root/no-sort/${executable##*/}"
+done
+if PATH="$test_root/no-sort" run_manager install "$artifact_one" >"$test_root/prerequisites.log" 2>&1; then
+  fail 'installation accepted a missing system prerequisite'
+fi
+grep -F 'required command is missing: sort' "$test_root/prerequisites.log" >/dev/null ||
+  fail 'missing system prerequisite was not identified'
+[[ ! -e $test_home/dotfiles-releases ]] || fail 'installation changed HOME before checking system prerequisites'
+
 health_commit=4444444444444444444444444444444444444444
 health_id=dotfiles-${health_commit:0:12}
 health_artifact=$test_root/health-failure.tar.gz
@@ -22,16 +35,20 @@ tar -C "$test_root/stage-health-failure" -czf "$health_artifact" "$health_id"
 test_home=$test_root/health-failure-home
 mkdir -p "$test_home/bin-extras"
 write_fake_tool "$test_home/bin-extras/node"
-set +e
-health_failure_output=$(PATH="$test_home/bin-extras:$PATH" run_manager install "$health_artifact" 2>&1)
-health_failure_status=$?
-set -e
-[[ $health_failure_status -ne 0 && $health_failure_output != *': installed '* ]] ||
-  fail 'required final health failure reported installation success'
-[[ ! -e $test_home/dotfiles-releases/current &&
-  ! -e $test_home/dotfiles-releases/.state/pending.env &&
-  ! -e $test_home/dotfiles-releases/$health_id ]] ||
-  fail 'required final health failure retained partial installation state'
+for install_option in '' --skip-tests; do
+  install_args=(install)
+  [[ -z $install_option ]] || install_args+=("$install_option")
+  set +e
+  health_failure_output=$(PATH="$test_home/bin-extras:$PATH" run_manager "${install_args[@]}" "$health_artifact" 2>&1)
+  health_failure_status=$?
+  set -e
+  [[ $health_failure_status -ne 0 && $health_failure_output != *': installed '* ]] ||
+    fail "required core health failure reported installation success with '$install_option'"
+  [[ ! -e $test_home/dotfiles-releases/current &&
+    ! -e $test_home/dotfiles-releases/.state/pending.env &&
+    ! -e $test_home/dotfiles-releases/$health_id ]] ||
+    fail "required core health failure retained partial installation state with '$install_option'"
+done
 
 inventory_commit=5555555555555555555555555555555555555555
 inventory_id=dotfiles-${inventory_commit:0:12}
@@ -69,6 +86,34 @@ fi
   ! -e $test_home/dotfiles-releases/.state/pending.env &&
   ! -e $test_home/dotfiles-releases/$inventory_id ]] ||
   fail 'duplicate Python inventory retained partial installation state'
+
+cat >"$test_root/stage-one/$id_one/tools/bin/rg" <<'EOF'
+#!/usr/bin/env bash
+if [[ ${1:-} == --version ]]; then printf 'rg fixture 1.0\n'; else exit 96; fi
+EOF
+repack_artifact one "$id_one" "$artifact_one"
+test_home=$test_root/skip-tests-home
+mkdir -p "$test_home"
+run_full_manager() {
+  HOME=$test_home DOTFILES_OS_RELEASE_FILE=$os_release DOTFILES_RELEASE_TEST_MODE='' \
+    bash "$repo_dir/scripts/dotfiles-release" "$@"
+}
+if run_full_manager install "$artifact_one" >"$test_root/functional-failure.log" 2>&1; then
+  fail 'normal install accepted a failed functional check'
+fi
+grep -F 'CLI operations health check failed (status 96)' "$test_root/functional-failure.log" >/dev/null ||
+  fail 'normal install did not run the functional check'
+[[ ! -e $test_home/dotfiles-releases/current && ! -e $test_home/bin/rg ]] ||
+  fail 'failed functional check activated the candidate'
+run_full_manager install --skip-tests "$artifact_one" >"$test_root/skip-tests.log"
+assert_link "$test_home/dotfiles-releases/current" "$id_one"
+grep -F 'skipped extended functional tests' "$test_root/skip-tests.log" >/dev/null ||
+  fail 'skipped functional checks were not reported'
+if run_full_manager health >"$test_root/full-health.log" 2>&1; then
+  fail 'skip-tests disabled subsequent health checks'
+fi
+grep -F 'CLI operations health check failed (status 96)' "$test_root/full-health.log" >/dev/null ||
+  fail 'health did not resume the functional check'
 
 test_home=$test_root/health-home
 mkdir -p "$test_home/bin-extras"

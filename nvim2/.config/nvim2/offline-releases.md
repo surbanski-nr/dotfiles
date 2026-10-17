@@ -108,6 +108,12 @@ not `FILE`; see [TPM and Krew](../../../maintenance/setup.md#tpm-and-krew).
 
 ## Offline health
 
+Normal `install` checks the candidate before activation, including the full
+Nvim2 suite. `install --skip-tests ARCHIVE` skips the extended functional suites
+for that invocation while preserving core integrity/runtime checks and Python
+venv creation. Use it for an already qualified package when the host cannot
+run the functional tests. A subsequent `health` still runs the complete suite.
+
 `dotfiles-release health [ID]` verifies the local content record, file modes,
 symlink targets, source metadata, Python isolation and all runtime versions.
 It verifies the installed content again after functional checks, so tool writes
@@ -173,9 +179,14 @@ Existing archives are checked with the trusted checkout's
 `dotfiles-release inspect PLATFORM ARCHIVE COMMIT`: archive paths and links,
 complete metadata, expected platform and full commit ID, and internal checksums.
 Only missing archives are built. Each archive is published together with its
-`.tar.gz.sha256` sidecar. A retry verifies existing assets and publishes only a
-missing checksum without rebuilding or overwriting the archive. A mismatched
-existing checksum fails rather than being replaced. The workflow never creates
+`.tar.gz.sha256` sidecar. The release also includes a standalone
+`dotfiles-release` script, extracted from the qualified Debian archive with its
+embedded tool-probe configuration. Download it with the matching platform
+archive and checksum; installation needs no Git checkout.
+Only the Debian job publishes this shared script. A retry verifies existing
+assets and supplies a missing checksum or manager without rebuilding or
+overwriting the archive. An existing manager must match the one in the archive;
+a mismatched manager or checksum fails rather than being replaced. The workflow never creates
 a tag or release. A new archive is uploaded only after offline install and full
 health have passed. Qualification logs and metadata are retained even if a
 build, verification or upload fails; containers use `--init` to reap debugger
@@ -184,6 +195,7 @@ processes and are removed on exit.
 Expected assets are:
 
 ```text
+dotfiles-release
 dotfiles-COMMIT-debian-13-x86_64.tar.gz
 dotfiles-COMMIT-ubuntu-24.04-x86_64.tar.gz
 dotfiles-COMMIT-ubuntu-26.04-x86_64.tar.gz

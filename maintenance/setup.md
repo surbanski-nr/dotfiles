@@ -344,7 +344,10 @@ or module-cache dependencies separately before disconnecting. See the
 
 `scripts/build-dotfiles-release` is the connected build and runtime-image
 preparation entry point. `scripts/dotfiles-release` is the standalone manager
-shipped inside each archive. The manager verifies, installs, lists, checks,
+shipped inside each archive and attached to the GitHub release as
+`dotfiles-release`. The published script is extracted from the qualified
+Debian archive, includes its tool-probe configuration, and is the same manager
+for all four platforms. The manager verifies, installs, lists, checks,
 rolls back and uninstalls releases without the builder or a Git checkout.
 
 The artifact contains a Git archive of the matching dotfiles commit, not the
@@ -358,7 +361,8 @@ After venv creation the retained installation removes the wheelhouse and
 records a new local manifest covering file contents, modes and symlink targets.
 
 Install the target distribution prerequisites while approved repositories are
-available, then transfer the matching artifact. From the matching reviewed
+available, then transfer `dotfiles-release`, the matching platform archive and
+its `.sha256` file from the same GitHub release. From the matching reviewed
 dotfiles snapshot:
 
 ```bash
@@ -372,12 +376,27 @@ tool list: `setup-tools` selects `TOOLS`, and the builder selects
 `OFFLINE_RELEASE_TOOLS`. The archive retains the old metadata key
 `OFFLINE_TOOLS` for compatibility with retained releases.
 
-After disconnecting external networking, run the installer as the intended
+On a connected machine, download these release assets into one directory with
+`gh`, then transfer them to the prepared host:
+
+```bash
+tag=dotfiles-COMMIT
+platform=debian-13-x86_64
+archive=dotfiles-COMMIT-$platform.tar.gz
+gh release download "$tag" --repo surbanski-nr/dotfiles \
+  --pattern dotfiles-release --pattern "$archive" --pattern "$archive.sha256"
+```
+
+Replace `COMMIT` in the tag with its actual suffix and in the archive name with
+the first 12 characters of the full commit SHA.
+
+After disconnecting external networking, run the downloaded installer as the intended
 ordinary user. It derives identity from that account and does not require a
 particular user name, UID or `/home` path:
 
 ```bash
-bash scripts/dotfiles-release install \
+sha256sum --check --strict dotfiles-COMMIT-debian-13-x86_64.tar.gz.sha256
+bash ./dotfiles-release install \
   "$PWD/dotfiles-COMMIT-debian-13-x86_64.tar.gz"
 source "$HOME/.bashrc"
 hash -r
@@ -385,18 +404,34 @@ dotfiles-release list
 dotfiles-release health
 ```
 
-Verify the trusted transfer checksum before installation:
+Install checks required system commands before reading the archive. It verifies
+archive safety, platform, metadata and checksums, then checks managed-path
+conflicts before creating the Python venvs at their final retained paths.
+Full candidate health runs before switching `current` or replacing public links.
+Activation rechecks the links and core runtime checks. A failure restores the
+previous selection; executable behavior and final filesystem writes can still
+fail after preparation has started.
+
+For an already qualified package on a host where the extended functional tests
+cannot run, use:
 
 ```bash
-sha256sum --check --strict \
-  dotfiles-COMMIT-debian-13-x86_64.tar.gz.sha256
+bash ./dotfiles-release install --skip-tests \
+  "$PWD/dotfiles-COMMIT-debian-13-x86_64.tar.gz"
 ```
+
+This skips the CLI, Kubernetes, tmux, Bash and Nvim2 functional suites. Archive
+and installed-content integrity, platform, ownership, Python isolation and
+dependencies, tool versions, Helm schema/yq checks and activation checks remain
+required. The flag applies only to that invocation. `dotfiles-release health`
+and `verify` always run full checks. Reinstalling an unchanged retained archive
+continues to reuse it with core checks rather than rerunning the functional suites.
 
 The full qualification path runs the same install plus health in a fresh
 runtime container with `--network none`:
 
 ```bash
-bash scripts/dotfiles-release verify debian-13-x86_64 \
+bash ./dotfiles-release verify debian-13-x86_64 \
   "$PWD/dotfiles-COMMIT-debian-13-x86_64.tar.gz"
 ```
 

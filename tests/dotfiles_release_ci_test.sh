@@ -11,6 +11,9 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 source_dir=$test_root/source
 mkdir -p "$source_dir/scripts"
 cp "$repo_dir/release.env" "$source_dir/release.env"
+cp "$repo_dir/tools-probes.env" "$source_dir/tools-probes.env"
+cp "$repo_dir/scripts/dotfiles-release" "$source_dir/scripts/dotfiles-release"
+printf '\n# Fixture release snapshot differs from workflow tooling.\n' >>"$source_dir/scripts/dotfiles-release"
 printf '#!/bin/sh\nexit 0\n' >"$source_dir/scripts/build-dotfiles-release"
 printf '#!/bin/sh\nexit 0\n' >"$source_dir/scripts/setup-lib"
 printf 'fixture config\n' >"$source_dir/system.env"
@@ -46,7 +49,10 @@ make_archive() {
   local stage=$test_root/payload platform=${1:-$PLATFORM}
   mkdir -p "$stage/$RELEASE_TAG"
   printf 'fixture payload\n' >"$stage/$RELEASE_TAG/payload"
-  printf '#!/bin/sh\nexit 99\n' >"$stage/$RELEASE_TAG/dotfiles-release"
+  {
+    printf '#!/usr/bin/env bash\n'
+    cat "$source_dir/tools-probes.env" "$source_dir/scripts/dotfiles-release"
+  } >"$stage/$RELEASE_TAG/dotfiles-release"
   printf 'fixture build manifest\n' >"$stage/$RELEASE_TAG/build-manifest.txt"
   printf '%s\n' \
     "RELEASE_ID=$RELEASE_TAG" "PLATFORM_ID=$platform" "SOURCE_COMMIT=$TEST_COMMIT" \
@@ -117,13 +123,27 @@ matrix | jq -e 'length == 4 and .[0].build_archive == false and all(.[1:][]; .bu
   fail 'missing checksum scheduled an archive rebuild'
 
 run_ci publish "$test_root/nonexistent-output"
-[[ $(<"$TEST_UPLOAD_LOG") == "$archive.sha256" ]] || fail 'checksum repair uploaded an existing archive'
+[[ $(<"$TEST_UPLOAD_LOG") == "$archive.sha256"$'\n'dotfiles-release ]] ||
+  fail 'checksum/manager repair uploaded an existing archive'
+cmp -s "$TEST_RELEASE_ASSETS/dotfiles-release" "$test_root/payload/$RELEASE_TAG/dotfiles-release" ||
+  fail 'published manager differs from the release snapshot'
+HOME="$test_root/empty-home" bash "$TEST_RELEASE_ASSETS/dotfiles-release" inspect \
+  "$PLATFORM" "$TEST_RELEASE_ASSETS/$archive" "$COMMIT_SHA" >/dev/null ||
+  fail 'published manager does not work outside the checkout'
 (cd "$TEST_RELEASE_ASSETS" && sha256sum --check --strict "$archive.sha256" >/dev/null)
 run_preflight
 matrix | jq -e 'length == 3 and all(.[]; .platform != "debian-13-x86_64")' >/dev/null || fail 'complete platform was not skipped'
 upload_before=$(sha256sum "$TEST_UPLOAD_LOG")
 run_ci publish "$test_root/nonexistent-output"
 [[ $(sha256sum "$TEST_UPLOAD_LOG") == "$upload_before" ]] || fail 'complete assets were uploaded twice'
+
+printf '\nmodified manager\n' >>"$TEST_RELEASE_ASSETS/dotfiles-release"
+if run_preflight >"$test_root/bad-manager.log" 2>&1; then fail 'preflight accepted a mismatched manager'; fi
+if run_ci publish "$test_root/nonexistent-output" >"$test_root/bad-manager-publish.log" 2>&1; then
+  fail 'publish replaced a mismatched manager'
+fi
+[[ $(sha256sum "$TEST_UPLOAD_LOG") == "$upload_before" ]] || fail 'manager mismatch changed release assets'
+cp "$test_root/payload/$RELEASE_TAG/dotfiles-release" "$TEST_RELEASE_ASSETS/dotfiles-release"
 
 printf 'invalid checksum\n' >"$TEST_RELEASE_ASSETS/$archive.sha256"
 if run_preflight >"$test_root/bad-checksum.log" 2>&1; then fail 'preflight accepted a mismatched sidecar'; fi
@@ -162,7 +182,9 @@ set -e
 run_preflight
 matrix | jq -e '.[0].build_archive == false' >/dev/null || fail 'partial upload retry would rebuild the archive'
 run_ci publish "$test_root/output"
-[[ $(grep -Fxc "$archive" "$TEST_UPLOAD_LOG") -eq 1 && $(grep -Fxc "$archive.sha256" "$TEST_UPLOAD_LOG") -eq 1 ]] ||
+[[ $(grep -Fxc "$archive" "$TEST_UPLOAD_LOG") -eq 1 &&
+  $(grep -Fxc "$archive.sha256" "$TEST_UPLOAD_LOG") -eq 1 &&
+  $(grep -Fxc dotfiles-release "$TEST_UPLOAD_LOG") -eq 1 ]] ||
   fail 'partial upload retry did not publish each asset exactly once'
 
 for platform in ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
@@ -174,6 +196,16 @@ done
 run_preflight
 [[ $(matrix) == '[]' ]] || fail 'complete release scheduled redundant work'
 grep -Fx 'should_run=false' "$GITHUB_OUTPUT" >/dev/null || fail 'complete release did not skip work'
+
+find "$TEST_RELEASE_ASSETS" -maxdepth 1 -name dotfiles-release -delete
+run_preflight
+matrix | jq -e 'length == 1 and .[0].platform == "debian-13-x86_64" and .[0].build_archive == false' >/dev/null ||
+  fail 'missing standalone manager scheduled redundant archive builds'
+: >"$TEST_UPLOAD_LOG"
+run_ci publish "$test_root/nonexistent-output"
+[[ $(<"$TEST_UPLOAD_LOG") == dotfiles-release ]] || fail 'manager repair uploaded existing package assets'
+run_preflight
+[[ $(matrix) == '[]' ]] || fail 'manager repair left redundant work'
 
 make_archive
 export TEST_BUILD_ARCHIVE=$test_root/$archive

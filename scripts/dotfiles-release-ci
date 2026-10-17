@@ -43,11 +43,16 @@ inspect_asset() {
   bash "$script_dir/dotfiles-release" inspect "$1" "$2" "$COMMIT_SHA" >/dev/null
 }
 
+extract_manager() {
+  tar -xOzf "$1" "dotfiles-${COMMIT_SHA:0:12}/dotfiles-release" >"$2" || return
+  chmod 0755 "$2"
+}
+
 preflight() {
   local release_file=$work/release.json error_file=$work/release-error.txt
   local object_file=$work/tag-object.json attempts=1 attempt object_type
   local platform asset existing checksum build_archive matrix
-  local release_found=false
+  local release_found=false manager_missing=true
   local -a selected=()
 
   if [[ $EVENT_NAME == workflow_dispatch ]]; then RELEASE_TAG=$INPUT_RELEASE_TAG; else RELEASE_TAG=$TAG_NAME; fi
@@ -79,6 +84,7 @@ preflight() {
   [[ $object_type == commit && $COMMIT_SHA =~ ^[0-9a-f]{40}$ ]] || die 'tag does not resolve to a full commit ID'
   [[ $COMMIT_SHA == "${RELEASE_TAG#dotfiles-}"* ]] || die "tag does not match target commit $COMMIT_SHA"
 
+  if asset_exists dotfiles-release "$release_file"; then manager_missing=false; fi
   for platform in "${platforms[@]}"; do
     asset=dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz
     build_archive=true
@@ -87,11 +93,17 @@ preflight() {
       mkdir -p "$existing"
       download_asset "$asset" "$existing"
       inspect_asset "$platform" "$existing/$asset"
+      if [[ $platform == "${platforms[0]}" && $manager_missing == false ]]; then
+        extract_manager "$existing/$asset" "$work/expected-manager"
+        download_asset dotfiles-release "$work"
+        cmp -s "$work/expected-manager" "$work/dotfiles-release" ||
+          die 'dotfiles-release asset does not match the archive manager'
+      fi
       checksum=$asset.sha256
       if asset_exists "$checksum" "$release_file"; then
         download_asset "$checksum" "$existing"
         check_checksum "$existing/$asset" "$existing/$checksum"
-        continue
+        if [[ $platform != "${platforms[0]}" || $manager_missing == false ]]; then continue; fi
       fi
       build_archive=false
     fi
@@ -146,9 +158,8 @@ build_and_qualify() {
   tar -xOzf "$archive" "$root/release.env" >"$evidence/release.env"
   tar -xOzf "$archive" "$root/build-manifest.txt" >"$evidence/build-manifest.txt"
   cp "$archive.sha256" "$evidence/archive.sha256"
-  delivered_manager=$work/dotfiles-release
-  tar -xOzf "$archive" "$root/dotfiles-release" >"$delivered_manager"
-  chmod 0755 "$delivered_manager"
+  delivered_manager=$output_dir/dotfiles-release
+  extract_manager "$archive" "$delivered_manager"
 
   {
     docker run --detach --init --name "$container" "$builder_image" sleep infinity
@@ -181,7 +192,7 @@ build_and_qualify() {
 
 publish() {
   local output_dir=$1 asset=dotfiles-${COMMIT_SHA:0:12}-$PLATFORM.tar.gz
-  local release_file=$work/release.json archive checksum
+  local release_file=$work/release.json archive checksum manager=$work/dotfiles-release
   local -a uploads=()
 
   timeout 30s gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_file"
@@ -201,6 +212,17 @@ publish() {
   else
     (cd "$(dirname -- "$archive")" && sha256sum "$asset") >"$checksum"
     uploads+=("$checksum")
+  fi
+  if [[ $PLATFORM == "${platforms[0]}" ]]; then
+    extract_manager "$archive" "$manager"
+    if asset_exists dotfiles-release "$release_file"; then
+      mkdir -p "$work/existing-manager"
+      download_asset dotfiles-release "$work/existing-manager"
+      cmp -s "$manager" "$work/existing-manager/dotfiles-release" ||
+        die 'dotfiles-release asset does not match the archive manager'
+    else
+      uploads+=("$manager")
+    fi
   fi
   if ((${#uploads[@]})); then
     timeout 300s gh release upload "$RELEASE_TAG" --repo "$REPOSITORY" "${uploads[@]}"
