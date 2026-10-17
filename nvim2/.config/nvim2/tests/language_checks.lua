@@ -105,8 +105,9 @@ local function run()
       filetype = 'yaml',
       clients = { 'yamlls' },
       parser = 'yaml',
-      lines = { 'name: value', 'items:', ' - one' },
+      lines = { 'name: value', '', '', 'items:', ' - aaa', '', ' - bbb', '', 'flow: [', '  aaa,', '  bbb', ']', '', 'inline: [aaa, bbb]' },
       formatter = true,
+      formatted_lines = { 'name: value', '', '', 'items:', '  - aaa', '', '  - bbb', '', 'flow: [aaa, bbb]', '', 'inline: [aaa, bbb]' },
     },
   }
 
@@ -146,6 +147,12 @@ local function run()
       local available = vim.iter(require('conform').list_formatters(buffer)):any(function(formatter) return formatter.available end)
       assert(available, 'no configured formatter is available for ' .. fixture.path)
       require('conform').format { bufnr = buffer, async = false, timeout_ms = 10000 }
+      if fixture.formatted_lines then
+        assert(
+          vim.deep_equal(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), fixture.formatted_lines),
+          'YAML formatting changed blank lines or list style unexpectedly'
+        )
+      end
     end
 
     if fixture.completion then

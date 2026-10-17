@@ -85,6 +85,7 @@ function M.setup()
     },
     formatters = {
       goimports = { env = require('custom.go').env },
+      yamlfmt = { prepend_args = { '-formatter', 'retain_line_breaks=true' } },
     },
     formatters_by_ft = {
       bash = { 'shfmt' },
