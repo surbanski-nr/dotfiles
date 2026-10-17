@@ -131,6 +131,7 @@ select_platform() {
 
 build_and_qualify() {
   local source_dir=$1 output_dir=$2 archive root delivered_manager size digest
+  local phase=${3:-build}
   local builder_image test_uid test_home builder container verifier
   local evidence=$RUNNER_TEMP/dotfiles-evidence/$PLATFORM
   local run_key=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM
@@ -145,12 +146,14 @@ build_and_qualify() {
   verifier=dotfiles-verify-$run_key
   containers=("$builder" "$container" "$verifier")
   runtime_image=dotfiles-runtime:$run_key
-  timeout 300s docker pull "$builder_image" 2>&1 | tee "$evidence/pull.log"
-  timeout --signal=TERM --kill-after=30s 5400s docker run --rm --init --name "$builder" \
-    --volume "$source_dir:/workspace:ro" --volume "$output_dir:/out" \
-    --env BUILDER_IMAGE="$builder_image" "$builder_image" \
-    bash /workspace/scripts/build-dotfiles-release build "$PLATFORM" /workspace /out \
-    2>&1 | tee "$evidence/build.log"
+  if [[ $phase != verify ]]; then
+    timeout 300s docker pull "$builder_image" 2>&1 | tee "$evidence/pull.log"
+    timeout --signal=TERM --kill-after=30s 5400s docker run --rm --init --name "$builder" \
+      --volume "$source_dir:/workspace:ro" --volume "$output_dir:/out" \
+      --env BUILDER_IMAGE="$builder_image" "$builder_image" \
+      bash /workspace/scripts/build-dotfiles-release build "$PLATFORM" /workspace /out \
+      2>&1 | tee "$evidence/build.log"
+  fi
 
   archive=$output_dir/dotfiles-${COMMIT_SHA:0:12}-$PLATFORM.tar.gz
   check_checksum "$archive" "$archive.sha256"
@@ -160,6 +163,7 @@ build_and_qualify() {
   cp "$archive.sha256" "$evidence/archive.sha256"
   delivered_manager=$output_dir/dotfiles-release
   extract_manager "$archive" "$delivered_manager"
+  [[ $phase != build-only ]] || return 0
 
   {
     docker run --detach --init --name "$container" "$builder_image" sleep infinity
@@ -188,6 +192,33 @@ build_and_qualify() {
     printf -- '- Size: %s bytes\n' "$size"
     printf -- '- SHA-256: %s\n' "$digest"
   } >>"$GITHUB_STEP_SUMMARY"
+}
+
+test_all_platforms() {
+  local source_dir phase platform source_status
+  source_dir=$(CDPATH='' cd -- "$1" && pwd)
+  COMMIT_SHA=$(git -C "$source_dir" rev-parse HEAD)
+  source_status=$(git -C "$source_dir" status --porcelain --untracked-files=normal)
+  [[ -z $source_status ]] ||
+    die 'offline qualification requires a clean committed checkout'
+  timeout 10s docker info >/dev/null || die 'Docker must be available to the current user'
+
+  RELEASE_TAG=dotfiles-${COMMIT_SHA:0:7}
+  RUNNER_TEMP=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-qualification.XXXXXX")
+  GITHUB_RUN_ID=local-${RUNNER_TEMP##*/}
+  GITHUB_RUN_ATTEMPT=1
+  GITHUB_STEP_SUMMARY=$RUNNER_TEMP/summary.md
+  export COMMIT_SHA RELEASE_TAG RUNNER_TEMP GITHUB_RUN_ID GITHUB_RUN_ATTEMPT GITHUB_STEP_SUMMARY
+  printf 'Offline packages and logs: %s\n' "$RUNNER_TEMP"
+
+  for phase in build-only verify; do
+    for platform in "${platforms[@]}"; do
+      printf 'Offline %s: %s\n' "$phase" "$platform"
+      PLATFORM=$platform bash "$script_dir/dotfiles-release-ci" "$phase" \
+        "$source_dir" "$RUNNER_TEMP/output/$platform"
+    done
+  done
+  printf 'Offline qualification passed for all four platforms: %s\n' "$RUNNER_TEMP"
 }
 
 publish() {
@@ -232,22 +263,27 @@ publish() {
 }
 
 main() {
+  if [[ ${1:-} == test ]]; then
+    (($# == 2)) || { die 'usage: dotfiles-release-ci test SOURCE_DIR'; return 2; }
+    test_all_platforms "$2"
+    return
+  fi
   work=$(mktemp -d "$RUNNER_TEMP/dotfiles-ci.XXXXXX")
   case ${1:-} in
     preflight) (($# == 1)) || return 2; preflight ;;
-    build | publish)
+    build | build-only | verify | publish)
       PLATFORM=${PLATFORM:?PLATFORM is required}
       COMMIT_SHA=${COMMIT_SHA:?COMMIT_SHA is required}
       RELEASE_TAG=${RELEASE_TAG:?RELEASE_TAG is required}
-      if [[ $1 == build ]]; then
+      if [[ $1 != publish ]]; then
         (($# == 3)) || return 2
-        build_and_qualify "$2" "$3"
+        build_and_qualify "$2" "$3" "$1"
       else
         (($# == 2)) || return 2
         publish "$2"
       fi
       ;;
-    *) die 'usage: dotfiles-release-ci preflight | build SOURCE_DIR OUTPUT_DIR | publish OUTPUT_DIR'; return 2 ;;
+    *) die 'usage: dotfiles-release-ci test SOURCE_DIR | preflight | {build|build-only|verify} SOURCE_DIR OUTPUT_DIR | publish OUTPUT_DIR'; return 2 ;;
   esac
 }
 

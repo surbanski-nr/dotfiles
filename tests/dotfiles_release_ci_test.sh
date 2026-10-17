@@ -242,4 +242,48 @@ for stage in BUILD VERIFY PREPARE; do
     fail 'failed build did not clean up its containers'
 done
 
-printf 'Dotfiles release CI tests passed\n'
+qualification_archives=$test_root/qualification-archives
+qualification_tmp=$test_root/'local with spaces'
+mkdir -p "$qualification_archives" "$qualification_tmp"
+for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
+  make_archive "$platform"
+  cp "$test_root/$archive" "$qualification_archives/dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz"
+done
+: >"$TEST_DOCKER_LOG"
+TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
+  run_ci test "$source_dir" >"$test_root/qualification.log"
+awk '
+  / build / { builds++ }
+  / verify / { if (builds != 4) exit 1; verifications++ }
+  END { if (builds != 4 || verifications != 4) exit 1 }
+' "$TEST_DOCKER_LOG" || fail 'qualification did not build all four packages before installing them'
+qualification_root=$(sed -n 's/^Offline packages and logs: //p' "$test_root/qualification.log")
+for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
+  [[ -s $qualification_root/output/$platform/dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz &&
+    -x $qualification_root/output/$platform/dotfiles-release ]] || fail 'qualification did not retain its artifacts'
+  grep -F 'fixture offline health succeeded' \
+    "$qualification_root/dotfiles-evidence/$platform/offline-verify.log" >/dev/null ||
+    fail "qualification did not install and check $platform without networking"
+done
+# shellcheck source=../release.env
+source "$source_dir/release.env"
+for image in "$DEBIAN_13_IMAGE" "$UBUNTU_2404_IMAGE" "$UBUNTU_2604_IMAGE" "$AMZN_2023_IMAGE"; do
+  [[ $(grep -Fxc "pull $image" "$TEST_DOCKER_LOG") -eq 1 ]] || fail 'qualification did not use the pinned platform image'
+done
+
+: >"$TEST_DOCKER_LOG"
+if TMPDIR="$qualification_tmp" TEST_BUILD_FAIL=1 TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
+  run_ci test "$source_dir" >"$test_root/qualification-failure.log" 2>&1; then
+  fail 'qualification accepted a failed build'
+fi
+[[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 1 ]] || fail 'qualification continued after a failed build'
+if grep -q ' verify ' "$TEST_DOCKER_LOG"; then fail 'qualification installed packages after a failed build'; fi
+
+printf 'uncommitted\n' >"$source_dir/uncommitted"
+: >"$TEST_DOCKER_LOG"
+if run_ci test "$source_dir" >"$test_root/qualification-dirty.log" 2>&1; then
+  fail 'qualification accepted an uncommitted checkout'
+fi
+[[ ! -s $TEST_DOCKER_LOG ]] || fail 'qualification started Docker for an uncommitted checkout'
+
+printf 'dotfiles_release_ci: tests passed\n'

@@ -10,8 +10,8 @@ for scenario in "${scenarios[@]}"; do
     profiles | validation_tools | paths | publication | recovery | health | lifecycle | integrity | locking) ;;
     *) printf 'Unknown scenario: %s\nAvailable: profiles validation_tools paths publication recovery health lifecycle integrity locking\n' "$scenario" >&2; exit 2 ;;
   esac
-  printf 'Dotfiles release: %s\n' "$scenario"
+  printf 'dotfiles_release: running %s\n' "$scenario"
   bash "$test_dir/${scenario}_test.sh"
 done
 
-printf 'Dotfiles release tests passed\n'
+printf 'dotfiles_release: all scenarios passed\n'

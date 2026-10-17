@@ -191,7 +191,7 @@ validate_scripts() {
   timeout 120s bash tests/dotfiles_release_ci_test.sh
   timeout 30s bash tests/offline_debug_adapter_test.sh
   timeout 30s bash tests/offline_go_test.sh
-  timeout 30s bash tests/offline_launchers_test.sh
+  timeout --foreground 30s bash tests/offline_launchers_test.sh
   timeout 120s bash tests/scripts_test.sh
   timeout 30s bash tests/setup_asdf_test.sh
   timeout 30s bash tests/setup_system_test.sh

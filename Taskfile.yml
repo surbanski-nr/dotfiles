@@ -65,6 +65,12 @@ tasks:
     cmds:
       - bash scripts/update-offline-python-locks
 
+  test:offline:
+    desc: Build all four offline packages, then install and test them without networking
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - bash scripts/dotfiles-release-ci test "{{.ROOT_DIR}}"
+
   tools:actionlint:
     internal: true
     run: once

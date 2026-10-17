@@ -10,8 +10,11 @@ case $1 in
       for arg in "$@"; do
         if [[ $arg == *:/out ]]; then output_dir=${arg%:/out}; fi
       done
-      cp "$TEST_BUILD_ARCHIVE" "$output_dir/$RELEASE_TAG-$PLATFORM.tar.gz"
-      (cd "$output_dir" && sha256sum "$RELEASE_TAG-$PLATFORM.tar.gz" >"$RELEASE_TAG-$PLATFORM.tar.gz.sha256")
+      archive=dotfiles-${COMMIT_SHA:0:12}-$PLATFORM.tar.gz
+      source_archive=$TEST_BUILD_ARCHIVE
+      if [[ -n ${TEST_BUILD_ARCHIVES_DIR:-} ]]; then source_archive=$TEST_BUILD_ARCHIVES_DIR/$archive; fi
+      cp "$source_archive" "$output_dir/$archive"
+      (cd "$output_dir" && sha256sum "$archive" >"$archive.sha256")
       printf 'fixture build succeeded\n'
     elif [[ " $* " == *' verify '* ]]; then
       [[ " $* " == *' --init '* && " $* " == *' --network none '* && " $* " == *' --user '* ]] || exit 2
@@ -28,6 +31,6 @@ case $1 in
       exit 83
     fi
     ;;
-  cp | commit | rm | image) ;;
+  cp | commit | rm | image | info) ;;
   *) exit 2 ;;
 esac

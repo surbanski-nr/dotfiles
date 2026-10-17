@@ -289,9 +289,28 @@ The new yq profile requires `YQ_VERSION` and `HELM_SCHEMA_PLUGIN_VERSION`;
 retained profiles keep their original requirements and plugin discovery.
 
 The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
-`ubuntu-26.04-x86_64` and `amzn-2023-x86_64`. Build from a clean committed
-checkout on a connected machine. Select the matching immutable image from
-`release.env` and keep the checkout read-only in the builder:
+`ubuntu-26.04-x86_64` and `amzn-2023-x86_64`. For a complete local qualification,
+run from a clean committed checkout on a connected machine with Docker access:
+
+```bash
+.cache/validation-tools/bin/task test:offline
+```
+
+The task uses `scripts/dotfiles-release-ci test` and the immutable images from
+`release.env`. It builds all four packages sequentially before preparing fresh
+runtime containers and installing each as an ordinary user with `--network none`.
+Every installation runs the full functional checks and then `health`.
+The task prints a retained `/tmp/dotfiles-qualification.XXXXXX` directory:
+`output/PLATFORM/` contains the archive, checksum and standalone installer;
+`dotfiles-evidence/PLATFORM/` contains build, prerequisite-preparation and
+offline-install logs; `summary.md` contains successful package sizes and hashes.
+It stops on a failure and preserves the packages and logs while cleaning up its
+containers and temporary runtime images. No GitHub release or credentials are
+required, and nothing is published. `task validate` runs the repository's local
+fixture tests, including installer profiles, rather than this full qualification.
+
+To build only one platform, select its image from `release.env` and keep the
+checkout read-only in the builder:
 
 ```bash
 set -euo pipefail
