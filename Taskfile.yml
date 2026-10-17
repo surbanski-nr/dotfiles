@@ -66,10 +66,23 @@ tasks:
       - bash scripts/update-offline-python-locks
 
   test:offline:
-    desc: Build all four offline packages, then install and test them without networking
+    desc: Build and verify offline packages in parallel (optional PLATFORM)
+    summary: |
+      Build all platforms in parallel, then verify successful builds offline.
+      Failures do not stop other platforms; logs and artifacts are retained.
+
+      Optional PLATFORM (default: all):
+        debian-13-x86_64
+        ubuntu-24.04-x86_64
+        ubuntu-26.04-x86_64
+        amzn-2023-x86_64
+
+      Example: task test:offline PLATFORM=ubuntu-24.04-x86_64
     dir: '{{.ROOT_DIR}}'
+    env:
+      PLATFORM: '{{.PLATFORM | default ""}}'
     cmds:
-      - bash scripts/dotfiles-release-ci test "{{.ROOT_DIR}}"
+      - bash scripts/dotfiles-release-ci test "{{.ROOT_DIR}}" "$PLATFORM"
 
   tools:actionlint:
     internal: true

@@ -5,6 +5,7 @@ set -euo pipefail
 script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 platforms=(debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64)
 containers=()
+declare -A workers=()
 runtime_image=
 work=
 
@@ -16,13 +17,20 @@ die() {
 cleanup() {
   local status=$?
   trap - EXIT
+  trap '' INT TERM
   set +e
+  if ((${#workers[@]})); then
+    kill "${workers[@]}" 2>/dev/null
+    wait "${workers[@]}" 2>/dev/null
+  fi
   if ((${#containers[@]})); then docker rm --force "${containers[@]}" >/dev/null 2>&1; fi
   if [[ -n $runtime_image ]]; then docker image rm "$runtime_image" >/dev/null 2>&1; fi
   if [[ -n $work ]]; then find "$work" -depth -delete; fi
   exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 asset_exists() {
   jq -e --arg asset "$1" '.assets[]? | select(.name == $asset)' "$2" >/dev/null
@@ -195,7 +203,16 @@ build_and_qualify() {
 }
 
 test_all_platforms() {
-  local source_dir phase platform source_status
+  local source_dir phase platform source_status evidence status result=0
+  local requested_platform=${2:-}
+  local -a selected=()
+  local -A build_status=() verify_status=()
+  for platform in "${platforms[@]}"; do
+    if [[ -z $requested_platform || $platform == "$requested_platform" ]]; then
+      selected+=("$platform")
+    fi
+  done
+  ((${#selected[@]})) || { die "unsupported platform: $requested_platform"; return 2; }
   source_dir=$(CDPATH='' cd -- "$1" && pwd)
   COMMIT_SHA=$(git -C "$source_dir" rev-parse HEAD)
   source_status=$(git -C "$source_dir" status --porcelain --untracked-files=normal)
@@ -212,13 +229,51 @@ test_all_platforms() {
   printf 'Offline packages and logs: %s\n' "$RUNNER_TEMP"
 
   for phase in build-only verify; do
-    for platform in "${platforms[@]}"; do
-      printf 'Offline %s: %s\n' "$phase" "$platform"
-      PLATFORM=$platform bash "$script_dir/dotfiles-release-ci" "$phase" \
-        "$source_dir" "$RUNNER_TEMP/output/$platform"
+    workers=()
+    for platform in "${selected[@]}"; do
+      if [[ $phase == verify && ${build_status[$platform]} != 0 ]]; then continue; fi
+      evidence=$RUNNER_TEMP/dotfiles-evidence/$platform
+      mkdir -p "$evidence"
+      printf 'Offline %s: %s (log: %s/%s.log)\n' "$phase" "$platform" "$evidence" "$phase"
+      # A timeout worker forwards cancellation to its subprocesses.
+      PLATFORM=$platform GITHUB_STEP_SUMMARY="$evidence/summary.md" \
+        timeout --signal=TERM --kill-after=30s 10800s \
+        bash "$script_dir/dotfiles-release-ci" "$phase" \
+        "$source_dir" "$RUNNER_TEMP/output/$platform" >"$evidence/$phase.log" 2>&1 &
+      workers[$platform]=$!
+    done
+    for platform in "${selected[@]}"; do
+      [[ -n ${workers[$platform]:-} ]] || continue
+      status=0
+      wait "${workers[$platform]}" || status=$?
+      unset 'workers[$platform]'
+      if [[ $phase == build-only ]]; then
+        build_status[$platform]=$status
+      else
+        verify_status[$platform]=$status
+      fi
+      if ((status)); then
+        printf 'dotfiles-release-ci: offline %s failed for %s (exit %s); see %s/%s/%s.log\n' \
+          "$phase" "$platform" "$status" "$RUNNER_TEMP/dotfiles-evidence" "$platform" "$phase" >&2
+        if ((result == 0)); then result=$status; fi
+      else
+        printf 'Offline %s passed: %s\n' "$phase" "$platform"
+        if [[ $phase == verify ]]; then
+          cat "$RUNNER_TEMP/dotfiles-evidence/$platform/summary.md" >>"$GITHUB_STEP_SUMMARY"
+        fi
+      fi
     done
   done
-  printf 'Offline qualification passed for all four platforms: %s\n' "$RUNNER_TEMP"
+  {
+    printf '\nOffline qualification results (0 means success):\n'
+    for platform in "${selected[@]}"; do
+      printf '%s: build=%s verify=%s; logs: %s/%s\n' \
+        "$platform" "${build_status[$platform]}" "${verify_status[$platform]:-skipped}" \
+        "$RUNNER_TEMP/dotfiles-evidence" "$platform"
+    done
+    printf 'Logs and artifacts retained: %s\n' "$RUNNER_TEMP"
+  } | tee -a "$GITHUB_STEP_SUMMARY"
+  return "$result"
 }
 
 publish() {
@@ -264,8 +319,8 @@ publish() {
 
 main() {
   if [[ ${1:-} == test ]]; then
-    (($# == 2)) || { die 'usage: dotfiles-release-ci test SOURCE_DIR'; return 2; }
-    test_all_platforms "$2"
+    (($# == 2 || $# == 3)) || { die 'usage: dotfiles-release-ci test SOURCE_DIR [PLATFORM]'; return 2; }
+    test_all_platforms "$2" "${3:-}"
     return
   fi
   work=$(mktemp -d "$RUNNER_TEMP/dotfiles-ci.XXXXXX")
@@ -283,7 +338,7 @@ main() {
         publish "$2"
       fi
       ;;
-    *) die 'usage: dotfiles-release-ci test SOURCE_DIR | preflight | {build|build-only|verify} SOURCE_DIR OUTPUT_DIR | publish OUTPUT_DIR'; return 2 ;;
+    *) die 'usage: dotfiles-release-ci test SOURCE_DIR [PLATFORM] | preflight | {build|build-only|verify} SOURCE_DIR OUTPUT_DIR | publish OUTPUT_DIR'; return 2 ;;
   esac
 }
 
