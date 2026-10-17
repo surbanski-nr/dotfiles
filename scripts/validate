@@ -150,8 +150,10 @@ validate_scripts() {
     tests/setup_asdf_test.sh
     tests/setup_system_test.sh
     tests/setup_tools_test.sh
+    tests/tmux_timer_test.sh
     tests/validate_test.sh
   )
+  files+=(tmux/.tmux/*.sh)
   local first_line
   local posix_files=()
 
@@ -228,6 +230,7 @@ validate_nvim2() {
 validate_configs() {
   need git
   need jq
+  need python3
   need script
   need tmux
   need yamllint
@@ -270,6 +273,8 @@ validate_configs() {
   cleanup_tmux_socket=$socket
   tmux_config=$temporary_home/explicit.tmux.conf
   cp "$repo_dir/tmux/.tmux.conf" "$tmux_config"
+  mkdir -p "$temporary_home/.tmux"
+  cp "$repo_dir/tmux/.tmux/eye-timer.sh" "$temporary_home/.tmux/eye-timer.sh"
   (
     unset TMUX TMUX_OFFLINE_RELEASE_ROOT TMUX_PLUGIN_MANAGER_PATH
     HOME="$temporary_home" timeout 10s tmux -L "$socket" \
@@ -287,7 +292,7 @@ validate_configs() {
   pane_active_border_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv pane-active-border-style)
   [[ $pane_active_border_style == *'fg=#008080'* ]] ||
     die "tmux active pane border is not Windows 95 teal: $pane_active_border_style"
-  status_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv status-style)
+  status_style=$(HOME="$temporary_home" tmux -L "$socket" display-message -p '#{E:status-style}')
   [[ $status_style == 'bg=#008080,fg=#ffffff' ]] ||
     die "tmux status bar does not use white on teal: $status_style"
   window_status_current_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv window-status-current-style)
@@ -341,6 +346,7 @@ validate_configs() {
   exec {client_input_fd}>&-
   wait "$cleanup_tmux_client_pid"
   cleanup_tmux_client_pid=
+  timeout 60s bash tests/tmux_timer_test.sh
 }
 
 validate_workflows() {

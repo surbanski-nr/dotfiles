@@ -844,6 +844,45 @@ JSON array of database names. `day` stores daily notes under
 `$NOTES/periodic-notes/daily-notes`, falling back to `SECOND_BRAIN` for older
 private configuration, and opens them with Nvim2.
 
+## Tmux eye-break timer
+
+Press `Ctrl+a`, release it, then press `t` to open the local eye-break timer
+menu. This replaces tmux's built-in clock mode; the status bar still shows
+the time. The timer starts disabled and uses 60 minutes by default:
+
+- `s`: start, resume a paused timer, or start a new countdown after completion.
+- `p`: pause and show `|| MM:SS`.
+- `r`: reset to the configured duration and wait for Start.
+- `m`: enter whole minutes from 1 to 1440, then wait for Start.
+- `o`: hide and disable the timer.
+
+The countdown appears before the IP. While the timer is visible, clock/date
+disappear below 90 columns and the IP disappears below 60; the hostname still
+requires 160 columns. At the end, the countdown disappears and the entire
+status bar becomes red with white text. This colour is the only completion
+signal; there is no extra label or notification. It remains until you start
+again, reset, set minutes, or turn the timer off.
+
+The script supplies timer text and state to tmux's native status bar. Layout
+and colours stay in `.tmux.conf`, alongside the existing IP and clock.
+
+One timer is shared by all sessions and windows on the same tmux server.
+Reloading the config preserves it. Time continues while clients are detached;
+the completion colour appears when a client reattaches. Killing the server
+clears its state. The timer uses the existing status refresh interval, normally
+five seconds with tmux-sensible, so completion may appear up to one interval
+late. Paused and disabled timers run no status job; there is no background
+countdown loop. The local script is included in both connected installations
+and offline releases and requires Bash and `flock` from util-linux.
+
+Run its focused integration checks with a private tmux server and terminal:
+
+```bash
+timeout 60s bash tests/tmux_timer_test.sh
+```
+
+They also run as part of `task validate:configs` and `task validate`.
+
 ## TPM and Krew
 
 TPM and its plugin checkouts use the commits in `tools.env`. This section is
