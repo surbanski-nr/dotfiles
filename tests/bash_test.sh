@@ -83,7 +83,6 @@ printf 'TOOL_RELEASES[python]=%q\n' \
   $'\n3.9.7|https://example.invalid/python-3.9.7.tar.gz|0000000000000000000000000000000000000000000000000000000000000000\n' \
   >>"$python_manifest/tools.env"
 ln -s "$repo_dir/scripts/setup-lib" "$python_manifest/scripts/setup-lib"
-ln -s "$repo_dir/tools-probes.env" "$python_manifest/tools-probes.env"
 for command_name in bash grep timeout; do
   ln -s "$(command -v "$command_name")" "$python_home/bin/$command_name"
 done

@@ -92,6 +92,7 @@ _dotfiles_check_release_version() {
   local command_name=$2
   local catalog=$3
   local tool=$4
+  local check
   local -a arguments=()
   shift 4
 
@@ -99,7 +100,9 @@ _dotfiles_check_release_version() {
   if (($#)); then
     arguments=("$@")
   else
-    read -r -a arguments <<<"${TOOL_PROBE_ARGS[$command_name]:---version}"
+    check=${TOOL_CHECKS[$command_name]:-}
+    check=${check#*|}
+    read -r -a arguments <<<"${check:---version}"
   fi
   _dotfiles_check_version "$label" "$command_name" "$RELEASE_VERSION" "${arguments[@]}"
 }
@@ -140,8 +143,6 @@ dotfiles-check() (
     # Loaded only when dotfiles-check runs, never during normal shell startup.
     # shellcheck source=../scripts/setup-lib
     source "$manifest_dir/scripts/setup-lib"
-    # shellcheck source=../tools-probes.env
-    source "$manifest_dir/tools-probes.env"
     validate_tool_config || return
   fi
 

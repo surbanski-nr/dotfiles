@@ -157,7 +157,12 @@ make_artifact() {
 
   {
     printf '#!/usr/bin/env bash\n'
-    cat "$repo_dir/tools-probes.env" "$repo_dir/scripts/dotfiles-release"
+    (
+      # shellcheck source=../../tools.env
+      source "$repo_dir/tools.env"
+      declare -p TOOL_CHECKS
+    )
+    cat "$repo_dir/scripts/dotfiles-release"
   } >"$release/dotfiles-release"
   chmod 0755 "$release/dotfiles-release"
   ln -s ../dotfiles-release "$release/bin/dotfiles-release"

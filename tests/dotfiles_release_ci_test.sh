@@ -11,7 +11,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 source_dir=$test_root/source
 mkdir -p "$source_dir/scripts"
 cp "$repo_dir/release.env" "$source_dir/release.env"
-cp "$repo_dir/tools-probes.env" "$source_dir/tools-probes.env"
+cp "$repo_dir/tools.env" "$source_dir/tools.env"
 cp "$repo_dir/scripts/dotfiles-release" "$source_dir/scripts/dotfiles-release"
 printf '\n# Fixture release snapshot differs from workflow tooling.\n' >>"$source_dir/scripts/dotfiles-release"
 printf '#!/bin/sh\nexit 0\n' >"$source_dir/scripts/build-dotfiles-release"
@@ -51,7 +51,12 @@ make_archive() {
   printf 'fixture payload\n' >"$stage/$RELEASE_TAG/payload"
   {
     printf '#!/usr/bin/env bash\n'
-    cat "$source_dir/tools-probes.env" "$source_dir/scripts/dotfiles-release"
+    (
+      # shellcheck source=../tools.env
+      source "$source_dir/tools.env"
+      declare -p TOOL_CHECKS
+    )
+    cat "$source_dir/scripts/dotfiles-release"
   } >"$stage/$RELEASE_TAG/dotfiles-release"
   printf 'fixture build manifest\n' >"$stage/$RELEASE_TAG/build-manifest.txt"
   printf '%s\n' \

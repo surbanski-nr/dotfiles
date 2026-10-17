@@ -94,8 +94,6 @@ load_build_config() {
   source "$source_dir/system.env" || return
   # shellcheck source=../tools.env
   source "$source_dir/tools.env" || return
-  # shellcheck source=../tools-probes.env
-  source "$source_dir/tools-probes.env" || return
   validate_tool_config || return
   local tool
   SIMPLE_RELEASE_TOOLS=()
@@ -122,15 +120,11 @@ load_build_config() {
 }
 
 release_version_field() {
-  local tool=$1 record name field
-  for record in "${RELEASE_TOOL_VERSIONS[@]}"; do
-    IFS='|' read -r name field <<<"$record"
-    if [[ $name == "$tool" ]]; then
-      printf '%s\n' "$field"
-      return 0
-    fi
-  done
-  die "missing release version field for $tool"
+  local tool=$1 check field
+  check=${TOOL_CHECKS[$tool]:-}
+  field=${check%%|*}
+  [[ -n $field ]] || { die "missing release version field for $tool"; return 1; }
+  printf '%s\n' "$field"
 }
 
 install_build_packages() {
@@ -600,7 +594,8 @@ build_release() {
     "$release/python-locks/" || return
   {
     printf '#!/usr/bin/env bash\n'
-    cat "$source_dir/tools-probes.env" "$source_dir/scripts/dotfiles-release"
+    declare -p TOOL_CHECKS
+    cat "$source_dir/scripts/dotfiles-release"
   } >"$release/dotfiles-release" || return
   chmod 0755 "$release/dotfiles-release" || return
   install_release_tools "$release" "$inputs" || return

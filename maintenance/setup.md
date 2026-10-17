@@ -46,8 +46,8 @@ the agent or rebooting requires adding them again. User lingering is not
 enabled automatically. A pre-existing `~/.ssh/config` is a deliberate stow
 conflict and must be reviewed before installation.
 
-`tools.env` owns tool profiles, release records and asdf/tmux plugin pins. It
-stores direct releases in `TOOL_RELEASES`. Each tool has ordered
+`tools.env` owns tool profiles, release records, version checks and asdf/tmux
+plugin pins. It stores direct releases in `TOOL_RELEASES`. Each tool has ordered
 `version|full_URL|SHA256` records, and the first record is the default. A
 required default without an artifact is an error, with no fallback to a later
 record. Actionlint, ShellCheck and Task are also regular development tools;
@@ -109,12 +109,15 @@ headers for remaining asdf runtime builds and native project dependencies, plus
 Docker Engine for local containers and release builds. It is
 not a second release-builder role; builder-only packages stay out of it.
 
-`tools-probes.env` owns tool version arguments shared by `setup-tools`, shell
-diagnostics and release health, plus the builder/health metadata-field mapping. Each value contains whitespace-separated arguments; omitted tools use
-`--version`. The builder embeds this data in the generated standalone manager,
-so it works outside the checkout and can check older releases that did not
-include the shared configuration file. Edit the source configuration and
-rebuild; do not edit generated managers.
+`TOOL_CHECKS` in `tools.env` maps command names to
+`release_metadata_field|version_arguments` for `setup-tools`, shell diagnostics
+and release health. Arguments are whitespace-separated; empty arguments use
+`--version`. The metadata field is empty for kubectl and Helm, whose retained
+versions are checked through separate lists. Commands such as `node` and `uvx`
+have their own entries even when their releases share a tool record. The
+builder embeds only this map in the generated standalone manager, so it works
+outside the checkout. Edit `tools.env` and rebuild; do not edit generated
+managers.
 
 Kubectl and Helm are installed directly by `setup-tools`, not `setup-asdf`.
 You can select just those tools:

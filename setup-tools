@@ -41,8 +41,6 @@ main() {
 load_setup_config() {
   # shellcheck source=system.env
   source "$REPO_DIR/system.env"
-  # shellcheck source=tools-probes.env
-  source "$REPO_DIR/tools-probes.env"
   validate_tool_config
 
   BIN_DIR=${SETUP_TOOLS_BIN_DIR:-$HOME/bin}
@@ -356,10 +354,12 @@ verify_executable() {
   local name=$1
   local executable=$2
   local version=${3#v}
-  local output
+  local output check
   local -a arguments=()
 
-  read -r -a arguments <<<"${TOOL_PROBE_ARGS[$name]:---version}"
+  check=${TOOL_CHECKS[$name]:-}
+  check=${check#*|}
+  read -r -a arguments <<<"${check:---version}"
   output=$("$executable" "${arguments[@]}" 2>&1)
   [[ $output == *"$version"* ]] ||
     report_error "$name executable did not report version $version: ${output%%$'\n'*}"
