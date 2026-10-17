@@ -65,6 +65,9 @@ vim.filetype.add {
   },
 }
 
+vim.keymap.set({ 'n', 'x', 'o' }, 'H', '^', { desc = 'Go to first non-blank character' })
+vim.keymap.set({ 'n', 'x', 'o' }, 'L', '$', { desc = 'Go to end of line' })
+
 vim.keymap.set('n', 'c', '"_c')
 vim.keymap.set('n', 'C', '"_C')
 vim.keymap.set('n', 'd', '"_d', { desc = 'Delete with motion without replacing yank register' })

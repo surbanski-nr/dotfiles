@@ -73,6 +73,7 @@ Notation used below:
 | Next or previous whitespace-separated WORD | `W`, `B`                            |
 | End of word                              | `e`                                   |
 | Start, first text, or end of line        | `0`, `^`, `$`                         |
+| First text or end of line aliases       | `H`, `L`                              |
 | First or last line                       | `gg`, `G`                             |
 | Jump to a line                           | `<line>G`, for example `42G`          |
 | Previous or next paragraph/block         | `{`, `}`                              |
@@ -93,6 +94,10 @@ Notation used below:
 | Browse and open a jump-list location     | `<leader>sj`, select, then `<Enter>`  |
 | Toggle relative or absolute line numbers | `<leader>tl`                          |
 | Toggle the right-edge position marker    | `<leader>ts` or `:ScrollMarkerToggle` |
+
+`H` maps to `^` and `L` to `$` in Normal, Visual and operator-pending modes.
+For example, `dL` deletes to the end of the line and `vL` selects to its end.
+These replace the native `H`/`L` motions to the top/bottom of the visible window.
 
 `<leader>tl` changes only the current window. Line numbers stay visible: the
 default relative mode is useful for motions such as `5j`, while absolute mode
