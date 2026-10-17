@@ -439,7 +439,47 @@ local function run()
     '    scopes:',
     '      - all',
     '    command: bash',
-  }, { 4, 8 }, 'block_node', 4)
+  }, { 4, 8 }, 'block_mapping_pair', 4)
+  local yaml_mapping = {
+    'root:',
+    '  app:',
+    '    database:',
+    '      host: localhost',
+    '      port: 5432',
+    '',
+    '  other: true',
+  }
+  for _, row in ipairs { 4, 5 } do
+    assert_indent_scope('yaml', yaml_mapping, { row, 8 }, 'block_mapping_pair', 4)
+  end
+  local yaml_list = {
+    'spec:',
+    '  containers:',
+    '    - name: demo',
+    '      env:',
+    '        - name: HOST',
+    '          value: localhost',
+    '        - name: PORT',
+    '          value: "5432"',
+    '  restartPolicy: Never',
+  }
+  for _, row in ipairs { 5, 7 } do
+    assert_indent_scope('yaml', yaml_list, { row, 12 }, 'block_mapping_pair', 6)
+    assert_indent_scope('yaml', yaml_list, { row + 1, 12 }, 'block_sequence_item', 8)
+  end
+  local yaml_inline_key = {
+    'root:',
+    '  entries:',
+    '    - settings:',
+    '        host: localhost',
+    '        port: 5432',
+    '      name: demo',
+    '  other: true',
+  }
+  for _, row in ipairs { 4, 5 } do
+    assert_indent_scope('yaml', yaml_inline_key, { row, 10 }, 'block_mapping_pair', 6)
+  end
+  assert_indent_scope('yaml', yaml_inline_key, { 6, 8 }, 'block_sequence_item', 4)
 
   vim.cmd.enew()
   vim.bo.filetype = 'lua'

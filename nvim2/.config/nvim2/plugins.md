@@ -167,10 +167,14 @@ width `▏` guide to the default white foreground, without horizontal start or
 end markers. The active scope follows nested blocks in Bash, Lua, Python,
 TypeScript and YAML. Bash control flow and Python compound statements are
 included explicitly because the plugin defaults otherwise stop at their
-enclosing function. Lua table constructors are also included. YAML scope ends
-are adjusted to their last content line because Treesitter otherwise reports
-the following dedent and moves the active guide to column zero. The lockfile
-pins its tested revision. Toggle all guides with
+enclosing function. Lua table constructors are also included. YAML uses
+mapping pairs and list items instead of generic block nodes, so sibling keys
+keep the same scope. On a list's `- name` line the guide belongs to the parent
+key; on its following `value` line it belongs to that list item. Nested values
+of a key such as `- settings:` align their guide with `settings`, after the
+dash. YAML scope ends are adjusted to their last content line because
+Treesitter otherwise reports the following dedent and moves the active guide
+to column zero. The lockfile pins its tested revision. Toggle all guides with
 `<leader>ti` or `:IBLToggle`;
 toggle only the active-scope marker with `:IBLToggleScope`. Change the
 characters or colors in
