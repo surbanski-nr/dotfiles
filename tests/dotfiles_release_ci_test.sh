@@ -244,16 +244,17 @@ done
 
 qualification_archives=$test_root/qualification-archives
 qualification_tmp=$test_root/'local with spaces'
-mkdir -p "$qualification_archives" "$qualification_tmp"
+qualification_parallel=$test_root/qualification-parallel
+mkdir -p "$qualification_archives" "$qualification_tmp" "$qualification_parallel"
 for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
   make_archive "$platform"
   cp "$test_root/$archive" "$qualification_archives/dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz"
 done
 : >"$TEST_DOCKER_LOG"
-TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
+TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" TEST_PARALLEL_DIR="$qualification_parallel" \
   run_ci test "$source_dir" >"$test_root/qualification.log"
 awk '
-  / build / { builds++ }
+  /^built / { builds++ }
   / verify / { if (builds != 4) exit 1; verifications++ }
   END { if (builds != 4 || verifications != 4) exit 1 }
 ' "$TEST_DOCKER_LOG" || fail 'qualification did not build all four packages before installing them'
@@ -264,6 +265,8 @@ for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-20
   grep -F 'fixture offline health succeeded' \
     "$qualification_root/dotfiles-evidence/$platform/offline-verify.log" >/dev/null ||
     fail "qualification did not install and check $platform without networking"
+  [[ $(grep -Fxc "### $platform" "$qualification_root/summary.md") -eq 1 ]] ||
+    fail "parallel qualification lost or duplicated the summary for $platform"
 done
 # shellcheck source=../release.env
 source "$source_dir/release.env"
@@ -272,12 +275,67 @@ for image in "$DEBIAN_13_IMAGE" "$UBUNTU_2404_IMAGE" "$UBUNTU_2604_IMAGE" "$AMZN
 done
 
 : >"$TEST_DOCKER_LOG"
-if TMPDIR="$qualification_tmp" TEST_BUILD_FAIL=1 TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
-  run_ci test "$source_dir" >"$test_root/qualification-failure.log" 2>&1; then
-  fail 'qualification accepted a failed build'
+qualification_parallel=$test_root/qualification-parallel-failure
+mkdir -p "$qualification_parallel"
+set +e
+TMPDIR="$qualification_tmp" TEST_BUILD_FAIL=1 TEST_BUILD_ARCHIVES_DIR="$qualification_archives" TEST_PARALLEL_DIR="$qualification_parallel" \
+  run_ci test "$source_dir" >"$test_root/qualification-failure.log" 2>&1
+qualification_status=$?
+set -e
+[[ $qualification_status -eq 81 ]] || fail 'qualification hid a failed parallel build'
+[[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 4 ]] || fail 'qualification did not launch four parallel builds'
+if grep -q ' verify ' "$TEST_DOCKER_LOG"; then fail 'qualification installed packages when every build failed'; fi
+for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
+  grep -E "^rm --force dotfiles-builder-local-.*-$platform " "$TEST_DOCKER_LOG" >/dev/null ||
+    fail "failed parallel qualification did not clean up $platform"
+done
+
+qualification_parallel=$test_root/qualification-parallel-partial
+mkdir -p "$qualification_parallel"
+: >"$TEST_DOCKER_LOG"
+set +e
+TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
+  TEST_PARALLEL_DIR="$qualification_parallel" TEST_PARALLEL_VERIFY_COUNT=3 \
+  TEST_BUILD_FAIL=debian-13-x86_64 TEST_VERIFY_FAIL=ubuntu-24.04-x86_64 \
+  run_ci test "$source_dir" >"$test_root/qualification-partial.log" 2>&1
+qualification_status=$?
+set -e
+[[ $qualification_status -eq 81 ]] || fail 'qualification hid the failed platform'
+[[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 4 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq 3 ]] ||
+  fail 'one failed platform stopped qualification of the others'
+qualification_root=$(sed -n 's/^Offline packages and logs: //p' "$test_root/qualification-partial.log")
+for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
+  case $platform in
+    debian-13-x86_64) result='build=81 verify=skipped' ;;
+    ubuntu-24.04-x86_64) result='build=0 verify=82' ;;
+    *) result='build=0 verify=0' ;;
+  esac
+  grep -Fx "$platform: $result; logs: $qualification_root/dotfiles-evidence/$platform" \
+    "$qualification_root/summary.md" >/dev/null || fail "qualification lost the final result for $platform"
+  [[ -s $qualification_root/dotfiles-evidence/$platform/build-only.log ]] || fail "qualification lost the build log for $platform"
+  if [[ $platform != debian-13-x86_64 ]]; then
+    [[ -s $qualification_root/dotfiles-evidence/$platform/verify.log ]] || fail "qualification lost the verification log for $platform"
+  fi
+done
+grep -F 'fixture build failure' "$qualification_root/dotfiles-evidence/debian-13-x86_64/build-only.log" >/dev/null ||
+  fail 'qualification lost the failed build output'
+grep -F 'fixture offline failure' "$qualification_root/dotfiles-evidence/ubuntu-24.04-x86_64/verify.log" >/dev/null ||
+  fail 'qualification lost the failed verification output'
+grep -F 'fixture offline health succeeded' "$qualification_root/dotfiles-evidence/amzn-2023-x86_64/verify.log" >/dev/null ||
+  fail 'qualification did not finish a successful platform after other failures'
+
+: >"$TEST_DOCKER_LOG"
+TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
+  run_ci test "$source_dir" ubuntu-26.04-x86_64 >"$test_root/qualification-single.log"
+[[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 1 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq 1 ]] ||
+  fail 'single-platform qualification ran other platforms'
+grep -F 'ubuntu-26.04-x86_64: build=0 verify=0;' "$test_root/qualification-single.log" >/dev/null ||
+  fail 'single-platform qualification did not finish the selected platform'
+: >"$TEST_DOCKER_LOG"
+if run_ci test "$source_dir" invalid-platform >"$test_root/qualification-platform.log" 2>&1; then
+  fail 'qualification accepted an unsupported platform'
 fi
-[[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 1 ]] || fail 'qualification continued after a failed build'
-if grep -q ' verify ' "$TEST_DOCKER_LOG"; then fail 'qualification installed packages after a failed build'; fi
+[[ ! -s $TEST_DOCKER_LOG ]] || fail 'qualification started Docker for an unsupported platform'
 
 printf 'uncommitted\n' >"$source_dir/uncommitted"
 : >"$TEST_DOCKER_LOG"

@@ -3,10 +3,31 @@
 set -euo pipefail
 
 printf '%s\n' "$*" >>"$TEST_DOCKER_LOG"
+
+parallel_barrier() {
+  [[ -n ${TEST_PARALLEL_DIR:-} ]] || return 0
+  local phase=$1 deadline=$((SECONDS + 5)) expected=4
+  [[ $phase != verify ]] || expected=${TEST_PARALLEL_VERIFY_COUNT:-4}
+  local -a started
+  : >"$TEST_PARALLEL_DIR/$phase-$PLATFORM"
+  while :; do
+    started=("$TEST_PARALLEL_DIR/$phase-"*)
+    ((${#started[@]} == expected)) && return 0
+    if ((SECONDS >= deadline)); then
+      printf 'fixture %s workers did not run in parallel\n' "$phase" >&2
+      return 84
+    fi
+    sleep 0.02
+  done
+}
+
 case $1 in
   run)
     if [[ " $* " == *' build '* ]]; then
-      if [[ ${TEST_BUILD_FAIL:-0} == 1 ]]; then printf 'fixture build failure\n'; exit 81; fi
+      parallel_barrier build
+      if [[ ${TEST_BUILD_FAIL:-0} == 1 || ${TEST_BUILD_FAIL:-0} == "$PLATFORM" ]]; then
+        printf 'fixture build failure\n'; exit 81
+      fi
       for arg in "$@"; do
         if [[ $arg == *:/out ]]; then output_dir=${arg%:/out}; fi
       done
@@ -15,10 +36,14 @@ case $1 in
       if [[ -n ${TEST_BUILD_ARCHIVES_DIR:-} ]]; then source_archive=$TEST_BUILD_ARCHIVES_DIR/$archive; fi
       cp "$source_archive" "$output_dir/$archive"
       (cd "$output_dir" && sha256sum "$archive" >"$archive.sha256")
+      printf 'built %s\n' "$PLATFORM" >>"$TEST_DOCKER_LOG"
       printf 'fixture build succeeded\n'
     elif [[ " $* " == *' verify '* ]]; then
+      parallel_barrier verify
       [[ " $* " == *' --init '* && " $* " == *' --network none '* && " $* " == *' --user '* ]] || exit 2
-      if [[ ${TEST_VERIFY_FAIL:-0} == 1 ]]; then printf 'fixture offline failure\n'; exit 82; fi
+      if [[ ${TEST_VERIFY_FAIL:-0} == 1 || ${TEST_VERIFY_FAIL:-0} == "$PLATFORM" ]]; then
+        printf 'fixture offline failure\n'; exit 82
+      fi
       printf 'fixture offline health succeeded\n'
     else
       printf 'fixture container started\n'

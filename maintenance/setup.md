@@ -294,19 +294,30 @@ run from a clean committed checkout on a connected machine with Docker access:
 
 ```bash
 .cache/validation-tools/bin/task test:offline
+# Show the available PLATFORM values:
+.cache/validation-tools/bin/task --summary test:offline
+# Build and verify just one platform:
+.cache/validation-tools/bin/task test:offline PLATFORM=ubuntu-24.04-x86_64
 ```
 
 The task uses `scripts/dotfiles-release-ci test` and the immutable images from
-`release.env`. It builds all four packages sequentially before preparing fresh
-runtime containers and installing each as an ordinary user with `--network none`.
+`release.env`. By default it builds all four packages in parallel, waits for
+all builds to finish, then prepares and verifies successful builds in parallel.
+Each installation uses a fresh container, an ordinary user and `--network none`.
 Every installation runs the full functional checks and then `health`.
 The task prints a retained `/tmp/dotfiles-qualification.XXXXXX` directory:
 `output/PLATFORM/` contains the archive, checksum and standalone installer;
 `dotfiles-evidence/PLATFORM/` contains build, prerequisite-preparation and
-offline-install logs; `summary.md` contains successful package sizes and hashes.
-It stops on a failure and preserves the packages and logs while cleaning up its
-containers and temporary runtime images. No GitHub release or credentials are
-required, and nothing is published. `task validate` runs the repository's local
+offline-install logs, including complete `build-only.log` and `verify.log`
+output for each worker; `summary.md` contains successful package sizes and hashes.
+Failure on one platform does not stop the others. The task prints each
+platform's build and verification exit codes and log directory at the end,
+and adds these results to `summary.md`. Verification is skipped only for a
+platform whose build failed. The task returns a failure after all work finishes
+if any selected platform failed. It preserves packages and logs from successful
+and failed jobs while cleaning up containers and temporary runtime images.
+No GitHub release or credentials are required, and nothing is published.
+`task validate` runs the repository's local
 fixture tests, including installer profiles, rather than this full qualification.
 
 To build only one platform, select its image from `release.env` and keep the
