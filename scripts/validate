@@ -34,6 +34,7 @@ cleanup_paths=()
 cleanup_tmux_home=
 cleanup_tmux_socket=
 cleanup_tmux_client_pid=
+test_pid=
 export PATH="$tools_dir/bin:$PATH"
 cd "$repo_dir"
 
@@ -42,7 +43,17 @@ cleanup() {
   local path
 
   trap - EXIT
+  trap '' INT TERM
   set +e
+  if [[ -n $test_pid ]]; then
+    pkill -TERM --session "$test_pid" 2>/dev/null
+    wait "$test_pid" 2>/dev/null
+    for _ in {1..50}; do
+      pkill -0 --session "$test_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    pkill -KILL --session "$test_pid" 2>/dev/null
+  fi
   if [[ -n $cleanup_tmux_client_pid ]]; then
     kill "$cleanup_tmux_client_pid" 2>/dev/null
     wait "$cleanup_tmux_client_pid" 2>/dev/null
@@ -58,6 +69,19 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+run_test() {
+  need setsid
+  need pkill
+  # A private session keeps batch tests away from the user's terminal and lets
+  # cleanup terminate nested timeout groups without touching other tasks.
+  setsid timeout --kill-after=5s "$@" </dev/null &
+  test_pid=$!
+  wait "$test_pid"
+  test_pid=
+}
 
 check_shell_syntax() {
   local interpreter=$1
@@ -120,7 +144,7 @@ validate_bash() {
     nvim2/.config/nvim2/offline-releases.md
   shellcheck --shell=bash --external-sources --source-path=SCRIPTDIR \
     "${files[@]}"
-  timeout 120s bash tests/bash_test.sh
+  run_test 120s bash tests/bash_test.sh
 }
 
 validate_scripts() {
@@ -187,17 +211,17 @@ validate_scripts() {
       shellcheck --external-sources --source-path=SCRIPTDIR "$file"
     fi
   done
-  timeout 120s bash tests/bstow_test.sh
-  timeout 30s bash tests/install_validation_tool_test.sh
-  timeout 600s bash tests/dotfiles_release_test.sh
-  timeout 120s bash tests/dotfiles_release_ci_test.sh
-  timeout 30s bash tests/offline_debug_adapter_test.sh
-  timeout 30s bash tests/offline_go_test.sh
-  timeout --foreground 30s bash tests/offline_launchers_test.sh
-  timeout 120s bash tests/scripts_test.sh
-  timeout 30s bash tests/setup_asdf_test.sh
-  timeout 30s bash tests/setup_system_test.sh
-  timeout 120s bash tests/setup_tools_test.sh
+  run_test 120s bash tests/bstow_test.sh
+  run_test 30s bash tests/install_validation_tool_test.sh
+  run_test 600s bash tests/dotfiles_release_test.sh
+  run_test 120s bash tests/dotfiles_release_ci_test.sh
+  run_test 30s bash tests/offline_debug_adapter_test.sh
+  run_test 30s bash tests/offline_go_test.sh
+  run_test 30s bash tests/offline_launchers_test.sh
+  run_test 120s bash tests/scripts_test.sh
+  run_test 30s bash tests/setup_asdf_test.sh
+  run_test 30s bash tests/setup_system_test.sh
+  run_test 120s bash tests/setup_tools_test.sh
 }
 
 validate_nvim2() {
@@ -346,7 +370,7 @@ validate_configs() {
   exec {client_input_fd}>&-
   wait "$cleanup_tmux_client_pid"
   cleanup_tmux_client_pid=
-  timeout 60s bash tests/tmux_timer_test.sh
+  run_test 60s bash tests/tmux_timer_test.sh
 }
 
 validate_workflows() {
@@ -425,7 +449,7 @@ validate_repo() {
     [[ -x $file ]] || die "executable bit is missing: $file"
   done
 
-  timeout 120s bash tests/validate_test.sh
+  run_test 120s bash tests/validate_test.sh
 
   if [[ $base =~ ^[0-9a-f]{40}$ ]] &&
     [[ $base != 0000000000000000000000000000000000000000 ]] &&
