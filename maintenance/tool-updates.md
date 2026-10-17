@@ -284,6 +284,13 @@ Use `:pods`, `:deployments`, `:jobs`, `:cronjobs`, `:configmaps`,
 completed and failed rows, selected rows, headers, dialogs, logs and YAML.
 Read-only mode is a UI guard, not an RBAC or filesystem sandbox.
 
+The `surb` skin uses `bgColor: default` to preserve the terminal background.
+Use a dark terminal background with its light foreground palette. Selected
+table rows keep black text on a light background so their contrast does not
+depend on the terminal's default foreground color. K9s uses each row's status
+color as its selection background, so these colors must contrast with black
+text. Completed rows use a muted grey to remain distinct from Running rows.
+
 Edit the copied `$preview_root/.config/k9s/skins/surb.yaml` to experiment, or
 edit the clone and copy the changed skin over again. To try another bundled
 skin, change `k9s.ui.skin` in the copied `config.yaml`. Restart k9s with the

@@ -1,19 +1,19 @@
 # -----------------------------------------------------------------------------
-# BlackAndWtf skin
+# Surb skin
 # -----------------------------------------------------------------------------
 
 # Styles...
 fg: &fg "white"
-bg: &bg "black"
+bg: &bg "default"
 mark: &mark "darkgoldenrod"
 active: &active "dimgray"
 text: &text "navajowhite"
 white: &white "whitesmoke"
 ghost: &ghost "ghostwhite"
-dslate: &dslate "darkslategray"
 err: &err "pink"
 slate: &slate "slategray"
 gray: &gray "gray"
+muted: &muted "#909090"
 
 # Skin...
 k9s:
@@ -25,6 +25,12 @@ k9s:
     fgColor: *fg
     bgColor: *bg
     suggestColor: *gray
+  help:
+    fgColor: *fg
+    bgColor: *bg
+    sectionColor: *white
+    keyColor: *fg
+    numKeyColor: *text
   info:
     fgColor: *text
     sectionColor: *fg
@@ -54,12 +60,13 @@ k9s:
       modifyColor: *text
       addColor: *ghost
       errorColor: *err
-      highlightColor: *dslate
+      highlightColor: *text
       killColor: *slate
-      completedColor: *gray
+      completedColor: *muted
     title:
       fgColor: *fg
-      highlightColor: *active
+      bgColor: *bg
+      highlightColor: *muted
       counterColor: *text
       filterColor: *slate
   views:
@@ -67,10 +74,10 @@ k9s:
       fgColor: *fg
       bgColor: *bg
       cursorBgColor: *fg
-      cursorFgColor: *bg
+      cursorFgColor: "black"
       markColor: *mark
       header:
-        fgColor: *dslate
+        fgColor: *white
         bgColor: *bg
         sorterColor: *fg
     xray:
@@ -81,7 +88,7 @@ k9s:
       showIcons: false
     yaml:
       keyColor: *ghost
-      colorColor: *slate
+      colonColor: *slate
       valueColor: *text
     logs:
       fgColor: *ghost
@@ -93,6 +100,8 @@ k9s:
         toggleOffColor: *gray
     charts:
       bgColor: *bg
+      dialBgColor: *bg
+      chartBgColor: *bg
       defaultDialColors:
         - *white
         - *err
