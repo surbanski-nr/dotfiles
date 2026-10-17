@@ -491,8 +491,11 @@ help, terminal, quickfix and picker windows. The active overlay is read-only;
 source pane. `\` runs the normal Neo-tree action from that saved source context
 and then adjusts the overlays. Leaving the tab also stops the session.
 
-Matrix uses one roughly 15 FPS timer, bounded ASCII streams and scratch buffers
-with no swap or undo history. It preserves source text, cursors, folds and
+Matrix starts with streams already distributed across the screen. It uses
+20 times the previous stream count, up to 800, with varied falling speeds.
+Its background is the terminal's default, shared with the editor. It uses one
+roughly 15 FPS timer and scratch buffers with no swap or undo history.
+It preserves source text, cursors, folds and
 modified flags. It is a temporary visual effect, not a background wallpaper,
 session manager or editing buffer.
 

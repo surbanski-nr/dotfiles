@@ -5,16 +5,17 @@ local glyphs = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 local session
 
 local function random(state, limit)
-  state.seed = (1103515245 * state.seed + 12345) % 2147483648
+  -- Keep integer arithmetic within LuaJIT's exact range.
+  state.seed = (16807 * state.seed) % 2147483647
   return (state.seed % limit) + 1
 end
 
 local function streams(state, width, height)
   local result = {}
-  for _ = 1, math.max(1, math.min(40, math.floor(width / 8))) do
+  for _ = 1, 20 * math.max(1, math.min(40, math.floor(width / 8))) do
     result[#result + 1] = {
       column = random(state, math.max(width, 1)) - 1,
-      head = -random(state, math.max(height, 1)),
+      head = random(state, math.max(height, 1)) - 1,
       speed = 4 + random(state, 8),
       tail = 4 + random(state, math.max(2, math.min(7, height))) - 1,
     }
@@ -103,6 +104,7 @@ local function start()
     style = 'minimal',
     border = 'none',
   })
+  vim.api.nvim_set_option_value('winhighlight', 'Normal:Normal,NormalFloat:Normal', { win = window })
   for option, value in pairs {
     buftype = 'nofile',
     bufhidden = 'wipe',
@@ -119,7 +121,7 @@ local function start()
     win = window,
     width = width,
     height = height,
-    seed = vim.uv.hrtime() % 2147483648,
+    seed = vim.uv.hrtime() % 2147483646 + 1,
     last_frame = vim.uv.hrtime(),
   }
   current.streams = streams(current, width, height)

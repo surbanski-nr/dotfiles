@@ -838,6 +838,18 @@ if matrix then
     vim.bo[overlay_buffer].buftype == 'nofile' and not vim.bo[overlay_buffer].buflisted and not vim.bo[overlay_buffer].modifiable,
     'Matrix overlay is writable or persistent'
   )
+  assert(
+    vim.wait(1000, function()
+      local columns = {}
+      for _, line in ipairs(vim.api.nvim_buf_get_lines(overlay_buffer, 0, -1, false)) do
+        for column = 1, #line do
+          if line:byte(column) ~= 32 then columns[column] = true end
+        end
+      end
+      return vim.tbl_count(columns) >= math.min(40, math.floor(vim.api.nvim_win_get_width(0) / 2))
+    end),
+    'Matrix did not fill the screen with visible streams on startup'
+  )
   matrix.toggle()
   assert(not matrix.status().active and not matrix.status().timer, 'Matrix teardown left active resources')
   assert(vim.api.nvim_buf_is_valid(source_buffer), 'Matrix removed its source buffer')
