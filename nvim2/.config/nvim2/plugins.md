@@ -150,6 +150,16 @@ buffer/Git-status views without adding a cwd abstraction.
 
 The active colorscheme is Neovim's built-in `default` with its dark
 `NvimDark*` palette and a small set of local overrides in `lua/custom/plugins/default_colors.lua`.
+The editor, gutters and window separators inherit the terminal background.
+Truecolor remains enabled for syntax colors; popups, the cursor line,
+selections and the status line keep their distinct backgrounds.
+The cursor line blends the terminal background with 16% white, and the active
+status line with 22% white. The inactive status line uses 10% white and dimmer
+text. Other line numbers blend the terminal background with 40% white; the
+current line number stays orange. The palette reads the background through an
+asynchronous OSC 11 query. If the terminal does not reply, it uses the default
+dark palette's `#14161b` as its base. The editor background itself continues to
+come from the terminal.
 
 Indent guides use the narrow solid `▏` character and the visible `#4f5358`
 grey from the default palette. The current Treesitter scope changes the same
