@@ -80,6 +80,13 @@ def choose(master, key):
     read_terminal(master)
 
 
+def stop_test(signum, _frame):
+    raise SystemExit(128 + signum)
+
+
+signal.signal(signal.SIGTERM, stop_test)
+
+
 try:
     # Exercise loading from a symlink, as bstow installs the config.
     (root / 'tmux.conf').symlink_to(repo / 'tmux/.tmux.conf')
