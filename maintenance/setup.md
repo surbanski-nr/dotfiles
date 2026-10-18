@@ -385,6 +385,11 @@ configuration, and is the same manager for all four platforms. The manager
 verifies, installs, lists, checks,
 rolls back and uninstalls releases without the builder or a Git checkout.
 
+Release preflight uses GitHub asset names to select incomplete platforms without
+downloading packages. Before publishing missing assets, the platform job verifies
+the existing archive, checksums and standalone manager. Completing a missing
+checksum does not rebuild the archive.
+
 The artifact contains a Git archive of the matching dotfiles commit, not the
 main repository history. It also contains the full Neovim runtime tree, pinned
 plugin Git metadata, parsers, queries, Mason receipts, tmux plugins, Python

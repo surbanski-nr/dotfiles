@@ -37,6 +37,7 @@ asset_exists() {
 }
 
 download_asset() {
+  printf 'Downloading %s.\n' "$1"
   timeout 300s gh release download "$RELEASE_TAG" --repo "$REPOSITORY" \
     --pattern "$1" --dir "$2"
 }
@@ -48,6 +49,7 @@ check_checksum() {
 }
 
 inspect_asset() {
+  printf 'Inspecting %s.\n' "${2##*/}"
   bash "$script_dir/dotfiles-release" inspect "$1" "$2" "$COMMIT_SHA" >/dev/null
 }
 
@@ -59,12 +61,13 @@ extract_manager() {
 preflight() {
   local release_file=$work/release.json error_file=$work/release-error.txt
   local object_file=$work/tag-object.json attempts=1 attempt object_type
-  local platform asset existing checksum build_archive matrix
+  local platform asset build_archive matrix
   local release_found=false manager_complete=false
   local -a selected=()
 
   if [[ $EVENT_NAME == workflow_dispatch ]]; then RELEASE_TAG=$INPUT_RELEASE_TAG; else RELEASE_TAG=$TAG_NAME; fi
   [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{7,40}$ ]] || die "invalid release tag: $RELEASE_TAG"
+  printf 'Resolving release %s.\n' "$RELEASE_TAG"
   [[ $EVENT_NAME != push ]] || attempts=6
   for ((attempt = 1; attempt <= attempts; attempt++)); do
     if timeout 30s gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
@@ -91,6 +94,7 @@ preflight() {
   done
   [[ $object_type == commit && $COMMIT_SHA =~ ^[0-9a-f]{40}$ ]] || die 'tag does not resolve to a full commit ID'
   [[ $COMMIT_SHA == "${RELEASE_TAG#dotfiles-}"* ]] || die "tag does not match target commit $COMMIT_SHA"
+  printf 'Release %s resolves to commit %s.\n' "$RELEASE_TAG" "$COMMIT_SHA"
 
   if asset_exists dotfiles-release "$release_file" &&
     asset_exists dotfiles-release.sha256 "$release_file"; then manager_complete=true; fi
@@ -98,29 +102,15 @@ preflight() {
     asset=dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz
     build_archive=true
     if asset_exists "$asset" "$release_file"; then
-      existing=$work/$platform
-      mkdir -p "$existing"
-      download_asset "$asset" "$existing"
-      inspect_asset "$platform" "$existing/$asset"
-      if [[ $platform == "${platforms[0]}" ]]; then
-        extract_manager "$existing/$asset" "$existing/dotfiles-release"
-        if asset_exists dotfiles-release "$release_file"; then
-          download_asset dotfiles-release "$work"
-          cmp -s "$existing/dotfiles-release" "$work/dotfiles-release" ||
-            die 'dotfiles-release asset does not match the archive manager'
-        fi
-        if asset_exists dotfiles-release.sha256 "$release_file"; then
-          download_asset dotfiles-release.sha256 "$existing"
-          check_checksum "$existing/dotfiles-release" "$existing/dotfiles-release.sha256"
-        fi
-      fi
-      checksum=$asset.sha256
-      if asset_exists "$checksum" "$release_file"; then
-        download_asset "$checksum" "$existing"
-        check_checksum "$existing/$asset" "$existing/$checksum"
-        if [[ $platform != "${platforms[0]}" || $manager_complete == true ]]; then continue; fi
+      if asset_exists "$asset.sha256" "$release_file" &&
+        [[ $platform != "${platforms[0]}" || $manager_complete == true ]]; then
+        printf '%s: assets complete; skipping.\n' "$platform"
+        continue
       fi
       build_archive=false
+      printf '%s: completing missing assets without rebuilding.\n' "$platform"
+    else
+      printf '%s: archive missing; build required.\n' "$platform"
     fi
     selected+=("$(jq -cn --arg platform "$platform" --argjson build_archive "$build_archive" \
       '{platform: $platform, build_archive: $build_archive}')")
@@ -327,6 +317,7 @@ publish() {
     fi
   fi
   if ((${#uploads[@]})); then
+    printf 'Uploading %s.\n' "${uploads[@]##*/}"
     timeout 300s gh release upload "$RELEASE_TAG" --repo "$REPOSITORY" "${uploads[@]}"
   else
     printf 'Release assets for %s are already complete.\n' "$PLATFORM"

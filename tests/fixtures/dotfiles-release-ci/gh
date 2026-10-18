@@ -34,7 +34,13 @@ case ${1:-} in
       esac
     done
     case $operation in
-      download) cp -- "$TEST_RELEASE_ASSETS/$asset" "$destination/$asset" ;;
+      download)
+        if [[ ${TEST_RELEASE_DOWNLOAD_FAIL:-0} == 1 ]]; then
+          printf 'fixture asset download unavailable\n' >&2
+          exit 75
+        fi
+        cp -- "$TEST_RELEASE_ASSETS/$asset" "$destination/$asset"
+        ;;
       upload)
         for file in "$@"; do
           name=${file##*/}

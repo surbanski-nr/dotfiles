@@ -108,10 +108,16 @@ for field in YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION; do
   sed -i "/^$field=/d" "$test_root/payload/$RELEASE_TAG/release.env"
   repack_archive
   cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
-  if run_preflight >"$test_root/missing-$field.log" 2>&1; then fail "CI accepted missing $field"; fi
+  if run_ci publish "$test_root/nonexistent-output" >"$test_root/missing-$field.log" 2>&1; then
+    fail "publish accepted missing $field"
+  fi
   cp "$test_root/profile.env" "$test_root/payload/$RELEASE_TAG/release.env"
 done
+repack_archive
+cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
+run_ci publish "$test_root/nonexistent-output"
 find "$TEST_RELEASE_ASSETS" -maxdepth 1 -type f -delete
+: >"$TEST_UPLOAD_LOG"
 make_archive
 
 TEST_RELEASE_ERROR=404 run_preflight >"$test_root/absent.log"
@@ -145,7 +151,6 @@ run_ci publish "$test_root/nonexistent-output"
 [[ $(sha256sum "$TEST_UPLOAD_LOG") == "$upload_before" ]] || fail 'complete assets were uploaded twice'
 
 printf '\nmodified manager\n' >>"$TEST_RELEASE_ASSETS/dotfiles-release"
-if run_preflight >"$test_root/bad-manager.log" 2>&1; then fail 'preflight accepted a mismatched manager'; fi
 if run_ci publish "$test_root/nonexistent-output" >"$test_root/bad-manager-publish.log" 2>&1; then
   fail 'publish replaced a mismatched manager'
 fi
@@ -153,9 +158,6 @@ fi
 cp "$test_root/payload/$RELEASE_TAG/dotfiles-release" "$TEST_RELEASE_ASSETS/dotfiles-release"
 
 printf 'invalid checksum\n' >"$TEST_RELEASE_ASSETS/dotfiles-release.sha256"
-if run_preflight >"$test_root/bad-manager-checksum.log" 2>&1; then
-  fail 'preflight accepted a mismatched manager checksum'
-fi
 if run_ci publish "$test_root/nonexistent-output" >"$test_root/bad-manager-checksum-publish.log" 2>&1; then
   fail 'publish replaced a mismatched manager checksum'
 fi
@@ -163,25 +165,24 @@ fi
 (cd "$TEST_RELEASE_ASSETS" && sha256sum dotfiles-release >dotfiles-release.sha256)
 
 printf 'invalid checksum\n' >"$TEST_RELEASE_ASSETS/$archive.sha256"
-if run_preflight >"$test_root/bad-checksum.log" 2>&1; then fail 'preflight accepted a mismatched sidecar'; fi
 if run_ci publish "$test_root/nonexistent-output" >"$test_root/bad-publish.log" 2>&1; then fail 'publish replaced a mismatched sidecar'; fi
 find "$TEST_RELEASE_ASSETS" -maxdepth 1 -type f -delete
 
 make_archive amzn-2023-x86_64
 cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
-if run_preflight >"$test_root/platform.log" 2>&1; then fail 'wrong-platform archive was accepted'; fi
+if run_ci publish "$test_root/nonexistent-output" >"$test_root/platform.log" 2>&1; then fail 'wrong-platform archive was accepted'; fi
 grep -F 'release is not for debian-13-x86_64' "$test_root/platform.log" >/dev/null || fail 'platform mismatch was not identified'
 
 make_archive
 ln -s "$test_root/outside" "$test_root/payload/$RELEASE_TAG/escape"
 repack_archive
 cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
-if run_preflight >"$test_root/escape.log" 2>&1; then fail 'absolute escaping symlink was accepted'; fi
+if run_ci publish "$test_root/nonexistent-output" >"$test_root/escape.log" 2>&1; then fail 'absolute escaping symlink was accepted'; fi
 [[ ! -e $test_root/outside ]] || fail 'unsafe archive wrote outside its root'
 unlink "$test_root/payload/$RELEASE_TAG/escape"
 tar -C "$test_root/payload" --transform="s|$RELEASE_TAG/payload|$RELEASE_TAG/../outside|" \
   -czf "$TEST_RELEASE_ASSETS/$archive" "$RELEASE_TAG"
-if run_preflight >"$test_root/traversal.log" 2>&1; then fail 'archive path traversal was accepted'; fi
+if run_ci publish "$test_root/nonexistent-output" >"$test_root/traversal.log" 2>&1; then fail 'archive path traversal was accepted'; fi
 grep -F 'unsafe archive member' "$test_root/traversal.log" >/dev/null || fail 'traversal was not rejected before extraction'
 [[ ! -e $test_root/outside ]] || fail 'traversal wrote outside the archive root'
 
@@ -211,12 +212,12 @@ for platform in ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
   cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$asset"
   (cd "$TEST_RELEASE_ASSETS" && sha256sum "$asset" >"$asset.sha256")
 done
-run_preflight
+TEST_RELEASE_DOWNLOAD_FAIL=1 run_preflight
 [[ $(matrix) == '[]' ]] || fail 'complete release scheduled redundant work'
 grep -Fx 'should_run=false' "$GITHUB_OUTPUT" >/dev/null || fail 'complete release did not skip work'
 
 rm "$TEST_RELEASE_ASSETS/dotfiles-release.sha256"
-run_preflight
+TEST_RELEASE_DOWNLOAD_FAIL=1 run_preflight
 matrix | jq -e 'length == 1 and .[0].platform == "debian-13-x86_64" and .[0].build_archive == false' >/dev/null ||
   fail 'missing manager checksum scheduled redundant archive builds'
 : >"$TEST_UPLOAD_LOG"
@@ -227,7 +228,7 @@ run_preflight
 [[ $(matrix) == '[]' ]] || fail 'manager checksum repair left redundant work'
 
 find "$TEST_RELEASE_ASSETS" -maxdepth 1 -name dotfiles-release -delete
-run_preflight
+TEST_RELEASE_DOWNLOAD_FAIL=1 run_preflight
 matrix | jq -e 'length == 1 and .[0].platform == "debian-13-x86_64" and .[0].build_archive == false' >/dev/null ||
   fail 'missing standalone manager scheduled redundant archive builds'
 : >"$TEST_UPLOAD_LOG"
