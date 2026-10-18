@@ -306,7 +306,8 @@ all builds to finish, then prepares and verifies successful builds in parallel.
 Each installation uses a fresh container, an ordinary user and `--network none`.
 Every installation runs the full functional checks and then `health`.
 The task prints a retained `/tmp/dotfiles-qualification.XXXXXX` directory:
-`output/PLATFORM/` contains the archive, checksum and standalone installer;
+`output/PLATFORM/` contains the archive and standalone installer with their
+`.sha256` files;
 `dotfiles-evidence/PLATFORM/` contains build, prerequisite-preparation and
 offline-install logs, including complete `build-only.log` and `verify.log`
 output for each worker; `summary.md` contains successful package sizes and hashes.
@@ -378,9 +379,10 @@ or module-cache dependencies separately before disconnecting. See the
 `scripts/build-dotfiles-release` is the connected build and runtime-image
 preparation entry point. `scripts/dotfiles-release` is the standalone manager
 shipped inside each archive and attached to the GitHub release as
-`dotfiles-release`. The published script is extracted from the qualified
-Debian archive, includes its tool-probe configuration, and is the same manager
-for all four platforms. The manager verifies, installs, lists, checks,
+`dotfiles-release`, together with `dotfiles-release.sha256`. The published
+script is extracted from the qualified Debian archive, includes its tool-probe
+configuration, and is the same manager for all four platforms. The manager
+verifies, installs, lists, checks,
 rolls back and uninstalls releases without the builder or a Git checkout.
 
 The artifact contains a Git archive of the matching dotfiles commit, not the
@@ -395,7 +397,7 @@ records a new local manifest covering file contents, modes and symlink targets.
 
 Install the target distribution prerequisites while approved repositories are
 available, then transfer `dotfiles-release`, the matching platform archive and
-its `.sha256` file from the same GitHub release. From the matching reviewed
+their `.sha256` files from the same GitHub release. From the matching reviewed
 dotfiles snapshot:
 
 ```bash
@@ -417,7 +419,8 @@ tag=dotfiles-COMMIT
 platform=debian-13-x86_64
 archive=dotfiles-COMMIT-$platform.tar.gz
 gh release download "$tag" --repo surbanski-nr/dotfiles \
-  --pattern dotfiles-release --pattern "$archive" --pattern "$archive.sha256"
+  --pattern dotfiles-release --pattern dotfiles-release.sha256 \
+  --pattern "$archive" --pattern "$archive.sha256"
 ```
 
 Replace `COMMIT` in the tag with its actual suffix and in the archive name with
@@ -428,7 +431,8 @@ ordinary user. It derives identity from that account and does not require a
 particular user name, UID or `/home` path:
 
 ```bash
-sha256sum --check --strict dotfiles-COMMIT-debian-13-x86_64.tar.gz.sha256
+sha256sum --check --strict dotfiles-release.sha256 \
+  dotfiles-COMMIT-debian-13-x86_64.tar.gz.sha256
 bash ./dotfiles-release install \
   "$PWD/dotfiles-COMMIT-debian-13-x86_64.tar.gz"
 source "$HOME/.bashrc"

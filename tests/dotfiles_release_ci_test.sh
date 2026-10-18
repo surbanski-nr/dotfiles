@@ -128,7 +128,7 @@ matrix | jq -e 'length == 4 and .[0].build_archive == false and all(.[1:][]; .bu
   fail 'missing checksum scheduled an archive rebuild'
 
 run_ci publish "$test_root/nonexistent-output"
-[[ $(<"$TEST_UPLOAD_LOG") == "$archive.sha256"$'\n'dotfiles-release ]] ||
+[[ $(<"$TEST_UPLOAD_LOG") == "$archive.sha256"$'\n'dotfiles-release$'\n'dotfiles-release.sha256 ]] ||
   fail 'checksum/manager repair uploaded an existing archive'
 cmp -s "$TEST_RELEASE_ASSETS/dotfiles-release" "$test_root/payload/$RELEASE_TAG/dotfiles-release" ||
   fail 'published manager differs from the release snapshot'
@@ -136,6 +136,8 @@ HOME="$test_root/empty-home" bash "$TEST_RELEASE_ASSETS/dotfiles-release" inspec
   "$PLATFORM" "$TEST_RELEASE_ASSETS/$archive" "$COMMIT_SHA" >/dev/null ||
   fail 'published manager does not work outside the checkout'
 (cd "$TEST_RELEASE_ASSETS" && sha256sum --check --strict "$archive.sha256" >/dev/null)
+[[ -s $TEST_RELEASE_ASSETS/dotfiles-release.sha256 ]] || fail 'published standalone manager has no checksum'
+(cd "$TEST_RELEASE_ASSETS" && sha256sum --check --strict dotfiles-release.sha256 >/dev/null)
 run_preflight
 matrix | jq -e 'length == 3 and all(.[]; .platform != "debian-13-x86_64")' >/dev/null || fail 'complete platform was not skipped'
 upload_before=$(sha256sum "$TEST_UPLOAD_LOG")
@@ -149,6 +151,16 @@ if run_ci publish "$test_root/nonexistent-output" >"$test_root/bad-manager-publi
 fi
 [[ $(sha256sum "$TEST_UPLOAD_LOG") == "$upload_before" ]] || fail 'manager mismatch changed release assets'
 cp "$test_root/payload/$RELEASE_TAG/dotfiles-release" "$TEST_RELEASE_ASSETS/dotfiles-release"
+
+printf 'invalid checksum\n' >"$TEST_RELEASE_ASSETS/dotfiles-release.sha256"
+if run_preflight >"$test_root/bad-manager-checksum.log" 2>&1; then
+  fail 'preflight accepted a mismatched manager checksum'
+fi
+if run_ci publish "$test_root/nonexistent-output" >"$test_root/bad-manager-checksum-publish.log" 2>&1; then
+  fail 'publish replaced a mismatched manager checksum'
+fi
+[[ $(sha256sum "$TEST_UPLOAD_LOG") == "$upload_before" ]] || fail 'manager checksum mismatch changed release assets'
+(cd "$TEST_RELEASE_ASSETS" && sha256sum dotfiles-release >dotfiles-release.sha256)
 
 printf 'invalid checksum\n' >"$TEST_RELEASE_ASSETS/$archive.sha256"
 if run_preflight >"$test_root/bad-checksum.log" 2>&1; then fail 'preflight accepted a mismatched sidecar'; fi
@@ -189,7 +201,8 @@ matrix | jq -e '.[0].build_archive == false' >/dev/null || fail 'partial upload 
 run_ci publish "$test_root/output"
 [[ $(grep -Fxc "$archive" "$TEST_UPLOAD_LOG") -eq 1 &&
   $(grep -Fxc "$archive.sha256" "$TEST_UPLOAD_LOG") -eq 1 &&
-  $(grep -Fxc dotfiles-release "$TEST_UPLOAD_LOG") -eq 1 ]] ||
+  $(grep -Fxc dotfiles-release "$TEST_UPLOAD_LOG") -eq 1 &&
+  $(grep -Fxc dotfiles-release.sha256 "$TEST_UPLOAD_LOG") -eq 1 ]] ||
   fail 'partial upload retry did not publish each asset exactly once'
 
 for platform in ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
@@ -201,6 +214,17 @@ done
 run_preflight
 [[ $(matrix) == '[]' ]] || fail 'complete release scheduled redundant work'
 grep -Fx 'should_run=false' "$GITHUB_OUTPUT" >/dev/null || fail 'complete release did not skip work'
+
+rm "$TEST_RELEASE_ASSETS/dotfiles-release.sha256"
+run_preflight
+matrix | jq -e 'length == 1 and .[0].platform == "debian-13-x86_64" and .[0].build_archive == false' >/dev/null ||
+  fail 'missing manager checksum scheduled redundant archive builds'
+: >"$TEST_UPLOAD_LOG"
+run_ci publish "$test_root/nonexistent-output"
+[[ $(<"$TEST_UPLOAD_LOG") == dotfiles-release.sha256 ]] || fail 'manager checksum repair uploaded existing assets'
+(cd "$TEST_RELEASE_ASSETS" && sha256sum --check --strict dotfiles-release.sha256 >/dev/null)
+run_preflight
+[[ $(matrix) == '[]' ]] || fail 'manager checksum repair left redundant work'
 
 find "$TEST_RELEASE_ASSETS" -maxdepth 1 -name dotfiles-release -delete
 run_preflight
@@ -262,6 +286,7 @@ qualification_root=$(sed -n 's/^Offline packages and logs: //p' "$test_root/qual
 for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
   [[ -s $qualification_root/output/$platform/dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz &&
     -x $qualification_root/output/$platform/dotfiles-release ]] || fail 'qualification did not retain its artifacts'
+  (cd "$qualification_root/output/$platform" && sha256sum --check --strict dotfiles-release.sha256 >/dev/null)
   grep -F 'fixture offline health succeeded' \
     "$qualification_root/dotfiles-evidence/$platform/offline-verify.log" >/dev/null ||
     fail "qualification did not install and check $platform without networking"
