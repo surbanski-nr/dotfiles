@@ -51,6 +51,30 @@ jobs:
       - run: 'true'
 EOF
 git init -q "$syntax_repo"
+printf '.cache/\n' >"$syntax_repo/.gitignore"
+PATH="$test_bin" /bin/bash "$syntax_repo/scripts/validate" configs
+
+check_whitespace_failure() {
+  local state=$1 output
+  if output=$(PATH="$test_bin" /bin/bash "$syntax_repo/scripts/validate" configs 2>&1); then
+    fail "whitespace gate accepted trailing whitespace in $state"
+  fi
+  [[ $output == *'whitespace.txt:1:'* && $output == *'whitespace.txt:2:'* ]] ||
+    fail 'whitespace failure did not identify both invalid lines'
+}
+
+printf 'trailing space \ntrailing tab\t\n' >"$syntax_repo/whitespace.txt"
+check_whitespace_failure 'an untracked file'
+git -C "$syntax_repo" add .
+git -C "$syntax_repo" -c user.name=fixture \
+  -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+  commit -qm fixture
+check_whitespace_failure 'a committed file'
+
+printf 'clean\n' >"$syntax_repo/whitespace.txt"
+mkdir -p "$syntax_repo/.cache"
+printf 'ignored \n' >"$syntax_repo/.cache/whitespace.txt"
+printf '\0binary \n' >"$syntax_repo/binary.bin"
 PATH="$test_bin" /bin/bash "$syntax_repo/scripts/validate" configs
 
 printf 'if then\n' >"$syntax_repo/bash/.bash_profile"

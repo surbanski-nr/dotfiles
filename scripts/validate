@@ -19,7 +19,7 @@ die() {
 
 usage() {
   printf '%s\n' \
-    'usage: validate {bash|configs|nvim2|repo|scripts|tmux|tooling|workflows}' \
+    'usage: validate {bash|configs|nvim2|scripts|tmux|tools|workflows}' \
     >&2
   exit 2
 }
@@ -176,11 +176,13 @@ validate_scripts() {
   need bash
   need git
   need jq
+  need python3
   need sha256sum
   need sh
   need shellcheck
   need tar
   need timeout
+  local variable
   local files=(
     bstow
     setup-asdf
@@ -194,16 +196,41 @@ validate_scripts() {
     tests/offline_go_test.sh
     tests/offline_launchers_test.sh
     tests/scripts_test.sh
+    tests/install_validation_tool_test.sh
     tests/setup_asdf_test.sh
     tests/setup_system_test.sh
     tests/setup_tools_test.sh
+    tests/validate_test.sh
   )
 
+  for file in scripts/setup-lib tests/dotfiles_release/fixture.sh tests/setup_tools/fixture.sh; do
+    [[ ! -x $file ]] || die "source-only library is executable: $file"
+  done
+  for file in scripts/* tests/fixtures/*/* \
+    tests/dotfiles_release/*_test.sh tests/setup_tools/*_test.sh \
+    bstow vim/setup nvim2/.config/nvim2/tests/check.sh; do
+    [[ $file == scripts/setup-lib ]] && continue
+    [[ -x $file ]] || die "executable bit is missing: $file"
+  done
+
+  check_shell_syntax bash release.env system.env
+  # shellcheck source=../release.env
+  source release.env
+  for variable in DEBIAN_13_IMAGE UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE \
+    AMZN_2023_IMAGE; do
+    [[ ${!variable} =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
+      die "$variable is not pinned to a SHA-256 digest"
+  done
+  [[ ! -e offline ]] || die 'legacy offline source directory still exists'
+  if grep -qE \
+    'nvim2-release|NVIM2_RELEASE|TARGET_(USER|UID|HOME)' \
+    scripts/dotfiles-release scripts/build-dotfiles-release release.env \
+    .github/workflows/dotfiles-release.yml; then
+    die 'offline release files retain a legacy name or baked target identity'
+  fi
+
   while IFS= read -r -d '' file; do
-    case "$file" in
-      scripts/validate | scripts/install-validation-tool) ;;
-      *) files+=("$file") ;;
-    esac
+    files+=("$file")
   done < <(find scripts -maxdepth 1 -type f -print0 | sort -z)
   while IFS= read -r -d '' file; do
     files+=("$file")
@@ -211,13 +238,15 @@ validate_scripts() {
   if [[ -d tests/fixtures ]]; then
     while IFS= read -r -d '' file; do
       case "$file" in
-        tests/fixtures/bash/* | tests/fixtures/validation/*) ;;
+        tests/fixtures/bash/* | tests/fixtures/validation/tpm) ;;
         *) files+=("$file") ;;
       esac
     done < <(find tests/fixtures -type f -print0 | sort -z)
   fi
 
   check_shell_files "${files[@]}"
+  run_test 30s bash tests/install_validation_tool_test.sh
+  run_test 120s bash tests/validate_test.sh
   run_test 120s bash tests/bstow_test.sh
   run_test 600s bash tests/dotfiles_release_test.sh
   run_test 120s bash tests/dotfiles_release_ci_test.sh
@@ -238,6 +267,9 @@ validate_nvim2() {
   local -a test_scripts=(nvim2/.config/nvim2/tests/check.sh nvim2/.config/nvim2/tests/fixtures/*.sh)
   local lock_file=nvim2/.config/nvim2/nvim-pack-lock.json
 
+  for file in nvim2/.config/nvim2/python-locks/{ansible-lint,yamllint}.{in,lock}; do
+    [[ -f $file && ! -L $file ]] || die "Nvim2 Python lock source is missing: $file"
+  done
   stylua --check \
     --config-path nvim2/.config/nvim2/.stylua.toml \
     nvim2/.config/nvim2
@@ -261,8 +293,16 @@ validate_configs() {
   need git
   need jq
   need yamllint
+  local grep_status
   local json_files=()
   local yaml_files=()
+
+  if git grep --untracked -nI -E '[[:blank:]]+$' -- .; then
+    die 'trailing whitespace found'
+  else
+    grep_status=$?
+    ((grep_status == 1)) || die 'cannot inspect repository whitespace'
+  fi
 
   while IFS= read -r -d '' file; do
     [[ -f $file ]] || continue
@@ -388,19 +428,27 @@ validate_tmux() {
   run_test 60s bash tests/tmux_timer_test.sh
 }
 
-validate_tooling() {
+validate_tools() {
   need bash
-  need python3
-  need shellcheck
-  need timeout
+  local grep_status
 
-  check_shell_files scripts/validate scripts/install-validation-tool \
-    tests/validate_test.sh tests/install_validation_tool_test.sh \
-    tests/fixtures/validation/batch-test \
-    tests/fixtures/validation/tmux-fail-show-options \
-    tests/fixtures/validation/zizmor-offline
-  run_test 30s bash tests/install_validation_tool_test.sh
-  run_test 120s bash tests/validate_test.sh
+  check_shell_syntax bash tools.env validation.env
+  # shellcheck source=../tools.env
+  source tools.env
+  # shellcheck source=../validation.env
+  source validation.env
+  # shellcheck source=setup-lib
+  source scripts/setup-lib
+  validate_tool_config
+  validate_validation_config
+  if grep -Eq \
+    '^(ASDF|GH|K9S|TRIVY|KYVERNO|KUBECONFORM|SHELLCHECK|RG|ZOXIDE|UV|OMP|NVIM|NPM|TMUX|FZF|KREW|ACTIONLINT|STYLUA|ZIZMOR|TASK)_(VERSION|SHA256)=' \
+    tools.env validation.env; then
+    die 'legacy editable release scalars remain in the catalogs'
+  else
+    grep_status=$?
+    ((grep_status == 1)) || die 'cannot inspect release catalogs for legacy scalars'
+  fi
 }
 
 validate_workflows() {
@@ -427,75 +475,13 @@ validate_workflows() {
   fi
 }
 
-validate_repo() {
-  local base=${VALIDATE_BASE_SHA:-}
-  local grep_status
-  local image
-  local variable
-
-  check_shell_syntax bash release.env tools.env validation.env system.env
-  # shellcheck source=../tools.env
-  source tools.env
-  # shellcheck source=../validation.env
-  source validation.env
-  # shellcheck source=setup-lib
-  source scripts/setup-lib
-  validate_tool_config
-  validate_validation_config
-  for file in nvim2/.config/nvim2/python-locks/{ansible-lint,yamllint}.{in,lock}; do
-    [[ -f $file && ! -L $file ]] || die "Nvim2 Python lock source is missing: $file"
-  done
-  [[ ! -e offline ]] || die 'legacy offline source directory still exists'
-  if grep -Eq \
-    '^(ASDF|GH|K9S|TRIVY|KYVERNO|KUBECONFORM|SHELLCHECK|RG|ZOXIDE|UV|OMP|NVIM|NPM|TMUX|FZF|KREW|ACTIONLINT|STYLUA|ZIZMOR|TASK)_(VERSION|SHA256)=' \
-    tools.env validation.env; then
-    die 'legacy editable release scalars remain in the catalogs'
-  else
-    grep_status=$?
-    ((grep_status == 1)) || die 'cannot inspect release catalogs for legacy scalars'
-  fi
-  # shellcheck source=../release.env
-  source release.env
-  for variable in DEBIAN_13_IMAGE UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE \
-    AMZN_2023_IMAGE; do
-    image=${!variable}
-    [[ $image =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
-      die "$variable is not pinned to a SHA-256 digest"
-  done
-  if grep -qE \
-    'nvim2-release|NVIM2_RELEASE|TARGET_(USER|UID|HOME)' \
-    scripts/dotfiles-release scripts/build-dotfiles-release release.env \
-    .github/workflows/dotfiles-release.yml; then
-    die 'offline release files retain a legacy name or baked target identity'
-  fi
-
-  for file in scripts/setup-lib tests/dotfiles_release/fixture.sh tests/setup_tools/fixture.sh; do
-    [[ ! -x $file ]] || die "source-only library is executable: $file"
-  done
-  for file in scripts/* tests/fixtures/*/* \
-    tests/dotfiles_release/*_test.sh tests/setup_tools/*_test.sh \
-    bstow vim/setup nvim2/.config/nvim2/tests/check.sh; do
-    [[ $file == scripts/setup-lib ]] && continue
-    [[ -x $file ]] || die "executable bit is missing: $file"
-  done
-
-  if [[ $base =~ ^[0-9a-f]{40}$ ]] &&
-    [[ $base != 0000000000000000000000000000000000000000 ]] &&
-    git cat-file -e "$base^{commit}" 2>/dev/null; then
-    git diff --check "$base" HEAD --
-  else
-    git diff --check HEAD --
-  fi
-}
-
 case ${1:-} in
   bash) validate_bash ;;
   configs) validate_configs ;;
   nvim2) validate_nvim2 ;;
-  repo) validate_repo ;;
   scripts) validate_scripts ;;
   tmux) validate_tmux ;;
-  tooling) validate_tooling ;;
+  tools) validate_tools ;;
   workflows) validate_workflows ;;
   *) usage ;;
 esac

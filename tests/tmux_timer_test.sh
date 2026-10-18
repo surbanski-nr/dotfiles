@@ -145,15 +145,27 @@ try:
     read_terminal(master)
 
     choose(master, b's')
+    wait_until(lambda: option('state') == 'running', 'Start did not run the timer')
     # Advance elapsed time without slowing the suite with a real minute-long wait.
-    tmux('set-option', '-g', '@eye-timer-deadline', str(int(time.time()) + 42))
+    pause_deadline = int(time.time()) + 42
+    tmux('set-option', '-g', '@eye-timer-deadline', str(pause_deadline))
+    pause_started = int(time.time())
     choose(master, b'p')
+    wait_until(lambda: option('state') == 'paused', 'Pause did not pause the timer')
+    pause_finished = int(time.time())
+    remaining = int(option('remaining'))
     paused = run('status')
-    assert paused.startswith('|| 00:4'), 'pause did not retain the remaining time'
+    assert pause_deadline - pause_finished <= remaining <= pause_deadline - pause_started, (
+        'pause did not retain the remaining time')
+    assert paused == f'|| {remaining // 60:02d}:{remaining % 60:02d}', 'paused timer label is incorrect'
     time.sleep(1.1)
     assert run('status') == paused, 'paused timer kept counting down'
+    resume_started = int(time.time())
     choose(master, b's')
-    assert 38 <= int(option('deadline')) - time.time() <= 42, 'resume restarted the full duration'
+    wait_until(lambda: option('state') == 'running', 'Resume did not run the timer')
+    resume_deadline = int(option('deadline'))
+    assert resume_started + remaining <= resume_deadline <= int(time.time()) + remaining, (
+        'resume restarted the full duration')
 
     tmux('source-file', str(root / 'tmux.conf'))
     assert option('state') == 'running', 'config reload stopped the timer'

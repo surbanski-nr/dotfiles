@@ -1,7 +1,7 @@
 # Dotfiles
 
 Personal bash, tmux, neovim, oh my posh, etc., configuration for Linux x86-64.
-Current targets are Debian 13, Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2023.
+Current CI targets are Debian 13, Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2023.
 
 The intetion is to have a version controlled and easly reproducable development environment across my computers.
 
@@ -80,4 +80,19 @@ Workflow validation runs locally without GitHub credentials. Set `GH_TOKEN`,
 online audits. The GitHub Actions workflow supplies its repository token.
 
 Focused tasks include `validate:bash`, `validate:configs`, `validate:nvim2`,
-`validate:repo`, `validate:scripts` and `validate:workflows`.
+`validate:scripts`, `validate:tmux`, `validate:tools` and `validate:workflows`.
+
+`validate:bash` lints and tests Bash startup files and checks the syntax of
+`bash` code blocks read directly from Markdown documentation with `bash -n`.
+
+`validate:configs` checks YAML, JSON and Git configuration syntax and trailing
+spaces and tabs in current text files, including tracked files and new files
+that Git does not ignore.
+
+`validate:tools` checks the tool definitions in `tools.env` and `validation.env`.
+
+`validate:scripts` checks executable bits, lints shell scripts and tests
+installers, offline releases and the validation scripts, including failure
+handling and Ctrl+C cleanup.
+
+Nvim2 lockfiles are checked by `validate:nvim2`.

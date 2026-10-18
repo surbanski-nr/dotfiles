@@ -6,65 +6,58 @@ env:
 
 tasks:
   default:
-    desc: Run every validation task
+    desc: Run all validation tasks in parallel
     cmds:
       - task: validate
 
   validate:
-    desc: Validate the complete repository
+    desc: Run all validation tasks in parallel
     deps:
       - validate:bash
       - validate:configs
       - validate:nvim2
-      - validate:repo
       - validate:scripts
       - validate:tmux
-      - validate:tooling
+      - validate:tools
       - validate:workflows
 
   validate:bash:
-    desc: Validate Bash startup files and their tests
+    desc: Lint Bash startup files, check Bash syntax in Markdown and run Bash tests
     deps: [tools:shellcheck]
     cmds:
       - bash scripts/validate bash
 
   validate:configs:
-    desc: Validate YAML, JSON and Git configuration
+    desc: Check YAML, JSON and Git syntax and trailing whitespace in current files
     deps: [tools:yamllint]
     cmds:
       - bash scripts/validate configs
 
   validate:nvim2:
-    desc: Validate active Nvim2 configuration and lockfile
+    desc: Check Nvim2 Lua formatting, shell test scripts and lockfiles
     deps: [tools:shellcheck, tools:stylua]
     cmds:
       - bash scripts/validate nvim2
 
-  validate:repo:
-    desc: Validate repository invariants and changed whitespace
-    cmds:
-      - bash scripts/validate repo
-
   validate:scripts:
-    desc: Validate standalone scripts, installers and release tests
-    deps: [tools:shellcheck]
+    desc: Check executable bits, lint scripts and test installers, validation and offline releases
+    deps: [tools:actionlint, tools:shellcheck, tools:yamllint]
     cmds:
       - bash scripts/validate scripts
 
   validate:tmux:
-    desc: Validate tmux configuration and eye timer behavior
+    desc: Check tmux configuration and test config reload and the eye timer
     deps: [tools:shellcheck]
     cmds:
       - bash scripts/validate tmux
 
-  validate:tooling:
-    desc: Validate the validator and validation tool installer
-    deps: [tools:actionlint, tools:shellcheck, tools:yamllint]
+  validate:tools:
+    desc: Check tool definitions in tools.env and validation.env
     cmds:
-      - bash scripts/validate tooling
+      - bash scripts/validate tools
 
   validate:workflows:
-    desc: Validate GitHub Actions syntax and security
+    desc: Check GitHub Actions syntax and security
     deps:
       - tools:actionlint
       - tools:shellcheck
