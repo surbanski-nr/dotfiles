@@ -154,4 +154,91 @@ set -e
 unlink "$release_link"
 ln -s 'target file' "$release_link"
 
+tty_release=$test_root/'Nvim release with spaces'
+tty_home=$test_root/'Nvim health home with spaces'
+mkdir -p "$tty_release/config/nvim2/tests" "$tty_home"
+cat >"$tty_release/config/nvim2/tests/check.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ ! -t 0 ]]
+timeout --signal=TERM --kill-after=1s 1s bash --noprofile --norc -ic \
+  'printf "nvim-tty-health-ok\n"'
+if flock -n "$FIXTURE_NVIM_LOCK" true; then
+  printf 'Nvim health released the manager lock too early\n' >&2
+  exit 95
+fi
+sleep 30 </dev/null >/dev/null 2>&1 &
+printf '%s\n' "$!" >"$FIXTURE_NVIM_CHILD_PID"
+exit "${FIXTURE_NVIM_STATUS:-0}"
+EOF
+TEST_REPO_DIR="$repo_dir" TEST_NVIM_RELEASE="$tty_release" TEST_NVIM_HOME="$tty_home" python3 - <<'PY'
+import errno
+import os
+import pty
+import select
+import signal
+import subprocess
+import time
+
+manager = os.path.join(os.environ['TEST_REPO_DIR'], 'scripts', 'dotfiles-release')
+release = os.environ['TEST_NVIM_RELEASE']
+home = os.environ['TEST_NVIM_HOME']
+
+for expected in (0, 94):
+    lock = os.path.join(home, f'manager-{expected}.lock')
+    child_pid_file = os.path.join(home, f'health-child-{expected}.pid')
+    with open(lock, 'w'):
+        pass
+    pid, terminal = pty.fork()
+    if pid == 0:
+        os.environ['FIXTURE_NVIM_STATUS'] = str(expected)
+        os.environ['FIXTURE_NVIM_LOCK'] = lock
+        os.environ['FIXTURE_NVIM_CHILD_PID'] = child_pid_file
+        os.execl('/bin/bash', 'bash', '-c',
+                 'source "$1"; exec {LOCK_FD}<"$4"; flock -x "$LOCK_FD"; '
+                 'health_stage Nvim health_nvim "$2" "$3"',
+                 'nvim-health-test', manager, release, home, lock)
+    output = bytearray()
+    status = None
+    deadline = time.monotonic() + 10
+    try:
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([terminal], [], [], .02)
+            if ready:
+                try:
+                    output.extend(os.read(terminal, 65536))
+                except OSError as error:
+                    if error.errno != errno.EIO:
+                        raise
+            finished, result = os.waitpid(pid, os.WNOHANG)
+            if finished:
+                status = os.waitstatus_to_exitcode(result)
+                break
+        decoded = output.decode(errors='replace')
+        assert status == expected, f'Nvim health under a terminal returned {status}, expected {expected}: {decoded}'
+        assert 'nvim-tty-health-ok' in decoded, f'Interactive shell did not complete: {decoded}'
+        if expected:
+            assert f'Nvim health check failed (status {expected})' in decoded, decoded
+        with open(child_pid_file) as pid_file:
+            health_child = int(pid_file.read())
+        os.kill(health_child, 0)
+        probe = subprocess.run(['flock', '-n', lock, 'true'], timeout=5)
+        assert probe.returncode == 0, 'Nvim health descendant retained the manager lock after exit'
+    finally:
+        if status is None:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            os.waitpid(pid, 0)
+        if os.path.exists(child_pid_file):
+            with open(child_pid_file) as pid_file:
+                health_child = int(pid_file.read())
+            try:
+                os.kill(health_child, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        os.close(terminal)
+PY
+
 printf 'dotfiles_release: health passed\n'

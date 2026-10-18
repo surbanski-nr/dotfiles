@@ -1240,7 +1240,7 @@ install_archive() {
     need "$command_name" || return
   done
   if [[ $skip_tests != true ]]; then
-    for command_name in head mkfifo script sleep timeout; do need "$command_name" || return; done
+    for command_name in head mkfifo script setsid sleep timeout; do need "$command_name" || return; done
   fi
   [[ -f $archive && ! -L $archive ]] ||
     { die "artifact is not a regular file: $archive"; return 1; }
@@ -1670,9 +1670,26 @@ EOF
   printf 'validation-tools=healthy\n'
 }
 
+health_nvim() {
+  local release=$1 health_home=$2
+
+  need setsid || return
+  (
+    if [[ -n ${LOCK_FD:-} ]]; then exec {LOCK_FD}>&-; fi
+    # Interactive Bash fixtures open /dev/tty even with redirected stdin.
+    # Detach from the terminal so timeout's background group cannot get SIGTTIN.
+    HOME="$health_home" XDG_CACHE_HOME="$health_home/.cache" \
+      XDG_STATE_HOME="$health_home/.local/state" GIT_OPTIONAL_LOCKS=0 \
+      DOTFILES_OFFLINE_RELEASE_ROOT="$release" \
+      PYTHONDONTWRITEBYTECODE=1 NVIM_APPNAME=nvim2 NVIM2_CHECK_TOOLS=1 \
+      NVIM2_BENCHMARK_RUNS=3 setsid --wait timeout 1200s \
+        bash "$release/config/nvim2/tests/check.sh" </dev/null
+  )
+}
+
 health_release() {
-  local release_id=$1 mode=${2:-full} skip_tests=${3:-false} release command_name path check_script health_home
-  local PATH output expected field DOTFILES_OFFLINE_RELEASE_ROOT status
+  local release_id=$1 mode=${2:-full} skip_tests=${3:-false} release command_name path health_home
+  local PATH output expected field DOTFILES_OFFLINE_RELEASE_ROOT
   local KUBECTL_VERSION='' HELM_VERSION=''
   local DOTFILES_IGNORE_BIN_EXTRAS=1 VIRTUAL_ENV=''
   local tool version serialized
@@ -1763,19 +1780,7 @@ health_release() {
   health_stage 'Kubernetes tools' health_kubernetes_tools "$release" "$health_home" || return
   health_stage tmux health_tmux "$release" "$health_home" || return
   health_stage Bash health_bash "$release" "$health_home" || return
-  check_script=$release/config/nvim2/tests/check.sh
-  (
-    if [[ -n ${LOCK_FD:-} ]]; then exec {LOCK_FD}>&-; fi
-    HOME="$health_home" XDG_CACHE_HOME="$health_home/.cache" \
-      XDG_STATE_HOME="$health_home/.local/state" GIT_OPTIONAL_LOCKS=0 \
-      DOTFILES_OFFLINE_RELEASE_ROOT="$release" \
-      PYTHONDONTWRITEBYTECODE=1 NVIM_APPNAME=nvim2 NVIM2_CHECK_TOOLS=1 \
-      NVIM2_BENCHMARK_RUNS=3 timeout 1200s bash "$check_script"
-  ) || {
-    status=$?
-    die "Nvim health check failed (status $status)" || true
-    return "$status"
-  }
+  health_stage Nvim health_nvim "$release" "$health_home" || return
   if [[ -f $release/installed.sha256 ]]; then verify_installed_manifest "$release" || return; fi
 }
 
