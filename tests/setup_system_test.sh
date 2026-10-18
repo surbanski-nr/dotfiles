@@ -70,6 +70,11 @@ EOF
 cat >"$fixture_bin/apt-get" <<'EOF'
 #!/usr/bin/env bash
 [[ ${TEST_PACKAGE_FAIL:-} != "apt-get:${1:-}" ]] || exit 71
+if [[ ${TEST_PACKAGE_TTY_PROBE:-0} == 1 ]]; then
+  [[ -t 0 ]] || exit 77
+  IFS= read -r reply || exit 78
+  [[ $reply == package-tty-probe ]] || exit 79
+fi
 printf 'apt-get' >>"$TEST_PACKAGE_LOG"
 printf '\t%s' "$@" >>"$TEST_PACKAGE_LOG"
 printf '\n' >>"$TEST_PACKAGE_LOG"
@@ -199,6 +204,38 @@ fi
   fail 'host setup did not enable and start the container services'
 [[ $(grep -c $'^docker\t--host\tunix:///var/run/docker.sock\tinfo$' "$TEST_DOCKER_LOG") -eq 1 ]] ||
   fail 'host setup did not verify the local Docker daemon'
+
+real_timeout=$(command -v timeout)
+real_script=$(command -v script)
+unlink "$fixture_bin/timeout"
+cat >"$fixture_bin/timeout" <<'EOF'
+#!/usr/bin/env bash
+arguments=("$@")
+for index in "${!arguments[@]}"; do
+  case ${arguments[index]} in
+    600s) arguments[index]=5s ;;
+    --kill-after=5s) arguments[index]=--kill-after=1s ;;
+  esac
+done
+exec "$TEST_REAL_TIMEOUT" "${arguments[@]}"
+EOF
+chmod 0755 "$fixture_bin/timeout"
+# The command is expanded by the shell inside the pseudo-terminal.
+# shellcheck disable=SC2016
+if ! printf 'package-tty-probe\npackage-tty-probe\n' |
+  "$real_timeout" --foreground --kill-after=2s 15s env PATH="$fixture_bin" \
+    TEST_REAL_TIMEOUT="$real_timeout" TEST_ONLINE_SETUP_SCRIPT="$online_setup_script" \
+    TEST_PACKAGE_TTY_PROBE=1 TEST_PACKAGE_LOG="$package_log" \
+    SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
+    "$real_script" --quiet --return --command 'exec "$TEST_ONLINE_SETUP_SCRIPT"' \
+    "$test_root/package-tty.log" >"$test_root/package-tty.output" 2>&1; then
+  fail 'package installation could not read its real terminal'
+fi
+grep -F 'host setup packages ready' "$test_root/package-tty.log" >/dev/null ||
+  fail 'package installation stopped or timed out while reading its terminal'
+unlink "$fixture_bin/timeout"
+ln -s "$real_timeout" "$fixture_bin/timeout"
+
 for missing_command in pkill ps script; do
   mv "$fixture_bin/$missing_command" "$fixture_bin/$missing_command.saved"
   if missing_output=$(PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \

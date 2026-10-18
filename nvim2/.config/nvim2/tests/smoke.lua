@@ -598,21 +598,24 @@ local function run()
   vim.api.nvim_buf_set_name(0, vim.fs.joinpath(eslint_root, 'sample.ts'))
   vim.bo.filetype = 'typescript'
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'const unused={answer:42};' })
+  -- Cold server and linter startup can exceed five seconds on a small VM.
   assert(
-    vim.wait(5000, function()
+    vim.wait(15000, function()
       return vim.iter(vim.lsp.get_clients { bufnr = 0 }):any(function(client) return client.name == 'ts_ls' end)
     end),
     'TypeScript Language Server did not attach to a TypeScript project'
   )
   assert(vim.api.nvim_buf_get_commands(0, {}).LspTypescriptSourceAction, 'TypeScript source-action command is unavailable')
   vim.cmd 'FormatEnable!'
-  require('conform').format { bufnr = 0, async = false, timeout_ms = 5000 }
+  require('conform').format { bufnr = 0, async = false, timeout_ms = 15000 }
   assert(vim.api.nvim_get_current_line() == 'const unused = { answer: 42 };', 'Prettier did not format TypeScript')
   vim.api.nvim_exec_autocmds('BufWritePost', { buffer = 0 })
   local eslint_namespace = require('lint').get_namespace 'eslint_d'
   assert(
-    vim.wait(5000, function() return #vim.diagnostic.get(0, { namespace = eslint_namespace }) > 0 end),
-    'eslint_d did not diagnose TypeScript in a configured project'
+    vim.wait(30000, function()
+      return vim.iter(vim.diagnostic.get(0, { namespace = eslint_namespace })):any(function(diagnostic) return diagnostic.code == 'no-unused-vars' end)
+    end),
+    'eslint_d did not diagnose an unused TypeScript variable in a configured project'
   )
   if vim.env.DOTFILES_OFFLINE_RELEASE_ROOT then
     local daemon_state =

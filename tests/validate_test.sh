@@ -17,7 +17,7 @@ fail() {
 }
 
 mkdir -p "$test_bin"
-for command_name in bash cp cut dirname find flock git grep head jq mkdir mkfifo mktemp pkill ps python3 readlink script setsid sh sleep sort timeout tmux yamllint; do
+for command_name in bash cp cut dirname env find flock git grep head jq mkdir mkfifo mktemp pkill ps python3 readlink script setsid sh sleep sort timeout tmux yamllint; do
   command_path=$(command -v "$command_name")
   ln -s "$command_path" "$test_bin/$command_name"
 done
@@ -132,6 +132,18 @@ if ! PATH="$test_bin" /bin/bash "$syntax_repo/scripts/validate" bash \
 fi
 rm "$test_bin/python3"
 mv "$test_bin/python3.saved" "$test_bin/python3"
+
+mv "$test_bin/timeout" "$test_bin/timeout.saved"
+ln -s "$repo_dir/tests/fixtures/validation/timeout-inherit-signals" "$test_bin/timeout"
+printf '#!/usr/bin/env bash\ntrap "exit 130" INT\nkill -INT "$$"\nexit 0\n' \
+  >"$syntax_repo/tests/bash_test.sh"
+signal_status=0
+PATH="$test_bin" /bin/bash "$syntax_repo/scripts/validate" bash \
+  >"$test_root/test-signal.log" 2>&1 || signal_status=$?
+[[ $signal_status == 130 ]] || \
+  fail "background test inherited ignored SIGINT: $(<"$test_root/test-signal.log")"
+unlink "$test_bin/timeout"
+mv "$test_bin/timeout.saved" "$test_bin/timeout"
 for file in bash_test.sh bash_history_test.sh; do
   cp "$repo_dir/tests/fixtures/validation/batch-test" "$syntax_repo/tests/$file"
 done

@@ -6,10 +6,14 @@ local function write(path, lines)
   assert(vim.fn.writefile(lines, path) == 0, 'could not write Go fixture: ' .. path)
 end
 
-local function command(args, cwd)
+local function command(args, cwd, timeout_ms)
   local env = vim.tbl_extend('force', require('custom.go').env(), { GOPROXY = 'off', GOTOOLCHAIN = 'local' })
-  local result = vim.system(args, { cwd = cwd, text = true, env = env }):wait(30000)
-  assert(result.code == 0, table.concat(args, ' ') .. ': ' .. (result.stderr or ''))
+  timeout_ms = timeout_ms or 30000
+  local result = vim.system(args, { cwd = cwd, text = true, env = env }):wait(timeout_ms)
+  assert(
+    result.code == 0,
+    ('%s: exit %s, signal %s (timeout %d ms): %s'):format(table.concat(args, ' '), result.code, result.signal, timeout_ms, result.stderr or '')
+  )
   return vim.trim(result.stdout or '')
 end
 
@@ -43,7 +47,8 @@ local function run()
     formatted:find('import "fmt"', 1, true) and formatted:find('\tfmt.Println(answer())', 1, true),
     'goimports did not format and add the import: ' .. formatted
   )
-  assert(command({ 'go', 'run', '.' }, root) == '42', 'formatted multi-file package did not run')
+  -- An offline HOME starts without a build cache for the SDK's standard library.
+  assert(command({ 'go', 'run', '.' }, root, 60000) == '42', 'formatted multi-file package did not run')
   command({ 'go', 'test', './...' }, root)
 
   vim.api.nvim_win_set_cursor(0, { 6, 14 })

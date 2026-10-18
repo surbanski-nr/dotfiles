@@ -155,6 +155,11 @@ local function run()
       end
     end
 
+    -- Cold tsserver can attach before its project analysis is ready.
+    if fixture.diagnostic then
+      assert(vim.wait(15000, function() return #vim.diagnostic.get(buffer) > 0 end), 'LSP produced no expected diagnostic for ' .. fixture.path)
+    end
+
     if fixture.completion then
       vim.api.nvim_win_set_cursor(0, { 3, 8 })
       local client = client_named(buffer, 'ts_ls')
@@ -162,10 +167,6 @@ local function run()
       local result = response and response.result
       local items = result and (result.items or result)
       assert(type(items) == 'table' and #items > 0, 'TypeScript LSP returned no completion items')
-    end
-
-    if fixture.diagnostic then
-      assert(vim.wait(15000, function() return #vim.diagnostic.get(buffer) > 0 end), 'LSP produced no expected diagnostic for ' .. fixture.path)
     end
 
     if fixture.codelens then

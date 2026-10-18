@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+[[ $# == 3 && $EUID == 0 ]] || { printf 'dev-vm-setup: expected UID GID PLATFORM as guest root\n' >&2; exit 1; }
+guest_uid=$1 guest_gid=$2 platform=$3
+[[ $guest_uid =~ ^[1-9][0-9]*$ && $guest_gid =~ ^[1-9][0-9]*$ ]] || exit 1
+# shellcheck source=/dev/null
+source /etc/os-release
+[[ $ID-$VERSION_ID-x86_64 == "$platform" && $(uname -m) == x86_64 ]] || {
+  printf 'dev-vm-setup: guest OS does not match %s\n' "$platform" >&2
+  exit 1
+}
+
+checkout=/workspace/dotfiles
+cd "$checkout"
+# shellcheck source=setup-system-lib
+source "$checkout/scripts/setup-system-lib"
+SETUP_NAME=dev-vm
+SETUP_WARNINGS=0
+# The LXD agent can start before boot-time /tmp cleanup finishes.
+SETUP_TEMP_DIR=$(mktemp -d /run/dotfiles-dev.XXXXXX)
+trap 'find "$SETUP_TEMP_DIR" -depth -delete' EXIT
+
+if ! getent group "$guest_gid" >/dev/null; then
+  groupadd --gid "$guest_gid" dotfiles-dev
+fi
+account=$(getent passwd "$guest_uid" || true)
+if [[ -z $account ]]; then
+  useradd --create-home --uid "$guest_uid" --gid "$guest_gid" --shell /bin/bash dotfiles-dev
+  account=$(getent passwd "$guest_uid")
+fi
+IFS=: read -r guest_user _ _ _ _ guest_home _ <<<"$account"
+[[ $guest_home == /home/* ]] || { printf 'dev-vm-setup: refusing unexpected guest home\n' >&2; exit 1; }
+usermod --gid "$guest_gid" --shell /bin/bash "$guest_user"
+
+packages=()
+for package in curl git sudo; do
+  command -v "$package" >/dev/null || packages+=("$package")
+done
+if ((${#packages[@]})); then
+  case $ID in
+    debian | ubuntu)
+      system_setup_command 'bootstrap package index' timeout --kill-after=5s 600s \
+        env DEBIAN_FRONTEND=noninteractive apt-get update --error-on=any || true
+      system_setup_command 'bootstrap prerequisites' timeout --kill-after=5s 600s \
+        env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${packages[@]}" || true
+      ;;
+    amzn)
+      for index in "${!packages[@]}"; do
+        [[ ${packages[index]} != curl ]] || packages[index]=curl-minimal
+      done
+      system_setup_command 'bootstrap prerequisites' timeout --kill-after=5s 600s \
+        dnf install -y "${packages[@]}" || true
+      ;;
+  esac
+fi
+
+mkdir -p /etc/sudoers.d
+printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$guest_user" >/etc/sudoers.d/dotfiles-dev
+chmod 0440 /etc/sudoers.d/dotfiles-dev
+if command -v visudo >/dev/null; then
+  visudo --check --file /etc/sudoers.d/dotfiles-dev
+else
+  system_warning 'sudo is unavailable; repair prerequisites through lxc exec as guest root'
+fi
+
+private_bin=$guest_home/.local/share/dotfiles-validation
+runuser --user "$guest_user" -- mkdir -p "$private_bin"
+# Mask host executables and absolute Python venv paths without modifying host bin.
+mountpoint -q "$checkout/bin" || mount --bind "$private_bin" "$checkout/bin"
+if command -v curl >/dev/null; then
+  if system_setup_command 'pinned private Task bootstrap' runuser --user "$guest_user" -- \
+    env "HOME=$guest_home" "VALIDATION_TOOLS_DIR=$checkout/bin" \
+    bash "$checkout/scripts/install-validation-tool" task; then
+    ln -sfn "$checkout/bin/task" /usr/local/bin/task
+  fi
+else
+  system_warning 'curl is unavailable; rerun task dev when bootstrap prerequisites can be downloaded'
+fi

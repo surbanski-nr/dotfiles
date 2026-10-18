@@ -1,0 +1,5 @@
+#!/bin/sh
+
+set -eu
+
+printf '%s\n' "${TEST_CI_CPUS:-4}"

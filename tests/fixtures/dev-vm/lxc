@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+[[ $1 == --project && $2 == "$TEST_DEV_PROJECT" ]] || {
+  printf 'fixture: wrong or missing LXD project\n' >&2
+  exit 71
+}
+shift 2
+printf '%s\n' "$*" >>"$TEST_DEV_LOG"
+command=$1
+shift
+
+case $command in
+  list)
+    [[ $1 != --fast ]] || shift
+    files=("$TEST_DEV_STATE"/vm-*.json)
+    if [[ ! -e ${files[0]} ]]; then
+      printf '[]\n'
+    elif [[ $1 == --format=json ]]; then
+      jq -s '.' "${files[@]}"
+    else
+      jq -s --arg name "$1" '[.[] | select(.name == $name)]' "${files[@]}"
+    fi
+    ;;
+  image)
+    case $1 in
+      info)
+        if [[ ${TEST_DEV_COLD_IMAGE:-0} == 1 && ! -e $TEST_DEV_STATE/image.json ]]; then exit 1; fi
+        if [[ -e $TEST_DEV_STATE/image.json ]]; then
+          checksum=$(jq -r '.properties["user.dotfiles.dev.sha256"]' "$TEST_DEV_STATE/image.json")
+        else
+          checksum=$(printf '%s\n' "$PLATFORMS_JSON" | jq -r --arg alias "$PLATFORM_ALIAS" '.[$alias].sha256')
+        fi
+        printf 'Properties:\n    user.dotfiles.dev.sha256: %s\n' "$checksum"
+        ;;
+      import) tar -xOf "$2" metadata.yaml >"$TEST_DEV_STATE/image.json" ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  init)
+    [[ ${TEST_DEV_INIT_FAIL:-0} != 1 ]] || { printf 'fixture: VM creation failed\n' >&2; exit 81; }
+    image=$1 name=$2
+    shift 2
+    config='{}'
+    disk=
+    while (($#)); do
+      case $1 in
+        -c)
+          pair=$2
+          config=$(printf '%s\n' "$config" | jq -c --arg key "${pair%%=*}" --arg value "${pair#*=}" '.[$key] = $value')
+          shift 2
+          ;;
+        -d) disk=${2#root,size=}; shift 2 ;;
+        --network | --storage) shift 2 ;;
+        --vm) shift ;;
+        *) exit 1 ;;
+      esac
+    done
+    jq -n --arg name "$name" --arg image "$image" --arg disk "$disk" --argjson config "$config" '
+      {name: $name, type: "virtual-machine", status: "Stopped", config: $config,
+        image: $image, devices: {root: {type: "disk", size: $disk}}}' >"$TEST_DEV_STATE/vm-$name.json"
+    ;;
+  config)
+    action=$1
+    shift
+    case $action in
+      device)
+        [[ $1 == add ]] || exit 1
+        name=$2 device=$3 type=$4
+        shift 4
+        properties=$(jq -cn --arg type "$type" '$ARGS.positional | {type: $type} +
+          (map(split("=") | {(.[0]): (.[1:] | join("="))}) | add)' --args "$@")
+        state=$TEST_DEV_STATE/vm-$name.json
+        jq --arg name "$device" --argjson properties "$properties" '.devices[$name] = $properties' "$state" >"$state.next"
+        mv "$state.next" "$state"
+        ;;
+      set) cat >"$TEST_DEV_STATE/cloud-init.yaml" ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  start)
+    state=$TEST_DEV_STATE/vm-$1.json
+    jq '.status = "Running"' "$state" >"$state.next"
+    mv "$state.next" "$state"
+    ;;
+  exec)
+    name=$1
+    shift
+    while [[ $1 != -- ]]; do shift; done
+    shift
+    case $1 in
+      true)
+        if [[ ${TEST_DEV_AGENT_HANG:-0} == 1 && ! -e $TEST_DEV_STATE/agent-waited ]]; then
+          touch "$TEST_DEV_STATE/agent-waited"
+          trap '' TERM
+          while true; do sleep 1; done
+        fi
+        exit 0
+        ;;
+      bash)
+        if [[ ${TEST_DEV_PREPARE_FAIL:-0} != 0 ]]; then
+          exit "$TEST_DEV_PREPARE_FAIL"
+        fi
+        if [[ ${TEST_DEV_PREPARE_CONNECTION_FAIL:-0} == 1 && ! -e $TEST_DEV_STATE/prepare-retried ]]; then
+          touch "$TEST_DEV_STATE/prepare-retried"
+          exit 255
+        fi
+        cat >/dev/null
+        ;;
+      getent) printf 'dev:x:%s:%s:Development:/home/dev:/bin/bash\n' "$(id -u)" "$(id -g)" ;;
+      runuser)
+        printf 'guest-shell %s\n' "$name"
+        if [[ -n ${TEST_DEV_SHELL_READY:-} ]]; then
+          touch "$TEST_DEV_SHELL_READY"
+          while [[ ! -e $TEST_DEV_SHELL_RELEASE ]]; do sleep 0.1; done
+        fi
+        exit "${TEST_DEV_SHELL_STATUS:-0}"
+        ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  *) exit 1 ;;
+esac

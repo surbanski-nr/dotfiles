@@ -18,7 +18,8 @@ fi
 config_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 xdg_config_home=$(dirname -- "$config_dir")
 app_name=$(basename -- "$config_dir")
-timeout_seconds=${NVIM2_CHECK_TIMEOUT_SECONDS:-60}
+# Cold language servers and Go debug builds need room on small development VMs.
+timeout_seconds=${NVIM2_CHECK_TIMEOUT_SECONDS:-120}
 runs=${NVIM2_BENCHMARK_RUNS:-5}
 
 if [[ ! -v DOTFILES_LAUNCHER_XDG_CONFIG_HOME_SET ]]; then

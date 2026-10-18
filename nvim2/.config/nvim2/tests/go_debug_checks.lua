@@ -10,7 +10,7 @@ local function write(path, lines)
   assert(vim.fn.writefile(lines, path) == 0, 'could not write Go debugger fixture: ' .. path)
 end
 
-local function wait_for(predicate, message) assert(vim.wait(15000, predicate, 10), message) end
+local function wait_for(predicate, message, timeout) assert(vim.wait(timeout or 15000, predicate, 10), message) end
 
 local function response(request)
   local done, result, failure = false, nil, nil
@@ -37,11 +37,11 @@ local function breakpoint(path, line)
   dap.set_breakpoint()
 end
 
-local function stopped(line)
+local function stopped(line, timeout)
   wait_for(function()
     local session = dap.session()
     return session and session.stopped_thread_id and session.current_frame and session.current_frame.line == line
-  end, 'Go did not stop at line ' .. line)
+  end, 'Go did not stop at line ' .. line, timeout)
   local pid = vim.fn.getpid()
   for child_pid in table.concat(vim.fn.readfile(('/proc/%d/task/%d/children'):format(pid, pid)), ' '):gmatch '%d+' do
     local command = io.open('/proc/' .. child_pid .. '/cmdline', 'rb')
@@ -138,7 +138,8 @@ local function run()
 
   breakpoint(main, 7)
   launch 'launch package'
-  stopped(7)
+  -- Normal Go builds do not warm the separate debug-mode compilation cache.
+  stopped(7, 60000)
   assert(next(adapter_pids), 'Go launch did not start an observable Delve process')
   assert(next(debuggee_pids), 'Delve did not report the launched process')
   assert(evaluate 'value' == '42', 'Go locals did not expose the value from another package file')
@@ -162,7 +163,7 @@ local function run()
   breakpoint(test, 7)
   assert(vim.wait(3000, function() return vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()] ~= nil end), 'Go test parser did not attach')
   vim.fn.maparg('<leader>dt', 'n', false, true).callback()
-  stopped(7)
+  stopped(7, 60000)
   assert(dap.session().config.mode == 'test', 'Go test key launched a normal program')
   assert(evaluate 'value' == '42', 'nearest Go test did not expose its local value')
   finish()

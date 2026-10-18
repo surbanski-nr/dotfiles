@@ -94,6 +94,13 @@ version pins (distros are relatively stable and well tested and behind on versio
 
 ## Testing
 
+Run `task` without arguments to list available tasks. `task dev` opens a
+persistent Debian 13 LXD VM. Select another supported OS with
+`task dev -- ubuntu2404`, `ubuntu2604` or `amazonlinux2023`.
+`task test` builds and qualifies offline packages in Docker; use
+`task test -- debian13` to select one platform. Run it inside the VM to keep
+Docker images and containers off the host.
+
 Bootstrap the pinned Task executable and run repository validation with:
 
 ```bash

@@ -231,8 +231,8 @@ local function run()
     assert(vim.deep_equal(vim.fn.readfile(path), yaml_lines), filetype .. ' formatted without opting in')
     keys '<leader>f'
     assert(
-      vim.wait(3000, function() return vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), yaml_formatted) end),
-      filetype .. ' manual formatting did not preserve blank lines or literal text'
+      vim.wait(15000, function() return vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), yaml_formatted) end),
+      filetype .. ' manual formatting did not preserve blank lines or literal text: ' .. vim.inspect(vim.api.nvim_buf_get_lines(0, 0, -1, false))
     )
     assert(not policy.is_enabled() and vim.deep_equal(vim.fn.readfile(path), yaml_lines), filetype .. ' manual format enabled automatic formatting or saved')
     keys '<leader>tf'

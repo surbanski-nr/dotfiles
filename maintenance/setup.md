@@ -376,11 +376,11 @@ The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
 run from a clean committed checkout on a connected machine with Docker access:
 
 ```bash
-bin/task test:offline
+bin/task test
 # Show the available PLATFORM values:
-bin/task --summary test:offline
+bin/task --summary test
 # Build and qualify just one platform:
-bin/task test:offline PLATFORM=ubuntu-24.04-x86_64
+bin/task test -- ubuntu2404
 ```
 
 The task uses `scripts/dotfiles-release-ci test` and the immutable images from

@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+die() { printf 'dev-vm: %s\n' "$*" >&2; exit 1; }
+
+[[ $# == 0 ]] || die 'use task dev -- PLATFORM'
+[[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || die 'a Linux x86-64 LXD host is required'
+((EUID != 0)) || die 'run task dev as the ordinary checkout owner, not root'
+for command_name in lxc jq flock timeout sha256sum git; do
+  command -v "$command_name" >/dev/null || die "required command is missing: $command_name"
+done
+
+repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+[[ -d $repo_dir/.git ]] || die 'use a standalone development clone with a .git directory'
+alias=${PLATFORM_ALIAS:-debian13}
+configuration=$(printf '%s\n' "${PLATFORMS_JSON:-}" | jq -ce --arg alias "$alias" '.[$alias]') ||
+  die "unknown platform: $alias"
+image=$(printf '%s\n' "$configuration" | jq -er '.image')
+platform=$(printf '%s\n' "$configuration" | jq -er '.platform')
+checksum=$(printf '%s\n' "$configuration" | jq -r '.sha256 // ""')
+[[ $alias =~ ^[a-z0-9]+$ ]] || die "invalid platform alias: $alias"
+[[ ${DEV_CPUS:-} =~ ^[1-9][0-9]*$ ]] || die 'DEV_CPUS must be a positive integer'
+for size in "${DEV_MEMORY:-}" "${DEV_DISK:-}"; do
+  [[ $size =~ ^[1-9][0-9]*(MiB|GiB|MB|GB)$ ]] || die 'DEV_MEMORY and DEV_DISK need a size such as 16GiB'
+done
+for setting in DEV_PROJECT DEV_NETWORK DEV_STORAGE; do
+  [[ -n ${!setting:-} ]] || die "$setting is required"
+done
+
+lxd() { timeout --kill-after=5s 600s lxc --project "$DEV_PROJECT" "$@"; }
+
+# Only creation/preparation is serialized; independent interactive shells must coexist.
+exec 9>"$repo_dir/.git/dotfiles-dev-$alias.lock"
+flock -w 1800 9 || die 'another VM preparation is still running'
+instances=$(lxd list --fast --format=json)
+matches=$(printf '%s\n' "$instances" | jq -c --arg root "$repo_dir" --arg alias "$alias" '
+  [.[] | select(.config["user.dotfiles.dev.root"] == $root and
+    .config["user.dotfiles.dev.platform"] == $alias)]')
+count=$(printf '%s\n' "$matches" | jq length)
+((count <= 1)) || die "multiple development VMs match this checkout and $alias; inspect them with lxc --project $DEV_PROJECT list"
+stage=
+trap '[[ -z $stage ]] || find "$stage" -depth -delete' EXIT
+
+if ((count == 0)); then
+  repo_key=$(printf '%s' "$repo_dir" | sha256sum)
+  vm=dotfiles-dev-$alias-${repo_key:0:8}-$(date -u +%Y%m%dT%H%M%SZ)
+  if [[ -n $checksum ]]; then
+    [[ $checksum =~ ^[0-9a-f]{64}$ && $image == https://* ]] || die 'invalid QCOW2 image or SHA256'
+    image_alias=dotfiles-dev-$alias-${checksum:0:12}
+    if ! lxd image info "$image_alias" >/dev/null 2>&1; then
+      command -v curl >/dev/null || die 'curl is required to download the QCOW2 image'
+      stage=$(mktemp -d)
+      curl --fail --show-error --location --retry 2 --connect-timeout 30 --max-time 1200 \
+        "$image" --output "$stage/rootfs.qcow2"
+      (cd "$stage" && printf '%s  rootfs.qcow2\n' "$checksum" | sha256sum --check --strict)
+      jq -n --arg alias "$alias" --arg checksum "$checksum" --argjson created "$(date +%s)" '
+        {architecture: "x86_64", creation_date: $created,
+          properties: {description: ("dotfiles development " + $alias),
+            "user.dotfiles.dev.sha256": $checksum}}' >"$stage/metadata.yaml"
+      tar -C "$stage" -czf "$stage/metadata.tar.gz" metadata.yaml
+      lxd image import "$stage/metadata.tar.gz" "$stage/rootfs.qcow2" --alias "$image_alias"
+      find "$stage" -depth -delete
+      stage=
+    fi
+    [[ $(lxd image info "$image_alias" | sed -n 's/^    user.dotfiles.dev.sha256: //p') == "$checksum" ]] ||
+      die "existing image $image_alias has an unexpected checksum property"
+    image=$image_alias
+  fi
+  printf 'Creating %s in LXD project %s\n' "$vm" "$DEV_PROJECT"
+  lxd init "$image" "$vm" --vm --network "$DEV_NETWORK" --storage "$DEV_STORAGE" \
+    -c "limits.cpu=$DEV_CPUS" -c "limits.memory=$DEV_MEMORY" -d "root,size=$DEV_DISK" \
+    -c security.secureboot=false \
+    -c "user.dotfiles.dev.root=$repo_dir" -c "user.dotfiles.dev.platform=$alias"
+  lxd config device add "$vm" checkout disk "source=$repo_dir" path=/workspace/dotfiles
+  if [[ -n $checksum ]]; then
+    # Official Amazon KVM images lack the LXD agent supplied by LXD cloud images.
+    lxd config set "$vm" user.user-data - <<'CLOUD_INIT'
+#cloud-config
+write_files:
+  - path: /usr/local/sbin/dotfiles-lxd-agent-bootstrap
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      modprobe 9pnet_virtio || true
+      mount -t 9p config /mnt -o access=0,transport=virtio || mount -t virtiofs config /mnt
+      cd /mnt
+      ./install.sh
+      cd /
+      umount /mnt
+      systemctl start lxd-agent
+runcmd:
+  - [bash, /usr/local/sbin/dotfiles-lxd-agent-bootstrap]
+CLOUD_INIT
+    lxd config device add "$vm" cloud-init disk source=cloud-init:config
+  fi
+else
+  printf '%s\n' "$matches" | jq -e --arg root "$repo_dir" '
+    .[0].type == "virtual-machine" and .[0].devices.checkout.source == $root and
+    .[0].devices.checkout.path == "/workspace/dotfiles"' >/dev/null ||
+    die 'matching VM has an unexpected type or checkout mount; inspect it before continuing'
+  vm=$(printf '%s\n' "$matches" | jq -r '.[0].name')
+  printf 'Reusing %s in LXD project %s\n' "$vm" "$DEV_PROJECT"
+fi
+
+state=$(lxd list "$vm" --fast --format=json | jq -er '.[0].status')
+case $state in
+  Stopped) lxd start "$vm" ;;
+  Running) ;;
+  *) die "VM $vm is $state; inspect it before continuing" ;;
+esac
+printf 'Waiting for the LXD agent in %s (up to 10 minutes).\n' "$vm"
+deadline=$((SECONDS + 600))
+until timeout --foreground --kill-after=5s 10s lxc --project "$DEV_PROJECT" exec "$vm" --disable-stdin -- true >/dev/null 2>&1; do
+  ((SECONDS < deadline)) || die "VM $vm did not start its LXD agent; inspect lxc --project $DEV_PROJECT console $vm"
+  sleep 2
+done
+
+[[ ! -L $repo_dir/bin ]] || die 'checkout bin must be a directory, not a symlink'
+mkdir -p "$repo_dir/bin"
+for attempt in 1 2 3; do
+  if timeout --kill-after=5s 1800s lxc --project "$DEV_PROJECT" exec "$vm" -- bash -s -- \
+    "$(id -u)" "$(id -g)" "$platform" <"$repo_dir/scripts/dev-vm-setup"; then
+    break
+  else
+    status=$?
+  fi
+  # LXC uses 255 for connection errors; guest preparation is safe to rerun.
+  ((status == 255 && attempt < 3)) || exit "$status"
+  printf 'dev-vm: warning: LXD connection failed; retrying preparation (%s/3).\n' "$((attempt + 1))" >&2
+  sleep 2
+done
+account=$(lxd exec "$vm" --disable-stdin -- getent passwd "$(id -u)")
+IFS=: read -r guest_user _ _ _ _ guest_home _ <<<"$account"
+[[ -n $guest_user && $guest_home == /home/* ]] || die 'guest account has an unexpected home'
+exec 9>&-
+printf 'Opening %s. Exit leaves the VM running.\n' "$vm"
+# runuser initializes supplementary groups, including Docker after setup-system.
+exec lxc --project "$DEV_PROJECT" exec "$vm" --env "TERM=${TERM:-xterm-256color}" \
+  --cwd /workspace/dotfiles -- runuser --user "$guest_user" -- \
+  env "HOME=$guest_home" "USER=$guest_user" "LOGNAME=$guest_user" bash -l

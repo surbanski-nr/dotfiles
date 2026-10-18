@@ -6,12 +6,22 @@ repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=dotfiles_release/fixture.sh
 source "$repo_dir/tests/dotfiles_release/fixture.sh"
 test_root=$(mktemp -d)
-trap 'find "$test_root" -depth -delete' EXIT
+cancellation_pid=
+cleanup() {
+  if [[ -n $cancellation_pid ]]; then
+    pkill --signal KILL --session "$cancellation_pid" 2>/dev/null || true
+    wait "$cancellation_pid" 2>/dev/null || true
+  fi
+  find "$test_root" -depth -delete
+}
+trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 source_dir=$test_root/source
 mkdir -p "$source_dir/scripts"
+cp "$repo_dir/Taskfile.yml" "$source_dir/Taskfile.yml"
+cp "$repo_dir/scripts/dotfiles-release-ci" "$source_dir/scripts/dotfiles-release-ci"
 cp "$repo_dir/release.env" "$source_dir/release.env"
 cp "$repo_dir/tools.env" "$source_dir/tools.env"
 cp "$repo_dir/scripts/dotfiles-release" "$source_dir/scripts/dotfiles-release"
@@ -47,6 +57,7 @@ export TEST_DOCKER_LOG=$test_root/docker.log
 mkdir -p "$RUNNER_TEMP" "$TEST_RELEASE_ASSETS" "$test_root/empty-home" "$test_root/bin"
 ln -s "$repo_dir/tests/fixtures/dotfiles-release-ci/gh" "$test_root/bin/gh"
 ln -s "$repo_dir/tests/fixtures/dotfiles-release-ci/docker" "$test_root/bin/docker"
+ln -s "$repo_dir/tests/fixtures/dotfiles-release-ci/nproc" "$test_root/bin/nproc"
 export PATH="$test_root/bin:$PATH"
 archive=$RELEASE_TAG-$PLATFORM.tar.gz
 
@@ -85,6 +96,8 @@ repack_archive() {
 }
 
 run_ci() { bash "$repo_dir/scripts/dotfiles-release-ci" "$@"; }
+task_executable=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}/task
+run_task_test() { "$task_executable" --dir "$source_dir" test "$@"; }
 run_preflight() { : >"$GITHUB_OUTPUT"; run_ci preflight; }
 matrix() { sed -n 's/^platforms=//p' "$GITHUB_OUTPUT"; }
 
@@ -317,7 +330,7 @@ for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-20
 done
 : >"$TEST_DOCKER_LOG"
 TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" TEST_PARALLEL_DIR="$qualification_parallel" \
-  run_ci test "$source_dir" >"$test_root/qualification.log"
+  run_task_test >"$test_root/qualification.log" 2>&1
 awk '
   /^built / { builds++ }
   / verify / { if (builds != 4) exit 1; verifications++ }
@@ -356,47 +369,104 @@ for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-20
     fail "failed parallel qualification did not clean up $platform"
 done
 
-qualification_parallel=$test_root/qualification-parallel-partial
-mkdir -p "$qualification_parallel"
-: >"$TEST_DOCKER_LOG"
-set +e
-TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
-  TEST_PARALLEL_DIR="$qualification_parallel" TEST_PARALLEL_VERIFY_COUNT=3 \
-  TEST_BUILD_FAIL=debian-13-x86_64 TEST_VERIFY_FAIL=ubuntu-24.04-x86_64 \
-  run_ci test "$source_dir" >"$test_root/qualification-partial.log" 2>&1
-qualification_status=$?
-set -e
-[[ $qualification_status -eq 81 ]] || fail 'qualification hid the failed platform'
-[[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 4 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq 3 ]] ||
-  fail 'one failed platform stopped qualification of the others'
-qualification_root=$(sed -n 's/^Offline packages and logs: //p' "$test_root/qualification-partial.log")
-for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
-  case $platform in
-    debian-13-x86_64) result='build=81 verify=skipped' ;;
-    ubuntu-24.04-x86_64) result='build=0 verify=82' ;;
-    *) result='build=0 verify=0' ;;
-  esac
-  grep -Fx "$platform: $result; logs: $qualification_root/dotfiles-evidence/$platform" \
-    "$qualification_root/summary.md" >/dev/null || fail "qualification lost the final result for $platform"
-  [[ -s $qualification_root/dotfiles-evidence/$platform/build-only.log ]] || fail "qualification lost the build log for $platform"
-  if [[ $platform != debian-13-x86_64 ]]; then
-    [[ -s $qualification_root/dotfiles-evidence/$platform/verify.log ]] || fail "qualification lost the verification log for $platform"
+for cpu_count in 4 2 1; do
+  qualification_parallel=
+  if ((cpu_count == 4)); then
+    qualification_parallel=$test_root/qualification-parallel-partial
+    mkdir -p "$qualification_parallel"
   fi
+  worker_events=$test_root/qualification-workers-$cpu_count
+  : >"$TEST_DOCKER_LOG"
+  set +e
+  TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
+    TEST_CI_CPUS="$cpu_count" TEST_WORKER_EVENTS="$worker_events" \
+    TEST_PARALLEL_DIR="$qualification_parallel" TEST_PARALLEL_VERIFY_COUNT=3 \
+    TEST_BUILD_FAIL=debian-13-x86_64 TEST_VERIFY_FAIL=ubuntu-24.04-x86_64 \
+    run_ci test "$source_dir" >"$test_root/qualification-partial.log" 2>&1
+  qualification_status=$?
+  set -e
+  [[ $qualification_status -eq 81 ]] || fail 'qualification hid the failed platform'
+  [[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 4 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq 3 ]] ||
+    fail 'one failed platform stopped qualification of the others'
+  awk -v cpus="$cpu_count" '
+    $2 == "start" { active[$1]++; if (active[$1] > peak[$1]) peak[$1] = active[$1] }
+    $2 == "end" { active[$1]--; completed[$1]++ }
+    { if (active[$1] < 0 || active[$1] > cpus) failed = 1 }
+    END {
+      if (failed || active["build"] || active["verify"] ||
+          completed["build"] != 4 || completed["verify"] != 3 ||
+          peak["build"] != (cpus < 4 ? cpus : 4) ||
+          peak["verify"] != (cpus < 3 ? cpus : 3)) exit 1
+    }
+  ' "$worker_events" || fail "qualification did not respect $cpu_count available CPUs"
+  qualification_root=$(sed -n 's/^Offline packages and logs: //p' "$test_root/qualification-partial.log")
+  for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
+    case $platform in
+      debian-13-x86_64) result='build=81 verify=skipped' ;;
+      ubuntu-24.04-x86_64) result='build=0 verify=82' ;;
+      *) result='build=0 verify=0' ;;
+    esac
+    grep -Fx "$platform: $result; logs: $qualification_root/dotfiles-evidence/$platform" \
+      "$qualification_root/summary.md" >/dev/null || fail "qualification lost the final result for $platform"
+    [[ -s $qualification_root/dotfiles-evidence/$platform/build-only.log ]] || fail "qualification lost the build log for $platform"
+    if [[ $platform != debian-13-x86_64 ]]; then
+      [[ -s $qualification_root/dotfiles-evidence/$platform/verify.log ]] || fail "qualification lost the verification log for $platform"
+    fi
+  done
+  grep -F 'fixture build failure' "$qualification_root/dotfiles-evidence/debian-13-x86_64/build-only.log" >/dev/null ||
+    fail 'qualification lost the failed build output'
+  grep -F 'fixture offline failure' "$qualification_root/dotfiles-evidence/ubuntu-24.04-x86_64/verify.log" >/dev/null ||
+    fail 'qualification lost the failed verification output'
+  grep -F 'fixture offline health succeeded' "$qualification_root/dotfiles-evidence/amzn-2023-x86_64/verify.log" >/dev/null ||
+    fail 'qualification did not finish a successful platform after other failures'
 done
-grep -F 'fixture build failure' "$qualification_root/dotfiles-evidence/debian-13-x86_64/build-only.log" >/dev/null ||
-  fail 'qualification lost the failed build output'
-grep -F 'fixture offline failure' "$qualification_root/dotfiles-evidence/ubuntu-24.04-x86_64/verify.log" >/dev/null ||
-  fail 'qualification lost the failed verification output'
-grep -F 'fixture offline health succeeded' "$qualification_root/dotfiles-evidence/amzn-2023-x86_64/verify.log" >/dev/null ||
-  fail 'qualification did not finish a successful platform after other failures'
+
+for pair in 'debian13 debian-13-x86_64' 'ubuntu2404 ubuntu-24.04-x86_64' \
+  'ubuntu2604 ubuntu-26.04-x86_64' 'amazonlinux2023 amzn-2023-x86_64'; do
+  read -r alias platform <<<"$pair"
+  : >"$TEST_DOCKER_LOG"
+  TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
+    run_task_test -- "$alias" >"$test_root/qualification-single.log" 2>&1
+  [[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 1 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq 1 ]] ||
+    fail 'single-platform qualification ran other platforms'
+  grep -F "$platform: build=0 verify=0;" "$test_root/qualification-single.log" >/dev/null ||
+    fail 'single-platform qualification did not finish the selected platform'
+done
+
+for phase in build verify; do
+  ready=$test_root/cancellation-$phase.ready
+  TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
+    TEST_HANG_PHASE="$phase" TEST_WORKER_READY="$ready" \
+    setsid env --default-signal=INT,QUIT bash "$repo_dir/scripts/dotfiles-release-ci" \
+    test "$source_dir" debian-13-x86_64 >"$test_root/cancellation-$phase.log" 2>&1 &
+  cancellation_pid=$!
+  deadline=$((SECONDS + 10))
+  until [[ -s $ready ]]; do
+    ((SECONDS < deadline)) || fail "qualification did not reach the blocked $phase worker"
+    sleep 0.05
+  done
+  worker_pid=$(<"$ready")
+  [[ $worker_pid =~ ^[1-9][0-9]*$ ]] || fail 'blocked worker did not report a PID'
+  session=$(ps -o sid= -p "$cancellation_pid")
+  [[ ${session//[[:space:]]/} == "$cancellation_pid" ]] || fail 'cancellation test did not create a private session'
+  kill -TERM "$cancellation_pid"
+  deadline=$((SECONDS + 10))
+  while kill -0 "$cancellation_pid" 2>/dev/null; do
+    ((SECONDS < deadline)) || fail "qualification cancellation left a blocked $phase worker"
+    sleep 0.05
+  done
+  cancellation_status=0
+  wait "$cancellation_pid" || cancellation_status=$?
+  [[ $cancellation_status == 143 ]] || fail "qualification hid cancellation during $phase"
+  if kill -0 "$worker_pid" 2>/dev/null; then fail "cancelled $phase worker is still running"; fi
+  cancellation_pid=
+done
 
 : >"$TEST_DOCKER_LOG"
-TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
-  run_ci test "$source_dir" ubuntu-26.04-x86_64 >"$test_root/qualification-single.log"
-[[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 1 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq 1 ]] ||
-  fail 'single-platform qualification ran other platforms'
-grep -F 'ubuntu-26.04-x86_64: build=0 verify=0;' "$test_root/qualification-single.log" >/dev/null ||
-  fail 'single-platform qualification did not finish the selected platform'
+if run_task_test -- invalid-platform >"$test_root/qualification-alias.log" 2>&1; then
+  fail 'task test accepted an unsupported alias'
+fi
+[[ ! -s $TEST_DOCKER_LOG ]] || fail 'task test started Docker for an unsupported alias'
 : >"$TEST_DOCKER_LOG"
 if run_ci test "$source_dir" invalid-platform >"$test_root/qualification-platform.log" 2>&1; then
   fail 'qualification accepted an unsupported platform'

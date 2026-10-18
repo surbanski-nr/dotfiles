@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+# Model timeout implementations that preserve a background job's ignored SIGINT.
+shift 2
+exec "$@"

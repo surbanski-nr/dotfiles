@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+while (($#)); do
+  if [[ $1 == --output ]]; then
+    printf 'fixture qcow2\n' >"$2"
+    exit 0
+  fi
+  shift
+done
+exit 1

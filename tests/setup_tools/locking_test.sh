@@ -57,12 +57,14 @@ for installer in setup-tools setup-asdf; do
     PATH="$test_root/blocking-download:$PATH" \
     "$test_repository/$installer" "$name" >"$test_root/holder-$installer.log" 2>&1 &
   killed_lock_pid=$!
+  # Redirection creates the marker before printf writes the child PID.
   for ((attempt = 0; attempt < 100; attempt++)); do
-    [[ ! -e $ready ]] || break
+    [[ ! -s $ready ]] || break
     sleep 0.02
   done
-  [[ -f $ready ]] || fail "$installer did not reach the blocked download"
+  [[ -s $ready ]] || fail "$installer did not reach the blocked download"
   killed_lock_child_pid=$(<"$ready")
+  [[ $killed_lock_child_pid =~ ^[1-9][0-9]*$ ]] || fail "$installer reported an invalid download PID"
   assert_locked "$other" "$other_name"
   kill -KILL "$killed_lock_pid"
   wait "$killed_lock_pid" 2>/dev/null || true

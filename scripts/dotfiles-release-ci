@@ -159,8 +159,8 @@ build_and_qualify() {
   containers=("$builder" "$container" "$verifier")
   runtime_image=dotfiles-runtime:$run_key
   if [[ $phase != verify ]]; then
-    timeout 300s docker pull "$builder_image" 2>&1 | tee "$evidence/pull.log"
-    timeout --signal=TERM --kill-after=30s 5400s docker run --rm --init --name "$builder" \
+    timeout --foreground 300s docker pull "$builder_image" 2>&1 | tee "$evidence/pull.log"
+    timeout --foreground --signal=TERM --kill-after=30s 5400s docker run --rm --init --name "$builder" \
       --volume "$source_dir:/workspace:ro" --volume "$output_dir:/out" \
       --env BUILDER_IMAGE="$builder_image" "$builder_image" \
       bash /workspace/scripts/build-dotfiles-release build "$PLATFORM" /workspace /out \
@@ -187,14 +187,14 @@ build_and_qualify() {
       docker cp "$library" "$container:/usr/local/lib/dotfiles/${library##*/}"
     done
     docker cp "$source_dir/system.env" "$container:/usr/local/lib/dotfiles/system.env"
-    timeout --signal=TERM --kill-after=15s 900s docker exec "$container" \
+    timeout --foreground --signal=TERM --kill-after=15s 900s docker exec "$container" \
       bash /usr/local/bin/build-dotfiles-release prepare-runtime "$PLATFORM" offline-test "$test_uid" "$test_home"
-    timeout 300s docker commit "$container" "$runtime_image"
+    timeout --foreground 300s docker commit "$container" "$runtime_image"
     docker rm --force "$container"
   } 2>&1 | tee "$evidence/prepare-runtime.log"
   # HOME in the command below is expanded by the container's shell.
   # shellcheck disable=SC2016
-  timeout --signal=TERM --kill-after=30s 1800s docker run --rm --init --name "$verifier" \
+  timeout --foreground --signal=TERM --kill-after=30s 1800s docker run --rm --init --name "$verifier" \
     --network none --user "$test_uid:$test_uid" --env HOME="$test_home" \
     --env DOTFILES=/tmp/inherited-dotfiles --env DOTFILES_AUTO_ROOT=/tmp/inherited-auto-root \
     --volume "$archive:/artifact.tar.gz:ro" \
@@ -217,9 +217,9 @@ build_and_qualify() {
 }
 
 test_all_platforms() {
-  local source_dir phase platform source_status evidence status result=0
+  local source_dir phase platform source_status evidence status parallelism batch_start result=0
   local requested_platform=${2:-}
-  local -a selected=()
+  local -a selected=() batch=()
   local -A build_status=() verify_status=()
   for platform in "${platforms[@]}"; do
     if [[ -z $requested_platform || $platform == "$requested_platform" ]]; then
@@ -232,6 +232,9 @@ test_all_platforms() {
   source_status=$(git -C "$source_dir" status --porcelain --untracked-files=normal)
   [[ -z $source_status ]] ||
     die 'offline qualification requires a clean committed checkout'
+  parallelism=$(nproc)
+  [[ $parallelism =~ ^[1-9][0-9]*$ ]] || die 'nproc did not report a positive CPU count'
+  if ((parallelism > ${#selected[@]})); then parallelism=${#selected[@]}; fi
   timeout 10s docker info >/dev/null || die 'Docker must be available to the current user'
 
   RELEASE_TAG=dotfiles-${COMMIT_SHA:0:7}
@@ -241,41 +244,45 @@ test_all_platforms() {
   GITHUB_STEP_SUMMARY=$RUNNER_TEMP/summary.md
   export COMMIT_SHA RELEASE_TAG RUNNER_TEMP GITHUB_RUN_ID GITHUB_RUN_ATTEMPT GITHUB_STEP_SUMMARY
   printf 'Offline packages and logs: %s\n' "$RUNNER_TEMP"
+  printf 'Offline qualification workers: %s\n' "$parallelism"
 
   for phase in build-only verify; do
-    workers=()
-    for platform in "${selected[@]}"; do
-      if [[ $phase == verify && ${build_status[$platform]} != 0 ]]; then continue; fi
-      evidence=$RUNNER_TEMP/dotfiles-evidence/$platform
-      mkdir -p "$evidence"
-      printf 'Offline %s: %s (log: %s/%s.log)\n' "$phase" "$platform" "$evidence" "$phase"
-      # A timeout worker forwards cancellation to its subprocesses.
-      PLATFORM=$platform GITHUB_STEP_SUMMARY="$evidence/summary.md" \
-        timeout --signal=TERM --kill-after=30s 10800s \
-        bash "$script_dir/dotfiles-release-ci" "$phase" \
-        "$source_dir" "$RUNNER_TEMP/output/$platform" >"$evidence/$phase.log" 2>&1 &
-      workers[$platform]=$!
-    done
-    for platform in "${selected[@]}"; do
-      [[ -n ${workers[$platform]:-} ]] || continue
-      status=0
-      wait "${workers[$platform]}" || status=$?
-      unset 'workers[$platform]'
-      if [[ $phase == build-only ]]; then
-        build_status[$platform]=$status
-      else
-        verify_status[$platform]=$status
-      fi
-      if ((status)); then
-        printf 'dotfiles-release-ci: offline %s failed for %s (exit %s); see %s/%s/%s.log\n' \
-          "$phase" "$platform" "$status" "$RUNNER_TEMP/dotfiles-evidence" "$platform" "$phase" >&2
-        if ((result == 0)); then result=$status; fi
-      else
-        printf 'Offline %s passed: %s\n' "$phase" "$platform"
-        if [[ $phase == verify ]]; then
-          cat "$RUNNER_TEMP/dotfiles-evidence/$platform/summary.md" >>"$GITHUB_STEP_SUMMARY"
+    for ((batch_start = 0; batch_start < ${#selected[@]}; batch_start += parallelism)); do
+      batch=("${selected[@]:batch_start:parallelism}")
+      workers=()
+      for platform in "${batch[@]}"; do
+        if [[ $phase == verify && ${build_status[$platform]} != 0 ]]; then continue; fi
+        evidence=$RUNNER_TEMP/dotfiles-evidence/$platform
+        mkdir -p "$evidence"
+        printf 'Offline %s: %s (log: %s/%s.log)\n' "$phase" "$platform" "$evidence" "$phase"
+        # A timeout worker forwards cancellation to its subprocesses.
+        PLATFORM=$platform GITHUB_STEP_SUMMARY="$evidence/summary.md" \
+          timeout --signal=TERM --kill-after=30s 10800s \
+          bash "$script_dir/dotfiles-release-ci" "$phase" \
+          "$source_dir" "$RUNNER_TEMP/output/$platform" >"$evidence/$phase.log" 2>&1 &
+        workers[$platform]=$!
+      done
+      for platform in "${batch[@]}"; do
+        [[ -n ${workers[$platform]:-} ]] || continue
+        status=0
+        wait "${workers[$platform]}" || status=$?
+        unset 'workers[$platform]'
+        if [[ $phase == build-only ]]; then
+          build_status[$platform]=$status
+        else
+          verify_status[$platform]=$status
         fi
-      fi
+        if ((status)); then
+          printf 'dotfiles-release-ci: offline %s failed for %s (exit %s); see %s/%s/%s.log\n' \
+            "$phase" "$platform" "$status" "$RUNNER_TEMP/dotfiles-evidence" "$platform" "$phase" >&2
+          if ((result == 0)); then result=$status; fi
+        else
+          printf 'Offline %s passed: %s\n' "$phase" "$platform"
+          if [[ $phase == verify ]]; then
+            cat "$RUNNER_TEMP/dotfiles-evidence/$platform/summary.md" >>"$GITHUB_STEP_SUMMARY"
+          fi
+        fi
+      done
     done
   done
   {

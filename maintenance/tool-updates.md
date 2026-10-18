@@ -7,6 +7,339 @@ candidate installations until rollback has been tested.
 
 Run the commands below from the repository root.
 
+## Local development VM
+
+Use an independent development clone, not the checkout used by the host's active
+dotfiles symlinks. The checkout is shared writable, so editing a live configuration
+would affect the host too. Keep the editor, tmux and Git operations on the host;
+open guest shells in other host tmux panes to run installers and checks. There is
+no need for nested tmux, SSH configuration or GitHub authentication in the VM.
+
+The Linux x86-64 host needs KVM, an initialized LXD installation and access to
+`lxc`, `jq`, `flock`, `curl` and the pinned Task executable. By default the task
+explicitly selects LXD project `default`, network `lxdbr0` and storage `default`.
+It does not change the client's current project or initialize LXD for you.
+See [LXD projects, networks and host firewall](#lxd-projects-networks-and-host-firewall)
+below to inspect these resources, configure a bridge or diagnose blocked traffic.
+`dev` never edits host firewall rules. Bootstrap network failures are warnings:
+the guest shell still opens so the VM can be repaired; missing prerequisites and
+Task can be retried later.
+
+```bash
+bash scripts/install-validation-tool task
+bin/task dev
+bin/task dev -- debian13
+bin/task dev -- ubuntu2404
+bin/task dev -- ubuntu2604
+bin/task dev -- amazonlinux2023
+```
+
+The native Task `--` separator forwards the short platform name. The shared
+`PLATFORMS` map in `Taskfile.yml` maps OS aliases to release platform IDs and VM
+images for both `dev` and `test`. Debian and Ubuntu use
+LXD cloud images; Amazon Linux uses the official KVM image with a checked SHA256
+and a small cloud-init bootstrap for the LXD agent. Docker build images remain
+pinned independently in `release.env`.
+
+The default VM has 1 vCPU, 16 GiB RAM and an 80 GiB root disk. The current Azure
+host is itself a Hyper-V VM; both two- and eight-vCPU nested guests stalled under
+full validation, although short two-vCPU probes passed. One vCPU passed native
+validation on all supported OSes without changing host services or QEMU CPU
+flags. Increase `DEV_CPUS` only after checking the larger allocation on your
+host. Set resources when creating a VM; existing VMs keep their allocation.
+Put overrides before `--`:
+
+```bash
+bin/task dev DEV_CPUS=1 DEV_MEMORY=8GiB DEV_DISK=40GiB -- ubuntu2404
+# Custom initialized LXD resources:
+bin/task dev DEV_PROJECT=default DEV_NETWORK=lxdbr0 DEV_STORAGE=default -- debian13
+```
+
+One persistent VM is reused per checkout and platform. Its name includes the
+platform, checkout hash and creation timestamp; the task prints it on entry.
+First boot can take several minutes; `dev` waits up to ten minutes for the LXD
+agent after starting the VM. Guest preparation allows up to three attempts for
+transient LXD connection failures; other preparation errors stop the task.
+Run the same command in another host tmux pane for another shell in that VM.
+`lxc exec` opens a local terminal session, not an SSH connection. Exiting a shell
+does not stop the VM or other sessions.
+
+The checkout is mounted at `/workspace/dotfiles`, the shell's initial directory.
+The ordinary guest user has the host's UID/GID and passwordless guest-only sudo.
+Only this checkout is shared. The guest has its own kernel, systemd, HOME,
+`~/bin`, asdf installations, history and Docker storage. Host HOME, SSH keys and
+Docker sockets are never mounted. The checkout's `bin/` is masked with a guest
+bind mount backed by `~/.local/share/dotfiles-validation`; host executables and
+absolute Python venv paths are neither used nor changed. The task bootstraps
+only minimal download/Git/sudo prerequisites and the pinned private Task, exposed
+through a guest-local `/usr/local/bin/task` link.
+
+Prepare the actual candidate inside the VM, using the normal installers:
+
+```bash
+./setup-system
+./setup-tools
+./setup-asdf
+
+for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
+  if [[ -f $file && ! -L $file && ! -e $file.before-dotfiles && ! -L $file.before-dotfiles ]]; then
+    mv -- "$file" "$file.before-dotfiles"
+  fi
+done
+
+./bstow stow bash tmux mc k9s nvim2
+exit
+```
+
+Reopen with `task dev` on the host to pick up Docker group membership and the
+new shell configuration. Tmux and Nvim plugins are not preinstalled by `dev`;
+use their normal setup when testing those configurations. Edit and commit on
+the host, then run the relevant checks in the guest:
+
+```bash
+./setup-tools nvim
+hash -r
+nvim --version
+dotfiles-check
+task validate
+bash nvim2/.config/nvim2/tests/check.sh
+task test -- debian13
+# In Nvim2: :checkhealth
+```
+
+`setup-tools` reuses an intact installation. A new version needs its complete
+`version|full_URL|SHA256` record; rerunning installs it and switches the link
+in `~/bin`. Earlier installations remain available for rollback. Restart the
+affected application after switching versions.
+
+`task test` still uses Docker, building complete archives and installing them
+as an ordinary user in separate containers with networking disabled. In the VM
+it uses the VM's own Docker daemon; on the host it uses the host daemon. The
+checkout must be clean and committed. Logs and packages remain under the printed
+temporary directory in that environment, not in a host dotfiles installation.
+Without a platform argument it checks all four platforms. Build and verification
+workers run in batches bounded by `nproc`, so a one-vCPU guest runs one platform
+at a time rather than competing with three other builds. A failed platform does
+not stop the remaining platforms, and verification only runs for successful builds.
+
+No extra down task or local VM-state database is needed. To stop an idle VM or
+recreate it, use the exact name and project printed by `dev`:
+
+```bash
+vm_name=dotfiles-dev-debian13-CHECKOUT_HASH-TIMESTAMP
+lxc --project default stop "$vm_name"
+# Delete only that VM when its experiments are no longer needed:
+lxc --project default delete "$vm_name"
+task dev
+```
+
+Deleting a VM removes its installed tools, private validation files and Docker
+data. The shared development checkout stays on the host. A stopped VM restarts
+with `task dev`, which reapplies the private `bin/` bind mount after reboot.
+
+## LXD projects, networks and host firewall
+
+Run the commands in this section on the LXD host, not inside the development VM.
+Inspection commands are read-only. Creating projects/bridges, changing network
+settings and adding firewall rules are explicit administrator operations; `dev`
+does not perform them. Review existing users of a resource before changing it.
+
+### Select the project and bridge
+
+`DEV_PROJECT` selects an LXD project, not a Git repository or a cloud project.
+Projects separate instance names and can have their own profiles, images and
+networks, depending on their `features.*` settings. `DEV_PROJECT=default` keeps
+development VMs in the default LXD project even if the client's current project
+is something else. Every `dev` LXC command explicitly passes `--project`.
+
+`DEV_NETWORK` selects a managed LXD network for the VM's NIC. `lxdbr0` is the
+usual bridge created by `lxd init`, similar to Docker's `docker0`: a virtual
+switch with DHCP and normally NAT for outbound traffic. Its name is conventional,
+not mandatory. A project name or a separate bridge alone is not a network
+security boundary; VMs sharing a bridge can communicate unless policy blocks it.
+The Docker daemon and `docker0` inside the VM are separate from the host's Docker.
+
+```bash
+lxc project list
+lxc project show default
+lxc --project default profile show default
+lxc --project default storage list
+lxc --project default network list
+lxc --project default network show lxdbr0
+ip -brief address show
+ip -4 route show
+```
+
+Choose a network with type `bridge`, `MANAGED=YES`, the intended subnet and working
+outbound connectivity. Inspect `ipv4.address`, `ipv4.nat`, and `used_by`; do not
+select the host's physical NIC or Docker's unmanaged `docker0` as `DEV_NETWORK`.
+With `features.networks=false`, a project shares the default project's networks.
+With `features.profiles=false` or `features.images=false`, those resources are
+also shared with `default`. Inspect the selected project's settings rather than
+assuming a bridge or default profile is available there.
+
+Normally use `bin/task dev` with no network override. On the current Azure host,
+both `lxdbr0` and `k8cbr0` exist with IPv4 NAT enabled. The host's Docker firewall
+has `FORWARD DROP`, but `DOCKER-USER` explicitly permits traffic from `k8cbr0`
+and established replies to it, not `lxdbr0`. `k8cbr0` was already used by other
+LXD VMs; it is a local workaround, not a dotfiles isolation requirement:
+
+```bash
+bin/task dev DEV_NETWORK=k8cbr0 -- debian13
+```
+
+If a separate instance namespace is useful, optionally create a project sharing
+the default project's profiles, images and bridges. This avoids rebuilding the
+default profile/storage setup; it does not create a separate host firewall:
+
+```bash
+lxc project create dotfiles-dev \
+  -c features.profiles=false -c features.images=false -c features.networks=false
+lxc project show dotfiles-dev
+bin/task dev DEV_PROJECT=dotfiles-dev DEV_NETWORK=lxdbr0 -- debian13
+```
+
+### Inspect blocking and allowing rules
+
+```bash
+sysctl net.ipv4.ip_forward
+sudo iptables --version
+sudo iptables -S FORWARD
+sudo iptables -L FORWARD -n -v --line-numbers
+sudo iptables -S DOCKER-USER
+sudo iptables -L DOCKER-USER -n -v --line-numbers
+sudo iptables -S DOCKER-FORWARD
+sudo iptables -S INPUT
+sudo iptables -t nat -S POSTROUTING
+# All IPv4 chains, including those reached through jumps:
+sudo iptables-save -c
+# LXD or another firewall manager may also install native nftables rules:
+sudo nft list ruleset
+```
+
+IPv4 forwarding must be `1`; NAT alone does not bypass a firewall drop. In
+`iptables -S` output, `-P FORWARD DROP` is the fallback policy, `-j ACCEPT` allows
+matching traffic, and `-j DROP` or `-j REJECT` blocks it. Follow jumps such as
+`DOCKER-USER` and `DOCKER-FORWARD`; their order and the first matching terminal
+rule matter. Packet counters help identify which rules receive the failed
+connection's traffic. An accept in one nftables base chain can still be followed
+by a drop in another, so inspect the complete ruleset when both tools are used.
+
+`iptables --version` reporting `nf_tables` is the iptables compatibility frontend
+and still supports the commands below. Docker's native nftables firewall backend
+is different and has no `DOCKER-USER` chain. If that chain is absent, or UFW,
+firewalld or another manager owns the policy, configure that manager's forwarding
+rules; do not create a disconnected `DOCKER-USER` chain or mix backends blindly.
+For enabled IPv6, inspect `sudo ip6tables -S FORWARD` too; IPv4 exceptions do not
+fix or secure IPv6 forwarding.
+
+If the VM has no DHCP lease or cannot reach the bridge's DNS service, inspect
+host `INPUT` rules as well. LXD normally supplies these rules for its managed
+bridge. Opening `FORWARD` does not open DHCP/DNS ports on the host, and allowing
+all host input is not an appropriate repair.
+
+### Configure a new bridge or repair the standard one
+
+Create a separate managed bridge only if one is actually wanted. LXD can choose
+an IPv4 subnet automatically; inspect it for conflicts with host, VPN, Docker,
+other LXD and remote networks before use. This example keeps the new bridge
+IPv4-only and does not change existing bridges:
+
+```bash
+lxc --project default network create devbr0 \
+  ipv4.address=auto ipv4.nat=true ipv6.address=none
+lxc --project default network show devbr0
+```
+
+Alternatively, retain the existing `lxdbr0` and enable NAT only if it is missing:
+
+```bash
+lxc --project default network show lxdbr0
+lxc --project default network set lxdbr0 ipv4.nat=true
+```
+
+Changing `ipv4.address` is not needed to fix a forwarding drop and can disrupt
+every VM using that bridge. Review `used_by`, plan new DHCP leases and route
+changes, and keep a recovery path before changing a shared subnet.
+
+If IPv4 forwarding was disabled, enable it only after reviewing host policy:
+
+```bash
+sudo sysctl -w net.ipv4.ip_forward=1
+```
+
+This sysctl change is temporary. For a deliberate persistent setting, use the
+host's existing sysctl configuration, or edit an administrator-owned file such
+as `/etc/sysctl.d/60-lxd-dev-forwarding.conf` containing
+`net.ipv4.ip_forward=1`. Do not overwrite unrelated sysctl settings.
+
+On a host using Docker's iptables backend, allow the chosen bridge's outbound
+traffic and established replies in `DOCKER-USER`. Replace `dev_bridge` with
+`devbr0` for the new bridge; choose `dev_uplink` from `ip -4 route show`, not from
+the example name. These exceptions are limited to that bridge and uplink:
+
+```bash
+dev_bridge=lxdbr0
+dev_uplink=eth0
+ip link show dev "$dev_bridge"
+ip link show dev "$dev_uplink"
+sudo iptables -S DOCKER-USER
+
+sudo iptables -C DOCKER-USER -i "$dev_bridge" -o "$dev_uplink" -j ACCEPT ||
+  sudo iptables -I DOCKER-USER 1 -i "$dev_bridge" -o "$dev_uplink" -j ACCEPT
+sudo iptables -C DOCKER-USER -i "$dev_uplink" -o "$dev_bridge" \
+  -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT ||
+  sudo iptables -I DOCKER-USER 1 -i "$dev_uplink" -o "$dev_bridge" \
+    -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+sudo iptables -L DOCKER-USER -n -v --line-numbers
+```
+
+Check that the interfaces and chain exist before running the insertion commands.
+The `-C` checks prevent adding duplicates on repeat runs. Inserting at the start
+places these scoped exceptions before an existing blocking rule. They allow VMs
+to initiate connections through the chosen uplink, including reachable LAN/VPN
+destinations; they do not allow unsolicited inbound connections or isolate VMs
+from each other. Do not flush chains, disable the firewall, or set the whole
+`FORWARD` policy to `ACCEPT` to fix one bridge.
+
+These are runtime rules. Use the host's existing firewall persistence mechanism
+for the same scoped exceptions and recheck them after reboot or Docker restart.
+Do not blindly save/restore Docker's and LXD's generated NAT/container rules.
+To remove only the two exceptions added above, reuse the same interface values:
+do not remove pre-existing rules that the `-C` checks merely reused.
+
+```bash
+sudo iptables -D DOCKER-USER -i "$dev_bridge" -o "$dev_uplink" -j ACCEPT
+sudo iptables -D DOCKER-USER -i "$dev_uplink" -o "$dev_bridge" \
+  -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+```
+
+After repairing `lxdbr0`, use `bin/task dev`. After preparing `devbr0`, use
+`bin/task dev DEV_NETWORK=devbr0`. `DEV_NETWORK` is applied when creating a VM;
+changing it does not move an already-existing VM. For a dev-created VM, inspect
+its local NIC, stop only that VM, and change its device explicitly:
+
+```bash
+dev_vm=dotfiles-dev-debian13-CHECKOUT_HASH-TIMESTAMP
+lxc --project default config device show "$dev_vm"
+lxc --project default stop "$dev_vm" --timeout 60
+lxc --project default config device set "$dev_vm" eth0 network=devbr0
+bin/task dev DEV_NETWORK=devbr0 -- debian13
+```
+
+Replace the VM name, project and NIC device name with the inspected values.
+Dev-created VMs have a local `eth0` device; an inherited NIC on another VM needs
+`lxc config device override` instead. Do not change the shared default profile
+just to move one VM. Reconnecting can change its address, so verify routes, DNS
+and a bounded HTTPS request inside the guest, then inspect host counters again:
+
+```bash
+ip -4 route show
+getent ahostsv4 github.com
+curl --fail --show-error --location --connect-timeout 5 --max-time 20 \
+  --output /dev/null https://github.com
+```
+
 ## Disposable candidate
 
 Start from an independent clone. The build scripts require a real `.git`
@@ -542,7 +875,7 @@ For retained offline releases, `dotfiles-release health [ID]` checks integrity
 and light runtime probes without activation, defaulting to `current`.
 Install and set share those probes. Their `--skip-health` flag bypasses runtime
 diagnostics only, not integrity; it is not a way to edit installed payloads.
-Full offline functional qualification remains part of `task test:offline`.
+Full offline functional qualification remains part of `task test`.
 
 Test a plugin change in the disposable checkout and data directories. Use the
 documented `vim.pack` update command to regenerate `nvim-pack-lock.json`; never
@@ -559,6 +892,14 @@ timeout --signal=TERM --kill-after=30s 1200s \
 timeout --signal=TERM --kill-after=30s 1200s \
   env NVIM2_CHECK_TOOLS=1 nvim2/.config/nvim2/tests/check.sh
 ```
+
+Each Lua case has a 120-second limit, overridable with
+`NVIM2_CHECK_TIMEOUT_SECONDS`. Cold TypeScript server/formatter startup and
+asynchronous YAML formatting can wait up to 15 seconds; ESLint has 30 seconds.
+The first Go SDK run and the first package/test debug builds have 60 seconds.
+Other Go commands keep 30 seconds, and adapter requests, stepping and cleanup
+keep 15 seconds. Exact formatting and debugger assertions remain enabled, and
+startup benchmarks still report the measured times.
 
 Capture unfiltered health and command output after asynchronous checks have
 had time to finish:
