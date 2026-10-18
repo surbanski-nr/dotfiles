@@ -16,7 +16,7 @@ end
 local overrides = {
   Boolean = { fg = '#ffcaff', ctermfg = 13 },
   CursorLineNr = { fg = '#ff9e64', ctermfg = 214 },
-  MatchParen = { fg = '#ff9e64', bg = '#3f342d', ctermfg = 214, ctermbg = 237 },
+  MatchParen = { fg = '#ff9e64', ctermfg = 214 },
   MiniStatuslineFilename = { link = 'StatusLine' },
   Nvim2MatrixBright = { fg = '#eef1f8', ctermfg = 15 },
   Nvim2MatrixDim = { fg = '#176b66', ctermfg = 30 },

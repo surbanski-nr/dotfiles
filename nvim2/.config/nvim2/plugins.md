@@ -182,6 +182,7 @@ characters or colors in
 
 Neovim's built-in `matchparen` plugin highlights a matching `()`, `[]` or `{}`
 pair in orange when the cursor is on or immediately after one of the brackets.
+Only the bracket text changes color; the existing line background is preserved.
 The small local `highlight_enclosing_pairs.lua` module keeps the nearest pair orange while
 the cursor is anywhere inside it. It walks upward through the current
 Treesitter node instead of scanning the file, and silently does nothing for a
