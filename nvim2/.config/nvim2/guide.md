@@ -78,7 +78,9 @@ Notation used below:
 | Previous or next paragraph/block         | `{`, `}`                              |
 | Matching bracket                         | `%`                                   |
 | Half-page down or up                     | `<C-d>`, `<C-u>`                      |
-| Center current line                      | `zz`                                  |
+| Full-page down or up                     | `<C-f>`, `<C-b>`                      |
+| Scroll view down or up one line          | `<C-e>`, `<C-y>`                      |
+| Place current line at center, top, bottom | `zz`, `zt`, `zb`                      |
 | Find character forward                   | `f<char>`                             |
 | Move before character forward            | `t<char>`                             |
 | Find/move before character backward      | `F<char>`, `T<char>`                  |
@@ -93,6 +95,12 @@ Notation used below:
 | Browse and open a jump-list location     | `<leader>sj`, select, then `<Enter>`  |
 | Toggle relative or absolute line numbers | `<leader>tl`                          |
 | Toggle the right-edge position marker    | `<leader>ts` or `:ScrollMarkerToggle` |
+
+Press `Esc` before using the scrolling keys. `<C-d>` and `<C-u>` keep their
+native Normal-mode behavior and move the cursor with the view. `<C-e>` and
+`<C-y>` scroll the view, moving the cursor only when needed to keep it visible.
+The profile keeps 15 lines of context around the cursor when the window is
+large enough, so `zt` and `zb` leave that margin near the edge.
 
 `<leader>tl` changes only the current window. Line numbers stay visible: the
 default relative mode is useful for motions such as `5j`, while absolute mode

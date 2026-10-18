@@ -855,6 +855,14 @@ JSON array of database names. `day` stores daily notes under
 `$NOTES/periodic-notes/daily-notes`, falling back to `SECOND_BRAIN` for older
 private configuration, and opens them with Nvim2.
 
+## Tmux redraws
+
+The configuration enables synchronized redraws for `xterm-256color` clients.
+Terminals supporting this mode display each redraw as one frame, including
+cursor visibility changes, so activity in another pane does not flash the
+cursor. Reattach the client after changing terminal features; the session and
+pane processes keep running.
+
 ## Tmux eye-break timer
 
 Press `Ctrl+a`, release it, then press `t` to open the local eye-break timer

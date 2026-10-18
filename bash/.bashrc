@@ -396,6 +396,7 @@ elif command -v fdfind >/dev/null 2>&1; then
 else
   export FZF_DEFAULT_COMMAND='find . -type f -not -path "*/.git/*" -print'
 fi
+export FZF_CTRL_T_COMMAND=$FZF_DEFAULT_COMMAND
 
 # fzf key bindings
 _dotfiles_fzf_provider=$(type -P fzf 2>/dev/null || true)
