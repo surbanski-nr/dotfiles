@@ -26,20 +26,33 @@ if PATH="$test_bin" command -v rg >/dev/null 2>&1; then
   fail 'isolated validation PATH unexpectedly contains rg'
 fi
 
-PATH="$test_bin" /bin/bash "$repo_dir/scripts/validate" configs
-
 syntax_repo=$test_root/syntax-repo
 mkdir -p "$syntax_repo/bash" "$syntax_repo/scripts" "$syntax_repo/tests"
 cp "$repo_dir/scripts/validate" "$syntax_repo/scripts/validate"
-cp "$repo_dir/bash/.bashrc" "$syntax_repo/bash/.bashrc"
-cp "$repo_dir/bash/.bash_profile" "$syntax_repo/bash/.bash_profile"
-cp "$repo_dir/bash/.bash_aliases" "$syntax_repo/bash/.bash_aliases"
-cp "$repo_dir/tests/bash_test.sh" "$syntax_repo/tests/bash_test.sh"
-cp "$repo_dir/release.env" "$syntax_repo/release.env"
-cp "$repo_dir/tools.env" "$syntax_repo/tools.env"
-cp "$repo_dir/validation.env" "$syntax_repo/validation.env"
-cp "$repo_dir/system.env" "$syntax_repo/system.env"
-cp "$repo_dir/README.md" "$syntax_repo/README.md"
+for file in .bashrc .bash_profile .bash_aliases; do
+  printf ':\n' >"$syntax_repo/bash/$file"
+done
+cp "$repo_dir/tests/fixtures/validation/batch-test" "$syntax_repo/tests/bash_test.sh"
+mkdir -p "$syntax_repo/tests/fixtures/bash"
+printf '#!/usr/bin/env bash\n:\n' >"$syntax_repo/tests/fixtures/bash/input"
+printf '# Validation fixture\n' >"$syntax_repo/README.md"
+cp "$repo_dir/.yamllint.yml" "$syntax_repo/.yamllint.yml"
+mkdir -p "$syntax_repo/git" "$syntax_repo/.github/workflows"
+printf '[user]\n\tname = Validation fixture\n' >"$syntax_repo/git/.gitconfig"
+printf '{"enabled":true}\n' >"$syntax_repo/config.json"
+cat >"$syntax_repo/.github/workflows/validate.yml" <<'EOF'
+---
+name: Fixture
+'on': push
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: 'true'
+EOF
+git init -q "$syntax_repo"
+PATH="$test_bin" /bin/bash "$syntax_repo/scripts/validate" configs
+
 printf 'if then\n' >"$syntax_repo/bash/.bash_profile"
 ln -s "$(command -v shellcheck)" "$test_bin/shellcheck"
 
@@ -54,7 +67,7 @@ set -e
 [[ $syntax_output == *'bash/.bash_profile'* ]] ||
   fail 'Bash syntax failure did not identify the invalid later file'
 
-cp "$repo_dir/bash/.bash_profile" "$syntax_repo/bash/.bash_profile"
+printf ':\n' >"$syntax_repo/bash/.bash_profile"
 mkdir -p "$syntax_repo/maintenance"
 for document in maintenance/setup.md maintenance/tool-updates.md; do
   cat >"$syntax_repo/$document" <<'EOF'
@@ -83,7 +96,7 @@ tmux_log=$test_root/tmux.log
 
 set +e
 PATH="$test_bin" TEST_REAL_TMUX="$real_tmux" TEST_TMUX_LOG="$tmux_log" \
-  /bin/bash "$repo_dir/scripts/validate" configs >/dev/null 2>&1
+  /bin/bash "$repo_dir/scripts/validate" tmux >/dev/null 2>&1
 tmux_status=$?
 set -e
 [[ $tmux_status -eq 73 ]] || fail 'tmux failure fixture returned an unexpected status'
@@ -100,11 +113,11 @@ ln -s "$repo_dir/tests/fixtures/validation/zizmor-offline" "$test_bin/zizmor"
 zizmor_log=$test_root/zizmor.log
 env -u GH_TOKEN -u GITHUB_TOKEN TEST_ZIZMOR_LOG="$zizmor_log" \
   VALIDATION_TOOLS_DIR="$test_root/empty-tools" PATH="$test_bin" \
-  /bin/bash "$repo_dir/scripts/validate" workflows
+  /bin/bash "$syntax_repo/scripts/validate" workflows
 grep -Fx -- '--offline --persona=pedantic --config zizmor.yml .' "$zizmor_log" \
   >/dev/null || fail 'workflow validation did not select the offline Zizmor audit'
 
-TEST_REPO_DIR="$repo_dir" TEST_TMP="$test_root" python3 - <<'PY'
+TEST_REPO_DIR="$repo_dir" TEST_BASH_REPO="$syntax_repo" TEST_TMP="$test_root" python3 - <<'PY'
 import errno
 import os
 from pathlib import Path
@@ -131,16 +144,18 @@ def stop_test(signum, _frame):
 signal.signal(signal.SIGTERM, stop_test)
 
 
-for mode in ('bash', 'configs'):
+for mode in ('bash', 'tmux'):
     temporary = root / ('interrupt-' + mode)
     temporary.mkdir()
     pid, terminal = pty.fork()
     if pid == 0:
-        os.chdir(repo)
-        os.environ.update(TMPDIR=str(temporary), TERM='xterm-256color')
+        target = Path(os.environ['TEST_BASH_REPO']) if mode == 'bash' else repo
+        os.chdir(target)
+        os.environ.update(TMPDIR=str(temporary), TERM='xterm-256color',
+                          TEST_BATCH_READY=str(temporary / 'batch-ready'))
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
-        os.execv('/bin/bash', ['bash', str(repo / 'scripts/validate'), mode])
+        os.execv('/bin/bash', ['bash', str(target / 'scripts/validate'), mode])
     sessions = {pid}
     servers = set()
     output = bytearray()
@@ -165,9 +180,7 @@ for mode in ('bash', 'configs'):
                     if error.errno != errno.EIO:
                         raise
             servers.update(temporary.glob('dotfiles-eye-timer.*/socket'))
-            running = (bool(servers) if mode == 'configs' else
-                       any('bash tests/bash_test.sh' in records[child][3]
-                           for child in children if child in records))
+            running = bool(servers) if mode == 'tmux' else (temporary / 'batch-ready').exists()
             if running and not interrupted:
                 os.write(terminal, b'\x03')
                 interrupted = True

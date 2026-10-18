@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+: "${TEST_BATCH_READY:?}"
+
+# Exercise cleanup of a nested process group and an interactive Bash child.
+timeout 30s bash --noprofile --norc -i <<'BASH'
+printf '%s\n' "$BASHPID" >"$TEST_BATCH_READY"
+sleep 30
+BASH

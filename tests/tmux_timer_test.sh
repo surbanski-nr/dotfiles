@@ -186,6 +186,7 @@ try:
     assert tmux('show-options', '-gv', 'status-interval') == '5', 'timer changed the status refresh interval'
     print('Tmux eye timer tests passed')
 finally:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
     subprocess.run(command + ['kill-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
     for master, slave, process in clients:
         if process.poll() is None:

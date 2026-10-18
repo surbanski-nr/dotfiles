@@ -892,7 +892,7 @@ Run its focused integration checks with a private tmux server and terminal:
 timeout 60s bash tests/tmux_timer_test.sh
 ```
 
-They also run as part of `task validate:configs` and `task validate`.
+They also run as part of `task validate:tmux` and `task validate`.
 
 ## TPM and Krew
 

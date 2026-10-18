@@ -19,7 +19,7 @@ die() {
 
 usage() {
   printf '%s\n' \
-    'usage: validate {bash|configs|nvim2|repo|scripts|workflows}' \
+    'usage: validate {bash|configs|nvim2|repo|scripts|tmux|tooling|workflows}' \
     >&2
   exit 2
 }
@@ -94,6 +94,30 @@ check_shell_syntax() {
   done
 }
 
+check_shell_files() {
+  local file first_line
+  local bash_files=()
+  local posix_files=()
+
+  for file in "$@"; do
+    IFS= read -r first_line <"$file" || true
+    case "$first_line" in
+      *bash*) bash_files+=("$file") ;;
+      '#!/bin/sh') posix_files+=("$file") ;;
+      *) die "unsupported or missing shell shebang: $file" ;;
+    esac
+  done
+  check_shell_syntax bash "${bash_files[@]}"
+  check_shell_syntax sh "${posix_files[@]}"
+  for file in "$@"; do
+    if [[ $file == tests/fixtures/bash/scenario ]]; then
+      shellcheck --exclude=SC1091 "$file"
+    else
+      shellcheck --external-sources --source-path=SCRIPTDIR "$file"
+    fi
+  done
+}
+
 check_markdown_bash() {
   local document
   local block_file=
@@ -139,11 +163,12 @@ validate_bash() {
     tests/bash_test.sh
   )
 
-  check_shell_syntax bash "${files[@]}" release.env tools.env validation.env system.env
+  check_shell_syntax bash "${files[@]}"
   check_markdown_bash README.md maintenance/setup.md maintenance/tool-updates.md \
     nvim2/.config/nvim2/offline-releases.md
   shellcheck --shell=bash --external-sources --source-path=SCRIPTDIR \
     "${files[@]}"
+  check_shell_files tests/fixtures/bash/*
   run_test 120s bash tests/bash_test.sh
 }
 
@@ -156,7 +181,6 @@ validate_scripts() {
   need shellcheck
   need tar
   need timeout
-  local bash_files=()
   local files=(
     bstow
     setup-asdf
@@ -164,7 +188,6 @@ validate_scripts() {
     setup-tools
     vim/setup
     tests/bstow_test.sh
-    tests/install_validation_tool_test.sh
     tests/dotfiles_release_test.sh
     tests/dotfiles_release_ci_test.sh
     tests/offline_debug_adapter_test.sh
@@ -174,45 +197,28 @@ validate_scripts() {
     tests/setup_asdf_test.sh
     tests/setup_system_test.sh
     tests/setup_tools_test.sh
-    tests/tmux_timer_test.sh
-    tests/validate_test.sh
   )
-  files+=(tmux/.tmux/*.sh)
-  local first_line
-  local posix_files=()
 
   while IFS= read -r -d '' file; do
-    files+=("$file")
+    case "$file" in
+      scripts/validate | scripts/install-validation-tool) ;;
+      *) files+=("$file") ;;
+    esac
   done < <(find scripts -maxdepth 1 -type f -print0 | sort -z)
   while IFS= read -r -d '' file; do
     files+=("$file")
   done < <(find tests/dotfiles_release tests/setup_tools -type f -name '*.sh' -print0 | sort -z)
   if [[ -d tests/fixtures ]]; then
     while IFS= read -r -d '' file; do
-      files+=("$file")
+      case "$file" in
+        tests/fixtures/bash/* | tests/fixtures/validation/*) ;;
+        *) files+=("$file") ;;
+      esac
     done < <(find tests/fixtures -type f -print0 | sort -z)
   fi
 
-  for file in "${files[@]}"; do
-    IFS= read -r first_line <"$file" || true
-    case "$first_line" in
-      *bash*) bash_files+=("$file") ;;
-      '#!/bin/sh') posix_files+=("$file") ;;
-      *) die "unsupported or missing shell shebang: $file" ;;
-    esac
-  done
-
-  check_shell_syntax bash "${bash_files[@]}"
-  check_shell_syntax sh "${posix_files[@]}"
-  for file in "${files[@]}"; do
-    if [[ $file == tests/fixtures/bash/scenario ]]; then
-      shellcheck --exclude=SC1091 "$file"
-    else
-      shellcheck --external-sources --source-path=SCRIPTDIR "$file"
-    fi
-  done
+  check_shell_files "${files[@]}"
   run_test 120s bash tests/bstow_test.sh
-  run_test 30s bash tests/install_validation_tool_test.sh
   run_test 600s bash tests/dotfiles_release_test.sh
   run_test 120s bash tests/dotfiles_release_ci_test.sh
   run_test 30s bash tests/offline_debug_adapter_test.sh
@@ -254,17 +260,8 @@ validate_nvim2() {
 validate_configs() {
   need git
   need jq
-  need python3
-  need script
-  need tmux
   need yamllint
   local json_files=()
-  local socket="dotfiles-validate-$$"
-  local client configured_path pane_active_border_style pane_border_lines
-  local pane_border_style repeat_time reloaded_value status_style tmux_config
-  local temporary_home window_status_current_style
-  local client_input client_stderr
-  local plugin tpm_root
   local yaml_files=()
 
   while IFS= read -r -d '' file; do
@@ -279,6 +276,7 @@ validate_configs() {
 
   while IFS= read -r -d '' file; do
     [[ -f $file ]] || continue
+    [[ $file == nvim2/.config/nvim2/nvim-pack-lock.json ]] && continue
     [[ $file == *.json ]] && json_files+=("$file")
   done < <(git ls-files --cached --others --exclude-standard -z | sort -z)
   for file in "${json_files[@]}"; do
@@ -286,6 +284,23 @@ validate_configs() {
   done
 
   git config --file git/.gitconfig --null --list >/dev/null
+}
+
+validate_tmux() {
+  need git
+  need python3
+  need script
+  need shellcheck
+  need tmux
+  need timeout
+  local socket="dotfiles-validate-$$"
+  local client configured_path pane_active_border_style pane_border_lines
+  local pane_border_style repeat_time reloaded_value status_style tmux_config
+  local temporary_home window_status_current_style
+  local client_input client_stderr
+  local plugin tpm_root
+
+  check_shell_files tmux/.tmux/*.sh tests/tmux_timer_test.sh tests/fixtures/validation/tpm
   for plugin in tpm tmux-sensible tmux-resurrect tmux-continuum; do
     git grep -q -e "^set -g @plugin 'tmux-plugins/$plugin'$" -- tmux/.tmux.conf ||
       die "tmux plugin is not declared at top level: $plugin"
@@ -373,6 +388,21 @@ validate_configs() {
   run_test 60s bash tests/tmux_timer_test.sh
 }
 
+validate_tooling() {
+  need bash
+  need python3
+  need shellcheck
+  need timeout
+
+  check_shell_files scripts/validate scripts/install-validation-tool \
+    tests/validate_test.sh tests/install_validation_tool_test.sh \
+    tests/fixtures/validation/batch-test \
+    tests/fixtures/validation/tmux-fail-show-options \
+    tests/fixtures/validation/zizmor-offline
+  run_test 30s bash tests/install_validation_tool_test.sh
+  run_test 120s bash tests/validate_test.sh
+}
+
 validate_workflows() {
   need actionlint
   need shellcheck
@@ -449,8 +479,6 @@ validate_repo() {
     [[ -x $file ]] || die "executable bit is missing: $file"
   done
 
-  run_test 120s bash tests/validate_test.sh
-
   if [[ $base =~ ^[0-9a-f]{40}$ ]] &&
     [[ $base != 0000000000000000000000000000000000000000 ]] &&
     git cat-file -e "$base^{commit}" 2>/dev/null; then
@@ -466,6 +494,8 @@ case ${1:-} in
   nvim2) validate_nvim2 ;;
   repo) validate_repo ;;
   scripts) validate_scripts ;;
+  tmux) validate_tmux ;;
+  tooling) validate_tooling ;;
   workflows) validate_workflows ;;
   *) usage ;;
 esac

@@ -18,6 +18,8 @@ tasks:
       - validate:nvim2
       - validate:repo
       - validate:scripts
+      - validate:tmux
+      - validate:tooling
       - validate:workflows
 
   validate:bash:
@@ -27,7 +29,7 @@ tasks:
       - bash scripts/validate bash
 
   validate:configs:
-    desc: Validate YAML, JSON, Git and tmux configuration
+    desc: Validate YAML, JSON and Git configuration
     deps: [tools:yamllint]
     cmds:
       - bash scripts/validate configs
@@ -40,15 +42,26 @@ tasks:
 
   validate:repo:
     desc: Validate repository invariants and changed whitespace
-    deps: [tools:yamllint]
     cmds:
       - bash scripts/validate repo
 
   validate:scripts:
-    desc: Validate standalone shell scripts and bstow tests
+    desc: Validate standalone scripts, installers and release tests
     deps: [tools:shellcheck]
     cmds:
       - bash scripts/validate scripts
+
+  validate:tmux:
+    desc: Validate tmux configuration and eye timer behavior
+    deps: [tools:shellcheck]
+    cmds:
+      - bash scripts/validate tmux
+
+  validate:tooling:
+    desc: Validate the validator and validation tool installer
+    deps: [tools:actionlint, tools:shellcheck, tools:yamllint]
+    cmds:
+      - bash scripts/validate tooling
 
   validate:workflows:
     desc: Validate GitHub Actions syntax and security
