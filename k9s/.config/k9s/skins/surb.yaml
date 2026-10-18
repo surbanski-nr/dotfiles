@@ -2,25 +2,25 @@
 # Surb skin
 # -----------------------------------------------------------------------------
 
-# Styles...
-fg: &fg "white"
+# Default text follows the terminal; light accents use a neutral white.
+fg: &fg "default"
 bg: &bg "default"
 mark: &mark "darkgoldenrod"
-active: &active "dimgray"
+active: &active "#909dab"
 text: &text "navajowhite"
-white: &white "whitesmoke"
-ghost: &ghost "ghostwhite"
-err: &err "pink"
-slate: &slate "slategray"
-gray: &gray "gray"
-muted: &muted "#909090"
+white: &white "#d0d0d0"
+ghost: &ghost "default"
+err: &err "#f47067"
+slate: &slate "#909dab"
+gray: &gray "#909dab"
+muted: &muted "#909dab"
 
 # Skin...
 k9s:
   body:
     fgColor: *fg
     bgColor: *bg
-    logoColor: *fg
+    logoColor: *white
   prompt:
     fgColor: *fg
     bgColor: *bg
@@ -39,7 +39,7 @@ k9s:
     bgColor: *bg
     buttonFgColor: *fg
     buttonBgColor: *bg
-    buttonFocusFgColor: *slate
+    buttonFocusFgColor: "black"
     buttonFocusBgColor: *white
     labelFgColor: *ghost
     fieldFgColor: *white
@@ -49,7 +49,7 @@ k9s:
       focusColor: *fg
     menu:
       fgColor: *fg
-      keyColor: *fg
+      keyColor: *white
       numKeyColor: *text
     crumbs:
       fgColor: *fg
@@ -58,7 +58,8 @@ k9s:
     status:
       newColor: *white
       modifyColor: *text
-      addColor: *ghost
+      addColor: *white
+      pendingColor: *mark
       errorColor: *err
       highlightColor: *text
       killColor: *slate
@@ -73,13 +74,14 @@ k9s:
     table:
       fgColor: *fg
       bgColor: *bg
-      cursorBgColor: *fg
+      cursorBgColor: *white
       cursorFgColor: "black"
       markColor: *mark
       header:
         fgColor: *white
         bgColor: *bg
         sorterColor: *fg
+        selectedSortColumnColor: *white
     xray:
       fgColor: *fg
       bgColor: *bg
