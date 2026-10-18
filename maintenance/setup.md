@@ -293,11 +293,11 @@ The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
 run from a clean committed checkout on a connected machine with Docker access:
 
 ```bash
-.cache/validation-tools/bin/task test:offline
+.bin/task test:offline
 # Show the available PLATFORM values:
-.cache/validation-tools/bin/task --summary test:offline
+.bin/task --summary test:offline
 # Build and verify just one platform:
-.cache/validation-tools/bin/task test:offline PLATFORM=ubuntu-24.04-x86_64
+.bin/task test:offline PLATFORM=ubuntu-24.04-x86_64
 ```
 
 The task uses `scripts/dotfiles-release-ci test` and the immutable images from
@@ -980,15 +980,16 @@ executable does not include plugins.
 
 `validation.env` owns `VALIDATION_TOOLS`, `VALIDATION_RELEASES` and
 `YAMLLINT_VERSION`. Task and GitHub Actions install their check tools from
-this manifest under `.cache/validation-tools`. Changes to development tools
-in `tools.env` or editor Python locks do not select new repository validation
-versions.
+this manifest directly into `.bin`. Yamllint's private Python environment
+lives under `.bin/yamllint-VERSION`; `.bin/yamllint` links to its executable.
+Changes to development tools in `tools.env` or editor Python locks do not
+select new repository validation versions.
 
 Run the repository checks through Task:
 
 ```bash
 bash scripts/install-validation-tool task
-.cache/validation-tools/bin/task validate
+.bin/task validate
 ```
 
 Release manager and connected tool tests run in separate scenarios with fresh

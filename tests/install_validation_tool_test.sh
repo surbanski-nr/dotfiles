@@ -29,7 +29,7 @@ run_installer() {
   set -e
 }
 
-mkdir -p "$test_repo/scripts" "$test_bin" "$tools_dir/bin"
+mkdir -p "$test_repo/scripts" "$test_bin" "$tools_dir"
 mkdir -p "$test_repo/nvim2/.config/nvim2/python-locks"
 cp "$repo_dir/scripts/install-validation-tool" "$test_repo/scripts/"
 cp "$repo_dir/scripts/setup-lib" "$test_repo/scripts/"
@@ -51,12 +51,12 @@ run_installer yamllint
   fail 'validation profile accepted a native yamllint release'
 cp "$repo_dir/validation.env" "$test_repo/validation.env"
 
-cat >"$tools_dir/bin/actionlint" <<'EOF'
+cat >"$tools_dir/actionlint" <<'EOF'
 #!/usr/bin/env bash
 printf '1.0.0\n'
 EOF
-chmod +x "$tools_dir/bin/actionlint"
-old_actionlint_hash=$(sha256sum "$tools_dir/bin/actionlint")
+chmod +x "$tools_dir/actionlint"
+old_actionlint_hash=$(sha256sum "$tools_dir/actionlint")
 
 candidate_dir=$test_root/actionlint-candidate
 mkdir "$candidate_dir"
@@ -80,9 +80,9 @@ TEST_DOWNLOAD_FAIL=1
 export TEST_DOWNLOAD_FILE TEST_DOWNLOAD_FAIL
 run_installer actionlint
 [[ $status -ne 0 ]] || fail 'installer accepted a failed download'
-[[ $(sha256sum "$tools_dir/bin/actionlint") == "$old_actionlint_hash" ]] ||
+[[ $(sha256sum "$tools_dir/actionlint") == "$old_actionlint_hash" ]] ||
   fail 'failed download replaced the existing actionlint'
-[[ $("$tools_dir/bin/actionlint" -version) == 1.0.0 ]] ||
+[[ $("$tools_dir/actionlint" -version) == 1.0.0 ]] ||
   fail 'actionlint stopped working after a failed download'
 
 TEST_DOWNLOAD_FAIL=0
@@ -101,7 +101,7 @@ TEST_DOWNLOAD_FILE=$bad_archive
 export TEST_DOWNLOAD_FILE
 run_installer actionlint
 [[ $status -ne 0 ]] || fail 'installer accepted a failed archive extraction'
-[[ $(sha256sum "$tools_dir/bin/actionlint") == "$old_actionlint_hash" ]] ||
+[[ $(sha256sum "$tools_dir/actionlint") == "$old_actionlint_hash" ]] ||
   fail 'failed extraction replaced the existing actionlint'
 
 cp "$repo_dir/validation.env" "$test_repo/validation.env"
@@ -116,15 +116,15 @@ run_installer actionlint
 [[ $status -ne 0 ]] || fail 'installer accepted an invalid candidate executable'
 [[ $output == *'candidate validation failed'* ]] ||
   fail 'installer did not identify candidate validation failure'
-[[ $(sha256sum "$tools_dir/bin/actionlint") == "$old_actionlint_hash" ]] ||
+[[ $(sha256sum "$tools_dir/actionlint") == "$old_actionlint_hash" ]] ||
   fail 'invalid candidate replaced the existing actionlint'
 
-cat >"$tools_dir/bin/yamllint" <<'EOF'
+cat >"$tools_dir/yamllint" <<'EOF'
 #!/usr/bin/env bash
 printf 'yamllint 1.0.0\n'
 EOF
-chmod +x "$tools_dir/bin/yamllint"
-old_yamllint_hash=$(sha256sum "$tools_dir/bin/yamllint")
+chmod +x "$tools_dir/yamllint"
+old_yamllint_hash=$(sha256sum "$tools_dir/yamllint")
 printf 'YAMLLINT_VERSION=2.0.0\n' >>"$test_repo/validation.env"
 printf 'yamllint==8.0.0\n' \
   >"$test_repo/nvim2/.config/nvim2/python-locks/yamllint.in"
@@ -135,17 +135,17 @@ TEST_VENV_PIP_FAIL=1
 export TEST_VENV_PIP_FAIL
 run_installer yamllint
 [[ $status -ne 0 ]] || fail 'installer accepted a failed Yamllint pip install'
-[[ $(sha256sum "$tools_dir/bin/yamllint") == "$old_yamllint_hash" ]] ||
+[[ $(sha256sum "$tools_dir/yamllint") == "$old_yamllint_hash" ]] ||
   fail 'failed pip install replaced the existing Yamllint'
-[[ $("$tools_dir/bin/yamllint" --version) == 'yamllint 1.0.0' ]] ||
+[[ $("$tools_dir/yamllint" --version) == 'yamllint 1.0.0' ]] ||
   fail 'Yamllint stopped working after a failed pip install'
 
 TEST_VENV_PIP_FAIL=0
 export TEST_VENV_PIP_FAIL
 run_installer yamllint
 [[ $status -eq 0 ]] || fail "valid Yamllint activation failed: $output"
-[[ -L $tools_dir/bin/yamllint ]] || fail 'Yamllint activation did not publish a link'
-[[ $("$tools_dir/bin/yamllint" --version) == 'yamllint 2.0.0' ]] ||
+[[ -L $tools_dir/yamllint ]] || fail 'Yamllint activation did not publish a link'
+[[ $("$tools_dir/yamllint" --version) == 'yamllint 2.0.0' ]] ||
   fail 'activated Yamllint did not use the validation pin independently of the editor pin'
 
 task_version=9.8.7
@@ -182,8 +182,8 @@ TEST_DOWNLOAD_FAIL=0
 export TEST_DOWNLOAD_FILE TEST_DOWNLOAD_FAIL
 run_installer task
 [[ $status -eq 0 ]] || fail "validation Task pin was not installed independently of the development pin: $output"
-[[ -x $tools_dir/bin/task ]] || fail 'matching external Task was reused instead of installing privately'
-[[ $("$tools_dir/bin/task" --version) == "Task version: v$task_version" ]] ||
+[[ -x $tools_dir/task ]] || fail 'matching external Task was reused instead of installing privately'
+[[ $("$tools_dir/task" --version) == "Task version: v$task_version" ]] ||
   fail 'privately installed Task does not run'
 
 cat >"$test_bin/task" <<'EOF'
@@ -195,7 +195,7 @@ TEST_DOWNLOAD_FAIL=1
 export TEST_DOWNLOAD_FAIL
 run_installer task
 [[ $status -eq 0 ]] || fail "valid private Task was not reused: $output"
-[[ $("$tools_dir/bin/task" --version) == "Task version: v$task_version" ]] ||
+[[ $("$tools_dir/task" --version) == "Task version: v$task_version" ]] ||
   fail 'external Task replaced the valid private Task'
 
 printf 'Validation tool installer tests passed\n'

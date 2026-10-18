@@ -394,7 +394,7 @@ files on a connected machine:
 
 ```bash
 bash scripts/install-validation-tool task
-.cache/validation-tools/bin/task update:python-locks
+.bin/task update:python-locks
 git diff -- tools.env nvim2/.config/nvim2/lua/custom/lsp.lua \
   nvim2/.config/nvim2/python-locks
 ```

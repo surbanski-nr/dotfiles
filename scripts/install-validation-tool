@@ -10,8 +10,7 @@ die() {
 [[ $# -eq 1 ]] || die 'usage: install-validation-tool TOOL'
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/.cache/validation-tools}
-bin_dir=$tools_dir/bin
+tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/.bin}
 tool=$1
 
 # shellcheck source=setup-lib
@@ -29,8 +28,8 @@ for configured_tool in "${VALIDATION_TOOLS[@]}"; do
 done
 [[ $supported == true ]] || die "unsupported tool: $tool"
 
-mkdir -p "$bin_dir"
-export PATH="$bin_dir:$PATH"
+mkdir -p "$tools_dir"
+export PATH="$tools_dir:$PATH"
 
 tool_version() {
   local executable=$1 output
@@ -48,8 +47,8 @@ else
   version=$RELEASE_VERSION
   url=$RELEASE_URL
 fi
-if [[ -x $bin_dir/$tool ]] &&
-  [[ $(tool_version "$bin_dir/$tool") == "$version" ]]; then
+if [[ -x $tools_dir/$tool ]] &&
+  [[ $(tool_version "$tools_dir/$tool") == "$version" ]]; then
   exit 0
 fi
 
@@ -67,7 +66,7 @@ trap cleanup EXIT
 
 activate_binary() {
   local candidate=$1
-  local destination=$bin_dir/$tool
+  local destination=$tools_dir/$tool
   local previous=$stage/previous-$tool
   local previous_exists=0
 
@@ -94,7 +93,7 @@ activate_binary() {
 
 activate_yamllint() {
   local candidate=$1
-  local destination=$bin_dir/yamllint
+  local destination=$tools_dir/yamllint
   local link=$stage/yamllint-link
   local previous=$stage/previous-yamllint
   local previous_exists=0
@@ -138,5 +137,5 @@ else
   activate_binary "$prepared/${SPEC_DESTS[0]}"
 fi
 
-[[ $(tool_version "$bin_dir/$tool") == "$version" ]] ||
+[[ $(tool_version "$tools_dir/$tool") == "$version" ]] ||
   die "$tool $version installation failed"
