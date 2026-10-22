@@ -48,9 +48,14 @@ check_checksum() {
   [[ $(<"$checksum") == "$expected" ]] || die "checksum does not match ${archive##*/}"
 }
 
-inspect_asset() {
-  printf 'Inspecting %s.\n' "${2##*/}"
-  bash "$script_dir/dotfiles-release" inspect "$1" "$2" "$COMMIT_SHA" >/dev/null
+verify_asset() {
+  local platform=$1 archive=$2 root=dotfiles-${COMMIT_SHA:0:12} metadata
+  printf 'Verifying %s.\n' "${archive##*/}"
+  bash "$script_dir/dotfiles-release" verify "$archive" || return
+  metadata=$(tar -xOzf "$archive" "$root/release.env") || return
+  [[ $(awk -F= '$1 == "PLATFORM_ID" { print $2 }' <<<"$metadata") == "$platform" &&
+    $(awk -F= '$1 == "SOURCE_COMMIT" { print $2 }' <<<"$metadata") == "$COMMIT_SHA" ]] ||
+    die 'archive platform or commit does not match the release job'
 }
 
 extract_manager() {
@@ -162,7 +167,8 @@ build_and_qualify() {
 
   archive=$output_dir/dotfiles-${COMMIT_SHA:0:12}-$PLATFORM.tar.gz
   check_checksum "$archive" "$archive.sha256"
-  root=$(bash "$script_dir/dotfiles-release" inspect "$PLATFORM" "$archive" "$COMMIT_SHA")
+  verify_asset "$PLATFORM" "$archive"
+  root=dotfiles-${COMMIT_SHA:0:12}
   tar -xOzf "$archive" "$root/release.env" >"$evidence/release.env"
   tar -xOzf "$archive" "$root/build-manifest.txt" >"$evidence/build-manifest.txt"
   cp "$archive.sha256" "$evidence/archive.sha256"
@@ -182,12 +188,18 @@ build_and_qualify() {
     timeout 300s docker commit "$container" "$runtime_image"
     docker rm --force "$container"
   } 2>&1 | tee "$evidence/prepare-runtime.log"
+  # HOME in the command below is expanded by the container's shell.
+  # shellcheck disable=SC2016
   timeout --signal=TERM --kill-after=30s 1800s docker run --rm --init --name "$verifier" \
     --network none --user "$test_uid:$test_uid" --env HOME="$test_home" \
     --env DOTFILES=/tmp/inherited-dotfiles --env DOTFILES_AUTO_ROOT=/tmp/inherited-auto-root \
     --volume "$archive:/artifact.tar.gz:ro" \
-    --volume "$delivered_manager:/usr/local/bin/dotfiles-release:ro" "$runtime_image" \
-    bash /usr/local/bin/dotfiles-release verify "$PLATFORM" /artifact.tar.gz \
+    --volume "$delivered_manager:/usr/local/bin/dotfiles-release:ro" \
+    --volume "$script_dir:/ci:ro" --volume "$script_dir/../tools.env:/tools.env:ro" "$runtime_image" \
+    bash -euo pipefail -c \
+    'bash /ci/dotfiles-release verify /artifact.tar.gz
+     bash /usr/local/bin/dotfiles-release install /artifact.tar.gz
+     bash /ci/check-dotfiles-release "$HOME/dotfiles-releases/current"' \
     2>&1 | tee "$evidence/offline-verify.log"
 
   size=$(stat --format=%s "$archive")
@@ -288,7 +300,7 @@ publish() {
     archive=$output_dir/$asset
     uploads+=("$archive")
   fi
-  inspect_asset "$PLATFORM" "$archive"
+  verify_asset "$PLATFORM" "$archive"
   checksum=$work/$asset.sha256
   if asset_exists "$asset.sha256" "$release_file"; then
     download_asset "$asset.sha256" "$work"

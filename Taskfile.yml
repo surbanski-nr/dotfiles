@@ -72,9 +72,10 @@ tasks:
       - bash scripts/update-offline-python-locks
 
   test:offline:
-    desc: Build and verify offline packages in parallel (optional PLATFORM)
+    desc: Build and qualify offline packages in parallel (optional PLATFORM)
     summary: |
-      Build all platforms in parallel, then verify successful builds offline.
+      Build all platforms in parallel, then verify archives, install and run
+      full functional checks offline for each successful build.
       Failures do not stop other platforms; logs and artifacts are retained.
 
       Optional PLATFORM (default: all):

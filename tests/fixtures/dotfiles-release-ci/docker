@@ -41,6 +41,7 @@ case $1 in
     elif [[ " $* " == *' verify '* ]]; then
       parallel_barrier verify
       [[ " $* " == *' --init '* && " $* " == *' --network none '* && " $* " == *' --user '* ]] || exit 2
+      [[ " $* " == *' install /artifact.tar.gz'* && " $* " == *'check-dotfiles-release'* ]] || exit 2
       if [[ ${TEST_VERIFY_FAIL:-0} == 1 || ${TEST_VERIFY_FAIL:-0} == "$PLATFORM" ]]; then
         printf 'fixture offline failure\n'; exit 82
       fi

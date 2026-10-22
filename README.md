@@ -24,20 +24,36 @@ ssh-add "$HOME/.ssh/github"
 ssh -o IdentitiesOnly=yes -i "$HOME/.ssh/github" -T git@github.com
 ```
 
-```bash
-mkdir -p "$HOME/github.com/surbanski"
-git clone git@github.com:surbanski-nr/dotfiles.git "$HOME/github.com/surbanski/dotfiles"
-pushd "$HOME/github.com/surbanski/dotfiles"
-```
-
-The preferred deployment of this dotfiles is a built offline release attached to GitHub release.
-No asdf installation or shims are needed for this route.
+The preferred deployment of this dotfiles is a built offline release attached to the GitHub release.
+No asdf installation is needed for this route.
 Prepare the target's system prerequisites with `./setup-system --offline-release`
 while its package repositories are reachable, then install the complete archive
 with the standalone `dotfiles-release` script downloaded from the same GitHub
 release. Do not run `setup-tools` or `setup-asdf` for this option.
 
-Alternatively on a machine with full internet access run below commands. Only `setup-system` uses `sudo`:
+On the prepared target, only the archive and downloaded manager are needed:
+
+```bash
+bash ./dotfiles-release verify ./dotfiles-COMMIT-PLATFORM.tar.gz
+bash ./dotfiles-release install ./dotfiles-COMMIT-PLATFORM.tar.gz
+bash ./dotfiles-release list
+bash ./dotfiles-release health
+bash ./dotfiles-release set dotfiles-COMMIT
+bash ./dotfiles-release uninstall dotfiles-COMMIT
+```
+
+`verify` reads the platform from the archive and checks its structure and
+checksums without installing or running its programs. `health [ID]` checks an
+installed release and, for `current`, its public links. Install and set run the
+same light runtime checks; `--skip-health` skips it.
+
+Alternatively on a machine with full internet access clone the repository and run below setup commands. Only `setup-system` uses `sudo`:
+
+```bash
+mkdir -p "$HOME/github.com/surbanski"
+git clone git@github.com:surbanski-nr/dotfiles.git "$HOME/github.com/surbanski/dotfiles"
+pushd "$HOME/github.com/surbanski/dotfiles"
+```
 
 ```bash
 ./setup-system
@@ -49,6 +65,7 @@ for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
     mv -- "$file" "$file.before-dotfiles"
   fi
 done
+
 ./bstow -v -t "$HOME" stow git ssh tmux bash mc oh-my-posh k9s nvim2 gnupg
 
 source "$HOME/.bashrc"
@@ -57,14 +74,18 @@ dotfiles-check
 ```
 
 `bstow` is my alternative to GNU Stow that manages package files as individual symlinks,
-records package ownership under `$HOME/.local/state/bstow`, and protects existing regular files and foreign links.
+operating system and tools see those files in proper directories like ~ or ~/.config,
+but they stay in the git repository so that they get updated across machines after pulling.
+The records package ownership under `$HOME/.local/state/bstow` (to know what to unlink when some package is deleted),
+and protects existing regular files and foreign links.
+
 Use `restow` after pulling deletions or renames. Preview `--force` before using it to adopt foreign links.
 
 `tools.env` contains tool lists and their fixed versions `version|full_URL|SHA256`
 
 `system.env` owns OS package lists, installation checks and host setup
 prerequisites. OS packages use the current repository candidates without
-version pins (the only place I trust with unfixed versions as distros are relatively stable and well tested).
+version pins (distros are relatively stable and well tested and behind on versions, no need to overcomplicate this part).
 
 ## Testing
 

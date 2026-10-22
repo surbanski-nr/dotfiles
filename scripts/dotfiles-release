@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# Release builds embed TOOL_CHECKS so the delivered manager is self-contained.
+# The builder embeds the probes in the standalone script attached to the release.
 if ! declare -p TOOL_CHECKS >/dev/null 2>&1; then
   manager_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
   # shellcheck source=../tools.env
@@ -10,24 +10,17 @@ if ! declare -p TOOL_CHECKS >/dev/null 2>&1; then
 fi
 
 RELEASE_ROOT=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}
-STATE_DIR=$RELEASE_ROOT/.state
-LOCK_FILE=$STATE_DIR/lock
-OWNERSHIP_FILE=$STATE_DIR/ownership.tsv
-PENDING_FILE=$STATE_DIR/pending.env
+RELEASE_ROOT=${RELEASE_ROOT%/}
 TEMP_PATHS=()
+UNDO_KINDS=()
+UNDO_PATHS=()
+UNDO_VALUES=()
+LINK_PATHS=()
+LINK_TARGETS=()
+TRANSACTION_ACTIVE=false
+CANDIDATE_DIR=
+EXTRACTED_ID=
 LOCK_FD=
-OWN_STATE=
-OWN_MODE=
-OWN_PATH=
-OWN_TARGET=
-OWN_BACKUP=
-OWN_TYPE=
-OWN_ORIGINAL_MODE=
-OWN_IDENTITY=
-SNAPSHOT_TYPE=
-SNAPSHOT_MODE=
-SNAPSHOT_IDENTITY=
-RECOVERED_PENDING=false
 RELEASE_METADATA_FIELDS=(
   RELEASE_ID PLATFORM_ID SOURCE_COMMIT SOURCE_TREE BUILDER_IMAGE
   NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION
@@ -48,21 +41,20 @@ die() {
 usage() {
   cat <<'EOF'
 Usage:
-  dotfiles-release inspect PLATFORM ARCHIVE COMMIT
-  dotfiles-release verify PLATFORM ARCHIVE
-  dotfiles-release install [--skip-tests] ARCHIVE
+  dotfiles-release verify ARCHIVE
   dotfiles-release list
   dotfiles-release health [RELEASE_ID]
-  dotfiles-release rollback [RELEASE_ID]
+  dotfiles-release install [--skip-health] ARCHIVE
   dotfiles-release uninstall [RELEASE_ID]
+  dotfiles-release set [--skip-health] RELEASE_ID
 
-inspect checks archive safety, identity and checksums without installing it.
-verify installs and activates the archive, then checks it. Use a disposable HOME.
-install checks the candidate before activation. --skip-tests skips extended
-functional tests, retaining integrity, Python, tool-version and activation checks.
-
-Platforms: debian-13-x86_64, ubuntu-24.04-x86_64,
-           ubuntu-26.04-x86_64, amzn-2023-x86_64
+verify checks archive safety, metadata, checksums and payload structure.
+It reads the platform from the archive and never installs or runs its tools.
+install prepares the release offline, checks its runtime and activates it.
+health checks installed integrity and runtime, defaulting to current.
+--skip-health skips runtime probes, never integrity or safety checks.
+set activates an installed release. uninstall removes a release, defaulting
+to current, and restores saved files when removing the active release.
 EOF
 }
 
@@ -72,33 +64,43 @@ cleanup_path() {
 }
 
 cleanup() {
-  local status=$?
-  local path
-
+  local status=$? path
   trap - EXIT
+  trap '' INT TERM
   set +e
-  for path in "${TEMP_PATHS[@]:-}"; do cleanup_path "$path"; done
+  if [[ $TRANSACTION_ACTIVE == true ]] && ! undo_transaction; then
+    die 'could not restore all paths; saved originals and temporary files were preserved'
+    if [[ -n $CANDIDATE_DIR ]]; then die "preserved candidate: $CANDIDATE_DIR"; fi
+    for path in "${TEMP_PATHS[@]}"; do
+      [[ ! -e $path && ! -L $path ]] || die "preserved temporary path: $path"
+    done
+    exit 1
+  fi
+  if [[ -n $CANDIDATE_DIR ]]; then cleanup_path "$CANDIDATE_DIR"; fi
+  for path in "${TEMP_PATHS[@]}"; do cleanup_path "$path"; done
   exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 need() {
   command -v "$1" >/dev/null 2>&1 || die "required command is missing: $1"
 }
 
-durable_replace() {
-  local temporary=$1 destination=$2
-
-  sync -f "$temporary" || return
-  mv -T -- "$temporary" "$destination" || return
-  sync -f "$(dirname -- "$destination")"
+archive_prerequisites() {
+  local command_name
+  for command_name in awk cmp dirname find mktemp readlink sed sha256sum sort tar wc xargs; do
+    need "$command_name" || return
+  done
 }
 
-durable_unlink() {
-  local path=$1
-
-  unlink "$path" || return
-  sync -f "$(dirname -- "$path")"
+operation_prerequisites() {
+  local command_name
+  archive_prerequisites || return
+  for command_name in bash chmod cp env flock ln mkdir mv stat timeout uname unlink; do
+    need "$command_name" || return
+  done
 }
 
 validate_platform_name() {
@@ -284,40 +286,29 @@ python_inventory_packages() {
   printf '%s\n' "${packages[@]}"
 }
 
-verify_release_symlinks() {
-  local release=$1 link target resolved links
-
-  links=$(mktemp) || return
-  TEMP_PATHS+=("$links")
-  find "$release" -type l -print0 >"$links" || return
-  while IFS= read -r -d '' link; do
-    target=$(readlink -- "$link") || return
-    if [[ $target == /* ]]; then
-      resolved=$(readlink -m -- "$target")
-    else
-      resolved=$(readlink -m -- "$(dirname -- "$link")/$target")
-    fi
-    [[ $resolved == "$release" || $resolved == "$release"/* ]] ||
-      { die "release symlink escapes its root: $link -> $target"; return 1; }
-  done <"$links"
-}
-
 validate_archive_members() (
   local archive=$1 first member root line mode name target resolved remainder
   local stage members verbose
+  local LC_ALL=C
+  local -A seen=()
 
   stage=$(mktemp -d) || return
   trap 'cleanup_path "$stage"' EXIT
   members=$stage/members
   verbose=$stage/verbose
-  tar -tzf "$archive" >"$members" || return
+  LC_ALL=C tar --quoting-style=literal -tzf "$archive" >"$members" || return
   first=$(sed -n '1p' "$members") || return
   root=${first%%/*}
   [[ $root =~ ^dotfiles-[0-9a-f]{12}$ ]] || { die 'archive has an invalid top-level directory'; return 1; }
   while IFS= read -r member; do
+    member=${member%/}
     [[ $member == "$root" || $member == "$root/"* ]] || { die "archive has multiple roots: $member"; return 1; }
-    [[ $member != /* && /$member/ != *'/../'* ]] || { die "unsafe archive member: $member"; return 1; }
-    [[ $member =~ ^[[:print:]]+/?$ ]] || { die "archive member has unsupported characters: $member"; return 1; }
+    [[ $member != /* && /$member/ != *'/../'* && /$member/ != *'/./'* &&
+      $member != *'//'* ]] || { die "unsafe archive member: $member"; return 1; }
+    [[ $member != *[[:cntrl:]]* ]] ||
+      { die "archive member has unsupported characters: $member"; return 1; }
+    [[ ! -v seen[$member] ]] || { die "duplicate archive member: $member"; return 1; }
+    seen["$member"]=1
   done <"$members"
   LC_ALL=C tar --quoting-style=literal -tvzf "$archive" >"$verbose" || return
   while IFS= read -r line; do
@@ -329,10 +320,10 @@ validate_archive_members() (
         [[ $remainder == *' -> '* ]] || { die "cannot parse archive link: $line"; return 1; }
         name=${remainder% -> *}
         target=${remainder##* -> }
-        [[ $name == "$root/"* && $target != /* && $target =~ ^[[:print:]]+$ ]] ||
+        [[ $name == "$root/"* && $target != /* && $target != *[[:cntrl:]]* ]] ||
           { die "unsafe archive link: $name -> $target"; return 1; }
-        resolved=$(readlink -m -- "/$(dirname -- "$name")/$target")
-        [[ $resolved == "/$root"/* ]] || { die "archive link escapes its root: $name -> $target"; return 1; }
+        resolved=$(readlink -m -- "/$(dirname -- "$name")/$target") || return
+        [[ $resolved == "/$root/"* ]] || { die "archive link escapes its root: $name -> $target"; return 1; }
         ;;
       h) die "archive hard links are not supported: $line"; return 1 ;;
       *) die "archive contains an unsupported member type: $line"; return 1 ;;
@@ -341,584 +332,13 @@ validate_archive_members() (
   printf '%s\n' "$root"
 )
 
-validate_release_directory() {
-  local release=$1 expected_platform=${2:-} release_id commit tree
-  local -A release_metadata=()
-
-  [[ -d $release && ! -L $release ]] || { die "invalid release directory: $release"; return 1; }
-  [[ -f $release/release.env && -f $release/SHA256SUMS ]] ||
-    { die 'release metadata is incomplete'; return 1; }
-  read_release_metadata "$release/release.env" release_metadata || return
-  release_id=${release_metadata[RELEASE_ID]}
-  commit=${release_metadata[SOURCE_COMMIT]}
-  tree=${release_metadata[SOURCE_TREE]}
-  [[ $release_id == "${release##*/}" && $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die 'release ID does not match its directory'; return 1; }
-  [[ $commit =~ ^[0-9a-f]{40}$ && $release_id == "dotfiles-${commit:0:12}" ]] ||
-    { die 'release ID does not match source commit'; return 1; }
-  [[ $tree =~ ^[0-9a-f]{40}$ ]] || { die 'source tree is not a full Git object ID'; return 1; }
-  if [[ -n $expected_platform ]]; then
-    [[ ${release_metadata[PLATFORM_ID]} == "$expected_platform" ]] ||
-      { die "release is not for $expected_platform"; return 1; }
-  fi
-  verify_release_symlinks "$release" || return
-  if [[ ! -f $release/installed.sha256 ]]; then
-    (cd "$release" && sha256sum --check --strict SHA256SUMS >/dev/null) || return
-  fi
-}
-
-inspect_archive() {
-  local platform=$1 archive=$2 commit=$3 top stage
-  local -A release_metadata=()
-
-  validate_platform_name "$platform" || return
-  [[ $commit =~ ^[0-9a-f]{40}$ ]] || { die 'expected commit must be a full Git object ID'; return 1; }
-  [[ -f $archive && ! -L $archive ]] || { die "artifact is not a regular file: $archive"; return 1; }
-  top=$(validate_archive_members "$archive") || return
-  [[ $top == "dotfiles-${commit:0:12}" ]] || { die 'archive root does not match expected commit'; return 1; }
-  stage=$(mktemp -d) || return
-  TEMP_PATHS+=("$stage")
-  tar -xzf "$archive" -C "$stage" --no-same-owner --no-same-permissions || return
-  [[ ! -e $stage/$top/installed.sha256 && ! -L $stage/$top/installed.sha256 ]] ||
-    { die 'archive contains installed-state metadata'; return 1; }
-  validate_release_directory "$stage/$top" "$platform" || return
-  read_release_metadata "$stage/$top/release.env" release_metadata || return
-  [[ ${release_metadata[SOURCE_COMMIT]} == "$commit" ]] ||
-    { die 'archive source commit does not match expected commit'; return 1; }
-  printf '%s\n' "$top"
-}
-
-validate_home() {
-  [[ $HOME == /* && $HOME != / && $HOME != *$'\n'* && $HOME != *$'\t'* ]] ||
-    { die "unsafe HOME: $HOME"; return 1; }
-  [[ -d $HOME && ! -L $HOME ]] || { die "HOME must be a real directory: $HOME"; return 1; }
-  [[ -w $HOME ]] || { die "HOME is not writable: $HOME"; return 1; }
-}
-
-acquire_lock() {
-  local mode=${1:-exclusive} path directory
-
-  validate_home || return
-  if [[ -e $RELEASE_ROOT || -L $RELEASE_ROOT ]]; then
-    [[ -d $RELEASE_ROOT && ! -L $RELEASE_ROOT ]] ||
-      { die "invalid release root: $RELEASE_ROOT"; return 1; }
-  else
-    mkdir -- "$RELEASE_ROOT" || return
-  fi
-  selected_id current >/dev/null || return
-  selected_id previous >/dev/null || return
-  if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
-    [[ -d $STATE_DIR && ! -L $STATE_DIR ]] ||
-      { die "invalid state directory: $STATE_DIR"; return 1; }
-  else
-    mkdir -- "$STATE_DIR" || return
-  fi
-  [[ -d $STATE_DIR && ! -L $STATE_DIR ]] ||
-    { die "invalid state directory: $STATE_DIR"; return 1; }
-  chmod 0700 "$STATE_DIR" || return
-  for path in "$LOCK_FILE" "$OWNERSHIP_FILE" "$PENDING_FILE"; do
-    if [[ -e $path || -L $path ]]; then
-      [[ -f $path && ! -L $path ]] || { die "invalid reserved state path: $path"; return 1; }
-    fi
-  done
-  for directory in "$STATE_DIR/backups" "$STATE_DIR/release-identities"; do
-    if [[ -e $directory || -L $directory ]]; then
-      [[ -d $directory && ! -L $directory ]] || {
-        die "invalid reserved state directory: $directory"
-        return 1
-      }
-    fi
-  done
-  if [[ ! -e $LOCK_FILE ]]; then
-    if ! (set -o noclobber; : >"$LOCK_FILE") 2>/dev/null; then
-      die "could not create lock marker: $LOCK_FILE"
-      return 1
-    fi
-    chmod 0600 "$LOCK_FILE" || return
-    sync -f "$LOCK_FILE" || return
-    sync -f "$STATE_DIR" || return
-  fi
-  exec {LOCK_FD}<"$LOCK_FILE" || return
-  if [[ $mode == shared ]]; then
-    flock -s -n "$LOCK_FD" || { die 'another release operation is running'; return 1; }
-  else
-    flock -x -n "$LOCK_FD" || { die 'another release operation is running'; return 1; }
-  fi
-  selected_id current >/dev/null || return
-  selected_id previous >/dev/null || return
-}
-
-selected_id() {
-  local name=$1 target path=$RELEASE_ROOT/$1
-
-  [[ $name == current || $name == previous ]] || { die "invalid selection name: $name"; return 1; }
-  if [[ ! -e $path && ! -L $path ]]; then return 0; fi
-  [[ -L $path ]] || { die "reserved selection path is not a symlink: $path"; return 1; }
-  target=$(readlink -- "$RELEASE_ROOT/$name")
-  [[ $target =~ ^dotfiles-[0-9a-f]{12}$ ]] || { die "invalid $name link: $target"; return 1; }
-  [[ -d $RELEASE_ROOT/$target && ! -L $RELEASE_ROOT/$target ]] ||
-    { die "$name selects a missing release: $target"; return 1; }
-  printf '%s\n' "$target"
-}
-
-switch_selection() {
-  local name=$1 target=${2:-} temporary current
-  [[ $name == current || $name == previous ]] ||
-    { die "invalid selection name: $name"; return 1; }
-  [[ -z $target || $target =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die "invalid release selection: $target"; return 1; }
-  temporary=$RELEASE_ROOT/.${name}.link.$$
-
-  current=$(selected_id "$name") || return
-
-  if [[ -z $target ]]; then
-    [[ -z $current ]] || durable_unlink "$RELEASE_ROOT/$name" || return
-    return
-  fi
-  [[ -d $RELEASE_ROOT/$target && ! -L $RELEASE_ROOT/$target ]] || {
-    die "cannot select missing release: $target"
-    return 1
-  }
-  [[ $current != "$target" ]] || return 0
-  [[ ! -e $temporary && ! -L $temporary ]] || { die "temporary selection path exists: $temporary"; return 1; }
-  ln -s "$target" "$temporary" || return
-  if ! durable_replace "$temporary" "$RELEASE_ROOT/$name"; then
-    [[ ! -e $temporary && ! -L $temporary ]] || unlink "$temporary" || true
-    return 1
-  fi
-  [[ $(selected_id "$name") == "$target" ]] || {
-    die "failed to select release: $target"
-    return 1
-  }
-}
-
-ownership_record() {
-  local path=$1 record
-  if [[ ! -f $OWNERSHIP_FILE ]]; then
-    printf '\n'
-    return 0
-  fi
-  record=$(awk -F '\t' -v path="$path" '$2 == path || $3 == path { print; exit }' \
-    "$OWNERSHIP_FILE" 2>/dev/null) || return
-  if [[ -n $record ]]; then
-    parse_ownership_record "$record" || return
-  fi
-  printf '%s\n' "$record"
-}
-
-parse_ownership_record() {
-  local record=$1 separated
-  local -a fields=()
-
-  separated=${record//$'\t'/$'\034'}
-  IFS=$'\034' read -r -a fields <<<"$separated"$'\034_'
-  unset "fields[$((${#fields[@]} - 1))]"
-  if ((${#fields[@]} != 8)); then
-    die 'ownership record has an invalid field count'
-    return 1
-  fi
-  OWN_STATE=${fields[0]}
-  OWN_MODE=${fields[1]}
-  OWN_PATH=${fields[2]}
-  OWN_TARGET=${fields[3]}
-  OWN_BACKUP=${fields[4]}
-  OWN_TYPE=${fields[5]}
-  OWN_ORIGINAL_MODE=${fields[6]}
-  OWN_IDENTITY=${fields[7]}
-  validate_ownership_entry "$OWN_STATE" "$OWN_MODE" "$OWN_PATH" "$OWN_TARGET" \
-    "$OWN_BACKUP" "$OWN_TYPE" "$OWN_ORIGINAL_MODE" "$OWN_IDENTITY"
-}
-
-path_snapshot() {
-  local path=$1
-
-  if [[ -L $path ]]; then
-    SNAPSHOT_TYPE=symlink
-    SNAPSHOT_MODE=$(stat -c %a -- "$path") || return
-    SNAPSHOT_IDENTITY=$(readlink -- "$path" | sha256sum | cut -d ' ' -f1) || return
-  elif [[ -f $path ]]; then
-    SNAPSHOT_TYPE='file'
-    SNAPSHOT_MODE=$(stat -c %a -- "$path") || return
-    SNAPSHOT_IDENTITY=$(sha256sum -- "$path" | cut -d ' ' -f1) || return
-  elif [[ -d $path ]]; then
-    SNAPSHOT_TYPE=directory
-    SNAPSHOT_MODE=$(stat -c %a -- "$path") || return
-    SNAPSHOT_IDENTITY=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-      --pax-option=delete=atime,delete=ctime -C "$path" -cf - . | sha256sum | cut -d ' ' -f1) || return
-  elif [[ ! -e $path ]]; then
-    SNAPSHOT_TYPE=absent
-    SNAPSHOT_MODE=-
-    SNAPSHOT_IDENTITY=-
-  else
-    die "unsupported managed path type: $path"
-    return 1
-  fi
-}
-
-path_matches_snapshot() {
-  local path=$1 expected_type=$2 expected_mode=$3 expected_identity=$4
-
-  path_snapshot "$path" || return
-  [[ $SNAPSHOT_TYPE == "$expected_type" && $SNAPSHOT_MODE == "$expected_mode" &&
-    $SNAPSHOT_IDENTITY == "$expected_identity" ]]
-}
-
-replace_ownership_record() {
-  local path=$1 replacement=${2:-} line temporary found=0
-
-  temporary=$(mktemp "$STATE_DIR/.ownership.XXXXXX") || return
-  TEMP_PATHS+=("$temporary")
-  if [[ -f $OWNERSHIP_FILE ]]; then
-    while IFS= read -r line || [[ -n $line ]]; do
-      parse_ownership_record "$line" || return
-      if [[ $OWN_PATH == "$path" ]]; then
-        ((found += 1))
-        [[ -z $replacement ]] || printf '%s\n' "$replacement" >>"$temporary" || return
-      else
-        printf '%s\n' "$line" >>"$temporary" || return
-      fi
-    done <"$OWNERSHIP_FILE"
-  fi
-  if ((found == 0)); then
-    [[ -n $replacement ]] || { die "ownership record is missing for $path"; return 1; }
-    printf '%s\n' "$replacement" >>"$temporary" || return
-  elif ((found != 1)); then
-    die "ownership record is duplicated for $path"
-    return 1
-  fi
-  chmod 0600 "$temporary" || return
-  if [[ -s $temporary ]]; then
-    durable_replace "$temporary" "$OWNERSHIP_FILE"
-  else
-    if [[ -e $OWNERSHIP_FILE ]]; then durable_unlink "$OWNERSHIP_FILE" || return; fi
-    unlink "$temporary" || return
-  fi
-}
-
-set_ownership_state() {
-  local state=$1 path=$2 replacement
-
-  replacement="$state"$'\t'"$OWN_MODE"$'\t'"$OWN_PATH"$'\t'"$OWN_TARGET"$'\t'\
-"$OWN_BACKUP"$'\t'"$OWN_TYPE"$'\t'"$OWN_ORIGINAL_MODE"$'\t'"$OWN_IDENTITY"
-  replace_ownership_record "$path" "$replacement"
-}
-
-managed_path_target_valid() {
-  local path=$1 target=$2 command_name relative
-
-  case $path in
-    "$HOME/bin/"*)
-      command_name=${path##*/}
-      case $command_name in
-        dotfiles-release | nvim | tmux | node | npm | npx | corepack | go | gofmt | rg | fd | zoxide | \
-          k9s | kind | uv | uvx | kubectx | kubens | oh-my-posh | task | fzf | terraform | kubectl | helm | \
-          actionlint | shellcheck | yamllint | gh | htop | kubeconform | kyverno | trivy | yq) ;;
-        *) return 1 ;;
-      esac
-      [[ $target == "../dotfiles-releases/current/bin/$command_name" ]]
-      ;;
-    "$HOME/.config/nvim2") [[ $target == "$RELEASE_ROOT/current/config/nvim2" ]] ;;
-    "$HOME/.local/share/nvim2") [[ $target == "$RELEASE_ROOT/current/share/nvim2" ]] ;;
-    "$HOME/.bashrc") [[ $target == "$RELEASE_ROOT/current/dotfiles/bash/.bashrc" ]] ;;
-    "$HOME/.bash_profile") [[ $target == "$RELEASE_ROOT/current/dotfiles/bash/.bash_profile" ]] ;;
-    "$HOME/.bash_aliases") [[ $target == "$RELEASE_ROOT/current/dotfiles/bash/.bash_aliases" ]] ;;
-    "$HOME/.ssh/config") [[ $target == "$RELEASE_ROOT/current/dotfiles/ssh/.ssh/config" ]] ;;
-    "$HOME/.config/systemd/user/dotfiles-ssh-agent.service")
-      [[ $target == \
-        "$RELEASE_ROOT/current/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service" ]]
-      ;;
-    "$HOME/.gitconfig") [[ $target == "$RELEASE_ROOT/current/dotfiles/git/.gitconfig" ]] ;;
-    "$HOME/.tmux.conf") [[ $target == "$RELEASE_ROOT/current/dotfiles/tmux/.tmux.conf" ]] ;;
-    "$HOME/.vimrc") [[ $target == "$RELEASE_ROOT/current/dotfiles/vim/.vimrc" ]] ;;
-    "$HOME/.oh-my-posh.omp.json")
-      [[ $target == "$RELEASE_ROOT/current/dotfiles/oh-my-posh/.oh-my-posh.omp.json" ]]
-      ;;
-    "$HOME/.config/k9s/config.yaml" | "$HOME/.config/k9s/aliases.yaml" | \
-      "$HOME/.config/k9s/plugins.yaml")
-      [[ $target == "$RELEASE_ROOT/current/dotfiles/k9s/.config/k9s/${path##*/}" ]]
-      ;;
-    "$HOME/.config/k9s/skins/"*)
-      relative=${path#"$HOME/.config/k9s/skins/"}
-      [[ -n $relative && $relative != /* && $relative != ../* && /$relative/ != *'/../'* &&
-        $target == "$RELEASE_ROOT/current/dotfiles/k9s/.config/k9s/skins/$relative" ]]
-      ;;
-    "$HOME/.tmux/plugins/tmux-sensible" | "$HOME/.tmux/plugins/tmux-resurrect" | \
-      "$HOME/.tmux/plugins/tmux-continuum")
-      [[ $target == "$RELEASE_ROOT/current/share/tmux/plugins/${path##*/}" ]]
-      ;;
-    *) return 1 ;;
-  esac
-}
-
-validate_ownership_entry() {
-  local state=$1 mode=$2 path=$3 target=$4 backup=$5
-  local original_type=$6 original_mode=$7 identity=$8 key
-
-  [[ $path == "$HOME/"* && $path != *$'\n'* && $path != *$'\t'* ]] ||
-    { die 'ownership record contains an unsafe path'; return 1; }
-  managed_path_target_valid "$path" "$target" ||
-    { die "ownership record contains an unknown managed path: $path"; return 1; }
-  case $mode in
-    created) [[ -z $backup ]] || { die "created ownership entry has a backup: $path"; return 1; } ;;
-    backup)
-      key=$(printf '%s' "$path" | sha256sum | cut -d ' ' -f1)
-      [[ $backup == "$STATE_DIR/backups/$key" ||
-        $backup == "$(dirname -- "$path")/.dotfiles-release-backup-$key" ]] ||
-        { die "ownership record has an invalid backup: $path"; return 1; }
-      ;;
-    *) die "ownership record has an invalid mode: $mode"; return 1 ;;
-  esac
-  case $state in planned | displaced | linked) ;; *) die "ownership record has an invalid state: $state"; return 1 ;; esac
-  case $original_type in
-    absent) [[ $mode == created && $original_mode == - && $identity == - ]] ;;
-    file | symlink | directory)
-      [[ $mode == backup && $original_mode =~ ^[0-7]{3,4}$ && $identity =~ ^[0-9a-f]{64}$ ]]
-      ;;
-    *) false ;;
-  esac || { die "ownership record has an invalid original identity: $path"; return 1; }
-}
-
-setup_tools_state_owns_link() {
-  local path=$1 command_name target name version destination state
-  local status artifact content extra actual state_root
-  local -a destinations=()
-
-  command_name=${path##*/}
-  [[ -L $path ]] || return 1
-  target=$(readlink -- "$path")
-  [[ $target != /* && $target != */../* && $target != ../* ]] || return 1
-  case "$command_name:$target" in
-    nvim:nvim-*/bin/nvim | htop:htop-*/bin/htop | tmux:tmux-*/bin/tmux)
-      name=$command_name
-      version=${target#"$command_name-"}
-      version=${version%/bin/"$command_name"}
-      destination=${target%/bin/"$command_name"}
-      ;;
-    go:go-*/bin/go | gofmt:go-*/bin/gofmt)
-      name=go
-      version=${target#go-}
-      version=${version%/bin/*}
-      destination=${target%/bin/*}
-      ;;
-    uv:uv-* | uvx:uvx-*)
-      name=uv
-      version=${target#"$command_name-"}
-      destinations=("uv-$version" "uvx-$version")
-      ;;
-    actionlint:actionlint-* | fd:fd-* | gh:gh-* | helm:helm-* | k9s:k9s-* | kind:kind-* | \
-      kubeconform:kubeconform-* | kubectl:kubectl-* | kubectx:kubectx-* | kubens:kubens-* | \
-      kyverno:kyverno-* | oh-my-posh:oh-my-posh-* | rg:rg-* | shellcheck:shellcheck-* | \
-      task:task-* | terraform:terraform-* | trivy:trivy-* | yq:yq-* | zoxide:zoxide-*)
-      name=$command_name
-      version=${target#"$command_name-"}
-      destination=$target
-      ;;
-    *) return 1 ;;
-  esac
-  [[ -n $version && $version != */* ]] || return 1
-  state_root=${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup-tools
-  state=$state_root/$name-$version.state
-  [[ -f $state && ! -L $state ]] || return 1
-  IFS=$'\t' read -r status artifact content extra <"$state" || return 1
-  [[ $status == complete && -z $extra && $artifact =~ ^[0-9a-f]{64}$ &&
-    $content =~ ^[0-9a-f]{64}$ ]] || return 1
-  if ((${#destinations[@]} == 0)); then destinations=("$destination"); fi
-  for destination in "${destinations[@]}"; do
-    [[ -e $HOME/bin/$destination && ! -L $HOME/bin/$destination ]] || return 1
-  done
-  actual=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-    -C "$HOME/bin" -cf - -- "${destinations[@]}" | sha256sum | awk '{print $1}') || return 1
-  [[ $actual == "$content" ]]
-}
-
-bstow_state_owns_link() {
-  local path=$1 relative state source owned=0 entry fd expected
-  local state_root=${BSTOW_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/bstow}
-  local states
-
-  [[ -L $path && $path == "$HOME/"* && -d $state_root && ! -L $state_root ]] || return 1
-  relative=${path#"$HOME/"}
-  states=$(mktemp) || return
-  TEMP_PATHS+=("$states")
-  find "$state_root" -maxdepth 1 -type f -name '*.links' -print0 >"$states" || return
-  while IFS= read -r -d '' state; do
-    [[ -f $state && ! -L $state ]] || continue
-    exec {fd}<"$state" || return 1
-    if ! IFS= read -r -d '' -u "$fd" source ||
-      [[ $source != /* || ! -d $source || -L $source ]]; then
-      exec {fd}<&-
-      return 1
-    fi
-    owned=0
-    while :; do
-      entry=
-      if ! IFS= read -r -d '' -u "$fd" entry; then
-        [[ -z $entry ]] || { exec {fd}<&-; return 1; }
-        break
-      fi
-      [[ -n $entry && $entry != /* && $entry != ../* && /$entry/ != *'/../'* ]] || {
-        exec {fd}<&-
-        return 1
-      }
-      [[ $entry == "$relative" ]] && owned=1
-    done
-    exec {fd}<&-
-    if ((owned == 1)); then
-      expected=$source/$relative
-      [[ -e $expected && $(readlink -f -- "$path") == "$(readlink -f -- "$expected")" ]] ||
-        return 1
-      return 0
-    fi
-  done <"$states"
-  return 1
-}
-
-bstow_state_owns_tree() {
-  local path=$1 entry found=0 entries
-
-  [[ -d $path && ! -L $path ]] || return 1
-  entries=$(mktemp) || return
-  TEMP_PATHS+=("$entries")
-  find "$path" -mindepth 1 -print0 >"$entries" || return
-  while IFS= read -r -d '' entry; do
-    if [[ -d $entry && ! -L $entry ]]; then
-      continue
-    fi
-    [[ -L $entry ]] || return 1
-    bstow_state_owns_link "$entry" || return 1
-    found=1
-  done <"$entries"
-  ((found == 1)) || return 1
-  [[ -z $(find "$path" -type d -empty -print -quit) ]]
-}
-
-recorded_provider_owns_path() {
-  local path=$1
-
-  setup_tools_state_owns_link "$path" ||
-    bstow_state_owns_link "$path"
-}
-
-tmux_plugin_checkout_owned() {
-  local path=$1 release_id=$2 plugin candidate origin expected_origin
-
-  plugin=${path##*/}
-  case $plugin in
-    tmux-sensible | tmux-resurrect | tmux-continuum) ;;
-    *) return 1 ;;
-  esac
-  [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] || return 1
-  candidate=$RELEASE_ROOT/$release_id/share/tmux/plugins/$plugin
-  [[ -d $path/.git && -d $candidate/.git && ! -L $path && ! -L $candidate ]] || return 1
-  expected_origin=$(git -C "$candidate" remote get-url origin 2>/dev/null) || return 1
-  [[ $expected_origin == https://*.git && $expected_origin != *[[:space:]]* ]] || return 1
-  origin=$(git -C "$path" remote get-url origin 2>/dev/null) || return 1
-  [[ $origin == "$expected_origin" &&
-    $(git -C "$path" rev-parse HEAD 2>/dev/null) == \
-      "$(git -C "$candidate" rev-parse HEAD 2>/dev/null)" &&
-    -z $(git -C "$path" status --porcelain --untracked-files=all 2>/dev/null) ]] || return 1
-}
-
-install_managed_link() {
-  local path=$1 target=$2 record mode backup key temporary replacement
-
-  [[ $path == "$HOME/"* && $path != *$'\n'* && $path != *$'\t'* ]] ||
-    { die "unsafe managed path: $path"; return 1; }
-  mkdir -p "$(dirname -- "$path")" || return
-  record=$(ownership_record "$path") || return
-  if [[ -n $record ]]; then
-    if [[ -L $path && $(readlink -- "$path") == "$target" ]]; then return; fi
-    die "managed path was modified: $path"
-    return 1
-  fi
-
-  mode=created
-  backup=
-  if [[ -e $path || -L $path ]]; then
-    mode=backup
-    key=$(printf '%s' "$path" | sha256sum | cut -d ' ' -f1)
-    backup=$(dirname -- "$path")/.dotfiles-release-backup-$key
-    [[ ! -e $backup && ! -L $backup ]] ||
-      { die "backup already exists for $path"; return 1; }
-    path_snapshot "$path" || return
-  else
-    SNAPSHOT_TYPE=absent
-    SNAPSHOT_MODE=-
-    SNAPSHOT_IDENTITY=-
-  fi
-  replacement=planned$'\t'"$mode"$'\t'"$path"$'\t'"$target"$'\t'"$backup"$'\t'\
-"$SNAPSHOT_TYPE"$'\t'"$SNAPSHOT_MODE"$'\t'"$SNAPSHOT_IDENTITY"
-  replace_ownership_record "$path" "$replacement" || return
-  parse_ownership_record "$replacement" || return
-  if [[ $mode == backup ]]; then
-    mv -T -- "$path" "$backup" || return
-    sync -f "$(dirname -- "$path")" || return
-  fi
-  set_ownership_state displaced "$path" || return
-  parse_ownership_record "displaced${replacement#planned}" || return
-  temporary="$(dirname -- "$path")/.dotfiles-release-link.$$"
-  [[ ! -e $temporary && ! -L $temporary ]] || { die "temporary managed link exists: $temporary"; return 1; }
-  ln -s "$target" "$temporary" || return
-  durable_replace "$temporary" "$path" || return
-  set_ownership_state linked "$path" || return
-}
-
-preflight_managed_link() {
-  local path=$1 target=$2 release_id=${3:-} record parent relative component
-  local -a components=()
-
-  [[ $path == "$HOME/"* && $path != *$'\n'* && $path != *$'\t'* ]] ||
-    { die "unsafe managed path: $path"; return 1; }
-  relative=${path#"$HOME/"}
-  IFS=/ read -r -a components <<<"$relative"
-  parent=$HOME
-  for component in "${components[@]:0:${#components[@]}-1}"; do
-    parent=$parent/$component
-    [[ ! -L $parent ]] || { die "managed path has a symlink parent: $parent"; return 1; }
-    [[ ! -e $parent || -d $parent ]] || { die "managed path has a non-directory parent: $parent"; return 1; }
-  done
-
-  record=$(ownership_record "$path")
-  if [[ -n $record ]]; then
-    [[ -L $path && $(readlink -- "$path") == "$target" ]] ||
-      { die "managed path was modified: $path"; return 1; }
-    return
-  fi
-  [[ ! -e $path && ! -L $path ]] && return
-  if [[ -L $path ]] && recorded_provider_owns_path "$path"; then return; fi
-  if [[ $path == "$HOME/.config/nvim2" && -d $path && ! -L $path ]] &&
-    bstow_state_owns_tree "$path"; then
-    return
-  fi
-  if [[ $path == "$HOME/.tmux/plugins/"* ]] &&
-    tmux_plugin_checkout_owned "$path" "$release_id"; then
-    return
-  fi
-  case $path in
-    "$HOME/.bashrc" | "$HOME/.bash_profile" | "$HOME/.bash_aliases")
-      [[ -f $path && ! -L $path ]] || { die "foreign managed path exists: $path"; return 1; }
-      ;;
-    *) die "foreign managed path exists: $path"; return 1 ;;
-  esac
-}
-
-manage_stable_link() {
-  local action=$1 path=$2 target=$3 release_id=${4:-}
-  case $action in
-    preflight) preflight_managed_link "$path" "$target" "$release_id" ;;
-    apply) install_managed_link "$path" "$target" ;;
-    *) die "invalid managed-link action: $action" ;;
-  esac
-}
-
 release_commands() {
-  local release_id=$1 tool serialized
+  local release=$1 tool
   local -a tools=()
   local -A release_metadata=()
 
-  read_release_metadata "$RELEASE_ROOT/$release_id/release.env" release_metadata || return
-  serialized=${release_metadata[OFFLINE_TOOLS]}
-  IFS=, read -r -a tools <<<"$serialized"
+  read_release_metadata "$release/release.env" release_metadata || return
+  IFS=, read -r -a tools <<<"${release_metadata[OFFLINE_TOOLS]}"
   printf '%s\n' dotfiles-release
   for tool in "${tools[@]}"; do
     case $tool in
@@ -931,80 +351,474 @@ release_commands() {
   done
 }
 
-provision_stable_links() {
-  local action=${1:-apply} release_id=${2:-}
-  local current=$RELEASE_ROOT/current
-  local command_name file relative command_output skin_list
-  local -a command_names=() skin_files=()
+verify_release_symlinks() {
+  local release=$1 mode=$2 package_list=$3 link target resolved package relative links
 
-  if [[ -z $release_id ]]; then release_id=$(selected_id current) || return; fi
-  command_output=$(release_commands "$release_id") || return
-  mapfile -t command_names <<<"$command_output"
-  for command_name in "${command_names[@]}"; do
-    manage_stable_link "$action" "$HOME/bin/$command_name" \
-      "../dotfiles-releases/current/bin/$command_name" "$release_id" || return
-  done
-  manage_stable_link "$action" "$HOME/.config/nvim2" "$current/config/nvim2" "$release_id" || return
-  manage_stable_link "$action" "$HOME/.local/share/nvim2" "$current/share/nvim2" "$release_id" || return
-  manage_stable_link "$action" "$HOME/.bashrc" "$current/dotfiles/bash/.bashrc" "$release_id" || return
-  manage_stable_link "$action" "$HOME/.bash_profile" "$current/dotfiles/bash/.bash_profile" "$release_id" || return
-  manage_stable_link "$action" "$HOME/.bash_aliases" "$current/dotfiles/bash/.bash_aliases" "$release_id" || return
-  # Retained releases from before the SSH package do not contain these files.
-  if [[ -d $RELEASE_ROOT/$release_id/dotfiles/ssh ]]; then
-    [[ -f $RELEASE_ROOT/$release_id/dotfiles/ssh/.ssh/config &&
-      -f $RELEASE_ROOT/$release_id/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service ]] || {
-      die 'release has incomplete SSH agent configuration'
-      return 1
-    }
-    manage_stable_link "$action" "$HOME/.ssh/config" \
-      "$current/dotfiles/ssh/.ssh/config" "$release_id" || return
-    manage_stable_link "$action" "$HOME/.config/systemd/user/dotfiles-ssh-agent.service" \
-      "$current/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service" "$release_id" || return
-  fi
-  manage_stable_link "$action" "$HOME/.gitconfig" "$current/dotfiles/git/.gitconfig" "$release_id" || return
-  manage_stable_link "$action" "$HOME/.tmux.conf" "$current/dotfiles/tmux/.tmux.conf" "$release_id" || return
-  manage_stable_link "$action" "$HOME/.vimrc" "$current/dotfiles/vim/.vimrc" "$release_id" || return
-  manage_stable_link "$action" "$HOME/.oh-my-posh.omp.json" \
-    "$current/dotfiles/oh-my-posh/.oh-my-posh.omp.json" "$release_id" || return
-  for file in config.yaml aliases.yaml plugins.yaml; do
-    manage_stable_link "$action" "$HOME/.config/k9s/$file" \
-      "$current/dotfiles/k9s/.config/k9s/$file" "$release_id" || return
-  done
-  [[ -d $RELEASE_ROOT/$release_id/dotfiles/k9s/.config/k9s/skins ]] || {
-    die 'release has no k9s skins directory'
+  links=$(mktemp) || return
+  TEMP_PATHS+=("$links")
+  find "$release" -type l -print0 >"$links" || return
+  while IFS= read -r -d '' link; do
+    target=$(readlink -- "$link") || return
+    resolved=$(readlink -m -- "$(dirname -- "$link")/$target") || return
+    if [[ $target == /* ]]; then
+      [[ $mode == installed ]] ||
+        { die "absolute archive symlink: $link"; return 1; }
+      resolved=$(readlink -m -- "$target") || return
+    fi
+    [[ $resolved == "$release/"* ]] ||
+      { die "release symlink escapes its root: $link -> $target"; return 1; }
+    [[ ! -e $link ]] || continue
+    # Upstream test links point into a test-only submodule that is not bundled.
+    if [[ $resolved == "$release/share/tmux/plugins/tmux-resurrect/lib/tmux-test/"* &&
+      ( $link == "$release/share/tmux/plugins/tmux-resurrect/run_tests" ||
+        $link == "$release/share/tmux/plugins/tmux-resurrect/tests/"* ) ]]; then
+      continue
+    fi
+    if [[ $mode == archive && $resolved == "$release/share/nvim2/mason/packages/"* ]]; then
+      relative=${resolved#"$release/share/nvim2/mason/packages/"}
+      package=${relative%%/*}
+      if [[ $relative == "$package/venv/"* && $'\n'$package_list$'\n' == *$'\n'"$package"$'\n'* ]]; then
+        continue
+      fi
+    fi
+    die "release symlink has a missing target: $link -> $target"
     return 1
-  }
-  skin_list=$(mktemp "$STATE_DIR/.skin-files.XXXXXX") || return
-  TEMP_PATHS+=("$skin_list")
-  find "$RELEASE_ROOT/$release_id/dotfiles/k9s/.config/k9s/skins" \
-    -type f -print0 >"$skin_list" || return
-  mapfile -d '' -t skin_files <"$skin_list" || return
-  for file in "${skin_files[@]}"; do
-    relative=${file#*/skins/}
-    manage_stable_link "$action" "$HOME/.config/k9s/skins/$relative" \
-      "$current/dotfiles/k9s/.config/k9s/skins/$relative" "$release_id" || return
+  done <"$links"
+}
+
+validate_release_directory() {
+  local release=$1 mode=${2:-installed} path package_output command_output command_name version tool
+  local -A release_metadata=()
+
+  [[ -d $release && ! -L $release ]] || { die "invalid release directory: $release"; return 1; }
+  read_release_metadata "$release/release.env" release_metadata || return
+  [[ ${release_metadata[RELEASE_ID]} == "${release##*/}" &&
+    ${release_metadata[RELEASE_ID]} == "dotfiles-${release_metadata[SOURCE_COMMIT]:0:12}" ]] ||
+    { die 'release ID does not match its directory and source commit'; return 1; }
+  for path in bin config dotfiles python-locks share tools; do
+    [[ -d $release/$path && ! -L $release/$path ]] ||
+      { die "release payload directory is missing: $path"; return 1; }
   done
-  for command_name in tmux-sensible tmux-resurrect tmux-continuum; do
-    manage_stable_link "$action" "$HOME/.tmux/plugins/$command_name" \
-      "$current/share/tmux/plugins/$command_name" "$release_id" || return
+  for path in SHA256SUMS build-manifest.txt config/nvim2/init.lua \
+    dotfiles/bash/.bashrc dotfiles/bash/.bash_profile dotfiles/bash/.bash_aliases \
+    dotfiles/git/.gitconfig dotfiles/tmux/.tmux.conf dotfiles/vim/.vimrc \
+    dotfiles/oh-my-posh/.oh-my-posh.omp.json \
+    dotfiles/k9s/.config/k9s/config.yaml dotfiles/k9s/.config/k9s/aliases.yaml \
+    dotfiles/k9s/.config/k9s/plugins.yaml; do
+    [[ -f $release/$path && ! -L $release/$path ]] ||
+      { die "release payload file is missing: $path"; return 1; }
+  done
+  [[ -s $release/build-manifest.txt && -x $release/dotfiles-release &&
+    -x $release/config/nvim2/tests/check.sh &&
+    -x $release/tools/nvim/bin/nvim &&
+    -d $release/tools/nvim/share/nvim/runtime &&
+    -x $release/tools/tmux/bin/tmux &&
+    -x $release/tools/python-${release_metadata[PYTHON_VERSION]}/bin/python3 &&
+    -d $release/share/nvim2/mason/bin &&
+    -d $release/dotfiles/k9s/.config/k9s/skins ]] ||
+    { die 'release runtime layout is incomplete'; return 1; }
+  if [[ -e $release/dotfiles/ssh || -L $release/dotfiles/ssh ]]; then
+    for path in dotfiles/ssh/.ssh/config dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service; do
+      [[ -f $release/$path && ! -L $release/$path ]] ||
+        { die "release SSH configuration is missing: $path"; return 1; }
+    done
+  fi
+  for tool in tmux-sensible tmux-resurrect tmux-continuum; do
+    [[ -d $release/share/tmux/plugins/$tool/.git &&
+      -f $release/share/tmux/plugins/$tool/${tool#tmux-}.tmux ]] ||
+      { die "release tmux plugin is missing: $tool"; return 1; }
+  done
+  package_output=$(python_inventory_packages "$release") || return
+  verify_release_symlinks "$release" "$mode" "$package_output" || return
+  command_output=$(release_commands "$release") || return
+  while IFS= read -r command_name; do
+    if [[ $mode == archive && $command_name == yamllint ]]; then
+      [[ -L $release/bin/yamllint ]] ||
+        { die 'release executable is missing: yamllint'; return 1; }
+    else
+      [[ -x $release/bin/$command_name ]] ||
+        { die "release executable is missing: $command_name"; return 1; }
+    fi
+  done <<<"$command_output"
+  for tool in kubectl helm; do
+    for version in ${release_metadata[${tool^^}_VERSIONS]//,/ }; do
+      [[ -x $release/bin/$tool-$version ]] ||
+        { die "release executable is missing: $tool-$version"; return 1; }
+    done
+  done
+  if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
+    path=$release/share/helm/plugins/helm-values-schema-json
+    [[ -f $path/plugin.yaml && ! -L $path/plugin.yaml && -x $path/schema && -s $path/LICENSE ]] ||
+      { die 'release Helm schema plugin is incomplete'; return 1; }
+    awk -v expected="${release_metadata[HELM_SCHEMA_PLUGIN_VERSION]#v}" \
+      '$1 == "name:" { name = $2 } $1 == "version:" { gsub(/"/, "", $2); version = $2 }
+       END { exit !(name == "schema" && version == expected) }' "$path/plugin.yaml" ||
+      { die 'release Helm schema plugin metadata does not match its version'; return 1; }
+  fi
+  if [[ $mode == archive ]]; then
+    [[ -d $release/python-wheelhouse && ! -L $release/python-wheelhouse &&
+      -n $(find "$release/python-wheelhouse" -type f -name '*.whl' -print -quit) ]] ||
+      { die 'release Python wheelhouse is missing'; return 1; }
+    for path in installed.sha256 installed.modes installed.symlinks .complete .incomplete .artifact.sha256; do
+      [[ ! -e $release/$path && ! -L $release/$path ]] ||
+        { die 'archive contains installed-state metadata'; return 1; }
+    done
+    verify_archive_checksums "$release" || return
+  fi
+}
+
+verify_archive_checksums() {
+  local release=$1 expected
+  expected=$(mktemp) || return
+  TEMP_PATHS+=("$expected")
+  (
+    cd "$release" || exit
+    find . -type f ! -path './SHA256SUMS' -print0 | LC_ALL=C sort -z |
+      xargs -0 -r sha256sum >"$expected" || exit
+  ) || return
+  cmp -s "$release/SHA256SUMS" "$expected" ||
+    { die 'archive checksums do not match the complete file inventory'; return 1; }
+}
+
+extract_archive() {
+  local archive=$1 parent=$2 top
+  [[ -f $archive && ! -L $archive ]] ||
+    { die "artifact is not a regular file: $archive"; return 1; }
+  top=$(validate_archive_members "$archive") || return
+  tar -xzf "$archive" -C "$parent" --keep-old-files --no-same-owner --no-same-permissions || return
+  validate_release_directory "$parent/$top" archive || return
+  EXTRACTED_ID=$top
+}
+
+verify_archive() {
+  local archive=$1 stage top
+  local -A release_metadata=()
+  archive_prerequisites || return
+  stage=$(mktemp -d) || return
+  TEMP_PATHS+=("$stage")
+  extract_archive "$archive" "$stage" || return
+  top=$EXTRACTED_ID
+  read_release_metadata "$stage/$top/release.env" release_metadata || return
+  printf '%s: verified %s (%s)\n' "${0##*/}" "$top" "${release_metadata[PLATFORM_ID]}"
+}
+
+manifest_content() {
+  local release=$1 kind=$2
+  (
+    cd "$release" || exit
+    case $kind in
+      hashes)
+        find . -type f ! -path './installed.sha256' ! -path './installed.modes' \
+          ! -path './installed.symlinks' ! -path './.complete' ! -path './.incomplete' -print0 |
+          LC_ALL=C sort -z | xargs -0 -r sha256sum
+        ;;
+      modes)
+        find . \( -type f -o -type d \) ! -path './installed.sha256' ! -path './installed.modes' \
+          ! -path './installed.symlinks' ! -path './.complete' ! -path './.incomplete' -print0 |
+          LC_ALL=C sort -z | xargs -0 -r stat -c '%a %n'
+        ;;
+      links) find . -type l -printf '%p\t%l\n' | LC_ALL=C sort ;;
+    esac
+  )
+}
+
+write_installed_manifest() {
+  local release=$1 kind name temporary
+  for kind in hashes modes links; do
+    case $kind in
+      hashes) name=installed.sha256 ;;
+      modes) name=installed.modes ;;
+      links) name=installed.symlinks ;;
+    esac
+    temporary=$(mktemp) || return
+    TEMP_PATHS+=("$temporary")
+    manifest_content "$release" "$kind" >"$temporary" || return
+    cp -- "$temporary" "$release/$name" || return
   done
 }
 
-validate_projection() {
-  local line current
+verify_installed_manifest() {
+  local release=$1 kind name expected
+  for kind in hashes modes links; do
+    case $kind in
+      hashes) name=installed.sha256 ;;
+      modes) name=installed.modes ;;
+      links) name=installed.symlinks ;;
+    esac
+    [[ -f $release/$name && ! -L $release/$name ]] ||
+      { die "installed manifest is missing in $release; uninstall and reinstall this ID"; return 1; }
+    expected=$(mktemp) || return
+    TEMP_PATHS+=("$expected")
+    manifest_content "$release" "$kind" >"$expected" || return
+    cmp -s "$release/$name" "$expected" ||
+      { die "installed $kind changed in $release"; return 1; }
+  done
+}
 
-  [[ -f $OWNERSHIP_FILE ]] || { die 'managed-link ownership record is missing'; return 1; }
-  while IFS= read -r line || [[ -n $line ]]; do
-    parse_ownership_record "$line" || return
-    [[ $OWN_PATH == "$HOME/"* && -L $OWN_PATH && $(readlink -- "$OWN_PATH") == "$OWN_TARGET" ]] || {
-      die "managed projection does not match its record: $OWN_PATH"
-      return 1
-    }
-  done <"$OWNERSHIP_FILE"
-  current=$(selected_id current) || return
-  [[ $(readlink -f -- "$HOME/bin/dotfiles-release") == \
-    "$RELEASE_ROOT/$current/dotfiles-release" ]] ||
-    { die 'managed command projection does not resolve through current'; return 1; }
+validate_home() {
+  [[ $HOME == /* && $HOME != / && $HOME != *$'\n'* && $HOME != *$'\t'* ]] ||
+    { die "unsafe HOME: $HOME"; return 1; }
+  [[ -d $HOME && ! -L $HOME && -w $HOME ]] ||
+    { die "HOME must be a writable real directory: $HOME"; return 1; }
+}
+
+validate_release_root() {
+  [[ $RELEASE_ROOT == /* && $RELEASE_ROOT != / && $RELEASE_ROOT != "$HOME" &&
+    $RELEASE_ROOT != *$'\n'* && $RELEASE_ROOT != *$'\t'* &&
+    /$RELEASE_ROOT/ != *'/../'* && /$RELEASE_ROOT/ != *'/./'* ]] ||
+    { die "unsafe release root: $RELEASE_ROOT"; return 1; }
+  if [[ -e $RELEASE_ROOT || -L $RELEASE_ROOT ]]; then
+    [[ -d $RELEASE_ROOT && ! -L $RELEASE_ROOT ]] ||
+      { die "invalid release root: $RELEASE_ROOT"; return 1; }
+  fi
+}
+
+acquire_lock() {
+  validate_home || return
+  validate_release_root || return
+  mkdir -p -- "$RELEASE_ROOT" || return
+  # Lock the directory inode; no persistent lock marker or state directory.
+  exec {LOCK_FD}<"$RELEASE_ROOT" || return
+  flock -x -n "$LOCK_FD" || { die 'another release operation is running'; return 1; }
+  current_id >/dev/null
+}
+
+current_id() {
+  local path=$RELEASE_ROOT/current target
+  [[ -e $path || -L $path ]] || return 0
+  [[ -L $path ]] || { die "reserved current path is not a symlink: $path"; return 1; }
+  target=$(readlink -- "$path") || return
+  [[ $target =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
+    { die "invalid current link: $target"; return 1; }
+  [[ -d $RELEASE_ROOT/$target && ! -L $RELEASE_ROOT/$target ]] ||
+    { die "current selects a missing release: $target"; return 1; }
+  printf '%s\n' "$target"
+}
+
+replace_link() {
+  local path=$1 target=$2 temporary
+  temporary=$(mktemp "$(dirname -- "$path")/.dotfiles-release-link.XXXXXX") || return
+  TEMP_PATHS+=("$temporary")
+  unlink "$temporary" || return
+  ln -s -- "$target" "$temporary" || return
+  mv -T -- "$temporary" "$path"
+}
+
+begin_transaction() {
+  UNDO_KINDS=()
+  UNDO_PATHS=()
+  UNDO_VALUES=()
+  TRANSACTION_ACTIVE=true
+}
+
+commit_transaction() {
+  TRANSACTION_ACTIVE=false
+  UNDO_KINDS=()
+  UNDO_PATHS=()
+  UNDO_VALUES=()
+}
+
+move_in_transaction() {
+  local source=$1 destination=$2
+  [[ ! -e $destination && ! -L $destination ]] ||
+    { die "refusing to overwrite saved path: $destination"; return 1; }
+  UNDO_KINDS+=(move)
+  UNDO_PATHS+=("$source")
+  UNDO_VALUES+=("$destination")
+  mv -T -- "$source" "$destination"
+}
+
+select_in_transaction() {
+  local target=${1:-} old
+  old=$(current_id) || return
+  [[ $target != "$old" ]] || return 0
+  UNDO_KINDS+=(current)
+  UNDO_PATHS+=("$RELEASE_ROOT/current")
+  UNDO_VALUES+=("$old")
+  if [[ -n $target ]]; then
+    replace_link "$RELEASE_ROOT/current" "$target"
+  elif [[ -L $RELEASE_ROOT/current ]]; then
+    unlink "$RELEASE_ROOT/current"
+  fi
+}
+
+undo_transaction() {
+  local index kind path value failed=0
+  for ((index = ${#UNDO_KINDS[@]} - 1; index >= 0; index--)); do
+    kind=${UNDO_KINDS[$index]}
+    path=${UNDO_PATHS[$index]}
+    value=${UNDO_VALUES[$index]}
+    case $kind in
+      link)
+        if [[ -L $path && $(readlink -- "$path") == "$value" ]]; then
+          unlink "$path" || failed=1
+        elif [[ -e $path || -L $path ]]; then
+          die "cannot restore modified path: $path"
+          failed=1
+        fi
+        ;;
+      move)
+        if [[ -e $value || -L $value ]]; then
+          if [[ -e $path || -L $path ]]; then
+            die "cannot restore $path; original saved at $value"
+            failed=1
+          else
+            mv -T -- "$value" "$path" || failed=1
+          fi
+        elif [[ ! -e $path && ! -L $path ]]; then
+          die "saved path is missing: $value"
+          failed=1
+        fi
+        ;;
+      current)
+        if [[ -n $value ]]; then
+          if [[ ! -L $path || $(readlink -- "$path") != "$value" ]]; then
+            replace_link "$path" "$value" || failed=1
+          fi
+        elif [[ -L $path ]]; then
+          unlink "$path" || failed=1
+        fi
+        ;;
+    esac
+  done
+  ((failed == 0)) || return 1
+  commit_transaction
+}
+
+validate_link_parent() {
+  local path=$1 parent relative component
+  local -a components=()
+  [[ $path == "$HOME/"* ]] || { die "unsafe managed path: $path"; return 1; }
+  relative=${path#"$HOME/"}
+  IFS=/ read -r -a components <<<"$relative"
+  parent=$HOME
+  for component in "${components[@]:0:${#components[@]}-1}"; do
+    parent=$parent/$component
+    [[ ! -L $parent ]] || { die "managed path has a symlink parent: $parent"; return 1; }
+    [[ ! -e $parent || -d $parent ]] ||
+      { die "managed path has a non-directory parent: $parent"; return 1; }
+  done
+}
+
+add_projection() {
+  LINK_PATHS+=("$1")
+  LINK_TARGETS+=("$2")
+}
+
+release_projection() {
+  local release=$1 current=$RELEASE_ROOT/current command_output command_name file relative skin_list
+  LINK_PATHS=()
+  LINK_TARGETS=()
+  command_output=$(release_commands "$release") || return
+  while IFS= read -r command_name; do
+    if [[ $RELEASE_ROOT == "$HOME/dotfiles-releases" ]]; then
+      add_projection "$HOME/bin/$command_name" "../dotfiles-releases/current/bin/$command_name"
+    else
+      add_projection "$HOME/bin/$command_name" "$current/bin/$command_name"
+    fi
+  done <<<"$command_output"
+  add_projection "$HOME/.config/nvim2" "$current/config/nvim2"
+  add_projection "$HOME/.local/share/nvim2" "$current/share/nvim2"
+  for file in .bashrc .bash_profile .bash_aliases; do
+    add_projection "$HOME/$file" "$current/dotfiles/bash/$file"
+  done
+  add_projection "$HOME/.gitconfig" "$current/dotfiles/git/.gitconfig"
+  add_projection "$HOME/.tmux.conf" "$current/dotfiles/tmux/.tmux.conf"
+  add_projection "$HOME/.vimrc" "$current/dotfiles/vim/.vimrc"
+  add_projection "$HOME/.oh-my-posh.omp.json" "$current/dotfiles/oh-my-posh/.oh-my-posh.omp.json"
+  if [[ -d $release/dotfiles/ssh ]]; then
+    add_projection "$HOME/.ssh/config" "$current/dotfiles/ssh/.ssh/config"
+    add_projection "$HOME/.config/systemd/user/dotfiles-ssh-agent.service" \
+      "$current/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service"
+  fi
+  for file in config.yaml aliases.yaml plugins.yaml; do
+    add_projection "$HOME/.config/k9s/$file" "$current/dotfiles/k9s/.config/k9s/$file"
+  done
+  skin_list=$(mktemp) || return
+  TEMP_PATHS+=("$skin_list")
+  find "$release/dotfiles/k9s/.config/k9s/skins" -type f -print0 >"$skin_list" || return
+  while IFS= read -r -d '' file; do
+    relative=${file#"$release/dotfiles/k9s/.config/k9s/skins/"}
+    add_projection "$HOME/.config/k9s/skins/$relative" \
+      "$current/dotfiles/k9s/.config/k9s/skins/$relative"
+  done <"$skin_list"
+  for file in tmux-sensible tmux-resurrect tmux-continuum; do
+    add_projection "$HOME/.tmux/plugins/$file" "$current/share/tmux/plugins/$file"
+  done
+}
+
+preflight_projection() {
+  local index path target backup
+  for index in "${!LINK_PATHS[@]}"; do
+    path=${LINK_PATHS[$index]}
+    target=${LINK_TARGETS[$index]}
+    validate_link_parent "$path" || return
+    [[ ! -L $path || $(readlink -- "$path") != "$target" ]] || continue
+    [[ -e $path || -L $path ]] || continue
+    backup=$path.before-dotfiles-release
+    [[ ! -e $backup && ! -L $backup ]] ||
+      { die "saved original already exists: $backup; preserve it before replacing $path"; return 1; }
+    [[ ! -e $path || -f $path || -d $path || -L $path ]] ||
+      { die "unsupported managed path: $path"; return 1; }
+  done
+}
+
+apply_projection() {
+  local index path target
+  for index in "${!LINK_PATHS[@]}"; do
+    path=${LINK_PATHS[$index]}
+    target=${LINK_TARGETS[$index]}
+    [[ ! -L $path || $(readlink -- "$path") != "$target" ]] || continue
+    mkdir -p -- "$(dirname -- "$path")" || return
+    if [[ -e $path || -L $path ]]; then
+      move_in_transaction "$path" "$path.before-dotfiles-release" || return
+    fi
+    UNDO_KINDS+=(link)
+    UNDO_PATHS+=("$path")
+    UNDO_VALUES+=("$target")
+    replace_link "$path" "$target" || return
+  done
+}
+
+verify_projection() {
+  local index path
+  for index in "${!LINK_PATHS[@]}"; do
+    path=${LINK_PATHS[$index]}
+    validate_link_parent "$path" || return
+    [[ -L $path && -e $path && $(readlink -- "$path") == "${LINK_TARGETS[$index]}" ]] ||
+      { die "active release link is missing or incorrect: $path"; return 1; }
+  done
+}
+
+check_installed_release() {
+  local release=$1
+  local -A release_metadata=()
+  validate_release_directory "$release" || return
+  read_release_metadata "$release/release.env" release_metadata || return
+  validate_platform "${release_metadata[PLATFORM_ID]}" || return
+  verify_installed_manifest "$release"
+}
+
+activate_release() {
+  local release_id=$1 release=$RELEASE_ROOT/$1 skip_health=${2:-false}
+  [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
+    { die "invalid release ID: $release_id"; return 1; }
+  check_installed_release "$release" || return
+  release_projection "$release" || return
+  preflight_projection || return
+  if [[ $skip_health == true ]]; then
+    printf '%s: skipped runtime health checks for %s\n' "${0##*/}" "$release_id" >&2
+  else
+    check_runtime "$release" || return
+    verify_installed_manifest "$release" || return
+  fi
+  migrate_nvim_state || return
+  begin_transaction
+  apply_projection || return
+  select_in_transaction "$release_id" || return
+  [[ $(current_id) == "$release_id" ]] || { die 'activation did not select the release'; return 1; }
+  verify_projection || return
+  commit_transaction
 }
 
 create_python_tools() {
@@ -1022,18 +836,18 @@ create_python_tools() {
     venv=$release/share/nvim2/mason/packages/$package/venv
     [[ ! -e $venv && ! -L $venv ]] ||
       { die "Python environment already exists: $venv"; return 1; }
-    "$python" -I -m venv "$venv" || return
+    timeout 120s "$python" -I -m venv "$venv" || return
     env -u PYTHONHOME -u PYTHONPATH -u PIP_TARGET -u PIP_PREFIX \
       -u PIP_REQUIRE_VIRTUALENV -u PIP_USER -u PIP_CONFIG_FILE \
       PIP_CONFIG_FILE=/dev/null PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1 \
-      "$venv/bin/python" -I -m pip install --disable-pip-version-check \
+      timeout 600s "$venv/bin/python" -I -m pip install --disable-pip-version-check \
       --no-index --require-hashes --only-binary=:all: \
       --find-links "$release/python-wheelhouse" \
       -r "$release/python-locks/$package.lock" || return
     [[ -x $venv/bin/$package ]] ||
       { die "Python entry point is missing: $package"; return 1; }
     env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
-      "$venv/bin/python" -I -m pip check || return
+      timeout 120s "$venv/bin/python" -I -m pip check || return
   done <<<"$package_output"
   for command_name in ansible ansible-config ansible-playbook; do
     [[ -x $release/share/nvim2/mason/packages/ansible-lint/venv/bin/$command_name ]] ||
@@ -1059,270 +873,12 @@ migrate_nvim_state() {
   done
 }
 
-write_installed_manifest() {
-  local release=$1
-  local hashes modes links
-
-  (
-    cd "$release" || exit
-    hashes=$(mktemp "$release/.installed.hashes.XXXXXX") || exit
-    modes=$(mktemp "$release/.installed.modes.XXXXXX") || exit
-    links=$(mktemp "$release/.installed.links.XXXXXX") || exit
-    find . -type f ! -path './installed.sha256' ! -path './installed.modes' \
-      ! -path './installed.symlinks' ! -path './.installed.*' \
-      ! -path './.incomplete' ! -path './.complete' -print0 | LC_ALL=C sort -z |
-      xargs -0 sha256sum >"$hashes" || exit
-    find . \( -type f -o -type d \) ! -path './installed.sha256' ! -path './installed.modes' \
-      ! -path './installed.symlinks' ! -path './.installed.*' \
-      ! -path './.incomplete' ! -path './.complete' -print0 | LC_ALL=C sort -z |
-      xargs -0 stat -c '%a %n' >"$modes" || exit
-    find . -type l -printf '%p\t%l\n' | LC_ALL=C sort >"$links" || exit
-    mv "$hashes" installed.sha256 || exit
-    mv "$modes" installed.modes || exit
-    mv "$links" installed.symlinks || exit
-  ) || return
-}
-
-verify_installed_manifest() {
-  local release=$1 expected_hashes expected_modes expected_links identity_file identity
-  [[ -f $release/installed.sha256 && -f $release/installed.modes &&
-    -f $release/installed.symlinks ]] || { die "installed manifest is missing in $release"; return 1; }
-  expected_hashes=$(mktemp "$STATE_DIR/.health-hashes.XXXXXX") || return
-  expected_modes=$(mktemp "$STATE_DIR/.health-modes.XXXXXX") || return
-  expected_links=$(mktemp "$STATE_DIR/.health-links.XXXXXX") || return
-  TEMP_PATHS+=("$expected_hashes" "$expected_modes" "$expected_links")
-  (
-    cd "$release" || exit
-    find . -type f ! -path './installed.sha256' ! -path './installed.modes' \
-      ! -path './installed.symlinks' ! -path './.installed.*' \
-      ! -path './.incomplete' ! -path './.complete' -print0 | LC_ALL=C sort -z |
-      xargs -0 sha256sum >"$expected_hashes" || exit
-    find . \( -type f -o -type d \) ! -path './installed.sha256' ! -path './installed.modes' \
-      ! -path './installed.symlinks' ! -path './.installed.*' \
-      ! -path './.incomplete' ! -path './.complete' -print0 | LC_ALL=C sort -z |
-      xargs -0 stat -c '%a %n' >"$expected_modes" || exit
-    find . -type l -printf '%p\t%l\n' | LC_ALL=C sort >"$expected_links" || exit
-  ) || return
-  cmp -s "$release/installed.sha256" "$expected_hashes" ||
-    { die "installed file content changed in $release"; return 1; }
-  cmp -s "$release/installed.modes" "$expected_modes" ||
-    { die "installed file modes changed in $release"; return 1; }
-  cmp -s "$release/installed.symlinks" "$expected_links" ||
-    { die "installed symlinks changed in $release"; return 1; }
-  identity_file=$STATE_DIR/release-identities/${release##*/}.sha256
-  [[ -f $identity_file && ! -L $identity_file ]] ||
-    { die "installed manifest identity is missing for ${release##*/}"; return 1; }
-  identity=$(sha256sum "$release/installed.sha256" "$release/installed.modes" \
-    "$release/installed.symlinks" | sha256sum | cut -d ' ' -f1)
-  [[ $(<"$identity_file") == "$identity" ]] ||
-    { die "installed manifest identity changed in $release"; return 1; }
-}
-
-record_installed_identity() {
-  local release=$1 directory=$STATE_DIR/release-identities identity temporary
-
-  mkdir -p "$directory" || return
-  chmod 0700 "$directory" || return
-  identity=$(sha256sum "$release/installed.sha256" "$release/installed.modes" \
-    "$release/installed.symlinks" | sha256sum | cut -d ' ' -f1)
-  temporary=$directory/.${release##*/}.$$
-  printf '%s\n' "$identity" >"$temporary" || return
-  chmod 0600 "$temporary" || return
-  durable_replace "$temporary" "$directory/${release##*/}.sha256"
-}
-
-write_pending() {
-  local phase=$1 new_id=$2 old_current=${3:-} old_previous=${4:-}
-  local temporary=$STATE_DIR/.pending.$$
-
-  printf 'phase=%s\nnew_id=%s\nold_current=%s\nold_previous=%s\n' \
-    "$phase" "$new_id" "$old_current" "$old_previous" >"$temporary" || return
-  chmod 0600 "$temporary" || return
-  durable_replace "$temporary" "$PENDING_FILE"
-}
-
-pending_value() {
-  metadata_value "$PENDING_FILE" "$1"
-}
-
-recover_pending() {
-  local phase new_id old_current old_previous line key count=0
-  local -A seen=()
-
-  [[ -f $PENDING_FILE ]] || return 0
-  [[ ! -L $PENDING_FILE ]] || die 'pending journal must not be a symlink'
-  while IFS= read -r line || [[ -n $line ]]; do
-    [[ $line =~ ^(phase|new_id|old_current|old_previous)=([a-z0-9-]*)$ ]] ||
-      { die 'pending journal contains invalid data'; return 1; }
-    key=${BASH_REMATCH[1]}
-    [[ -z ${seen[$key]:-} ]] || { die "pending journal repeats $key"; return 1; }
-    seen[$key]=1
-    ((count += 1))
-  done <"$PENDING_FILE"
-  [[ $count -eq 4 ]] || { die 'pending journal has an invalid field count'; return 1; }
-  phase=$(pending_value phase) || return
-  new_id=$(pending_value new_id) || return
-  old_current=$(pending_value old_current) || return
-  old_previous=$(pending_value old_previous) || return
-  [[ $new_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die 'pending journal has an invalid release ID'; return 1; }
-  [[ -z $old_current || $old_current =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die 'pending journal has an invalid old current ID'; return 1; }
-  [[ -z $old_previous || $old_previous =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die 'pending journal has an invalid old previous ID'; return 1; }
-  case $phase in
-    importing)
-      cleanup_path "$RELEASE_ROOT/$new_id" || return
-      cleanup_path "$STATE_DIR/release-identities/$new_id.sha256" || return
-      ;;
-    published | switching-new)
-      switch_selection current "$old_current" || return
-      switch_selection previous "$old_previous" || return
-      if [[ -z $old_current && -f $OWNERSHIP_FILE ]]; then restore_owned_links || return; fi
-      cleanup_path "$RELEASE_ROOT/$new_id" || return
-      cleanup_path "$STATE_DIR/release-identities/$new_id.sha256" || return
-      ;;
-    switching-existing)
-      switch_selection current "$old_current" || return
-      switch_selection previous "$old_previous" || return
-      if [[ -z $old_current && -f $OWNERSHIP_FILE ]]; then restore_owned_links || return; fi
-      ;;
-    restoring)
-      restore_owned_links || return
-      switch_selection current || return
-      switch_selection previous || return
-      ;;
-    *) die "pending journal has an invalid phase: $phase"; return 1 ;;
-  esac
-  durable_unlink "$PENDING_FILE" || return
-  RECOVERED_PENDING=true
-  printf '%s: recovered pending installation state for %s\n' "${0##*/}" "$new_id"
-}
-
-activate_release() {
-  local phase=$1 release_id=$2 old_current=${3:-} old_previous=${4:-}
-  local activation_status=0 recovery_status=0
-
-  provision_stable_links preflight "$release_id" || return
-  write_pending "$phase" "$release_id" "$old_current" "$old_previous" || return
-  if [[ $release_id != "$old_current" ]]; then
-    switch_selection previous "$old_current" || activation_status=$?
-    if ((activation_status == 0)); then
-      switch_selection current "$release_id" || activation_status=$?
-    fi
-  fi
-  [[ ${DOTFILES_RELEASE_TEST_FAIL_PHASE:-} != after-switch ]] || return 73
-  if ((activation_status == 0)); then migrate_nvim_state || activation_status=$?; fi
-  if ((activation_status == 0)); then
-    provision_stable_links apply "$release_id" || activation_status=$?
-  fi
-  if ((activation_status == 0)); then validate_projection || activation_status=$?; fi
-  if ((activation_status == 0)); then health_release "$release_id" quick || activation_status=$?; fi
-  if ((activation_status != 0)); then
-    recover_pending || recovery_status=$?
-    if ((recovery_status != 0)); then
-      die "activation failed for $release_id and automatic recovery also failed"
-    else
-      die "activation failed for $release_id; restored the previous selection"
-    fi
-    return 1
-  fi
-  durable_unlink "$PENDING_FILE" || return
-}
-
-install_archive() {
-  local archive=$1 skip_tests=${2:-false} top import release release_id platform old_current old_previous artifact_digest
-  local install_status=0 recovery_status=0
-  local -A release_metadata=()
-
-  for command_name in awk bash basename cat chmod cmp cp cut dirname env find flock git grep gzip id jq ln \
-    mkdir mktemp mv readlink sed sha256sum sort stat sync tar uname unlink wc xargs; do
-    need "$command_name" || return
-  done
-  if [[ $skip_tests != true ]]; then
-    for command_name in head mkfifo script setsid sleep timeout; do need "$command_name" || return; done
-  fi
-  [[ -f $archive && ! -L $archive ]] ||
-    { die "artifact is not a regular file: $archive"; return 1; }
-  archive=$(readlink -f -- "$archive") || return
-  acquire_lock exclusive || return
-  recover_pending || return
-  top=$(validate_archive_members "$archive") || return
-  release_id=$top
-  import=$(mktemp -d "$RELEASE_ROOT/.import.XXXXXX")
-  TEMP_PATHS+=("$import")
-  tar -xzf "$archive" -C "$import" --no-same-owner --no-same-permissions || return
-  release=$import/$top
-  read_release_metadata "$release/release.env" release_metadata || return
-  platform=${release_metadata[PLATFORM_ID]}
-  validate_platform "$platform" || return
-  validate_release_directory "$release" "$platform" || return
-  artifact_digest=$(sha256sum "$archive" | cut -d ' ' -f1) || return
-  old_current=$(selected_id current) || return
-  old_previous=$(selected_id previous) || return
-
-  if [[ -d $RELEASE_ROOT/$release_id && ! -L $RELEASE_ROOT/$release_id ]]; then
-    verify_installed_manifest "$RELEASE_ROOT/$release_id" || return
-    if [[ -f $RELEASE_ROOT/$release_id/.artifact.sha256 &&
-      $(<"$RELEASE_ROOT/$release_id/.artifact.sha256") == "$artifact_digest" ]]; then
-      health_release "$release_id" quick || return
-      activate_release switching-existing "$release_id" "$old_current" "$old_previous" || return
-      printf '%s: release %s is already installed and selected; reload Bash with: source ~/.bashrc && hash -r\n' \
-        "${0##*/}" "$release_id"
-      return
-    fi
-    die "release ID collision: $release_id"
-  fi
-
-  write_pending importing "$release_id" "$old_current" "$old_previous" || return
-  mv "$release" "$RELEASE_ROOT/$release_id" || install_status=$?
-  release=$RELEASE_ROOT/$release_id
-  if ((install_status == 0)); then : >"$release/.incomplete" || install_status=$?; fi
-  if ((install_status == 0)); then
-    write_pending published "$release_id" "$old_current" "$old_previous" || install_status=$?
-  fi
-  if ((install_status != 0)); then
-    recover_pending || recovery_status=$?
-    if ((recovery_status != 0)); then
-      die "release import failed for $release_id and automatic recovery also failed"
-    else
-      die "release import failed for $release_id; restored the previous selection"
-    fi
-    return 1
-  fi
-  [[ ${DOTFILES_RELEASE_TEST_FAIL_PHASE:-} != after-publish ]] || return 72
-  provision_stable_links preflight "$release_id" || install_status=$?
-  if ((install_status == 0)); then create_python_tools "$release" || install_status=$?; fi
-  if ((install_status == 0)); then
-    printf '%s\n' "$artifact_digest" >"$release/.artifact.sha256" || install_status=$?
-  fi
-  if ((install_status == 0)); then health_release "$release_id" candidate "$skip_tests" || install_status=$?; fi
-  if ((install_status == 0)); then cleanup_path "$release/python-wheelhouse" || install_status=$?; fi
-  if ((install_status == 0)); then write_installed_manifest "$release" || install_status=$?; fi
-  if ((install_status == 0)); then record_installed_identity "$release" || install_status=$?; fi
-  if ((install_status == 0)); then
-    mv "$release/.incomplete" "$release/.complete" || install_status=$?
-  fi
-  if ((install_status != 0)); then
-    recover_pending || recovery_status=$?
-    if ((recovery_status != 0)); then
-      die "release preparation failed for $release_id and automatic recovery also failed"
-    else
-      die "release preparation failed for $release_id; restored the previous selection"
-    fi
-    return 1
-  fi
-  activate_release switching-new "$release_id" "$old_current" "$old_previous" || return
-  printf '%s: installed %s; reload Bash with: source ~/.bashrc && hash -r\n' \
-    "${0##*/}" "$release_id"
-}
-
 health_python() {
   local release=$1 python_version=$2 python package venv package_output
 
   python=$release/tools/python-$python_version/bin/python3
   env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
-    "$python" -I - "$release" "$python_version" <<'PY' || return
+    timeout --kill-after=5s 30s "$python" -I -B - "$release" "$python_version" <<'PY' || return
 import hashlib
 import json
 import pathlib
@@ -1351,7 +907,7 @@ PY
     [[ -f $venv/pyvenv.cfg && -x $venv/bin/python && -x $venv/bin/$package ]] ||
       { die "incomplete Python environment: $venv"; return 1; }
     env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
-      "$venv/bin/python" -I - "$release" "$package" <<'PY' || return
+      timeout --kill-after=5s 30s "$venv/bin/python" -I -B - "$release" "$package" <<'PY' || return
 import pathlib
 import sys
 
@@ -1367,648 +923,252 @@ __import__(package)
 print('python-venv=' + sys.argv[2] + ':' + sys.prefix)
 PY
     env -u PYTHONHOME -u PYTHONPATH PIP_CONFIG_FILE=/dev/null PYTHONDONTWRITEBYTECODE=1 \
-      "$venv/bin/python" -I -m pip check || return
+      timeout --kill-after=5s 120s "$venv/bin/python" -I -B -m pip check || return
   done <<<"$package_output"
 
   PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
-    "$release/share/nvim2/mason/bin/ansible-config" --version || return
+    timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/ansible-config" --version || return
   PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
-    "$release/share/nvim2/mason/bin/ansible-lint" --offline --version || return
+    timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/ansible-lint" --offline --version || return
   PATH="$release/share/nvim2/mason/packages/yamllint/venv/bin:$release/bin:/usr/bin:/bin" \
-    "$release/share/nvim2/mason/bin/yamllint" --version || return
+    timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/yamllint" --version || return
 }
 
-health_cli_operations() {
-  local release=$1 health_home=$2 work output versions version
-  work=$health_home/cli
-
-  mkdir -p "$work/project" || return
-  if [[ -x $release/bin/uv ]]; then
-    PYTHONDONTWRITEBYTECODE=1 "$release/bin/uv" venv --no-config --offline \
-      --no-cache --no-python-downloads --python "$release/bin/python" "$work/uv-venv" || return
-    "$work/uv-venv/bin/python" -I -B -c \
-      'import json, ssl, sys; assert sys.prefix != sys.base_prefix; print("uv-venv-ok")' || return
-  fi
-  printf 'alpha\noffline needle\nomega\n' >"$work/input.txt" || return
-  output=$("$release/bin/rg" --fixed-strings 'offline needle' "$work/input.txt") || return
-  printf '%s\n' "$output"
-  [[ $output == *'offline needle'* ]] || { die 'ripgrep functional check failed'; return 1; }
-  output=$(printf 'alpha\noffline needle\nomega\n' | "$release/bin/fzf" --filter='offline needle') || return
-  printf '%s\n' "$output"
-  [[ $output == 'offline needle' ]] || { die 'fzf functional check failed'; return 1; }
-
-  _ZO_DATA_DIR="$work/zoxide" "$release/bin/zoxide" add "$work/project" || return
-  output=$(_ZO_DATA_DIR="$work/zoxide" "$release/bin/zoxide" query project) || return
-  printf 'zoxide-query=%s\n' "$output"
-  [[ $output == "$work/project" ]] || { die 'zoxide database check failed'; return 1; }
-  "$release/bin/zoxide" init bash | "$release/bin/rg" --fixed-strings '__zoxide_hook' || return
-
-  printf '%s\n' \
-    "version: '3'" \
-    'tasks:' \
-    '  health:' \
-    '    cmds:' \
-      '      - test -f marker' \
-    '    silent: true' >"$work/Taskfile.yml" || return
-  : >"$work/marker" || return
-  "$release/bin/task" --dir "$work" --taskfile "$work/Taskfile.yml" health || return
-
-  printf 'terraform{required_version=">= 1.0"}\n' >"$work/main.tf" || return
-  printf 'example_value="offline"\n' >"$work/terraform.tfvars" || return
-  "$release/bin/terraform" fmt "$work/main.tf" "$work/terraform.tfvars" || return
-  "$release/bin/terraform" fmt -check "$work/main.tf" "$work/terraform.tfvars" || return
-  "$release/bin/rg" --fixed-strings 'example_value = "offline"' "$work/terraform.tfvars" || return
-
-  mkdir -p "$work/chart/templates" || return
-  printf '%s\n' 'apiVersion: v2' 'name: offline-health' 'version: 0.1.0' \
-    >"$work/chart/Chart.yaml"
-  printf '{}\n' >"$work/chart/values.yaml" || return
-  printf '{}\n' >"$work/chart/values.lint.yaml" || return
-  printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' \
-    '  name: {{ .Release.Name }}' >"$work/chart/templates/config.yaml" || return
-  (cd "$work/chart" && "$release/share/nvim2/mason/bin/helm_ls" lint) || return
-  versions=$(metadata_value "$release/release.env" HELM_VERSIONS) || return
-  for version in ${versions//,/ }; do
-    output=$(HELM_VERSION="$version" HELM_CONFIG_HOME="$health_home/helm/config" \
-      HELM_CACHE_HOME="$health_home/helm/cache" HELM_DATA_HOME="$health_home/helm/data" \
-      "$release/bin/helm" template offline-health "$work/chart") || return
-    printf '%s\n' "$output"
-    [[ $output == *'name: offline-health'* ]] ||
-      { die "Helm $version did not render the local chart"; return 1; }
-  done
-}
-
-health_kubernetes_tools() {
-  local release=$1 health_home=$2 kubeconfig output versions version
-  kubeconfig=$health_home/kubeconfig
-
-  mkdir -p "$health_home/.config" || return
-  cp -a "$release/dotfiles/k9s/.config/k9s" "$health_home/.config/k9s" || return
-  printf '%s\n' \
-    'apiVersion: v1' \
-    'kind: Config' \
-    'clusters:' \
-    '- name: offline-a' \
-    '  cluster: {server: https://127.0.0.1:1}' \
-    '- name: offline-b' \
-    '  cluster: {server: https://127.0.0.1:1}' \
-    'users:' \
-    '- name: offline' \
-    '  user: {token: offline}' \
-    'contexts:' \
-    '- name: offline-a' \
-    '  context: {cluster: offline-a, user: offline, namespace: default}' \
-    '- name: offline-b' \
-    '  context: {cluster: offline-b, user: offline, namespace: default}' \
-    'current-context: offline-a' >"$kubeconfig" || return
-
-  versions=$(metadata_value "$release/release.env" KUBECTL_VERSIONS) || return
-  for version in ${versions//,/ }; do
-    output=$(KUBECTL_VERSION="$version" KUBECONFIG="$kubeconfig" \
-      "$release/bin/kubectl" config current-context) || return
-    [[ $output == offline-a ]] ||
-      { die "kubectl $version did not read the isolated kubeconfig"; return 1; }
-  done
-
-  output=$(KUBECONFIG="$kubeconfig" "$release/bin/kubectx" --current) || return
-  printf 'kubectx-current=%s\n' "$output"
-  [[ $output == offline-a ]] || { die 'kubectx did not read the isolated kubeconfig'; return 1; }
-  KUBECONFIG="$kubeconfig" "$release/bin/kubectx" offline-b || return
-  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubectx" --current) == offline-b ]] ||
-    { die 'kubectx did not switch the isolated context'; return 1; }
-  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubens" --current) == default ]] ||
-    { die 'kubens did not read the isolated namespace'; return 1; }
-  KUBECONFIG="$kubeconfig" "$release/bin/kubens" --force offline-namespace || return
-  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubens" --current) == offline-namespace ]] ||
-    { die 'kubens did not update the isolated namespace'; return 1; }
-
-  "$release/share/nvim2/mason/packages/yamllint/venv/bin/yamllint" \
-    -d relaxed "$health_home/.config/k9s"/*.yaml || return
-  HOME="$health_home" XDG_CONFIG_HOME="$health_home/.config" \
-    XDG_CACHE_HOME="$health_home/.cache" XDG_STATE_HOME="$health_home/.local/state" \
-    KUBECONFIG="$kubeconfig" "$release/bin/k9s" info || return
-}
-
-health_tmux() {
-  local release=$1 health_home=$2 socket socket_dir plugin entry option command
-  local client client_input client_stderr client_pid reload_value
-  local tmux=$release/bin/tmux
-
-  mkdir -p "$health_home/.local/share/tmux/resurrect" || return
-  (
-    # Unix socket paths are short; a valid HOME may exceed their limit.
-    socket_dir=$(mktemp -d /tmp/dotfiles-tmux.XXXXXX) || exit
-    socket=$socket_dir/socket
-    unset TMUX
-    export HOME="$health_home"
-    # shellcheck disable=SC2329
-    cleanup_health_tmux() {
-      # shellcheck disable=SC2317
-      "$tmux" -S "$socket" kill-server >/dev/null 2>&1 || true
-      cleanup_path "$socket_dir"
-    }
-    trap cleanup_health_tmux EXIT
-    "$tmux" -S "$socket" new-session -d -s health || exit
-    option=$("$tmux" -S "$socket" show-options -gv prefix)
-    [[ $option == C-a ]] || { die "tmux prefix is $option, expected C-a"; exit 1; }
-    option=$("$tmux" -S "$socket" show-options -gv @dotfiles-config)
-    [[ $option == "$release/dotfiles/tmux/.tmux.conf" ]] ||
-      { die 'tmux did not retain its physical config'; exit 1; }
-    "$tmux" -S "$socket" set-option -g status-position bottom || exit
-    client_input=$health_home/tmux-client-input
-    client_stderr=$health_home/tmux-client-stderr
-    mkfifo "$client_input" || exit
-    exec {client_input_fd}<>"$client_input"
-    TERM=xterm-256color timeout 10s script -qefc \
-      "$(printf '%q ' "$tmux" -S "$socket" attach-session -t health)" /dev/null \
-      <"$client_input" >/dev/null 2>"$client_stderr" &
-    client_pid=$!
-    client=
-    for _ in {1..50}; do
-      client=$("$tmux" -S "$socket" list-clients -F '#{client_name}' 2>/dev/null | head -n 1)
-      [[ -n $client ]] && break
-      sleep 0.02
-    done
-    [[ -n $client ]] || { die 'tmux health client did not attach'; exit 1; }
-    "$tmux" -S "$socket" send-keys -K -c "$client" C-a R || exit
-    reload_value=
-    for _ in {1..50}; do
-      reload_value=$("$tmux" -S "$socket" show-options -gv status-position 2>/dev/null || true)
-      [[ $reload_value == top ]] && break
-      sleep 0.02
-    done
-    [[ $reload_value == top ]] || { die 'tmux Shift-R did not reload the physical offline config'; exit 1; }
-    [[ ! -s $client_stderr ]] || { die 'tmux offline reload client wrote to stderr'; exit 1; }
-    "$tmux" -S "$socket" detach-client -t "$client" || exit
-    exec {client_input_fd}>&-
-    wait "$client_pid" || exit
-    for plugin in tmux-sensible tmux-resurrect tmux-continuum; do
-      entry=$release/share/tmux/plugins/$plugin/${plugin#tmux-}.tmux
-      [[ $plugin != tmux-sensible ]] || entry=$release/share/tmux/plugins/$plugin/sensible.tmux
-      [[ -x $entry || -f $entry ]] || { die "tmux plugin entry point is missing: $entry"; exit 1; }
-      printf -v command 'exec %q' "$entry"
-      "$tmux" -S "$socket" run-shell "$command" || exit
-      printf 'tmux-plugin=%s exit=0\n' "$plugin"
-    done
-    "$tmux" -S "$socket" list-keys -T prefix C-s || exit
-  ) || return
-}
-
-health_bash() {
-  local release=$1 health_home=$2 command_name check invocation
-
-  mkdir -p "$health_home/bin" || return
-  for command_name in dotfiles-release nvim tmux node npm npx corepack rg zoxide \
-    k9s kubectx kubens oh-my-posh task fzf terraform kubectl helm; do
-    ln -s "$release/bin/$command_name" "$health_home/bin/$command_name" || return
-  done
-  if [[ -x $release/bin/fd ]]; then
-    ln -s "$release/bin/fd" "$health_home/bin/fd" || return
-  fi
-  if [[ -x $release/bin/go ]]; then
-    for command_name in go gofmt; do
-      ln -s "$release/bin/$command_name" "$health_home/bin/$command_name" || return
-    done
-  fi
-  ln -s "$release/dotfiles/bash/.bashrc" "$health_home/.bashrc" || return
-  ln -s "$release/dotfiles/bash/.bash_aliases" "$health_home/.bash_aliases" || return
-  ln -s "$release/dotfiles/oh-my-posh/.oh-my-posh.omp.json" "$health_home/.oh-my-posh.omp.json" || return
-  check=$health_home/bash-health.sh
-  # The following single-quoted strings are the generated health script.
-  # shellcheck disable=SC2016
-  printf '%s\n' \
-    'set -e' \
-    '_dotfiles_health_fail() { printf "dotfiles-release: Bash health check failed: %s\n" "$*" >&2; exit 1; }' \
-    'source "$HOME/.bashrc" || _dotfiles_health_fail "first .bashrc load returned an error"' \
-    'source "$HOME/.bashrc" || _dotfiles_health_fail "second .bashrc load returned an error"' \
-    'hash -r' \
-    '[[ $DOTFILES == "$EXPECTED_RELEASE/dotfiles" ]] || _dotfiles_health_fail "DOTFILES does not select the candidate release: ${DOTFILES:-unset}"' \
-    '[[ $(readlink -f -- "$(type -P node)") == "$EXPECTED_RELEASE/tools/node/bin/node" ]] || _dotfiles_health_fail "node does not select the candidate release"' \
-    '[[ $(type -t __zoxide_hook) == function ]] || _dotfiles_health_fail "zoxide initialization is missing"' \
-    '[[ -n ${_DOTFILES_FZF_PROVIDER:-} ]] || _dotfiles_health_fail "fzf initialization is missing"' \
-    '[[ ${VIRTUAL_ENV_DISABLE_PROMPT:-} == 1 ]] || _dotfiles_health_fail "virtual-environment prompt suppression is missing"' \
-    'prompt=${PROMPT_COMMAND[*]}' \
-    'without=${prompt//_dotfiles_history_sync/}' \
-    '[[ $(( (${#prompt} - ${#without}) / 22 )) -eq 1 ]] || _dotfiles_health_fail "history synchronization is missing or duplicated"' \
-    '[[ $PS1 != *VIRTUAL_ENV* ]] || _dotfiles_health_fail "the prompt embeds VIRTUAL_ENV"' \
-    'printf "bash-dotfiles=%s\n" "$DOTFILES"' \
-    'printf "bash-prompt-command=%s\n" "$prompt"' \
-    'exit 0' >"$check" || return
-  printf -v invocation '%q ' env -u DOTFILES -u DOTFILES_AUTO_ROOT \
-    HOME="$health_home" EXPECTED_RELEASE="$release" \
-    TERM=xterm-256color PATH=/usr/bin:/bin bash --noprofile --norc -i "$check"
-  timeout 120s script --quiet --return --command "$invocation" /dev/null </dev/null || return
-}
-
-health_stage() {
-  local label=$1 status
-  shift
-
-  "$@" && return
-  status=$?
-  die "$label health check failed (status $status)" || true
-  return "$status"
-}
-
-health_version() {
-  local command_name=$1 expected=$2 output=$3
-
-  printf '%s\n' "$output"
-  [[ $output == *"${expected#v}"* || $output == *"$expected"* ]] || {
-    die "$command_name reported an unexpected version: $output"
-    return 1
-  }
-}
-
-health_validation_tools() {
-  local release=$1 health_home=$2 yq_version=$3 plugin_version=$4 helm_versions=$5
-  local work=$health_home/validation-tools output version
-  local HELM_PLUGINS=$release/share/helm/plugins
-  local HELM_CONFIG_HOME=$health_home/helm/config HELM_CACHE_HOME=$health_home/helm/cache
-  local HELM_DATA_HOME=$health_home/helm/data
-  export HELM_PLUGINS HELM_CONFIG_HOME HELM_CACHE_HOME HELM_DATA_HOME
-
-  [[ -f $HELM_PLUGINS/helm-values-schema-json/plugin.yaml &&
-    -x $HELM_PLUGINS/helm-values-schema-json/schema &&
-    -s $HELM_PLUGINS/helm-values-schema-json/LICENSE ]] || { die 'validation tool payload is incomplete'; return 1; }
-  need jq || return
-  mkdir -p "$work" || return
-  output=$("$release/bin/yq" --version) || return
-  [[ $output == "yq (https://github.com/mikefarah/yq/) version v${yq_version#v}" ]] ||
-    { die 'yq is not the pinned Mike Farah implementation'; return 1; }
-  printf 'name: first\n---\nname: second\n' >"$work/documents.yaml" || return
-  output=$("$release/bin/yq" eval -r '.name' "$work/documents.yaml") || return
-  [[ $output == $'first\n---\nsecond' ]] || { die 'yq YAML document check failed'; return 1; }
-  cat >"$work/values.yaml" <<'EOF'
-replicas: 2
-tls: {} # @schema $ref: tls.schema.json
-EOF
-  cat >"$work/tls.schema.json" <<'EOF'
-{"$id":"https://offline.example/tls.schema.json","type":"object","properties":{"enabled":{"type":"boolean"}},"required":["enabled"],"additionalProperties":false}
-EOF
-  for version in ${helm_versions//,/ }; do
-    output=$(HELM_VERSION="$version" "$release/bin/helm" plugin list) || return
-    awk -v expected="${plugin_version#v}" \
-      '$1 == "schema" { count++; valid = ($2 == expected) } END { exit !(count == 1 && valid) }' \
-      <<<"$output" || { die "Helm $version schema plugin manifest has an unexpected version"; return 1; }
-    output=$(HELM_VERSION="$version" "$release/bin/helm" schema version) || return
-    [[ $output == "helm schema version v${plugin_version#v}" ]] ||
-      { die "Helm $version schema plugin reported an unexpected version: $output"; return 1; }
-    (cd "$work" && HELM_VERSION="v${version#v}" "$release/bin/helm" schema \
-      -f values.yaml -o schema.json --bundle --bundle-without-id --bundle-root "$work") || return
-    jq -e '
-      .properties.replicas.type == "integer" and
-      .properties.tls."$ref" == "#/$defs/tls.schema.json" and
-      (."$defs"."tls.schema.json" |
-        .properties.enabled.type == "boolean" and .required == ["enabled"] and (has("$id") | not))
-    ' "$work/schema.json" >/dev/null || { die "Helm $version schema generation failed"; return 1; }
-  done
-  printf '%s\n' '{"properties":{"tls":{"description":"overlay"}}}' >"$work/overlay.json" || return
-  jq -s '.[0] * .[1]' "$work/schema.json" "$work/overlay.json" >"$work/merged.json" || return
-  jq -e '.properties.tls.description == "overlay" and .properties.tls."$ref" == "#/$defs/tls.schema.json"' \
-    "$work/merged.json" >/dev/null || { die 'jq schema overlay merge failed'; return 1; }
-  printf 'validation-tools=healthy\n'
-}
-
-health_nvim() {
-  local release=$1 health_home=$2
-
-  need setsid || return
-  (
-    if [[ -n ${LOCK_FD:-} ]]; then exec {LOCK_FD}>&-; fi
-    # Interactive Bash fixtures open /dev/tty even with redirected stdin.
-    # Detach from the terminal so timeout's background group cannot get SIGTTIN.
-    HOME="$health_home" XDG_CACHE_HOME="$health_home/.cache" \
-      XDG_STATE_HOME="$health_home/.local/state" GIT_OPTIONAL_LOCKS=0 \
-      DOTFILES_OFFLINE_RELEASE_ROOT="$release" \
-      PYTHONDONTWRITEBYTECODE=1 NVIM_APPNAME=nvim2 NVIM2_CHECK_TOOLS=1 \
-      NVIM2_BENCHMARK_RUNS=3 setsid --wait timeout 1200s \
-        bash "$release/config/nvim2/tests/check.sh" </dev/null
-  )
-}
-
-health_release() {
-  local release_id=$1 mode=${2:-full} skip_tests=${3:-false} release command_name path health_home
-  local PATH output expected field DOTFILES_OFFLINE_RELEASE_ROOT
-  local KUBECTL_VERSION='' HELM_VERSION=''
-  local DOTFILES_IGNORE_BIN_EXTRAS=1 VIRTUAL_ENV=''
-  local tool version serialized
+check_runtime() {
+  local release=$1 runtime_home command_name expected field serialized output tool version
+  local command_output
+  local PATH=$PATH DOTFILES_OFFLINE_RELEASE_ROOT=$1 DOTFILES_IGNORE_BIN_EXTRAS=1 VIRTUAL_ENV=''
+  local KUBECTL_VERSION='' HELM_VERSION='' PYTHONDONTWRITEBYTECODE=1
+  local HELM_PLUGINS=''
+  local LC_ALL=C.UTF-8 LANG=C.UTF-8
   local -a probe_args=() versions=()
   local -A release_metadata=()
 
-  [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die "invalid release ID: $release_id"; return 1; }
-  release=$RELEASE_ROOT/$release_id
-  DOTFILES_OFFLINE_RELEASE_ROOT=$release
-  export DOTFILES_OFFLINE_RELEASE_ROOT
-  export KUBECTL_VERSION HELM_VERSION
-  export DOTFILES_IGNORE_BIN_EXTRAS VIRTUAL_ENV
-  PATH="$release/bin:$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/share/nvim2/mason/bin:/usr/bin:/bin"
-  export PATH
-  validate_release_directory "$release" || return
   read_release_metadata "$release/release.env" release_metadata || return
-  output=${release_metadata[PLATFORM_ID]}
-  validate_platform "$output" || return
-  if [[ -f $release/installed.sha256 ]]; then
-    verify_installed_manifest "$release" || return
-  else
-    [[ $mode == candidate && -f $release/.incomplete ]] ||
-      { die "installed manifest is missing in $release"; return 1; }
+  runtime_home=$(mktemp -d) || return
+  TEMP_PATHS+=("$runtime_home")
+  PATH="$release/bin:$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/share/nvim2/mason/bin:/usr/bin:/bin"
+  export PATH DOTFILES_OFFLINE_RELEASE_ROOT DOTFILES_IGNORE_BIN_EXTRAS VIRTUAL_ENV
+  command_output=$(release_commands "$release") || return
+  while IFS= read -r command_name; do
+    [[ $(type -P -- "$command_name") == "$release/bin/$command_name" ]] ||
+      { die "release command does not resolve in its PATH: $command_name"; return 1; }
+  done <<<"$command_output"
+  if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
+    HELM_PLUGINS=$release/share/helm/plugins
   fi
-  health_python "$release" "${release_metadata[PYTHON_VERSION]}" || return
-  for command_name in "${!TOOL_CHECKS[@]}"; do
-    IFS='|' read -r field serialized <<<"${TOOL_CHECKS[$command_name]}"
-    [[ -n $field && -v release_metadata[$field] ]] || continue
-    path=$release/bin/$command_name
-    [[ -x $path ]] || { die "release executable is missing: $path"; return 1; }
-  done
-
+  export KUBECTL_VERSION HELM_VERSION PYTHONDONTWRITEBYTECODE HELM_PLUGINS LC_ALL LANG
+  HOME="$runtime_home" XDG_CONFIG_HOME="$runtime_home/.config" \
+    XDG_DATA_HOME="$runtime_home/.local/share" XDG_CACHE_HOME="$runtime_home/.cache" \
+    XDG_STATE_HOME="$runtime_home/.local/state" \
+    health_python "$release" "${release_metadata[PYTHON_VERSION]}" || return
   for command_name in "${!TOOL_CHECKS[@]}"; do
     IFS='|' read -r field serialized <<<"${TOOL_CHECKS[$command_name]}"
     [[ -n $field && -v release_metadata[$field] ]] || continue
     expected=${release_metadata[$field]}
     read -r -a probe_args <<<"${serialized:---version}"
-    output=$("$release/bin/$command_name" "${probe_args[@]}") || return
-    health_version "$command_name" "$expected" "$output" || return
+    output=$(HOME="$runtime_home" XDG_CONFIG_HOME="$runtime_home/.config" \
+      XDG_DATA_HOME="$runtime_home/.local/share" XDG_CACHE_HOME="$runtime_home/.cache" \
+      XDG_STATE_HOME="$runtime_home/.local/state" \
+      timeout 30s "$release/bin/$command_name" "${probe_args[@]}") || return
+    [[ $output == *"${expected#v}"* ]] ||
+      { die "$command_name reported an unexpected version: $output"; return 1; }
   done
-  if [[ -v release_metadata[GO_VERSION] ]]; then
-    [[ -x $release/bin/gofmt ]] || { die 'release executable is missing: gofmt'; return 1; }
-  fi
   for tool in kubectl helm; do
-    field=${tool^^}_VERSIONS
-    serialized=${release_metadata[$field]}
-    IFS=, read -r -a versions <<<"$serialized"
+    IFS=, read -r -a versions <<<"${release_metadata[${tool^^}_VERSIONS]}"
     serialized=${TOOL_CHECKS[$tool]#*|}
     read -r -a probe_args <<<"$serialized"
-    output=$("$release/bin/$tool" "${probe_args[@]}") || return
-    health_version "$tool" "${versions[0]}" "$output" || return
-    for version in "${versions[@]}"; do
-      output=$(env "${tool^^}_VERSION=$version" \
+    for version in '' "${versions[@]}"; do
+      expected=${version:-${versions[0]}}
+      output=$(HOME="$runtime_home" XDG_CONFIG_HOME="$runtime_home/.config" \
+        XDG_DATA_HOME="$runtime_home/.local/share" XDG_CACHE_HOME="$runtime_home/.cache" \
+        XDG_STATE_HOME="$runtime_home/.local/state" \
+        timeout 30s env "${tool^^}_VERSION=$version" \
         "$release/bin/$tool" "${probe_args[@]}") || return
-      health_version "$tool" "$version" "$output" || return
-      if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
-        output=$(env "${tool^^}_VERSION=v${version#v}" \
-          "$release/bin/$tool" "${probe_args[@]}") || return
-        health_version "$tool" "$version" "$output" || return
+      [[ $output == *"${expected#v}"* ]] ||
+        { die "$tool reported an unexpected version: $output"; return 1; }
+      if [[ $tool == helm && -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
+        output=$(HOME="$runtime_home" timeout 30s env HELM_VERSION="$version" \
+          "$release/bin/helm" schema version) || return
+        [[ $output == "helm schema version v${release_metadata[HELM_SCHEMA_PLUGIN_VERSION]#v}" ]] ||
+          { die "Helm $expected schema plugin reported an unexpected version: $output"; return 1; }
       fi
-      output=$("$release/bin/$tool-$version" "${probe_args[@]}") || return
-      health_version "$tool-$version" "$version" "$output" || return
     done
   done
-  for command_name in tmux-sensible tmux-resurrect tmux-continuum; do
-    [[ -d $release/share/tmux/plugins/$command_name/.git ]] ||
-      { die "tmux plugin metadata is missing: $command_name"; return 1; }
-  done
-  if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
-    health_home=$(mktemp -d "$STATE_DIR/.health.XXXXXX") || return
-    TEMP_PATHS+=("$health_home")
-    health_stage 'validation tools' health_validation_tools "$release" "$health_home" \
-      "${release_metadata[YQ_VERSION]}" "${release_metadata[HELM_SCHEMA_PLUGIN_VERSION]}" \
-      "${release_metadata[HELM_VERSIONS]}" || return
-  fi
-  if [[ $skip_tests == true ]]; then
-    printf '%s: skipped extended functional tests for %s; run dotfiles-release health to check them\n' \
-      "${0##*/}" "$release_id"
-  fi
-  [[ $mode == quick || $skip_tests == true || ${DOTFILES_RELEASE_TEST_MODE:-} == 1 ]] && return
-  if [[ -z ${health_home:-} ]]; then
-    health_home=$(mktemp -d "$STATE_DIR/.health.XXXXXX") || return
-    TEMP_PATHS+=("$health_home")
-  fi
-  mkdir -p "$health_home/.cache" "$health_home/.local/state"
-  health_stage 'CLI operations' health_cli_operations "$release" "$health_home" || return
-  health_stage 'Kubernetes tools' health_kubernetes_tools "$release" "$health_home" || return
-  health_stage tmux health_tmux "$release" "$health_home" || return
-  health_stage Bash health_bash "$release" "$health_home" || return
-  health_stage Nvim health_nvim "$release" "$health_home" || return
-  if [[ -f $release/installed.sha256 ]]; then verify_installed_manifest "$release" || return; fi
 }
 
-health_current() {
-  local requested=${1:-} current
-  acquire_lock exclusive || return
-  recover_pending || return
-  if [[ -n $requested ]]; then
-    [[ $requested =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-      { die "invalid release ID: $requested"; return 1; }
-    current=$requested
-  else
-    current=$(selected_id current) || return
-    [[ -n $current ]] || { die 'no current release is selected'; return 1; }
+health_release() {
+  local release_id=${1:-} release
+  operation_prerequisites || return
+  [[ -z $release_id || $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
+    { die "invalid release ID: $release_id"; return 1; }
+  validate_home || return
+  validate_release_root || return
+  [[ -d $RELEASE_ROOT ]] || { die 'no installed releases'; return 1; }
+  acquire_lock || return
+  if [[ -z $release_id ]]; then release_id=$(current_id) || return; fi
+  [[ -n $release_id ]] || { die 'no current release is selected; specify an installed ID'; return 1; }
+  release=$RELEASE_ROOT/$release_id
+  check_installed_release "$release" || return
+  if [[ $(current_id) == "$release_id" ]]; then
+    release_projection "$release" || return
+    verify_projection || return
   fi
-  health_release "$current" full || return
-  printf '%s: %s is healthy\n' "${0##*/}" "$current"
+  check_runtime "$release" || return
+  verify_installed_manifest "$release" || return
+  printf '%s: %s is healthy\n' "${0##*/}" "$release_id"
+}
+
+install_archive() {
+  local archive=$1 skip_health=${2:-false} import release_id release
+  local -A release_metadata=()
+  operation_prerequisites || return
+  acquire_lock || return
+  import=$(mktemp -d "$RELEASE_ROOT/.import.XXXXXX") || return
+  TEMP_PATHS+=("$import")
+  extract_archive "$archive" "$import" || return
+  release_id=$EXTRACTED_ID
+  release=$import/$release_id
+  read_release_metadata "$release/release.env" release_metadata || return
+  validate_platform "${release_metadata[PLATFORM_ID]}" || return
+  if [[ -e $RELEASE_ROOT/$release_id || -L $RELEASE_ROOT/$release_id ]]; then
+    [[ -d $RELEASE_ROOT/$release_id && ! -L $RELEASE_ROOT/$release_id ]] ||
+      { die "release path already exists: $release_id"; return 1; }
+    cmp -s "$release/SHA256SUMS" "$RELEASE_ROOT/$release_id/SHA256SUMS" ||
+      { die "release ID collision: $release_id"; return 1; }
+    activate_release "$release_id" "$skip_health" || return
+    printf '%s: selected installed %s; reload Bash with: source ~/.bashrc && hash -r\n' \
+      "${0##*/}" "$release_id"
+    return
+  fi
+  release_projection "$release" || return
+  preflight_projection || return
+  CANDIDATE_DIR=$RELEASE_ROOT/$release_id
+  mv -T -- "$release" "$CANDIDATE_DIR" || return
+  release=$CANDIDATE_DIR
+  # Venvs must be created at their final path because entry points contain it.
+  create_python_tools "$release" || return
+  cleanup_path "$release/python-wheelhouse" || return
+  write_installed_manifest "$release" || return
+  activate_release "$release_id" "$skip_health" || return
+  CANDIDATE_DIR=
+  printf '%s: installed and selected %s; reload Bash with: source ~/.bashrc && hash -r\n' \
+    "${0##*/}" "$release_id"
+}
+
+set_release() {
+  local release_id=$1 skip_health=${2:-false}
+  operation_prerequisites || return
+  [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
+    { die "invalid release ID: $release_id"; return 1; }
+  acquire_lock || return
+  activate_release "$release_id" "$skip_health" || return
+  printf '%s: selected %s; reload Bash with: source ~/.bashrc && hash -r\n' \
+    "${0##*/}" "$release_id"
 }
 
 list_releases() {
-  local current previous path id marker completeness metadata paths
-  local platform commit nvim_version node_version python_version
+  local path id current marker
   local -A release_metadata=()
-  acquire_lock exclusive || return
-  recover_pending || return
-  current=$(selected_id current) || return
-  previous=$(selected_id previous) || return
-  printf 'RELEASE\tPLATFORM\tCOMMIT\tNVIM\tNODE\tPYTHON\tSTATE\n'
-  paths=$(mktemp "$STATE_DIR/.release-list.XXXXXX") || return
-  TEMP_PATHS+=("$paths")
-  find "$RELEASE_ROOT" -mindepth 1 -maxdepth 1 -type d \
-    -name 'dotfiles-[0-9a-f]*' -print0 | sort -z >"$paths" || return
-  while IFS= read -r -d '' path; do
+  archive_prerequisites || return
+  validate_release_root || return
+  current=$(current_id) || return
+  printf 'RELEASE\tPLATFORM\tCOMMIT\tNVIM\tNODE\tPYTHON\tCURRENT\n'
+  for path in "$RELEASE_ROOT"/dotfiles-*; do
     id=${path##*/}
-    [[ $id =~ ^dotfiles-[0-9a-f]{12}$ ]] || continue
-    metadata=$path/release.env
-    read_release_metadata "$metadata" release_metadata || return
-    marker=
-    [[ $id == "$current" ]] && marker=current
-    if [[ $id == "$previous" ]]; then marker=${marker:+$marker,}previous; fi
-    completeness=incomplete
-    [[ -f $path/.complete && ! -e $path/.incomplete ]] && completeness=complete
-    marker=${marker:+$marker,}$completeness
-    if [[ -f $PENDING_FILE && $(pending_value new_id) == "$id" ]]; then marker=$marker,pending; fi
-    platform=${release_metadata[PLATFORM_ID]}
-    commit=${release_metadata[SOURCE_COMMIT]}
-    nvim_version=${release_metadata[NVIM_VERSION]}
-    node_version=${release_metadata[NODE_VERSION]}
-    python_version=${release_metadata[PYTHON_VERSION]}
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$id" \
-      "$platform" \
-      "$commit" \
-      "$nvim_version" \
-      "$node_version" \
-      "$python_version" \
-      "$marker"
-  done <"$paths"
+    [[ $id =~ ^dotfiles-[0-9a-f]{12}$ && -d $path && ! -L $path ]] || continue
+    [[ -f $path/installed.sha256 && -f $path/installed.modes && -f $path/installed.symlinks ]] || continue
+    read_release_metadata "$path/release.env" release_metadata || return
+    marker=-
+    [[ $id != "$current" ]] || marker=yes
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" \
+      "${release_metadata[PLATFORM_ID]}" "${release_metadata[SOURCE_COMMIT]}" \
+      "${release_metadata[NVIM_VERSION]}" "${release_metadata[NODE_VERSION]}" \
+      "${release_metadata[PYTHON_VERSION]}" "$marker"
+  done
 }
 
-rollback_release() {
-  local requested=${1:-} current previous target platform
-  local -A release_metadata=()
-  acquire_lock exclusive || return
-  recover_pending || return
-  current=$(selected_id current) || return
-  previous=$(selected_id previous) || return
-  [[ -n $current ]] || { die 'rollback requires a current release'; return 1; }
-  if [[ -n $requested ]]; then
-    [[ $requested =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-      { die "invalid release ID: $requested"; return 1; }
-    [[ -f $RELEASE_ROOT/$requested/.complete ]] ||
-      { die "release is not complete: $requested"; return 1; }
-    target=$requested
-  elif [[ -n $previous ]]; then
-    target=$previous
-  else
-    write_pending restoring "$current" "$current" "$previous" || return
-    restore_owned_links || return
-    switch_selection current || return
-    switch_selection previous || return
-    durable_unlink "$PENDING_FILE" || return
-    printf '%s: restored the pre-release baseline; retained %s\n' "${0##*/}" "$current"
-    return
+managed_home_links() {
+  local path target file
+  local -a paths=(
+    "$HOME/.config/nvim2" "$HOME/.local/share/nvim2"
+    "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.bash_aliases"
+    "$HOME/.gitconfig" "$HOME/.tmux.conf" "$HOME/.vimrc" "$HOME/.oh-my-posh.omp.json"
+    "$HOME/.ssh/config" "$HOME/.config/systemd/user/dotfiles-ssh-agent.service"
+    "$HOME/.config/k9s/config.yaml" "$HOME/.config/k9s/aliases.yaml" "$HOME/.config/k9s/plugins.yaml"
+    "$HOME/.tmux/plugins/tmux-sensible" "$HOME/.tmux/plugins/tmux-resurrect"
+    "$HOME/.tmux/plugins/tmux-continuum"
+  )
+  for path in "$HOME/bin/"*; do
+    [[ -L $path ]] || continue
+    paths+=("$path")
+  done
+  if [[ -d $HOME/.config/k9s/skins && ! -L $HOME/.config/k9s/skins ]]; then
+    file=$(mktemp) || return
+    TEMP_PATHS+=("$file")
+    find "$HOME/.config/k9s/skins" -type l -print0 >"$file" || return
+    while IFS= read -r -d '' path; do paths+=("$path"); done <"$file"
   fi
-  if [[ $target == "$current" ]]; then
-    printf '%s: %s is already selected\n' "${0##*/}" "$current"
-    return
-  fi
-  read_release_metadata "$RELEASE_ROOT/$target/release.env" release_metadata || return
-  platform=${release_metadata[PLATFORM_ID]}
-  validate_platform "$platform" || return
-  health_release "$target" quick || return
-  activate_release switching-existing "$target" "$current" "$previous" || return
-  printf '%s: rolled back to %s; reload Bash with: source ~/.bashrc && hash -r\n' \
-    "${0##*/}" "$target"
-}
-
-restore_owned_links() {
-  local line managed index
-  local -a records=()
-
-  [[ -f $OWNERSHIP_FILE ]] || return 0
-  mapfile -t records <"$OWNERSHIP_FILE" || return
-  for ((index = ${#records[@]} - 1; index >= 0; index--)); do
-    line=${records[$index]}
-    parse_ownership_record "$line" || return
-    managed=false
-    if [[ -L $OWN_PATH && $(readlink -- "$OWN_PATH") == "$OWN_TARGET" ]]; then managed=true; fi
-    case $OWN_MODE in
-      created)
-        if [[ $managed == true ]]; then
-          durable_unlink "$OWN_PATH" || return
-        elif [[ -e $OWN_PATH || -L $OWN_PATH ]]; then
-          die "refusing to replace modified managed path: $OWN_PATH"
-          return 1
-        fi
-        ;;
-      backup)
-        if [[ -e $OWN_BACKUP || -L $OWN_BACKUP ]]; then
-          path_matches_snapshot "$OWN_BACKUP" "$OWN_TYPE" "$OWN_ORIGINAL_MODE" \
-            "$OWN_IDENTITY" || {
-            die "managed backup identity changed: $OWN_BACKUP"
-            return 1
-          }
-          if [[ $managed == true ]]; then
-            if [[ -d $OWN_BACKUP && ! -L $OWN_BACKUP ]]; then
-              durable_unlink "$OWN_PATH" || return
-              mv -T -- "$OWN_BACKUP" "$OWN_PATH" || return
-            else
-              mv -T -- "$OWN_BACKUP" "$OWN_PATH" || return
-            fi
-            sync -f "$(dirname -- "$OWN_PATH")" || return
-          elif [[ -e $OWN_PATH || -L $OWN_PATH ]]; then
-            if path_matches_snapshot "$OWN_PATH" "$OWN_TYPE" "$OWN_ORIGINAL_MODE" \
-                "$OWN_IDENTITY"; then
-              cleanup_path "$OWN_BACKUP" || return
-              sync -f "$(dirname -- "$OWN_BACKUP")" || return
-            else
-              die "refusing to replace modified managed path: $OWN_PATH"
-              return 1
-            fi
-          else
-            mv -T -- "$OWN_BACKUP" "$OWN_PATH" || return
-            sync -f "$(dirname -- "$OWN_PATH")" || return
-          fi
-        else
-          path_matches_snapshot "$OWN_PATH" "$OWN_TYPE" "$OWN_ORIGINAL_MODE" \
-            "$OWN_IDENTITY" || {
-            die "managed backup is missing or restored path changed: $OWN_PATH"
-            return 1
-          }
-        fi
-        ;;
-    esac
-    replace_ownership_record "$OWN_PATH" || return
+  for path in "${paths[@]}"; do
+    [[ -L $path ]] || continue
+    target=$(readlink -- "$path") || return
+    if [[ $target == "$RELEASE_ROOT/current/"* ||
+      ( $RELEASE_ROOT == "$HOME/dotfiles-releases" && $path == "$HOME/bin/"* &&
+        $target == "../dotfiles-releases/current/bin/${path##*/}" ) ]]; then
+      validate_link_parent "$path" || return
+      printf '%s\0' "$path"
+    fi
   done
 }
 
 uninstall_release() {
-  local release_id=${1:-} current previous
-
-  acquire_lock exclusive || return
-  recover_pending || return
-  current=$(selected_id current) || return
-  previous=$(selected_id previous) || return
-  if [[ -z $release_id ]]; then
-    if [[ -z $current && ! -f $OWNERSHIP_FILE ]]; then
-      if [[ $RECOVERED_PENDING == true ]]; then
-        printf '%s: recovery already restored the pre-release baseline\n' "${0##*/}"
-        return 0
-      fi
-      die 'no active release or baseline to uninstall'
-      return 1
-    fi
-    [[ -n $current ]] || current=dotfiles-000000000000
-    write_pending restoring "$current" "$current" "$previous" || return
-    restore_owned_links || return
-    switch_selection current || return
-    switch_selection previous || return
-    durable_unlink "$PENDING_FILE" || return
-    printf '%s: restored the pre-release baseline; retained installed releases\n' "${0##*/}"
-    return
-  fi
-  [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
+  local release_id=${1:-} current removed links path saved backup
+  operation_prerequisites || return
+  [[ -z $release_id || $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
     { die "invalid release ID: $release_id"; return 1; }
+  acquire_lock || return
+  current=$(current_id) || return
+  release_id=${release_id:-$current}
+  [[ -n $release_id ]] || { die 'no current release; specify an installed ID'; return 1; }
   [[ -d $RELEASE_ROOT/$release_id && ! -L $RELEASE_ROOT/$release_id ]] ||
     { die "release is not installed: $release_id"; return 1; }
-  [[ $release_id != "$current" && $release_id != "$previous" ]] ||
-    { die 'refusing to remove a current or previous release'; return 1; }
-  verify_installed_manifest "$RELEASE_ROOT/$release_id" || return
-  cleanup_path "$RELEASE_ROOT/$release_id" || return
-  cleanup_path "$STATE_DIR/release-identities/$release_id.sha256" || return
+  removed=$(mktemp -d "$RELEASE_ROOT/.remove.XXXXXX") || return
+  TEMP_PATHS+=("$removed")
+  links=$(mktemp) || return
+  TEMP_PATHS+=("$links")
+  if [[ $release_id == "$current" ]]; then managed_home_links >"$links" || return; fi
+  begin_transaction
+  while IFS= read -r -d '' path; do
+    saved=$(mktemp "$(dirname -- "$path")/.dotfiles-release-link.XXXXXX") || return
+    TEMP_PATHS+=("$saved")
+    unlink "$saved" || return
+    move_in_transaction "$path" "$saved" || return
+    backup=$path.before-dotfiles-release
+    if [[ -e $backup || -L $backup ]]; then
+      move_in_transaction "$backup" "$path" || return
+    fi
+  done <"$links"
+  if [[ $release_id == "$current" ]]; then select_in_transaction || return; fi
+  move_in_transaction "$RELEASE_ROOT/$release_id" "$removed/$release_id" || return
+  commit_transaction
+  cleanup_path "$removed" || return
   printf '%s: uninstalled %s\n' "${0##*/}" "$release_id"
 }
 
-verify_archive() {
-  local platform=$1 archive=$2 current
-  local -A release_metadata=()
-  validate_platform "$platform" || return
-  install_archive "$archive" || return
-  current=$(selected_id current) || return
-  read_release_metadata "$RELEASE_ROOT/$current/release.env" release_metadata || return
-  [[ ${release_metadata[PLATFORM_ID]} == "$platform" ]] ||
-    { die "release is not for $platform"; return 1; }
-  health_release "$current" full || return
-  printf '%s: %s is healthy\n' "${0##*/}" "$current"
-}
-
 main() {
-  local command=${1:-}
+  local command=${1:-} skip_health=false
+  shift || true
+  if [[ $command == install || $command == set ]] && [[ ${1:-} == --skip-health ]]; then
+    skip_health=true
+    shift
+  fi
   case $command in
-    inspect) (($# == 4)) || { usage; return 2; }; inspect_archive "$2" "$3" "$4" ;;
-    verify) (($# == 3)) || { usage; return 2; }; verify_archive "$2" "$3" ;;
-    install)
-      if (($# == 3)) && [[ $2 == --skip-tests ]]; then
-        install_archive "$3" true
-      elif (($# == 2)); then
-        install_archive "$2"
-      else
-        usage
-        return 2
-      fi
-      ;;
-    list) (($# == 1)) || { usage; return 2; }; list_releases ;;
-    health) (($# == 1 || $# == 2)) || { usage; return 2; }; health_current "${2:-}" ;;
-    rollback) (($# == 1 || $# == 2)) || { usage; return 2; }; rollback_release "${2:-}" ;;
-    uninstall) (($# == 1 || $# == 2)) || { usage; return 2; }; uninstall_release "${2:-}" ;;
+    verify) (($# == 1)) || { usage; return 2; }; verify_archive "$1" ;;
+    list) (($# == 0)) || { usage; return 2; }; list_releases ;;
+    health) (($# <= 1)) || { usage; return 2; }; health_release "${1:-}" ;;
+    install) (($# == 1)) || { usage; return 2; }; install_archive "$1" "$skip_health" ;;
+    uninstall) (($# <= 1)) || { usage; return 2; }; uninstall_release "${1:-}" ;;
+    set) (($# == 1)) || { usage; return 2; }; set_release "$1" "$skip_health" ;;
     -h | --help) usage ;;
     *) usage; return 2 ;;
   esac

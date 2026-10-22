@@ -111,7 +111,7 @@ not a second release-builder role; builder-only packages stay out of it.
 
 `TOOL_CHECKS` in `tools.env` maps command names to
 `release_metadata_field|version_arguments` for `setup-tools`, shell diagnostics
-and release health. Arguments are whitespace-separated; empty arguments use
+and release runtime checks. Arguments are whitespace-separated; empty arguments use
 `--version`. The metadata field is empty for kubectl and Helm, whose retained
 versions are checked through separate lists. Commands such as `node` and `uvx`
 have their own entries even when their releases share a tool record. The
@@ -278,13 +278,13 @@ contains the same versions. Asdf, its plugins and its shims are not part of the
 offline package. Optional online `setup-asdf` remains available independently.
 
 The current manager can check and select retained releases from before `fd`,
-Go, kind, uv or the expanded operations-tool set was bundled. Selecting one makes its absent tools unavailable
-through the release launcher. It supports the original, fd-only and fd/Go profiles.
-Keep a copy of the newer manager when rolling back across that boundary:
-older managers do not understand the newer release metadata or SSH/yq ownership
-records. Releases from before the SSH package remain selectable. On rollback
-their optional SSH links stay recorded but do not resolve, just like commands
-absent from an older tool profile; selecting a newer release restores them.
+Go, kind, uv or the expanded operations-tool set was bundled. Selecting one
+makes its absent tools unavailable through the release launcher. It supports
+the original, fd-only and fd/Go profiles. Keep a downloaded copy of the newer
+manager when selecting older releases: older managers do not understand newer
+metadata. Releases from before the SSH package remain selectable. Their
+optional SSH links do not resolve, just like commands absent from an older
+tool profile; selecting a newer release restores them.
 The new yq profile requires `YQ_VERSION` and `HELM_SCHEMA_PLUGIN_VERSION`;
 retained profiles keep their original requirements and plugin discovery.
 
@@ -296,7 +296,7 @@ run from a clean committed checkout on a connected machine with Docker access:
 .bin/task test:offline
 # Show the available PLATFORM values:
 .bin/task --summary test:offline
-# Build and verify just one platform:
+# Build and qualify just one platform:
 .bin/task test:offline PLATFORM=ubuntu-24.04-x86_64
 ```
 
@@ -304,7 +304,10 @@ The task uses `scripts/dotfiles-release-ci test` and the immutable images from
 `release.env`. By default it builds all four packages in parallel, waits for
 all builds to finish, then prepares and verifies successful builds in parallel.
 Each installation uses a fresh container, an ordinary user and `--network none`.
-Every installation runs the full functional checks and then `health`.
+Each job verifies the archive, installs it with the downloaded manager, then
+runs `scripts/check-dotfiles-release` from the trusted workflow checkout.
+That CI-only checker runs the full functional suites and verifies installed
+content before and after them. It is not needed on the target host.
 The task prints a retained `/tmp/dotfiles-qualification.XXXXXX` directory:
 `output/PLATFORM/` contains the archive and standalone installer with their
 `.sha256` files;
@@ -382,8 +385,8 @@ shipped inside each archive and attached to the GitHub release as
 `dotfiles-release`, together with `dotfiles-release.sha256`. The published
 script is extracted from the qualified Debian archive, includes its tool-probe
 configuration, and is the same manager for all four platforms. The manager
-verifies, installs, lists, checks,
-rolls back and uninstalls releases without the builder or a Git checkout.
+has six commands: `verify`, `list`, `health`, `install`, `uninstall` and `set`.
+None needs the builder or a Git checkout on the target.
 
 Release preflight uses GitHub asset names to select incomplete platforms without
 downloading packages. Before publishing missing assets, the platform job verifies
@@ -438,6 +441,8 @@ particular user name, UID or `/home` path:
 ```bash
 sha256sum --check --strict dotfiles-release.sha256 \
   dotfiles-COMMIT-debian-13-x86_64.tar.gz.sha256
+bash ./dotfiles-release verify \
+  "$PWD/dotfiles-COMMIT-debian-13-x86_64.tar.gz"
 bash ./dotfiles-release install \
   "$PWD/dotfiles-COMMIT-debian-13-x86_64.tar.gz"
 source "$HOME/.bashrc"
@@ -446,80 +451,111 @@ dotfiles-release list
 dotfiles-release health
 ```
 
-Install checks required system commands before reading the archive. It verifies
-archive safety, platform, metadata and checksums, then checks managed-path
-conflicts before creating the Python venvs at their final retained paths.
-Full candidate health runs before switching `current` or replacing public links.
-Activation rechecks the links and core runtime checks. A failure restores the
-previous selection; executable behavior and final filesystem writes can still
-fail after preparation has started.
+`verify ARCHIVE` checks the single release root, safe archive paths and links,
+required payload, complete metadata and file inventory against `SHA256SUMS`.
+It reads the platform from payload-root `release.env`, not the archive name,
+so renaming the archive is harmless. It does not require a matching host
+platform, run package programs, install files or change the user's HOME.
+Checksums detect corruption; they do not make an untrusted archive trustworthy.
 
-For an already qualified package on a host where the extended functional tests
-cannot run, use:
+`install ARCHIVE` repeats structural verification and requires the package's
+platform to match the host. It checks system prerequisites and managed-path
+conflicts, creates isolated Python venvs at their final retained paths, removes
+the wheelhouse and records `installed.sha256`, `installed.modes` and
+`installed.symlinks`. These local manifests cover generated venvs as well as
+the original payload. Light runtime checks cover Python isolation and
+dependencies, bundled tool versions and the Helm schema plugin. Install then activates the
+release through the same code used by `set ID`. Reinstalling an unchanged
+retained ID reuses it after integrity and runtime checks.
 
-```bash
-bash ./dotfiles-release install --skip-tests \
-  "$PWD/dotfiles-COMMIT-debian-13-x86_64.tar.gz"
-```
+Extended CLI, Kubernetes, tmux, Bash and Nvim2 functional checks belong to
+`scripts/check-dotfiles-release` in connected build/CI tooling. They still run
+with networking disabled before publication, but are not part of target
+installation or archive verification. There is no `--skip-tests` switch.
 
-This skips the CLI, Kubernetes, tmux, Bash and Nvim2 functional suites. Archive
-and installed-content integrity, platform, ownership, Python isolation and
-dependencies, tool versions, Helm schema/yq checks and activation checks remain
-required. The flag applies only to that invocation. `dotfiles-release health`
-and `verify` always run full checks. Reinstalling an unchanged retained archive
-continues to reuse it with core checks rather than rerunning the functional suites.
+`health [ID]` checks the installed structure, content, modes, symlinks and those
+same light runtime probes, defaulting to `current`. For the selected release it
+also checks that all managed HOME links exist, point through `current` and have
+valid targets. An inactive ID is checked only within its own payload; its tools
+must resolve in the isolated release PATH and run without borrowing host tools.
+Health does not activate a release, repair links or run the extended CI suite. Runtime probes
+use a disposable HOME and a UTF-8 locale without touching user data. An error
+leaves the current selection unchanged. `install` and `set` run the shared
+probes before activation; a failed candidate therefore never becomes current.
 
-The full qualification path runs the same install plus health in a fresh
-runtime container with `--network none`:
+For diagnostic work, `install --skip-health ARCHIVE` and
+`set --skip-health ID` skip only runtime probes. Archive verification,
+platform compatibility, installed integrity, path conflict checks, backups
+and failure cleanup still apply. The bypass is reported explicitly. It does
+not permit editing the retained payload or regenerating its manifests; repair
+user configuration outside the release, or build and install a corrected
+archive. A later `health` checks the selected release again.
 
-```bash
-bash ./dotfiles-release verify debian-13-x86_64 \
-  "$PWD/dotfiles-COMMIT-debian-13-x86_64.tar.gz"
-```
+These are installation checks, not a repeat of development qualification.
+Health does not load personal shell startup files or examine aliases, shell
+command caches, intentional `~/bin-extras` overrides or project venvs. It cannot
+change the PATH of an already running shell; reload `.bashrc` and run `hash -r`
+after selection. Full Bash initialization, plugin features, formatting, LSP
+and debugger behavior remain covered by the offline CI functional checker.
 
-Releases are retained under `~/dotfiles-releases/dotfiles-COMMIT`.
-`current` controls new processes and `previous` supports whole-unit rollback.
-The first install records every managed entry and backs up an accepted prior
-file, link or provider tree beside that entry as a private
-`.dotfiles-release-backup-SHA256` path. Keeping the backup on the destination
-filesystem avoids relying on a cross-filesystem rename. A conflicting
-foreign link, a symlink parent or unproven tool/provider stops the install
-before activation. Existing `setup-tools`, `bstow` and clean pinned tmux plugin
-installations are migrated only when their records and content prove ownership.
-Private k9s files, kubeconfig inputs and unrelated tmux plugins are not touched.
+Releases are retained under `~/dotfiles-releases/dotfiles-COMMIT`. Override the
+store with an absolute `DOTFILES_RELEASE_ROOT` when needed. `current` is the
+only selection link; there is no `previous`, ownership database, pending
+journal or completion flag. `list` displays prepared directories with installed
+manifests and marks the selected ID. An unfinished import is not listed and
+cannot be selected; remove its exact ID with `uninstall ID` before retrying.
+`set` validates metadata, manifests and runtime rather than trusting a flag.
+
+Before replacing a managed path, activation moves its original file, link or
+directory to `<path>.before-dotfiles-release`. Backups stay on the same
+filesystem and survive later selections. A conflicting existing backup or
+symlink parent stops activation; foreign links are backed up like other
+originals. This deliberately needs no setup-tools or bstow ownership records.
+Only known release commands, dotfiles, packaged k9s skins and the three tmux
+plugin paths are managed. `~/bin-extras`, private k9s files, kubeconfig inputs
+and unrelated tmux plugins are not touched.
 
 Use the manager for every selection change:
 
 ```bash
 dotfiles-release list
+dotfiles-release set dotfiles-COMMIT
 dotfiles-release health
-dotfiles-release health dotfiles-COMMIT
-dotfiles-release rollback
-dotfiles-release rollback dotfiles-COMMIT
+dotfiles-release health dotfiles-OLDERID12
 dotfiles-release uninstall
 dotfiles-release uninstall dotfiles-INACTIVE12
 ```
 
-`rollback` selects `previous`, or an explicit complete retained ID. With no
-previous release it restores the baseline. Plain `uninstall` also restores the
-baseline without deleting retained payloads. `uninstall ID` removes only an
-inactive, locally unmodified payload. Close any process still using that ID
-before removing it because the manager deliberately does not guess process
-ownership or terminate applications. Run the retained
-`dotfiles-COMMIT/bin/dotfiles-release` directly after restoring a baseline
-that did not contain the public manager link.
+`set ID` selects an installed unit, including older releases. It never installs
+an archive. `uninstall ID` deletes that retained directory, including damaged
+or unfinished imports. If it is current, uninstall also removes the release's
+public links, restores adjacent original-file backups and removes `current`;
+it does not automatically select another release. Plain `uninstall` means the
+current ID. Other retained releases remain available for a later `set`.
+Uninstall preserves a managed path that the user replaced with another file
+or foreign link; its adjacent original backup then stays for manual recovery.
+Close processes still using the ID before deletion. The manager does not guess
+process ownership or terminate applications. Keep the downloaded standalone
+script outside managed links so it remains available after active uninstall.
 
-All manager operations share a non-blocking lock. A pending record lets the
-next invocation recover an interrupted import, selection or baseline restore
-before continuing the command that was requested. Recovery restores both
-selection links and each recorded projection entry, verifies the saved
-baseline identity and removes the journal only after the state is coherent.
-If a user changed a managed path or a backup no longer matches its recorded
-identity, the manager preserves the journal, backup and user data and reports
-the exact conflicting path. Inspect that path and its adjacent backup, restore
-the expected managed link or move the foreign data aside, then retry the same
-manager command. Do not edit `current`, `previous`, `pending.env`, installed
-files or generated manifests by hand, and do not use `sudo` to move a venv.
+`install`, `set`, `uninstall` and `health` share one non-blocking lock on the store
+directory, with no persistent lock file. `verify` and `list` are read-only and
+do not take that lock. Health locks an existing store only to prevent deletion
+or switching during diagnostics and does not create a store. Normal failures,
+Ctrl+C and TERM undo changed links and restore originals using a temporary
+in-memory undo list. A failed new install
+removes its candidate after a successful undo. If undo itself fails, the
+manager preserves the candidate and temporary backups and reports their paths.
+There is no automatic journal recovery after SIGKILL or power loss. Inspect
+adjacent backups and temporary link paths, select a known-good ID with `set`
+and explicitly remove an unfinished ID before reinstalling. Do not hand-edit
+installed payloads or generated manifests, and never move a completed venv.
+
+When migrating an installation created by the older stateful manager, first
+use a saved copy of that manager to run its plain `uninstall` and restore the
+original baseline. Its backup names and ownership database are not read by the
+new manager. Then install or select with the new downloaded script. Historical
+archive formats remain supported; stale legacy state is not used for recovery.
 
 Stable public links contain `current` literally. The Nvim, tmux and Kubernetes
 client launchers resolve one physical release when each process starts. After a switch, reload
@@ -545,8 +581,8 @@ remain supported.
 
 The offline eslint_d launcher runs its bundled ESLint fallback without a daemon,
 because native daemon state would modify the immutable installation. A project's
-own ESLint still uses the native daemon. Full health verifies installed content
-both before and after its functional checks.
+own ESLint still uses the native daemon. CI qualification verifies installed
+content both before and after its functional checks.
 
 The release does not own `~/bin/python` or `~/bin/python3`; standalone Python
 is private to its tool payload. kubectl and Helm are public release commands.
@@ -586,8 +622,9 @@ version fails clearly, without falling back to another tool
 provider. Explicit binaries such as `current/bin/kubectl-1.34.12` also work;
 only the two canonical client launchers are projected into `~/bin`.
 `release.env` records ordered `KUBECTL_VERSIONS` and `HELM_VERSIONS` lists.
-Health verifies every version and the default independently of the caller's
-selection, reads an isolated kubeconfig and renders a local chart offline.
+Installation checks every version and the default independently of the
+caller's selection. CI also reads an isolated kubeconfig and renders a local
+chart offline.
 
 Client selection is inherited by subprocesses that invoke `kubectl` or `helm`
 through these launchers. It does not change Kubernetes/Helm libraries embedded
@@ -610,19 +647,20 @@ out of the bundled default. A direct versioned Helm executable bypasses that
 launcher policy. Older releases without the plugin keep their original
 discovery and never borrow a plugin from a newer release.
 
-Health selects the bundled plugin directory explicitly, checks the version
+CI qualification selects the bundled plugin directory explicitly, checks the version
 and manifest, generates a local schema with `$ref`, `--bundle` and
 `--bundle-without-id` for every bundled Helm version, and exercises yq YAML
 documents and jq overlay merging. These checks use no network or user plugins.
-Missing or broken validation tools prevent candidate activation.
+Missing or wrong-version tools prevent activation; broken functional behavior
+fails CI qualification before publication.
 
 For the first upgrade from a pre-yq release, run `scripts/dotfiles-release`
 from this reviewed checkout, or extract the candidate's standalone
 `dotfiles-release` from the checksum-verified archive into a private directory.
 The installed old manager cannot read the new profile. Keep the newer manager
-outside the release links when rolling back, and use it to return to the new
-release. Let the manager update ownership and selection; do not edit retained
-payloads or `current` by hand.
+outside the release links when selecting an older ID, and use it to return to
+the newer release with `set ID`. Let the manager update selection; do not edit
+retained payloads or `current` by hand.
 
 For NetReveal chart validation, offline means delivery of executables.
 Chart repositories, schema endpoints and project pip dependencies may still
@@ -697,17 +735,17 @@ DOTFILES_IGNORE_BIN_EXTRAS=1 "$HOME/bin/nvim"
 
 In an existing Bash session, export that variable and reload `.bashrc` to
 rebuild PATH. Prefixing an arbitrary command with the variable does not rebuild
-its inherited PATH. Release health, builds and repository checks enforce this
+its inherited PATH. Release runtime checks, builds and repository checks enforce this
 setting so local replacements cannot hide a broken payload. `dotfiles-check`
 reports interactive selection and can truthfully report a version mismatch
-for an intentional override; release health checks the release itself.
+for an intentional override; release runtime checks inspect the release itself.
 
 Aliases, absolute executable paths and project-local tools such as
 `node_modules` have their own selection rules. The offline launcher's core
 Neovim runtime remains fixed; personal `NVIM_APPNAME` profiles retain their
 own configuration. Older retained Bash/Neovim configurations can restore older
 PATH behavior, and existing processes can retain inherited extras after a
-rollback. Rollback and uninstall leave the directory untouched.
+selection change. `set` and uninstall leave the extras directory untouched.
 
 The historical 2026-10-01 qualification of source commit
 `d4536234f5730fdb0e1f43335f9e0d5c0e79e935` measured the following apparent
@@ -759,7 +797,7 @@ figures, are within the original 1.65-1.90 GiB estimate per release. These
 measurements predate bundled kubectl and Helm; refresh them for the new payload.
 
 The [Nvim2 offline notes](../nvim2/.config/nvim2/offline-releases.md) describe the
-editor-specific runtime, health checks and state behavior. `tool-updates.md`
+editor-specific runtime, qualification checks and state behavior. `tool-updates.md`
 describes how a new source revision becomes a separately qualified immutable
 release.
 

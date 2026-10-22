@@ -1,0 +1,349 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+checker_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=dotfiles-release
+source "$checker_dir/dotfiles-release"
+
+health_cli_operations() {
+  local release=$1 health_home=$2 work output versions version
+  work=$health_home/cli
+
+  mkdir -p "$work/project" || return
+  if [[ -x $release/bin/uv ]]; then
+    PYTHONDONTWRITEBYTECODE=1 "$release/bin/uv" venv --no-config --offline \
+      --no-cache --no-python-downloads --python "$release/bin/python" "$work/uv-venv" || return
+    "$work/uv-venv/bin/python" -I -B -c \
+      'import json, ssl, sys; assert sys.prefix != sys.base_prefix; print("uv-venv-ok")' || return
+  fi
+  printf 'alpha\noffline needle\nomega\n' >"$work/input.txt" || return
+  output=$("$release/bin/rg" --fixed-strings 'offline needle' "$work/input.txt") || return
+  printf '%s\n' "$output"
+  [[ $output == *'offline needle'* ]] || { die 'ripgrep functional check failed'; return 1; }
+  output=$(printf 'alpha\noffline needle\nomega\n' | "$release/bin/fzf" --filter='offline needle') || return
+  printf '%s\n' "$output"
+  [[ $output == 'offline needle' ]] || { die 'fzf functional check failed'; return 1; }
+
+  _ZO_DATA_DIR="$work/zoxide" "$release/bin/zoxide" add "$work/project" || return
+  output=$(_ZO_DATA_DIR="$work/zoxide" "$release/bin/zoxide" query project) || return
+  printf 'zoxide-query=%s\n' "$output"
+  [[ $output == "$work/project" ]] || { die 'zoxide database check failed'; return 1; }
+  "$release/bin/zoxide" init bash | "$release/bin/rg" --fixed-strings '__zoxide_hook' || return
+
+  printf '%s\n' \
+    "version: '3'" \
+    'tasks:' \
+    '  health:' \
+    '    cmds:' \
+      '      - test -f marker' \
+    '    silent: true' >"$work/Taskfile.yml" || return
+  : >"$work/marker" || return
+  "$release/bin/task" --dir "$work" --taskfile "$work/Taskfile.yml" health || return
+
+  printf 'terraform{required_version=">= 1.0"}\n' >"$work/main.tf" || return
+  printf 'example_value="offline"\n' >"$work/terraform.tfvars" || return
+  "$release/bin/terraform" fmt "$work/main.tf" "$work/terraform.tfvars" || return
+  "$release/bin/terraform" fmt -check "$work/main.tf" "$work/terraform.tfvars" || return
+  "$release/bin/rg" --fixed-strings 'example_value = "offline"' "$work/terraform.tfvars" || return
+
+  mkdir -p "$work/chart/templates" || return
+  printf '%s\n' 'apiVersion: v2' 'name: offline-health' 'version: 0.1.0' \
+    >"$work/chart/Chart.yaml"
+  printf '{}\n' >"$work/chart/values.yaml" || return
+  printf '{}\n' >"$work/chart/values.lint.yaml" || return
+  printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' \
+    '  name: {{ .Release.Name }}' >"$work/chart/templates/config.yaml" || return
+  (cd "$work/chart" && "$release/share/nvim2/mason/bin/helm_ls" lint) || return
+  versions=$(metadata_value "$release/release.env" HELM_VERSIONS) || return
+  for version in ${versions//,/ }; do
+    output=$(HELM_VERSION="$version" HELM_CONFIG_HOME="$health_home/helm/config" \
+      HELM_CACHE_HOME="$health_home/helm/cache" HELM_DATA_HOME="$health_home/helm/data" \
+      "$release/bin/helm" template offline-health "$work/chart") || return
+    printf '%s\n' "$output"
+    [[ $output == *'name: offline-health'* ]] ||
+      { die "Helm $version did not render the local chart"; return 1; }
+  done
+}
+
+health_kubernetes_tools() {
+  local release=$1 health_home=$2 kubeconfig output versions version
+  kubeconfig=$health_home/kubeconfig
+
+  mkdir -p "$health_home/.config" || return
+  cp -a "$release/dotfiles/k9s/.config/k9s" "$health_home/.config/k9s" || return
+  printf '%s\n' \
+    'apiVersion: v1' \
+    'kind: Config' \
+    'clusters:' \
+    '- name: offline-a' \
+    '  cluster: {server: https://127.0.0.1:1}' \
+    '- name: offline-b' \
+    '  cluster: {server: https://127.0.0.1:1}' \
+    'users:' \
+    '- name: offline' \
+    '  user: {token: offline}' \
+    'contexts:' \
+    '- name: offline-a' \
+    '  context: {cluster: offline-a, user: offline, namespace: default}' \
+    '- name: offline-b' \
+    '  context: {cluster: offline-b, user: offline, namespace: default}' \
+    'current-context: offline-a' >"$kubeconfig" || return
+
+  versions=$(metadata_value "$release/release.env" KUBECTL_VERSIONS) || return
+  for version in ${versions//,/ }; do
+    output=$(KUBECTL_VERSION="$version" KUBECONFIG="$kubeconfig" \
+      "$release/bin/kubectl" config current-context) || return
+    [[ $output == offline-a ]] ||
+      { die "kubectl $version did not read the isolated kubeconfig"; return 1; }
+  done
+
+  output=$(KUBECONFIG="$kubeconfig" "$release/bin/kubectx" --current) || return
+  printf 'kubectx-current=%s\n' "$output"
+  [[ $output == offline-a ]] || { die 'kubectx did not read the isolated kubeconfig'; return 1; }
+  KUBECONFIG="$kubeconfig" "$release/bin/kubectx" offline-b || return
+  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubectx" --current) == offline-b ]] ||
+    { die 'kubectx did not switch the isolated context'; return 1; }
+  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubens" --current) == default ]] ||
+    { die 'kubens did not read the isolated namespace'; return 1; }
+  KUBECONFIG="$kubeconfig" "$release/bin/kubens" --force offline-namespace || return
+  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubens" --current) == offline-namespace ]] ||
+    { die 'kubens did not update the isolated namespace'; return 1; }
+
+  "$release/share/nvim2/mason/packages/yamllint/venv/bin/yamllint" \
+    -d relaxed "$health_home/.config/k9s"/*.yaml || return
+  HOME="$health_home" XDG_CONFIG_HOME="$health_home/.config" \
+    XDG_CACHE_HOME="$health_home/.cache" XDG_STATE_HOME="$health_home/.local/state" \
+    KUBECONFIG="$kubeconfig" "$release/bin/k9s" info || return
+}
+
+health_tmux() {
+  local release=$1 health_home=$2 socket socket_dir plugin entry option command
+  local client client_input client_stderr client_pid reload_value
+  local tmux=$release/bin/tmux
+
+  mkdir -p "$health_home/.local/share/tmux/resurrect" || return
+  (
+    # Unix socket paths are short; a valid HOME may exceed their limit.
+    socket_dir=$(mktemp -d /tmp/dotfiles-tmux.XXXXXX) || exit
+    socket=$socket_dir/socket
+    unset TMUX
+    export HOME="$health_home"
+    # shellcheck disable=SC2329
+    cleanup_health_tmux() {
+      # shellcheck disable=SC2317
+      "$tmux" -S "$socket" kill-server >/dev/null 2>&1 || true
+      cleanup_path "$socket_dir"
+    }
+    trap cleanup_health_tmux EXIT
+    "$tmux" -S "$socket" new-session -d -s health || exit
+    option=$("$tmux" -S "$socket" show-options -gv prefix)
+    [[ $option == C-a ]] || { die "tmux prefix is $option, expected C-a"; exit 1; }
+    option=$("$tmux" -S "$socket" show-options -gv @dotfiles-config)
+    [[ $option == "$release/dotfiles/tmux/.tmux.conf" ]] ||
+      { die 'tmux did not retain its physical config'; exit 1; }
+    "$tmux" -S "$socket" set-option -g status-position bottom || exit
+    client_input=$health_home/tmux-client-input
+    client_stderr=$health_home/tmux-client-stderr
+    mkfifo "$client_input" || exit
+    exec {client_input_fd}<>"$client_input"
+    TERM=xterm-256color timeout 10s script -qefc \
+      "$(printf '%q ' "$tmux" -S "$socket" attach-session -t health)" /dev/null \
+      <"$client_input" >/dev/null 2>"$client_stderr" &
+    client_pid=$!
+    client=
+    for _ in {1..50}; do
+      client=$("$tmux" -S "$socket" list-clients -F '#{client_name}' 2>/dev/null | head -n 1)
+      [[ -n $client ]] && break
+      sleep 0.02
+    done
+    [[ -n $client ]] || { die 'tmux health client did not attach'; exit 1; }
+    "$tmux" -S "$socket" send-keys -K -c "$client" C-a R || exit
+    reload_value=
+    for _ in {1..50}; do
+      reload_value=$("$tmux" -S "$socket" show-options -gv status-position 2>/dev/null || true)
+      [[ $reload_value == top ]] && break
+      sleep 0.02
+    done
+    [[ $reload_value == top ]] || { die 'tmux Shift-R did not reload the physical offline config'; exit 1; }
+    [[ ! -s $client_stderr ]] || { die 'tmux offline reload client wrote to stderr'; exit 1; }
+    "$tmux" -S "$socket" detach-client -t "$client" || exit
+    exec {client_input_fd}>&-
+    wait "$client_pid" || exit
+    for plugin in tmux-sensible tmux-resurrect tmux-continuum; do
+      entry=$release/share/tmux/plugins/$plugin/${plugin#tmux-}.tmux
+      [[ $plugin != tmux-sensible ]] || entry=$release/share/tmux/plugins/$plugin/sensible.tmux
+      [[ -x $entry || -f $entry ]] || { die "tmux plugin entry point is missing: $entry"; exit 1; }
+      printf -v command 'exec %q' "$entry"
+      "$tmux" -S "$socket" run-shell "$command" || exit
+      printf 'tmux-plugin=%s exit=0\n' "$plugin"
+    done
+    "$tmux" -S "$socket" list-keys -T prefix C-s || exit
+  ) || return
+}
+
+health_bash() {
+  local release=$1 health_home=$2 command_name check invocation
+
+  mkdir -p "$health_home/bin" || return
+  for command_name in dotfiles-release nvim tmux node npm npx corepack rg zoxide \
+    k9s kubectx kubens oh-my-posh task fzf terraform kubectl helm; do
+    ln -s "$release/bin/$command_name" "$health_home/bin/$command_name" || return
+  done
+  if [[ -x $release/bin/fd ]]; then
+    ln -s "$release/bin/fd" "$health_home/bin/fd" || return
+  fi
+  if [[ -x $release/bin/go ]]; then
+    for command_name in go gofmt; do
+      ln -s "$release/bin/$command_name" "$health_home/bin/$command_name" || return
+    done
+  fi
+  ln -s "$release/dotfiles/bash/.bashrc" "$health_home/.bashrc" || return
+  ln -s "$release/dotfiles/bash/.bash_aliases" "$health_home/.bash_aliases" || return
+  ln -s "$release/dotfiles/oh-my-posh/.oh-my-posh.omp.json" "$health_home/.oh-my-posh.omp.json" || return
+  check=$health_home/bash-health.sh
+  # The following single-quoted strings are the generated health script.
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    'set -e' \
+    '_dotfiles_health_fail() { printf "dotfiles-release: Bash health check failed: %s\n" "$*" >&2; exit 1; }' \
+    'source "$HOME/.bashrc" || _dotfiles_health_fail "first .bashrc load returned an error"' \
+    'source "$HOME/.bashrc" || _dotfiles_health_fail "second .bashrc load returned an error"' \
+    'hash -r' \
+    '[[ $DOTFILES == "$EXPECTED_RELEASE/dotfiles" ]] || _dotfiles_health_fail "DOTFILES does not select the candidate release: ${DOTFILES:-unset}"' \
+    '[[ $(readlink -f -- "$(type -P node)") == "$EXPECTED_RELEASE/tools/node/bin/node" ]] || _dotfiles_health_fail "node does not select the candidate release"' \
+    '[[ $(type -t __zoxide_hook) == function ]] || _dotfiles_health_fail "zoxide initialization is missing"' \
+    '[[ -n ${_DOTFILES_FZF_PROVIDER:-} ]] || _dotfiles_health_fail "fzf initialization is missing"' \
+    '[[ ${VIRTUAL_ENV_DISABLE_PROMPT:-} == 1 ]] || _dotfiles_health_fail "virtual-environment prompt suppression is missing"' \
+    'prompt=${PROMPT_COMMAND[*]}' \
+    'without=${prompt//_dotfiles_history_sync/}' \
+    '[[ $(( (${#prompt} - ${#without}) / 22 )) -eq 1 ]] || _dotfiles_health_fail "history synchronization is missing or duplicated"' \
+    '[[ $PS1 != *VIRTUAL_ENV* ]] || _dotfiles_health_fail "the prompt embeds VIRTUAL_ENV"' \
+    'printf "bash-dotfiles=%s\n" "$DOTFILES"' \
+    'printf "bash-prompt-command=%s\n" "$prompt"' \
+    'exit 0' >"$check" || return
+  printf -v invocation '%q ' env -u DOTFILES -u DOTFILES_AUTO_ROOT \
+    HOME="$health_home" EXPECTED_RELEASE="$release" \
+    TERM=xterm-256color PATH=/usr/bin:/bin bash --noprofile --norc -i "$check"
+  timeout 120s script --quiet --return --command "$invocation" /dev/null </dev/null || return
+}
+
+health_stage() {
+  local label=$1 status
+  shift
+
+  "$@" && return
+  status=$?
+  die "$label health check failed (status $status)" || true
+  return "$status"
+}
+
+health_version() {
+  local command_name=$1 expected=$2 output=$3
+
+  printf '%s\n' "$output"
+  [[ $output == *"${expected#v}"* || $output == *"$expected"* ]] || {
+    die "$command_name reported an unexpected version: $output"
+    return 1
+  }
+}
+
+health_validation_tools() {
+  local release=$1 health_home=$2 yq_version=$3 plugin_version=$4 helm_versions=$5
+  local work=$health_home/validation-tools output version
+  local HELM_PLUGINS=$release/share/helm/plugins
+  local HELM_CONFIG_HOME=$health_home/helm/config HELM_CACHE_HOME=$health_home/helm/cache
+  local HELM_DATA_HOME=$health_home/helm/data
+  export HELM_PLUGINS HELM_CONFIG_HOME HELM_CACHE_HOME HELM_DATA_HOME
+
+  [[ -f $HELM_PLUGINS/helm-values-schema-json/plugin.yaml &&
+    -x $HELM_PLUGINS/helm-values-schema-json/schema &&
+    -s $HELM_PLUGINS/helm-values-schema-json/LICENSE ]] || { die 'validation tool payload is incomplete'; return 1; }
+  need jq || return
+  mkdir -p "$work" || return
+  output=$("$release/bin/yq" --version) || return
+  [[ $output == "yq (https://github.com/mikefarah/yq/) version v${yq_version#v}" ]] ||
+    { die 'yq is not the pinned Mike Farah implementation'; return 1; }
+  printf 'name: first\n---\nname: second\n' >"$work/documents.yaml" || return
+  output=$("$release/bin/yq" eval -r '.name' "$work/documents.yaml") || return
+  [[ $output == $'first\n---\nsecond' ]] || { die 'yq YAML document check failed'; return 1; }
+  cat >"$work/values.yaml" <<'EOF'
+replicas: 2
+tls: {} # @schema $ref: tls.schema.json
+EOF
+  cat >"$work/tls.schema.json" <<'EOF'
+{"$id":"https://offline.example/tls.schema.json","type":"object","properties":{"enabled":{"type":"boolean"}},"required":["enabled"],"additionalProperties":false}
+EOF
+  for version in ${helm_versions//,/ }; do
+    output=$(HELM_VERSION="$version" "$release/bin/helm" plugin list) || return
+    awk -v expected="${plugin_version#v}" \
+      '$1 == "schema" { count++; valid = ($2 == expected) } END { exit !(count == 1 && valid) }' \
+      <<<"$output" || { die "Helm $version schema plugin manifest has an unexpected version"; return 1; }
+    output=$(HELM_VERSION="$version" "$release/bin/helm" schema version) || return
+    [[ $output == "helm schema version v${plugin_version#v}" ]] ||
+      { die "Helm $version schema plugin reported an unexpected version: $output"; return 1; }
+    (cd "$work" && HELM_VERSION="v${version#v}" "$release/bin/helm" schema \
+      -f values.yaml -o schema.json --bundle --bundle-without-id --bundle-root "$work") || return
+    jq -e '
+      .properties.replicas.type == "integer" and
+      .properties.tls."$ref" == "#/$defs/tls.schema.json" and
+      (."$defs"."tls.schema.json" |
+        .properties.enabled.type == "boolean" and .required == ["enabled"] and (has("$id") | not))
+    ' "$work/schema.json" >/dev/null || { die "Helm $version schema generation failed"; return 1; }
+  done
+  printf '%s\n' '{"properties":{"tls":{"description":"overlay"}}}' >"$work/overlay.json" || return
+  jq -s '.[0] * .[1]' "$work/schema.json" "$work/overlay.json" >"$work/merged.json" || return
+  jq -e '.properties.tls.description == "overlay" and .properties.tls."$ref" == "#/$defs/tls.schema.json"' \
+    "$work/merged.json" >/dev/null || { die 'jq schema overlay merge failed'; return 1; }
+  printf 'validation-tools=healthy\n'
+}
+
+health_nvim() {
+  local release=$1 health_home=$2
+
+  need setsid || return
+  (
+    if [[ -n ${LOCK_FD:-} ]]; then exec {LOCK_FD}>&-; fi
+    # Interactive Bash fixtures open /dev/tty even with redirected stdin.
+    # Detach from the terminal so timeout's background group cannot get SIGTTIN.
+    HOME="$health_home" XDG_CACHE_HOME="$health_home/.cache" \
+      XDG_STATE_HOME="$health_home/.local/state" GIT_OPTIONAL_LOCKS=0 \
+      DOTFILES_OFFLINE_RELEASE_ROOT="$release" \
+      PYTHONDONTWRITEBYTECODE=1 NVIM_APPNAME=nvim2 NVIM2_CHECK_TOOLS=1 \
+      NVIM2_BENCHMARK_RUNS=3 setsid --wait timeout 1200s \
+        bash "$release/config/nvim2/tests/check.sh" </dev/null
+  )
+}
+
+main() {
+  local release=${1:-} health_home
+  local DOTFILES_IGNORE_BIN_EXTRAS=1 VIRTUAL_ENV='' KUBECTL_VERSION='' HELM_VERSION=''
+  local PYTHONDONTWRITEBYTECODE=1
+  local LC_ALL=C.UTF-8 LANG=C.UTF-8
+  local -A release_metadata=()
+  (($# == 1)) || { die 'usage: check-dotfiles-release RELEASE_DIRECTORY'; return 2; }
+  release=$(readlink -f -- "$release") || return
+  validate_release_directory "$release" || return
+  verify_installed_manifest "$release" || return
+  read_release_metadata "$release/release.env" release_metadata || return
+  validate_platform "${release_metadata[PLATFORM_ID]}" || return
+  health_home=$(mktemp -d) || return
+  TEMP_PATHS+=("$health_home")
+  local PATH="$release/bin:$release/share/nvim2/mason/bin:/usr/bin:/bin"
+  export PATH DOTFILES_IGNORE_BIN_EXTRAS VIRTUAL_ENV KUBECTL_VERSION HELM_VERSION PYTHONDONTWRITEBYTECODE LC_ALL LANG
+  mkdir -p "$health_home/.cache" "$health_home/.local/state" || return
+  if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
+    health_stage 'validation tools' health_validation_tools "$release" "$health_home" \
+      "${release_metadata[YQ_VERSION]}" "${release_metadata[HELM_SCHEMA_PLUGIN_VERSION]}" \
+      "${release_metadata[HELM_VERSIONS]}" || return
+  fi
+  health_stage 'CLI operations' health_cli_operations "$release" "$health_home" || return
+  health_stage 'Kubernetes tools' health_kubernetes_tools "$release" "$health_home" || return
+  health_stage tmux health_tmux "$release" "$health_home" || return
+  health_stage Bash health_bash "$release" "$health_home" || return
+  health_stage Nvim health_nvim "$release" "$health_home" || return
+  verify_installed_manifest "$release" || return
+  printf '%s: %s passed offline functional checks\n' "${0##*/}" "${release##*/}"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi

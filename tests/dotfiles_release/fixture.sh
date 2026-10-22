@@ -109,8 +109,11 @@ write_fake_python() {
   cat >"$path" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ ${1:-} == -I && " $* " == *' - '* && ${2:-} != -B ]]; then
+  exit 99
+fi
 if [[ ${FIXTURE_FAIL_PYTHON_IMPORT:-} == 1 &&
-  ${1:-} == -I && ${2:-} == - && ${!#} == ansible-lint ]]; then
+  ${1:-} == -I && " $* " == *' - '* && ${!#} == ansible-lint ]]; then
   exit 95
 fi
 if [[ " $* " == *' -m venv '* ]]; then
@@ -121,6 +124,7 @@ if [[ " $* " == *' -m venv '* ]]; then
   for command_name in ansible ansible-config ansible-lint ansible-playbook yamllint; do
     printf '%s\n' \
       '#!/usr/bin/env bash' \
+      'if [[ $(basename -- "$0") == ansible* && ${LC_ALL:-} != C.UTF-8 ]]; then exit 99; fi' \
       'if [[ $(basename -- "$0") == ansible-lint && " $* " != *" --offline "* ]]; then exit 97; fi' \
       'printf "%s fixture 1.0\n" "$(basename -- "$0")"' \
       >"$destination/bin/$command_name"
@@ -153,7 +157,8 @@ make_artifact() {
     "$release/share/nvim2/mason/bin" "$release/share/nvim2/mason/packages/ansible-lint" \
     "$release/share/nvim2/mason/packages/yamllint" \
     "$release/python-wheelhouse" "$release/share/tmux/plugins" \
-    "$release/tools/bin" "$release/tools/nvim/bin" "$release/tools/tmux/bin"
+    "$release/tools/bin" "$release/tools/nvim/bin" "$release/tools/tmux/bin" \
+    "$release/tools/nvim/share/nvim/runtime"
 
   {
     printf '#!/usr/bin/env bash\n'
@@ -352,7 +357,7 @@ repack_artifact() {
 }
 
 run_manager() {
-  HOME=$test_home DOTFILES_OS_RELEASE_FILE=$os_release DOTFILES_RELEASE_TEST_MODE=1 \
+  HOME=$test_home DOTFILES_OS_RELEASE_FILE=$os_release \
     bash "$repo_dir/scripts/dotfiles-release" "$@"
 }
 

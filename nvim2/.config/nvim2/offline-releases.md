@@ -1,7 +1,7 @@
 # Nvim2 in complete offline releases
 
 The authoritative multi-application build, prerequisite, installation,
-ownership, rollback and uninstall procedure is in
+selection and uninstall procedure is in
 [setup.md](../../../maintenance/setup.md#complete-offline-release).
 This page documents the Neovim-specific parts of that release.
 
@@ -84,7 +84,7 @@ On first activation, the manager copies legacy `telescope_history` and
 does not exist. It preserves the source and never replaces newer state.
 
 Cache and logs also stay outside the payload. In particular,
-lua-language-server writes its log below the Nvim2 state directory. Health uses
+lua-language-server writes its log below the Nvim2 state directory. Checks use
 a disposable HOME, state and cache, so it does not modify the operator's
 history, kubeconfig or editor data.
 
@@ -106,26 +106,32 @@ An explicit `tmux -f FILE` remains authoritative.
 Connected TPM still reads plugin declarations from the default config location,
 not `FILE`; see [TPM and Krew](../../../maintenance/setup.md#tpm-and-krew).
 
-## Offline health
+## Offline verification and qualification
 
-Normal `install` checks the candidate before activation, including the full
-Nvim2 suite. `install --skip-tests ARCHIVE` skips the extended functional suites
-for that invocation while preserving core integrity/runtime checks and Python
-venv creation. Use it for an already qualified package when the host cannot
-run the functional tests. A subsequent `health` still runs the complete suite.
+`dotfiles-release verify ARCHIVE` reads platform and source identity from the
+archive and checks required structure, safe paths, metadata and checksums. It
+does not execute the payload, create venvs, install or activate anything, and
+works with the downloaded manager without a repository checkout.
 
-`dotfiles-release health [ID]` verifies the local content record, file modes,
-symlink targets, source metadata, Python isolation and all runtime versions.
-It verifies the installed content again after functional checks, so tool writes
-into the payload fail the same health invocation.
+`install ARCHIVE` checks the matching host platform, recreates Python venvs
+and records installed file contents, modes and symlink targets. It checks
+Python isolation and dependencies plus runtime versions, then activates through
+the same path as `set ID`. `health [ID]` repeats these light checks without
+activation, defaulting to `current`. Install and set accept `--skip-health` to
+skip runtime probes only; structure, platform and integrity checks remain
+mandatory. There is no `--skip-tests` flag.
+
+Full qualification belongs to the CI-only `scripts/check-dotfiles-release`
+from the trusted workflow checkout. It verifies installed content before and
+after its functional checks, so unexpected tool writes into the payload fail.
 New releases also bundle kind, uv/uvx, actionlint, ShellCheck, gh, htop,
 kubeconform, Kyverno and Trivy. Yamllint is exposed from its locked Python
-environment. Health checks their versions and
+environment. Qualification checks their versions and
 creates a disposable uv venv using the bundled Python with downloads disabled.
 It does not create a cluster, pull images or install project dependencies.
 Docker and container images remain separate prerequisites for kind.
 
-The full mode then runs functional rg, fzf, zoxide, Task, Terraform and tfvars
+The CI checker runs functional rg, fzf, zoxide, Task, Terraform and tfvars
 operations, an embedded-library `helm-ls` lint without Helm, isolated
 kubectx/kubens and k9s checks, a private tmux socket with all three plugins,
 and a real interactive Bash reload. Finally it executes:
@@ -145,13 +151,12 @@ golangci-lint, then run real Delve package and cursor-test sessions, goroutines,
 locals, stepping and adapter/debuggee cleanup.
 Terraform and tfvars continue to use `terraform fmt`. The local Helm chart test
 uses helm-ls without a Helm executable. No plugin, parser, language server or
-formatter is installed or updated by health. The release launcher uses the
+formatter is installed or updated by qualification. The release launcher uses the
 bundled Mason registry snapshot and disables registry refresh, so startup and
-health do not make network requests. The manager also passes the candidate's
-physical release root to the first health run, before `installed.sha256`
-exists, so that initial verification uses the same offline behavior.
+qualification do not make network requests. The checker runs against the
+installed physical release after the manager has created its manifests.
 
-For qualification evidence, preserve the unfiltered manager output and the
+For qualification evidence, preserve unfiltered installer/checker output and the
 files produced by the normal Nvim checks, including messages, Mason, Conform
 and LSP reports. An optional clipboard-provider warning in a headless
 container does not affect editing, while an error in a required plugin, tool,
@@ -176,8 +181,8 @@ Tag prefixes accept 7-40 lowercase hexadecimal characters; archive names and
 retained release IDs use the first 12 characters of the full commit SHA.
 
 Existing archives are checked with the trusted checkout's
-`dotfiles-release inspect PLATFORM ARCHIVE COMMIT`: archive paths and links,
-complete metadata, expected platform and full commit ID, and internal checksums.
+`dotfiles-release verify ARCHIVE`. CI separately compares the embedded platform
+and full source commit with the release job's expected identity.
 Only missing archives are built. Each archive is published together with its
 `.tar.gz.sha256` sidecar. The release also includes a standalone
 `dotfiles-release` script, extracted from the qualified Debian archive with its
@@ -187,8 +192,8 @@ Only the Debian job publishes this shared script. A retry verifies existing
 assets and supplies a missing checksum or manager without rebuilding or
 overwriting the archive. An existing manager must match the one in the archive;
 a mismatched manager or checksum fails rather than being replaced. The workflow never creates
-a tag or release. A new archive is uploaded only after offline install and full
-health have passed. Qualification logs and metadata are retained even if a
+a tag or release. A new archive is uploaded only after offline install and all
+CI functional checks have passed. Qualification logs and metadata are retained even if a
 build, verification or upload fails; containers use `--init` to reap debugger
 processes and are removed on exit.
 
@@ -205,6 +210,6 @@ dotfiles-COMMIT-amzn-2023-x86_64.tar.gz
 For a plugin or configuration change, edit the source checkout, regenerate
 `nvim-pack-lock.json` only through `vim.pack`, run repository validation, and
 build a new complete release. Never edit the installed snapshot or use it as a
-Git working tree. Keep A and B until their health, representative editing,
-rollback and process-pinning checks have passed, then remove an inactive ID as
+Git working tree. Keep A and B until their qualification, representative editing,
+selection with `set` and process-pinning checks have passed, then remove an inactive ID as
 described in `maintenance/setup.md`.

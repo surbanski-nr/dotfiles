@@ -105,7 +105,7 @@ set +e
 corrupt_output=$(run_manager install "$test_root/corrupt.tar.gz" 2>&1)
 corrupt_status=$?
 set -e
-[[ $corrupt_status -ne 0 && $corrupt_output == *'checksum did NOT match'* ]] ||
+[[ $corrupt_status -ne 0 && $corrupt_output == *'archive checksums do not match'* ]] ||
   fail 'artifact with a corrupt payload was accepted'
 
 printf 'dotfiles_release: integrity passed\n'

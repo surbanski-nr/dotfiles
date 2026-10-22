@@ -3,6 +3,8 @@
 set -euo pipefail
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=dotfiles_release/fixture.sh
+source "$repo_dir/tests/dotfiles_release/fixture.sh"
 test_root=$(mktemp -d)
 trap 'find "$test_root" -depth -delete' EXIT
 
@@ -47,7 +49,10 @@ archive=$RELEASE_TAG-$PLATFORM.tar.gz
 
 make_archive() {
   local stage=$test_root/payload platform=${1:-$PLATFORM}
-  mkdir -p "$stage/$RELEASE_TAG"
+  find "$stage" -depth -delete 2>/dev/null || true
+  find "$test_root/stage-ci-archive" -depth -delete 2>/dev/null || true
+  make_artifact "$TEST_COMMIT" ci-archive "$test_root/ci-fixture.tar.gz" 1.0 false false
+  mv "$test_root/stage-ci-archive" "$stage"
   printf 'fixture payload\n' >"$stage/$RELEASE_TAG/payload"
   {
     printf '#!/usr/bin/env bash\n'
@@ -75,7 +80,12 @@ make_archive() {
 
 repack_archive() {
   local stage=$test_root/payload
-  (cd "$stage/$RELEASE_TAG" && sha256sum payload dotfiles-release build-manifest.txt release.env >SHA256SUMS)
+  (
+    cd "$stage/$RELEASE_TAG"
+    find . -type f ! -path './SHA256SUMS' -print0 | LC_ALL=C sort -z |
+      xargs -0 sha256sum >"$test_root/ci-SHA256SUMS"
+    mv "$test_root/ci-SHA256SUMS" SHA256SUMS
+  )
   tar -C "$stage" -czf "$test_root/$archive" "$RELEASE_TAG"
 }
 
@@ -84,13 +94,31 @@ run_preflight() { : >"$GITHUB_OUTPUT"; run_ci preflight; }
 matrix() { sed -n 's/^platforms=//p' "$GITHUB_OUTPUT"; }
 
 make_archive
-root=$(HOME="$test_root/empty-home" bash "$repo_dir/scripts/dotfiles-release" inspect "$PLATFORM" "$test_root/$archive" "$COMMIT_SHA")
-[[ $root == "$RELEASE_TAG" && -z $(find "$test_root/empty-home" -mindepth 1 -print -quit) ]] ||
-  fail 'archive inspection changed HOME or did not return its identity'
+root=$(HOME="$test_root/empty-home" bash "$repo_dir/scripts/dotfiles-release" verify "$test_root/$archive")
+[[ $root == *"verified $RELEASE_TAG ($PLATFORM)"* && -z $(find "$test_root/empty-home" -mindepth 1 -print -quit) ]] ||
+  fail 'archive verification changed HOME or did not report its identity'
 run_preflight
 matrix | jq -e 'length == 4 and all(.[]; .build_archive == true)' >/dev/null || fail 'missing archives did not select four builds'
 grep -Fx 'should_run=true' "$GITHUB_OUTPUT" >/dev/null || fail 'missing assets did not schedule work'
 
+for command_name in fd kind uv uvx actionlint shellcheck gh kubeconform kyverno trivy yq; do
+  write_fake_tool "$test_root/payload/$RELEASE_TAG/tools/bin/$command_name" 1.0
+  ln -s "../tools/bin/$command_name" "$test_root/payload/$RELEASE_TAG/bin/$command_name"
+done
+for command_name in go gofmt; do
+  write_fake_tool "$test_root/payload/$RELEASE_TAG/tools/go/bin/$command_name" 1.0
+  ln -s "../tools/go/bin/$command_name" "$test_root/payload/$RELEASE_TAG/bin/$command_name"
+done
+write_fake_tool "$test_root/payload/$RELEASE_TAG/tools/htop/bin/htop" 1.0
+ln -s ../tools/htop/bin/htop "$test_root/payload/$RELEASE_TAG/bin/htop"
+ln -s ../share/nvim2/mason/packages/yamllint/venv/bin/yamllint \
+  "$test_root/payload/$RELEASE_TAG/bin/yamllint"
+plugin=$test_root/payload/$RELEASE_TAG/share/helm/plugins/helm-values-schema-json
+mkdir -p "$plugin"
+printf 'name: schema\nversion: "2.4.0"\n' >"$plugin/plugin.yaml"
+printf '#!/bin/sh\nexit 0\n' >"$plugin/schema"
+chmod 0755 "$plugin/schema"
+printf 'fixture license\n' >"$plugin/LICENSE"
 printf '%s\n' \
   'FD_VERSION=1.0' 'GO_VERSION=1.0' 'KIND_VERSION=1.0' 'UV_VERSION=1.0' \
   'ACTIONLINT_VERSION=1.0' 'SHELLCHECK_VERSION=1.0' 'GH_VERSION=1.0' 'HTOP_VERSION=1.0' \
@@ -138,8 +166,8 @@ run_ci publish "$test_root/nonexistent-output"
   fail 'checksum/manager repair uploaded an existing archive'
 cmp -s "$TEST_RELEASE_ASSETS/dotfiles-release" "$test_root/payload/$RELEASE_TAG/dotfiles-release" ||
   fail 'published manager differs from the release snapshot'
-HOME="$test_root/empty-home" bash "$TEST_RELEASE_ASSETS/dotfiles-release" inspect \
-  "$PLATFORM" "$TEST_RELEASE_ASSETS/$archive" "$COMMIT_SHA" >/dev/null ||
+HOME="$test_root/empty-home" bash "$TEST_RELEASE_ASSETS/dotfiles-release" verify \
+  "$TEST_RELEASE_ASSETS/$archive" >/dev/null ||
   fail 'published manager does not work outside the checkout'
 (cd "$TEST_RELEASE_ASSETS" && sha256sum --check --strict "$archive.sha256" >/dev/null)
 [[ -s $TEST_RELEASE_ASSETS/dotfiles-release.sha256 ]] || fail 'published standalone manager has no checksum'
@@ -171,7 +199,8 @@ find "$TEST_RELEASE_ASSETS" -maxdepth 1 -type f -delete
 make_archive amzn-2023-x86_64
 cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
 if run_ci publish "$test_root/nonexistent-output" >"$test_root/platform.log" 2>&1; then fail 'wrong-platform archive was accepted'; fi
-grep -F 'release is not for debian-13-x86_64' "$test_root/platform.log" >/dev/null || fail 'platform mismatch was not identified'
+grep -F 'archive platform or commit does not match the release job' "$test_root/platform.log" >/dev/null ||
+  fail 'platform mismatch was not identified'
 
 make_archive
 ln -s "$test_root/outside" "$test_root/payload/$RELEASE_TAG/escape"

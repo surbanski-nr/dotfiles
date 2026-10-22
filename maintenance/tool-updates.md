@@ -373,7 +373,7 @@ with network access disabled as ordinary users. The tool-enabled Nvim2 suite
 checks a real multi-file package, SDK compile/run/test, offline vendoring,
 gopls diagnostics/navigation/hover/completion, import formatting, configured
 golangci-lint diagnostics and real Delve breakpoint/variables/goroutines/step,
-nearest-test and process cleanup. Test rollback to a retained pre-Go release
+nearest-test and process cleanup. Test `set ID` with a retained pre-Go release
 using the newer manager. Projects requiring another SDK, uncached modules or
 CGO libraries need their own separately prepared dependencies.
 
@@ -431,7 +431,7 @@ version, append a verified upstream record; to change the default, move the
 required record first. Remove an old record only when it is no longer needed.
 Do not change the launcher, regenerate Python locks or edit `release.env`.
 Run `task validate`, build the matching platform package and qualify its
-offline install and health before deploying.
+offline install and full CI qualification before deploying.
 
 ```bash
 KUBECTL_VERSION=1.34.12 kubectl version --client
@@ -440,8 +440,8 @@ unset KUBECTL_VERSION HELM_VERSION
 ```
 
 A missing selection fails rather than downloading or using asdf. Whole-release
-rollback selects the previous payload and its defaults; a shell override stays
-set until you unset it, so it must also exist in the selected release.
+`dotfiles-release set ID` selects that installed payload and its defaults;
+a shell override stays set until you unset it, so it must also exist there.
 
 The offline Helm launcher accepts bare versions and one leading `v`. Its
 default stays `4.3.0`; `3.21.0` is available for NetReveal.
@@ -456,9 +456,9 @@ profiles; jq stays an OS runtime prerequisite.
 Do not edit generated metadata, installed plugin directories or Python locks.
 
 Qualify new candidates on all four supported platforms with the prepared OS
-baseline and network disabled for release installation/health. Check every
+baseline and network disabled for installation and CI qualification. Check every
 Helm version with the bundled plugin, actual schema generation with local
-references, yq multi-document processing and jq overlay merges. Health ignores
+references, yq multi-document processing and jq overlay merges. Qualification ignores
 caller plugin overrides and bin-extras. The tool-enabled editor checks must
 opt in explicitly when they qualify save formatting; ordinary sessions start
 with format on save disabled. Manual formatting is a one-time action.
@@ -469,9 +469,9 @@ Python to create a suitable project venv, and export project Helm pins for the
 entire invocation as shown in
 [setup.md](setup.md#helm-schema-plugin-and-project-validation). Keep evidence
 of Task/kubeconform compatibility; command availability alone is insufficient.
-For a first pre-yq upgrade and any later rollback/return, keep and invoke the
+For a first pre-yq upgrade and later selection changes, keep and invoke the
 newer standalone manager or reviewed source manager. An older installed
-manager does not understand the new metadata fields or yq ownership records.
+manager does not understand the newer metadata fields.
 
 ## Online project runtime rollback
 
@@ -531,6 +531,12 @@ explicitly before retrying.
 
 ## Nvim2 candidate and health evidence
 
+For retained offline releases, `dotfiles-release health [ID]` checks integrity
+and light runtime probes without activation, defaulting to `current`.
+Install and set share those probes. Their `--skip-health` flag bypasses runtime
+diagnostics only, not integrity; it is not a way to edit installed payloads.
+Full offline functional qualification remains part of `task test:offline`.
+
 Test a plugin change in the disposable checkout and data directories. Use the
 documented `vim.pack` update command to regenerate `nvim-pack-lock.json`; never
 edit that generated file. A quick copied-data trial does not replace a release
@@ -586,9 +592,9 @@ Run `task validate`, build and disconnect-test every affected platform release,
 then repeat the four-distribution qualification before transferring the
 reviewed diff to the normal checkout.
 
-## Complete offline release rollback
+## Complete offline release selection
 
-Use `dotfiles-release rollback` to select the retained previous unit, including
+Use `dotfiles-release set ID` to select an installed unit, including
 all tools, configuration, plugins and language support. Existing Neovim and
 tmux processes remain pinned to the physical release from which they started.
 Follow
@@ -598,9 +604,11 @@ use their documented `~/.local/opt` executable roots; retain those roots during
 migration.
 
 Do not combine an older editor with arbitrary newer plugin data. Keep the
-previous release until editing, health and disconnected runtime checks pass.
-Plain `uninstall` restores the baseline without deleting retained payloads.
-`uninstall ID` removes only an inactive, integrity-checked release.
+earlier release until editing and disconnected qualification checks pass.
+`uninstall ID` deletes that retained directory. Removing the current ID also
+restores adjacent original-file backups and clears `current`; plain
+`uninstall` does this for the current ID. It does not select another release.
+Close processes using the ID before removing it.
 
 For an editor-independent recovery path, use `vi FILE` or `vim FILE`. To bypass
 optional Vim configuration and plugins, use `vim -Nu NONE FILE`. For a Git
