@@ -50,13 +50,20 @@ conflict and must be reviewed before installation.
 
 Both deployment flows keep interactive Bash history in `~/.histfile`, outside
 the repository and release payloads. Before each prompt, `history -a` appends
-this shell's new commands and `history -n` imports new entries from other
-shells. `histappend` keeps normal shell exits from overwriting the shared file;
-reloading `.bashrc` does not add duplicate synchronization or prompt hooks.
+this shell's new commands. After a successful save, `history -c` clears only
+the in-memory list and `history -r` reloads the shared file. This avoids missed
+or duplicated entries when several shells append between prompts. A failed
+save preserves pending commands in memory; an unset or empty `HISTFILE`
+disables synchronization. `histappend` keeps normal shell exits from
+overwriting the shared file. Reloading `.bashrc` preserves unrelated prompt
+hooks without duplicating them or the synchronization hook.
 This is bounded history, not an unlimited archive: `HISTSIZE` and `HISTFILESIZE`
 are both 100000. Commands beginning with a space are omitted, consecutive
 duplicates are skipped, and older repetitions are removed from the in-memory
-list by `HISTCONTROL=ignoreboth:erasedups`.
+list when recording commands with `HISTCONTROL=ignoreboth:erasedups`. Imported
+entries are not filtered, so repeated executions already saved in the shared
+file can reappear after a refresh. Synchronization does not deduplicate or
+rewrite the file.
 
 `tools.env` owns tool profiles, release records, version checks and asdf/tmux
 plugin pins. It stores direct releases in `TOOL_RELEASES`. Each tool has ordered

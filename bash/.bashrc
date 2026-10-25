@@ -163,8 +163,16 @@ _dotfiles_init_ssh_agent
 unset -f _dotfiles_init_ssh_agent _dotfiles_ssh_agent_reachable
 
 _dotfiles_history_sync() {
-  history -a
-  history -n
+  [[ -n ${HISTFILE:-} ]] || return 0
+  history -a || return
+  if [[ ! -r $HISTFILE ]]; then
+    _dotfiles_warn "cannot read history file: $HISTFILE"
+    return 1
+  fi
+  # Incremental reads can skip peers' commands and reread ours after appending.
+  # Clear only the memory cache, after successfully saving pending commands.
+  history -c
+  history -r
 }
 
 _dotfiles_install_prompt_command() {
@@ -209,8 +217,7 @@ HISTFILESIZE=100000
 HISTFILE="$HOME/.histfile"
 HISTTIMEFORMAT='%F %T '
 
-# don't put duplicate lines or lines starting with space in the history.
-# See bash(1) for more options
+# Filter newly recorded commands, not entries read from the shared file.
 HISTCONTROL=ignoreboth:erasedups
 
 # Append history, verify history expansion, warn about active jobs on exit, and

@@ -20,6 +20,11 @@ load_profile() {
   source "$TEST_REPO_DIR/bash/.bash_profile"
 }
 
+run_prompt_hooks() {
+  local prompt_command
+  for prompt_command in "${PROMPT_COMMAND[@]}"; do eval "$prompt_command"; done
+}
+
 case $TEST_SCENARIO in
   check-tools)
     load_aliases
@@ -68,9 +73,77 @@ case $TEST_SCENARIO in
     load_bashrc
     history -c
     history -s 'command from first shell'
-    for prompt_command in "${PROMPT_COMMAND[@]}"; do eval "$prompt_command"; done
+    run_prompt_hooks
     printf 'command from second shell\n' >>"$HISTFILE"
-    for prompt_command in "${PROMPT_COMMAND[@]}"; do eval "$prompt_command"; done
+    run_prompt_hooks
+    HISTTIMEFORMAT='' history
+    ;;
+  shared-history)
+    set +o history
+    load_bashrc
+    history -c
+    history -s 'shared history seed'
+    run_prompt_hooks
+    for round in 1 2; do
+      TEST_SCENARIO=shared-history-peer TEST_HISTORY_ROUND=$round \
+        bash --noprofile --norc -i "${BASH_SOURCE[0]}"
+      history -s "command from second shell $round"
+      run_prompt_hooks
+      load_bashrc
+      run_prompt_hooks
+    done
+    HISTTIMEFORMAT='' history
+    ;;
+  shared-history-peer)
+    set +o history
+    load_bashrc
+    history -c
+    history -r
+    history -s "command from first shell $TEST_HISTORY_ROUND"
+    run_prompt_hooks
+    load_bashrc
+    run_prompt_hooks
+    ;;
+  prompt-history-array)
+    set +o history
+    # Exact duplicates and legacy suffixes must not discard unrelated hooks.
+    # Hook variables expand at prompt time, not while constructing the array.
+    # shellcheck disable=SC2016
+    PROMPT_COMMAND=(
+      'printf "user\n" >>"$TEST_PROMPT_LOG"'
+      '_dotfiles_history_sync'
+      'printf "other-user\n" >>"$TEST_PROMPT_LOG"; history -a; history -r'
+      'printf "user\n" >>"$TEST_PROMPT_LOG"'
+      '_dotfiles_history_sync'
+    )
+    load_bashrc
+    load_bashrc
+    load_bashrc
+    history_hooks=0
+    for prompt_command in "${PROMPT_COMMAND[@]}"; do
+      [[ $prompt_command != _dotfiles_history_sync ]] || ((history_hooks += 1))
+    done
+    printf 'history_hooks=%s\n' "$history_hooks"
+    history -c
+    history -s 'command with array hooks'
+    run_prompt_hooks
+    run_prompt_hooks
+    HISTTIMEFORMAT='' history
+    ;;
+  history-save-failure)
+    set +o history
+    load_bashrc
+    history -c
+    history -s 'command awaiting successful save'
+    history_file=$HISTFILE
+    HISTFILE=$HOME/missing-directory/history
+    if _dotfiles_history_sync; then exit 1; fi
+    HISTTIMEFORMAT='' history
+    unset HISTFILE
+    _dotfiles_history_sync
+    HISTTIMEFORMAT='' history
+    HISTFILE=$history_file
+    _dotfiles_history_sync
     HISTTIMEFORMAT='' history
     ;;
   broken-integration)

@@ -170,6 +170,52 @@ for hook in user zoxide; do
     fail "$hook prompt ran more than once per prompt after reload"
 done
 
+shared_history_home=$test_root/shared-history-home
+mkdir -p "$shared_history_home"
+shared_history_output=$(
+  timeout 15s env -i HOME="$shared_history_home" PATH="$test_root/bin:$original_path" \
+    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=shared-history \
+    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+)
+for origin in first second; do
+  for round in 1 2; do
+    command_line="command from $origin shell $round"
+    [[ $(grep -c "$command_line" <<<"$shared_history_output") -eq 1 ]] ||
+      fail "shared history did not import exactly one $origin-shell command in round $round"
+    [[ $(grep -cx "$command_line" "$shared_history_home/.histfile") -eq 1 ]] ||
+      fail "shared history duplicated or lost the $origin-shell command in round $round"
+  done
+done
+
+array_history_home=$test_root/array-history-home
+array_prompt_log=$test_root/array-prompts.log
+mkdir -p "$array_history_home"
+array_history_output=$(
+  timeout 15s env -i HOME="$array_history_home" PATH="$test_root/bin:$original_path" \
+    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=prompt-history-array \
+    TEST_PROMPT_LOG="$array_prompt_log" \
+    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+)
+assert_contains "$array_history_output" 'history_hooks=1'
+for hook in user other-user; do
+  [[ $(grep -cx "$hook" "$array_prompt_log") -eq 2 ]] ||
+    fail "$hook array prompt hook was lost or duplicated after reload"
+done
+[[ $(grep -cx 'command with array hooks' "$array_history_home/.histfile") -eq 1 ]] ||
+  fail 'array prompt hooks duplicated or lost the saved command'
+
+failed_history_home=$test_root/failed-history-home
+mkdir -p "$failed_history_home"
+failed_history_output=$(
+  timeout 15s env -i HOME="$failed_history_home" PATH="$test_root/bin:$original_path" \
+    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=history-save-failure \
+    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+)
+[[ $(grep -c 'command awaiting successful save' <<<"$failed_history_output") -eq 3 ]] ||
+  fail 'an unsuccessful or disabled history save discarded the pending command'
+[[ $(grep -cx 'command awaiting successful save' "$failed_history_home/.histfile") -eq 1 ]] ||
+  fail 'retrying history synchronization duplicated or lost the pending command'
+
 broken_output=$(
   timeout 15 env HOME="$reload_home" PATH="$test_root/bin:$original_path" \
     TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=broken-integration \
