@@ -211,11 +211,12 @@ bash ~/.config/nvim2/tests/check.sh
 From this repository's Nvim2 configuration directory, the equivalent command
 is `bash tests/check.sh`. The script exits nonzero when a check fails. It runs
 focused dependency and feature regressions, the broader smoke suite, and a
-real-file language integration suite. It exercises real Git checkouts,
-persistent project marks, tab-out, search lens, Mini Jump2d, Matrix lifecycle,
-Mini/native text objects, parser/LSP selection aliases, indentation bodies,
-register-preserving edits, snippets, hidden-file search, Treesitter folds,
-Mermaid preview, LSP attachment, diagnostics, completion and formatting.
+real-file language integration suite. It exercises real Git checkouts and diff
+shortcuts, persistent project marks, tab-out, search lens, Mini Jump2d,
+Matrix lifecycle, Mini/native text objects, parser/LSP selection aliases,
+indentation bodies, register-preserving edits, snippets, hidden-file search,
+Treesitter folds, Mermaid preview, LSP attachment, diagnostics, completion and
+formatting.
 
 The language suite covers Lua, Python, Bash, TypeScript, TSX, Terraform,
 Terraform variables, Ansible, Helm and generic YAML. Some servers also call

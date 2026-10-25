@@ -478,10 +478,9 @@ directly without opening Telescope.
 
 Splits are automatically resized evenly when the terminal size changes.
 
-For two-text review, open each text in its intended split and run `:diffthis`
-in both windows. Use `]c`/`[c` to navigate differences, `:diffupdate` after
-edits, and `:diffoff!` to leave diff mode in all windows. This is native diff,
-separate from [Gitsigns' Git comparisons](#git-and-gitsigns).
+For colored side-by-side comparisons, see
+[comparing files without Git](#comparing-files-without-git).
+For a buffer against its Git version, use [Gitsigns](#git-and-gitsigns).
 
 ### Restart and Matrix
 
@@ -1160,8 +1159,11 @@ imports or removing unused code.
 
 ## Git and Gitsigns
 
-Gitsigns mappings are buffer-local and appear in files inside a Git working
-tree.
+Gitsigns already provides inline and side-by-side diffs and a repository file
+panel; no extra Git plugin is needed. Press `Space h` for the Git Hunk group
+in which-key. Hunk/current-file mappings are buffer-local and appear in tracked
+files inside a Git working tree. `<leader>hv` is global and opens the repository
+viewer even from an empty buffer when the current directory is in a repository.
 
 | Action                         | Keys                               |
 | ------------------------------ | ---------------------------------- |
@@ -1177,6 +1179,9 @@ tree.
 | Blame current line             | `<leader>hb`                       |
 | Diff against index             | `<leader>hd`                       |
 | Diff against last commit       | `<leader>hD`                       |
+| Toggle full inline diff vs index | `<leader>hu`                      |
+| Toggle full inline diff vs HEAD | `<leader>hU`                       |
+| View repository changes        | `<leader>hv`                       |
 | Current-file hunks in quickfix | `<leader>hq`                       |
 | Repository hunks in quickfix   | `<leader>hQ`                       |
 | Toggle current-line blame      | `<leader>tb`                       |
@@ -1188,11 +1193,71 @@ then `<leader>hp` to preview it. Repeat `]c` and `<leader>hp` through the file;
 use `[c` to return to the previous hunk. Use `<leader>hq` when you want every
 hunk in the current file listed together instead.
 
-For repository review, run `:Gitsigns diff`, inspect the file panel, and press
-`g?` for its mappings. `]f`/`[f` move between reviewed files without returning
-focus to the panel. `:Gitsigns show_commit HEAD` reviews the last commit's
-changes; `:Gitsigns blame` opens a whole-file blame view. These are already
-available commands, not extra mappings or a second Git UI.
+### Current buffer: inline or side by side
+
+Gitsigns compares the current buffer, including unsaved edits. The default
+base is Git's index (the staging area), so `<leader>hd` shows changes not yet
+staged. `HEAD` is the last commit, so `<leader>hD` includes staged changes too.
+
+| Comparison | Keys or command |
+| --- | --- |
+| Whole buffer vs index, inline | `<leader>hu` or `:Gitsigns diffthis unified=true` |
+| Whole buffer vs last commit, inline | `<leader>hU` or `:Gitsigns diffthis HEAD unified=true` |
+| Buffer vs index, vertical split | `:vertical Gitsigns diffthis` |
+| Buffer vs last commit, vertical split | `:vertical Gitsigns diffthis HEAD` |
+
+The unified view resembles GitHub's inline diff: removed lines appear inline
+with the added/changed text in one window, with colored highlights. They are
+display overlays, not text inserted into your file. Repeat the same shortcut
+or command to turn it off. Use `]c`/`[c` to navigate changes.
+`<leader>hi` previews just the hunk under the cursor, not the whole file;
+`<leader>tw` toggles word-level highlights during normal editing.
+
+The explicit `:vertical` modifier guarantees side-by-side windows. Use
+`<C-h>`/`<C-l>` to move between them and `]c`/`[c` for differences. Run
+`:diffoff!` to leave split diff mode in the current tab, then close the
+comparison window with `:q`. This does not save or discard the original
+buffer's edits. To leave a unified view, repeat its shortcut or command instead
+of using `:diffoff!`.
+
+### Review changed files across the repository
+
+Press `<leader>hv` for the repository changes viewer (`v` means view, not
+vertical). It works from a tracked file or an empty/untracked buffer with the
+current directory inside the repository. The equivalent command is:
+
+```vim
+:Gitsigns diff
+```
+
+This opens a file panel and a side-by-side comparison of the working tree
+against `HEAD`, including staged and unstaged changes. Start with GitHub-like
+inline diffs instead with `:Gitsigns diff --diff=unified`; press `gu` in the
+file panel to toggle between inline and side-by-side views. To review only
+selected paths, use `:Gitsigns diff -- path/to/file` or
+`:Gitsigns diff --diff=unified -- src/`.
+
+Press `<CR>` on a panel entry to open it, `g?` for its mappings, and `q` in the
+panel to close the review. `]f`/`[f` move between reviewed files without
+returning focus to the panel. The file list and status columns reflect saved
+files; unsaved edits appear in an already opened file pane but do not add a
+file to the list. Use the current-buffer commands above for unsaved-only
+changes, or save first when reviewing the whole working directory.
+
+`:Gitsigns show_commit HEAD` reviews the last commit's changes, not pending
+working-tree changes. `:Gitsigns blame` opens a whole-file blame view.
+
+For a plain colored patch in the shell:
+
+```bash
+git diff --color=always -- path/to/file | less -R
+git diff --cached --color=always -- path/to/file | less -R
+```
+
+The first compares the saved working tree with the index; the second compares
+the index with `HEAD`. Neither includes unsaved Neovim edits.
+
+### Reviewing versus modifying changes
 
 Reset (`<leader>hr`/`<leader>hR`) changes working-tree text; unstage changes the
 index, not that text. In the diff panel, `s` stages a saved file and `u`
@@ -1206,6 +1271,47 @@ Treat `<leader>hd` and other index-buffer views carefully: index buffers can
 be editable, and writing one changes staging. Revision buffers are read-only;
 regular working-tree files remain editable. Read panel help before staging or
 resetting, and close a comparison without writing when only reviewing.
+
+## Comparing files without Git
+
+Neovim's native diff gives a colored, editable side-by-side view of any two
+text files, including files outside a repository. From the shell:
+
+```bash
+NVIM_APPNAME=nvim2 nvim -d file-a.txt file-b.txt
+```
+
+With the first file already open, run `:vertical diffsplit path/to/file-b.txt`.
+This compares the current buffer, including its unsaved edits, with the second
+file. Escape spaces in an Ex path, for example `path/to/file\ b.txt`. If both
+buffers are already in the desired splits, run `:diffthis` in each window
+instead. Colored line and word highlights and synchronized scrolling are
+provided by Neovim; no Git plugin or external `diff` is required.
+
+| Action | Keys or command |
+| --- | --- |
+| Move between the left and right windows | `<C-h>`, `<C-l>` |
+| Next or previous difference | `]c`, `[c` |
+| Recalculate the diff if needed | `:diffupdate` |
+| Leave diff mode in all windows of the current tab | `:diffoff!` |
+| Copy the other file's current change into this buffer | `:diffget` or `do` |
+| Copy this buffer's current change into the other buffer | `:diffput` or `dp` |
+
+`diffget` and `diffput` modify buffers; they are not navigation commands.
+Changes reach disk only when you save, and normal format-on-save behavior
+still applies. For review only, navigate and close the extra window with `:q`
+without copying or writing changes.
+
+For a quick read-only unified patch without opening an editor, GNU `diff` is
+also useful:
+
+```bash
+diff --color=always -u -- file-a.txt file-b.txt | less -R
+```
+
+This compares saved files only. `less -R` preserves the colors; `q` exits the
+pager. `diff` exits with status 1 when files differ, which is normal, not an
+error. Use Neovim when you want aligned panes, navigation or selective copying.
 
 ## Mini editing modules
 
