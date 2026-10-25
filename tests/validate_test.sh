@@ -115,6 +115,38 @@ EOF
 done
 
 real_tmux=$(command -v tmux)
+mkdir -p "$syntax_repo/bin/python/bin"
+ln -s "$(command -v python3)" "$syntax_repo/bin/python/bin/python3"
+ln -s "$(command -v shellcheck)" "$syntax_repo/bin/shellcheck"
+ln -s /bin/false "$syntax_repo/bin/python3"
+printf 'from pathlib import Path\nassert Path(__file__).is_file()\n' \
+  >"$syntax_repo/tests/bash_pty_test.py"
+for file in bash_test.sh bash_history_test.sh; do
+  printf '#!/usr/bin/env bash\n:\n' >"$syntax_repo/tests/$file"
+done
+mv "$test_bin/python3" "$test_bin/python3.saved"
+ln -s /bin/false "$test_bin/python3"
+if ! PATH="$test_bin" /bin/bash "$syntax_repo/scripts/validate" bash \
+  >"$test_root/private-python.log" 2>&1; then
+  fail "Bash validation did not prefer private Python to broken host/root-bin providers: $(<"$test_root/private-python.log")"
+fi
+rm "$test_bin/python3"
+mv "$test_bin/python3.saved" "$test_bin/python3"
+for file in bash_test.sh bash_history_test.sh; do
+  cp "$repo_dir/tests/fixtures/validation/batch-test" "$syntax_repo/tests/$file"
+done
+
+connected_home=$test_root/connected-home
+mkdir -p "$connected_home/bin"
+mv "$test_bin/tmux" "$connected_home/bin/tmux"
+ln -s /bin/false "$connected_home/bin/shellcheck"
+if ! HOME="$connected_home" PATH="$connected_home/bin:$test_bin" \
+  VALIDATION_TOOLS_DIR="$test_bin" /bin/bash "$repo_dir/scripts/validate" tmux \
+  >"$test_root/connected-tmux.log" 2>&1; then
+  fail "validation could not use connected tmux with pinned ShellCheck: $(<"$test_root/connected-tmux.log")"
+fi
+mv "$connected_home/bin/tmux" "$test_bin/tmux"
+
 rm "$test_bin/tmux"
 ln -s "$repo_dir/tests/fixtures/validation/tmux-fail-show-options" \
   "$test_bin/tmux"

@@ -211,10 +211,12 @@ health_bash() {
     'printf "bash-dotfiles=%s\n" "$DOTFILES"' \
     'printf "bash-prompt-command=%s\n" "$prompt"' \
     'exit 0' >"$check" || return
+  # shellcheck disable=SC2016
   printf -v invocation '%q ' env -u DOTFILES -u DOTFILES_AUTO_ROOT \
     HOME="$health_home" EXPECTED_RELEASE="$release" \
     DOTFILES_RELEASE_ROOT="$health_home/dotfiles-releases" \
-    TERM=xterm-256color PATH=/usr/bin:/bin bash --noprofile --norc -i "$check"
+    TERM=xterm-256color PATH=/usr/bin:/bin bash --noprofile --norc -i -c \
+    'source "$1"' bash-health "$check"
   timeout 120s script --quiet --return --command "$invocation" /dev/null </dev/null || return
 }
 

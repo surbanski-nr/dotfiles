@@ -55,7 +55,9 @@ After a successful save, `history -c` clears only the in-memory list and
 `history -r` reloads the shared file. This avoids missed or duplicated entries
 when several shells append between prompts, including after archiving. A
 failed save leaves commands in memory; an unset or empty `HISTFILE` disables
-synchronization. Normal exits append under the same lock and disable Bash's
+synchronization. The first prompt accepts a missing history file when there
+are no commands to save; the first command creates it. Normal exits append
+under the same lock and disable Bash's
 implicit exit write. A failed append, or a failed exit lock, also preserves a
 private `~/.histfile-unsaved.*` memory snapshot (or a temporary-directory fallback)
 and prints its path. Review that copy manually; it is not merged automatically.
@@ -1183,8 +1185,35 @@ executable does not include plugins.
 this manifest directly into the Git-ignored root `bin/` directory. Yamllint's
 private Python environment lives under `bin/yamllint-VERSION`; `bin/yamllint`
 links to its executable.
+`VALIDATION_RELEASES[python]` independently pins the standalone Python runtime
+used by all Python-backed validation. `install-validation-tool python` checks
+the archive SHA-256 and installs it under `bin/python-VERSION`; `bin/python`
+is a private directory link. Task prepares it automatically, and installing
+Yamllint directly also prepares it. No `python` or `python3` executable shim is
+created in `bin/`, `~/bin` or a release's `current/bin`.
 Changes to development tools in `tools.env` or editor Python locks do not
 select new repository validation versions.
+
+OS prerequisites belong to the normal setup role in `system.env`, not the
+validation version manifest. Run `./setup-system` to prepare `script` for
+private terminals and `ps`/`pkill` for process checks and cleanup.
+Debian/Ubuntu provide `script` through `bsdutils` and process tools
+through `procps`; Amazon Linux uses `util-linux` and `procps-ng`. The minimal
+offline runtime does not include repository-only validation prerequisites.
+
+Validation uses `bin/python/bin` on every supported platform, including Amazon
+Linux, so the OS Python version and its venv/pip packages do not affect it.
+Normal setup still provides OS Python and venv support for connected Mason.
+Yamllint venvs reference the versioned private interpreter, not the moving
+`bin/python` link. A new Python pin rebuilds Yamllint's venv even if its own pin
+is unchanged; installation failure preserves the previous venv and interpreter.
+Previously published Python runtimes and venvs are kept because existing venvs
+can still reference them. There is no ownership database or previous/pending state.
+
+Tmux for configuration tests comes from the existing PATH, including `~/bin`
+from `setup-tools` or the offline release's `current/bin`. Validation prepends
+its private Python bin and pinned tool directory without hiding those providers.
+Empty PATH entries are removed to avoid resolving programs from the working directory.
 
 Run the repository checks through Task:
 
@@ -1202,6 +1231,15 @@ bash tests/setup_tools_test.sh recovery
 ```
 
 Repository-owned shell sources are linted from their real checked-in paths.
+`validate:bash` retains batch logic tests and also runs actual Bash prompt loops
+on private pseudo-terminals. Those sessions exercise Ctrl-L, generated fzf
+Readline bindings, recall of another shell's commands, repeated startup loading,
+foreign prompt/EXIT hooks and automatic archiving while another shell is open.
+External prompt and fzf initialization is supplied by deterministic fixtures;
+release qualification separately exercises the packaged tools. Task supplies
+the private Python; util-linux `script` is required, with no host-dependent test skips. Each run uses
+temporary homes and cleans up its shells on failure or interruption.
+
 The Bash startup also conditionally loads distribution-owned Midnight
 Commander and bash-completion files. Their paths differ by supported
 platform, so each distribution qualification uses the actual packaged files

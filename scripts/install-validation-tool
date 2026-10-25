@@ -47,19 +47,33 @@ else
   version=$RELEASE_VERSION
   url=$RELEASE_URL
 fi
-if [[ -x $tools_dir/$tool ]] &&
-  [[ $(tool_version "$tools_dir/$tool") == "$version" ]]; then
-  exit 0
+executable=$tools_dir/$tool
+if [[ $tool == python ]]; then
+  HELD_LOCK_FDS=()
+  acquire_setup_lock "$tools_dir/.install-python.lock" 'another validation Python installation is running'
+  executable=$tools_dir/python/bin/python3
+elif [[ $tool == yamllint ]]; then
+  bash "$repo_dir/scripts/install-validation-tool" python
+  python=$(readlink -f -- "$tools_dir/python/bin/python3")
+fi
+if [[ -x $executable ]] && [[ $(tool_version "$executable") == "$version" ]]; then
+  if [[ $tool == yamllint ]]; then
+    installed_bin=$(dirname -- "$(readlink -f -- "$executable")")
+    installed_python=$(readlink -f -- "$installed_bin/python")
+    [[ $installed_python != "$python" ]] || exit 0
+  else
+    exit 0
+  fi
 fi
 
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] ||
   die 'automatic tool installation supports Linux x86_64 only'
 
 stage=$(mktemp -d "$tools_dir/install-$tool.XXXXXX")
-staged_venv=
+staged_tree=
 cleanup() {
-  [[ -z $staged_venv || ! -e $staged_venv ]] ||
-    find "$staged_venv" -depth -delete
+  [[ -z $staged_tree || ! -e $staged_tree ]] ||
+    find "$staged_tree" -depth -delete
   find "$stage" -depth -delete
 }
 trap cleanup EXIT
@@ -91,24 +105,24 @@ activate_binary() {
   die "$tool $version activation failed; restored the previous executable"
 }
 
-activate_yamllint() {
-  local candidate=$1
-  local destination=$tools_dir/yamllint
-  local link=$stage/yamllint-link
-  local previous=$stage/previous-yamllint
+activate_link() {
+  local candidate=$1 candidate_executable=$2
+  local destination=$tools_dir/$tool
+  local link=$stage/$tool-link
+  local previous=$stage/previous-$tool
   local previous_exists=0
 
-  [[ $(tool_version "$candidate/bin/yamllint") == "$version" ]] ||
-    die "yamllint $version candidate validation failed"
-  ln -s "$candidate/bin/yamllint" "$link"
+  [[ $(tool_version "$candidate_executable") == "$version" ]] ||
+    die "$tool $version candidate validation failed"
+  ln -s "$candidate" "$link"
 
   if [[ -e $destination || -L $destination ]]; then
     cp -a "$destination" "$previous"
     previous_exists=1
   fi
   mv -Tf "$link" "$destination"
-  if [[ $(tool_version "$destination") == "$version" ]]; then
-    staged_venv=
+  if [[ $(tool_version "$executable") == "$version" ]]; then
+    staged_tree=
     return 0
   fi
 
@@ -116,7 +130,7 @@ activate_yamllint() {
   if ((previous_exists)); then
     mv "$previous" "$destination"
   fi
-  die "yamllint $version activation failed; restored the previous environment"
+  die "$tool $version activation failed; restored the previous environment"
 }
 
 if [[ $tool == yamllint ]]; then
@@ -124,18 +138,29 @@ if [[ $tool == yamllint ]]; then
   if [[ -e $venv || -L $venv ]]; then
     venv=$tools_dir/yamllint-$version-${stage##*.}
   fi
-  staged_venv=$venv
-  python3 -m venv "$venv"
+  staged_tree=$venv
+  "$python" -I -m venv --symlinks "$venv"
   "$venv/bin/python" -m pip install --disable-pip-version-check \
     "yamllint==$version"
-  activate_yamllint "$venv"
+  activate_link "$venv/bin/yamllint" "$venv/bin/yamllint"
 else
   archive=$stage/$RELEASE_ASSET
   prepared=$stage/prepared
   download_file "$url" "$archive"
   prepare_artifact VALIDATION_RELEASES "$tool" "$version" "$archive" "$prepared"
-  activate_binary "$prepared/${SPEC_DESTS[0]}"
+  if [[ $tool == python ]]; then
+    runtime=$tools_dir/python-$version
+    # Existing venvs point here directly, so never replace a published runtime.
+    if [[ -e $runtime || -L $runtime ]]; then
+      runtime=$runtime-${stage##*.}
+    fi
+    staged_tree=$runtime
+    mv -- "$prepared/${SPEC_DESTS[0]}" "$runtime"
+    activate_link "$runtime" "$runtime/bin/python3"
+  else
+    activate_binary "$prepared/${SPEC_DESTS[0]}"
+  fi
 fi
 
-[[ $(tool_version "$tools_dir/$tool") == "$version" ]] ||
+[[ $(tool_version "$executable") == "$version" ]] ||
   die "$tool $version installation failed"

@@ -6,6 +6,8 @@ unset DOTFILES_IGNORE_USER_BIN
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 command_fixture=$repo_dir/tests/fixtures/bash/command
 scenario_fixture=$repo_dir/tests/fixtures/bash/scenario
+bash_executable=$(command -v bash)
+script_executable=$(command -v script)
 test_root=$(mktemp -d)
 original_path=$PATH
 
@@ -37,6 +39,18 @@ run_scenario() {
   shift
   env TEST_REPO_DIR="$repo_dir" TEST_SCENARIO="$scenario" "$@" \
     "$scenario_fixture"
+}
+
+run_interactive_scenario() {
+  local scenario=$1 invocation
+  shift
+  # -i alone disables Readline for a script file. Use a command on a private
+  # terminal for startup logic; bash_pty_test.py exercises the real prompt loop.
+  # shellcheck disable=SC2016
+  printf -v invocation '%q ' env TEST_REPO_DIR="$repo_dir" TEST_SCENARIO="$scenario" \
+    "$bash_executable" --noprofile --norc -i -c 'source "$1"' bash-test "$scenario_fixture"
+  "$@" env SHELL="$bash_executable" "$script_executable" \
+    --quiet --return --command "$invocation" /dev/null </dev/null
 }
 
 mkdir -p "$test_root/bin"
@@ -154,10 +168,9 @@ mkdir -p "$reload_home"
 ln -s "$repo_dir/bash/.bash_aliases" "$reload_home/.bash_aliases"
 link_command zoxide
 reload_output=$(
-  timeout 15 env HOME="$reload_home" PATH="$test_root/bin:$original_path" \
-    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=prompt-history \
-    TEST_COMMAND_MODE=reload TEST_PROMPT_LOG="$test_root/prompts.log" \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+  run_interactive_scenario prompt-history timeout 15 env HOME="$reload_home" \
+    PATH="$test_root/bin:$original_path" TERM=xterm-256color \
+    TEST_COMMAND_MODE=reload TEST_PROMPT_LOG="$test_root/prompts.log" 2>&1
 )
 for origin in first second; do
   [[ $(grep -c "command from $origin shell" <<<"$reload_output") -eq 1 ]] ||
@@ -173,9 +186,8 @@ done
 shared_history_home=$test_root/shared-history-home
 mkdir -p "$shared_history_home"
 shared_history_output=$(
-  timeout 15s env -i HOME="$shared_history_home" PATH="$test_root/bin:$original_path" \
-    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=shared-history \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+  run_interactive_scenario shared-history timeout 15s env -i HOME="$shared_history_home" \
+    PATH="$test_root/bin:$original_path" TERM=xterm-256color 2>&1
 )
 for origin in first second; do
   for round in 1 2; do
@@ -191,10 +203,9 @@ array_history_home=$test_root/array-history-home
 array_prompt_log=$test_root/array-prompts.log
 mkdir -p "$array_history_home"
 array_history_output=$(
-  timeout 15s env -i HOME="$array_history_home" PATH="$test_root/bin:$original_path" \
-    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=prompt-history-array \
-    TEST_PROMPT_LOG="$array_prompt_log" \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+  run_interactive_scenario prompt-history-array timeout 15s env -i \
+    HOME="$array_history_home" PATH="$test_root/bin:$original_path" \
+    TERM=xterm-256color TEST_PROMPT_LOG="$array_prompt_log" 2>&1
 )
 assert_contains "$array_history_output" 'history_hooks=1'
 for hook in user other-user; do
@@ -207,9 +218,8 @@ done
 failed_history_home=$test_root/failed-history-home
 mkdir -p "$failed_history_home"
 failed_history_output=$(
-  timeout 15s env -i HOME="$failed_history_home" PATH="$test_root/bin:$original_path" \
-    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=history-save-failure \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+  run_interactive_scenario history-save-failure timeout 15s env -i \
+    HOME="$failed_history_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color 2>&1
 )
 [[ $(grep -c 'command awaiting successful save' <<<"$failed_history_output") -eq 3 ]] ||
   fail 'an unsuccessful or disabled history save discarded the pending command'
@@ -217,18 +227,16 @@ failed_history_output=$(
   fail 'retrying history synchronization duplicated or lost the pending command'
 
 broken_output=$(
-  timeout 15 env HOME="$reload_home" PATH="$test_root/bin:$original_path" \
-    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=broken-integration \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+  run_interactive_scenario broken-integration timeout 15 env HOME="$reload_home" \
+    PATH="$test_root/bin:$original_path" TERM=xterm-256color 2>&1
 )
 assert_contains "$broken_output" 'dotfiles: zoxide initialization failed'
 [[ $broken_output != *'command not found'* ]] ||
   fail 'broken integration emitted raw shell errors'
 
 invalid_output=$(
-  timeout 15 env HOME="$reload_home" PATH="$test_root/bin:$original_path" \
-    TERM=xterm-256color TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=invalid-integration \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+  run_interactive_scenario invalid-integration timeout 15 env HOME="$reload_home" \
+    PATH="$test_root/bin:$original_path" TERM=xterm-256color 2>&1
 )
 assert_contains "$invalid_output" 'dotfiles: zoxide returned invalid shell initialization'
 assert_contains "$invalid_output" 'continued=yes'
@@ -271,24 +279,21 @@ mkdir -p "$shared_home/.config/systemd/user" "$shared_runtime" "$shared_bin"
 printf '[Service]\n' >"$shared_home/.config/systemd/user/dotfiles-ssh-agent.service"
 ln -s "$command_fixture" "$shared_bin/ssh-add"
 ln -s "$command_fixture" "$shared_bin/systemctl"
+ln -s "$command_fixture" "$shared_bin/fzf"
 shared_output=$(
-  env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
+  run_interactive_scenario shared-agent env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
     XDG_RUNTIME_DIR="$shared_runtime" TERM=xterm-256color \
     TEST_AGENT_LOG="$shared_log" TEST_AGENT_STATE="$shared_state" \
-    TEST_COMMAND_MODE=shared-agent TEST_REPO_DIR="$repo_dir" \
-    TEST_SCENARIO=shared-agent \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+    TEST_COMMAND_MODE=shared-agent 2>&1
 )
 assert_contains "$shared_output" "shared_sock=$shared_runtime/dotfiles-ssh-agent.socket pid=unset"
 [[ $(grep -cx 'systemctl --user start dotfiles-ssh-agent.service' "$shared_log") -eq 1 ]] ||
   fail 'reloading Bash did not reuse one shared ssh-agent service'
 second_shell_output=$(
-  env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
+  run_interactive_scenario shared-agent env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
     XDG_RUNTIME_DIR="$shared_runtime" TERM=xterm-256color \
     TEST_AGENT_LOG="$shared_log" TEST_AGENT_STATE="$shared_state" \
-    TEST_AGENT_STATUS=0 TEST_COMMAND_MODE=shared-agent TEST_REPO_DIR="$repo_dir" \
-    TEST_SCENARIO=shared-agent \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+    TEST_AGENT_STATUS=0 TEST_COMMAND_MODE=shared-agent 2>&1
 )
 assert_contains "$second_shell_output" \
   "shared_sock=$shared_runtime/dotfiles-ssh-agent.socket pid=unset"
@@ -299,13 +304,11 @@ inherited_log=$test_root/inherited-agent.log
 inherited_socket=$test_root/inherited-agent.socket
 inherited_state=$test_root/inherited-agent.state
 inherited_output=$(
-  env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
+  run_interactive_scenario shared-agent env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
     XDG_RUNTIME_DIR="$shared_runtime" SSH_AUTH_SOCK="$inherited_socket" \
     SSH_AGENT_PID=4242 TERM=xterm-256color TEST_AGENT_LOG="$inherited_log" \
     TEST_AGENT_STATE="$inherited_state" \
-    TEST_FORWARDED_SOCKET="$inherited_socket" TEST_COMMAND_MODE=shared-agent \
-    TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=shared-agent \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+    TEST_FORWARDED_SOCKET="$inherited_socket" TEST_COMMAND_MODE=shared-agent 2>&1
 )
 assert_contains "$inherited_output" \
   "shared_sock=$inherited_socket pid=4242"
@@ -315,12 +318,10 @@ fi
 
 stale_inherited_log=$test_root/stale-inherited-agent.log
 stale_inherited_output=$(
-  env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
+  run_interactive_scenario shared-agent env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
     XDG_RUNTIME_DIR="$shared_runtime" SSH_AUTH_SOCK=/missing/agent.sock \
     SSH_AGENT_PID=4242 TERM=xterm-256color TEST_AGENT_LOG="$stale_inherited_log" \
-    TEST_AGENT_STATE="$shared_state" TEST_COMMAND_MODE=shared-agent \
-    TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=shared-agent \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+    TEST_AGENT_STATE="$shared_state" TEST_COMMAND_MODE=shared-agent 2>&1
 )
 assert_contains "$stale_inherited_output" \
   "shared_sock=$shared_runtime/dotfiles-ssh-agent.socket pid=unset"
@@ -329,12 +330,10 @@ if grep -q '^systemctl ' "$stale_inherited_log"; then
 fi
 
 failed_agent_output=$(
-  env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
+  run_interactive_scenario shared-agent env -i HOME="$shared_home" PATH="$shared_bin:/usr/bin:/bin" \
     XDG_RUNTIME_DIR="$shared_runtime" TERM=xterm-256color \
     TEST_AGENT_LOG="$test_root/failed-agent.log" TEST_AGENT_STATE="$test_root/failed-agent.state" \
-    TEST_AGENT_START_FAIL=1 TEST_COMMAND_MODE=shared-agent TEST_REPO_DIR="$repo_dir" \
-    TEST_SCENARIO=shared-agent \
-    bash --noprofile --norc -i "$scenario_fixture" 2>&1
+    TEST_AGENT_START_FAIL=1 TEST_COMMAND_MODE=shared-agent 2>&1
 )
 assert_contains "$failed_agent_output" 'dotfiles: failed to start the shared ssh-agent service'
 assert_contains "$failed_agent_output" 'shared_sock=unset pid=unset'
@@ -344,9 +343,8 @@ link_command vim
 editor_log=$test_root/editors.log
 independent_output=$(
   TEST_COMMAND_MODE=independent TEST_EDITOR_LOG="$editor_log" \
-    run_scenario independent-editors \
-    env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color \
-    bash --noprofile --norc -i
+    run_interactive_scenario independent-editors \
+    env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color
 )
 assert_contains "$independent_output" 'cat=file vi=function vim=alias v=function'
 assert_contains "$(<"$editor_log")" 'vi:first'
@@ -360,21 +358,23 @@ cp "$repo_dir/git/.gitconfig" "$git_home/.gitconfig"
 cp "$repo_dir/tests/fixtures/bash/git-editor" "$git_bin/vi"
 chmod 0755 "$git_bin/vi"
 ln -s "$(PATH="$original_path" command -v git)" "$git_bin/git"
-timeout 15s env -u GIT_EDITOR -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
-  HOME="$git_home" PATH="$git_bin:/usr/bin:/bin" TERM=xterm-256color \
-  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$git_home/.gitconfig" \
-  TEST_GIT_EDITOR_LOG="$git_editor_log" TEST_REPO_DIR="$repo_dir" \
-  TEST_SCENARIO=git-editor bash --noprofile --norc -i "$scenario_fixture"
+ln -s "$command_fixture" "$git_bin/fzf"
+if ! git_editor_output=$(run_interactive_scenario git-editor timeout 15s \
+  env -u GIT_EDITOR -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
+    HOME="$git_home" PATH="$git_bin:/usr/bin:/bin" TERM=xterm-256color \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$git_home/.gitconfig" \
+    TEST_GIT_EDITOR_LOG="$git_editor_log"); then
+  fail "Git editor scenario failed: $git_editor_output"
+fi
 [[ $(<"$git_editor_log") == 'editor=vi visual=vi' ]] ||
   fail 'Git commit or shell editor defaults did not use system vi'
 
 checkout_with_spaces="$test_root/checkout with spaces"
 mkdir -p "$checkout_with_spaces/scripts"
 custom_output=$(
-  run_scenario custom-dotfiles \
+  run_interactive_scenario custom-dotfiles \
     env HOME="$reload_home" DOTFILES="$checkout_with_spaces" \
-    PATH="$test_root/bin:$original_path" TERM=xterm-256color \
-    bash --noprofile --norc -i
+    PATH="$test_root/bin:$original_path" TERM=xterm-256color
 )
 assert_contains "$custom_output" "dotfiles=$checkout_with_spaces pwd=$checkout_with_spaces"
 
@@ -409,10 +409,9 @@ cp "$transition_a/bin/release-command" "$transition_a/dotfiles/scripts/removed-s
 ln -s "${transition_a##*/}" "$transition_home/dotfiles-releases/current"
 ln -s dotfiles-releases/current/dotfiles/bash/.bashrc "$transition_home/.bashrc"
 transition_output=$(
-  run_scenario release-switch \
+  run_interactive_scenario release-switch \
     env HOME="$transition_home" PATH="$test_root/bin:$original_path" \
-    TERM=xterm-256color TEST_RELEASE_A="$transition_a" TEST_RELEASE_B="$transition_b" \
-    bash --noprofile --norc -i
+    TERM=xterm-256color TEST_RELEASE_A="$transition_a" TEST_RELEASE_B="$transition_b"
 )
 assert_contains "$transition_output" 'before=release-a config=release-a'
 assert_contains "$transition_output" \
@@ -428,12 +427,11 @@ custom_root="$test_root/custom root"
 second_custom_root="$test_root/second custom root"
 mkdir -p "$custom_root/scripts" "$second_custom_root/scripts"
 override_output=$(
-  run_scenario root-override \
+  run_interactive_scenario root-override \
     env HOME="$transition_home" PATH="$test_root/bin:$original_path" \
     TERM=xterm-256color TEST_CONNECTED_ROOT="$transition_connected" \
     TEST_RELEASE_A="$transition_a" TEST_RELEASE_B="$transition_b" \
-    TEST_CUSTOM_ROOT="$custom_root" TEST_SECOND_CUSTOM_ROOT="$second_custom_root" \
-    bash --noprofile --norc -i
+    TEST_CUSTOM_ROOT="$custom_root" TEST_SECOND_CUSTOM_ROOT="$second_custom_root"
 )
 assert_contains "$override_output" "override-before=$custom_root:unset"
 assert_contains "$override_output" "override-during=$second_custom_root:unset"
@@ -441,7 +439,7 @@ assert_contains "$override_output" "legacy-before-reset=$transition_a/dotfiles"
 assert_contains "$override_output" "legacy-after-reset=$transition_connected"
 
 launcher_environment_output=$(
-  run_scenario launcher-environment \
+  run_interactive_scenario launcher-environment \
     env HOME="$transition_home" PATH="$test_root/bin:$original_path" \
     TERM=xterm-256color \
     XDG_CONFIG_HOME="$transition_a/config" XDG_DATA_HOME="$transition_a/share" \
@@ -453,15 +451,14 @@ launcher_environment_output=$(
     DOTFILES_LAUNCHER_ZO_DATA_DIR_SET=0 \
     GOTOOLCHAIN=local \
     DOTFILES_LAUNCHER_GOROOT_SET=1 DOTFILES_LAUNCHER_GOROOT="$test_root/project SDK" \
-    DOTFILES_LAUNCHER_GOTOOLCHAIN_SET=1 DOTFILES_LAUNCHER_GOTOOLCHAIN=auto \
-    bash --noprofile --norc -i
+    DOTFILES_LAUNCHER_GOTOOLCHAIN_SET=1 DOTFILES_LAUNCHER_GOTOOLCHAIN=auto
 )
 assert_contains "$launcher_environment_output" \
   "xdg-config=$test_root/user config xdg-data=$test_root/user data zoxide=unset markers="
 assert_contains "$launcher_environment_output" "go-root=$test_root/project SDK go-toolchain=auto go-markers="
 
 launcher_unset_output=$(
-  run_scenario launcher-environment \
+  run_interactive_scenario launcher-environment \
     env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u _ZO_DATA_DIR \
     HOME="$transition_home" PATH="$test_root/bin:$original_path" \
     TERM=xterm-256color \
@@ -469,8 +466,7 @@ launcher_unset_output=$(
     DOTFILES_LAUNCHER_XDG_DATA_HOME_SET=0 \
     DOTFILES_LAUNCHER_ZO_DATA_DIR_SET=0 \
     GOROOT="$transition_a/tools/go" GOTOOLCHAIN=local \
-    DOTFILES_LAUNCHER_GOROOT_SET=0 DOTFILES_LAUNCHER_GOTOOLCHAIN_SET=0 \
-    bash --noprofile --norc -i
+    DOTFILES_LAUNCHER_GOROOT_SET=0 DOTFILES_LAUNCHER_GOTOOLCHAIN_SET=0
 )
 assert_contains "$launcher_unset_output" \
   'xdg-config=unset xdg-data=unset zoxide=unset markers='
@@ -482,10 +478,9 @@ ln -s "$command_fixture" "$path_home/.venv/bin/python"
 ln -s "$command_fixture" "$path_home/.asdf/shims/terraform"
 ln -s "$command_fixture" "$path_home/bin/terraform"
 path_output=$(
-  run_scenario path-order \
+  run_interactive_scenario path-order \
     env HOME="$path_home" VIRTUAL_ENV="$path_home/.venv" \
-    PATH="$path_home/bin:$original_path" TERM=xterm-256color \
-    bash --noprofile --norc -i
+    PATH="$path_home/bin:$original_path" TERM=xterm-256color
 )
 assert_contains "$path_output" "python=$path_home/.venv/bin/python"
 assert_contains "$path_output" "terraform=$path_home/bin/terraform"
@@ -526,11 +521,11 @@ for setup_mode in connected repo-with-release offline custom-store; do
   fi
   override_output=$(
     cd "$test_root"
-    run_scenario user-bin \
+    run_interactive_scenario user-bin \
       env -u DOTFILES_IGNORE_USER_BIN HOME="$override_home" TEST_BASHRC="$override_bashrc" \
       DOTFILES_RELEASE_ROOT="$override_store" \
       PATH=":$override_home/bin:$test_root/bin::$original_path:$override_home/bin:" \
-      TERM=xterm-256color bash --noprofile --norc -i
+      TERM=xterm-256color
   )
   assert_contains "$override_output" 'override=bin unique=bin'
   assert_contains "$override_output" 'asdf-only=.asdf/shims'
@@ -551,30 +546,27 @@ brew_bin=$test_root/existing-homebrew/bin
 brew_log=$test_root/brew.log
 mkdir -p "$brew_home" "$brew_bin"
 ln -s "$command_fixture" "$brew_bin/brew"
-TEST_BREW_LOG="$brew_log" run_scenario reload \
+TEST_BREW_LOG="$brew_log" run_interactive_scenario reload \
   env HOME="$brew_home" PATH="$brew_bin:$test_root/bin:$original_path" \
-  TERM=xterm-256color bash --noprofile --norc -i >/dev/null 2>&1
+  TERM=xterm-256color >/dev/null 2>&1
 [[ ! -e $brew_log ]] || fail 'Bash startup invoked Homebrew'
 
 fzf_output=$(
-  TEST_COMMAND_MODE=fzf-init run_scenario fzf-init \
-    env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color \
-    bash --noprofile --norc -i
+  TEST_COMMAND_MODE=fzf-init run_interactive_scenario fzf-init \
+    env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color
 )
 assert_contains "$fzf_output" 'fzf-init=yes'
 
 fzf_failure_output=$(
-  TEST_COMMAND_MODE=broken-integration run_scenario fzf-failure \
-    env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color \
-    bash --noprofile --norc -i 2>&1
+  TEST_COMMAND_MODE=broken-integration run_interactive_scenario fzf-failure \
+    env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color 2>&1
 )
 assert_contains "$fzf_failure_output" 'dotfiles: fzf initialization failed'
 assert_contains "$fzf_failure_output" 'continued=yes'
 
 kube_completion_output=$(
-  TEST_COMMAND_MODE=kube-completion run_scenario kube-completion \
-    env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color \
-    bash --noprofile --norc -i
+  TEST_COMMAND_MODE=kube-completion run_interactive_scenario kube-completion \
+    env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color
 )
 assert_contains "$kube_completion_output" 'complete -F __start_kubectl k'
 assert_contains "$kube_completion_output" 'k-completion=fixture-pod'
@@ -593,9 +585,8 @@ ln -s "$repo_dir/oh-my-posh/.oh-my-posh.omp.json" \
   "$reload_home/.oh-my-posh.omp.json"
 for terminal in dumb xterm-256color; do
   fallback_output=$(
-    TEST_COMMAND_MODE=broken-integration run_scenario fallback-prompt \
-      env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM="$terminal" \
-      bash --noprofile --norc -i 2>&1
+    TEST_COMMAND_MODE=broken-integration run_interactive_scenario fallback-prompt \
+      env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM="$terminal" 2>&1
   )
   assert_contains "$fallback_output" 'dotfiles: Oh My Posh initialization failed'
   assert_contains "$fallback_output" "$(id -un)@"
@@ -605,9 +596,9 @@ done
 
 kube_init_output=$(
   TEST_COMMAND_MODE=kube-prompt TEST_POSH_LOG="$posh_log" \
-    TEST_POSH_STATE="$posh_state" run_scenario kube-prompt-init \
+    TEST_POSH_STATE="$posh_state" run_interactive_scenario kube-prompt-init \
     env HOME="$reload_home" PATH="$test_root/bin:$original_path" \
-    TERM=xterm-256color bash --noprofile --norc -i
+    TERM=xterm-256color
 )
 assert_contains "$kube_init_output" 'kube-default=disabled'
 [[ $(grep -c '^init bash ' "$posh_log") -eq 1 ]] ||

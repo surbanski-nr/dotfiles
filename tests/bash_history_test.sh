@@ -10,6 +10,7 @@ archive_script=$repo_dir/scripts/bash-history-archive
 history_library=$repo_dir/bash/.bash_history_lib
 test_root=$(mktemp -d)
 original_path=$PATH
+script_executable=$(command -v script)
 background_pid=
 
 cleanup() {
@@ -54,11 +55,12 @@ archives() {
 }
 
 run_shell() {
-  local directory=$1 code=$2 helper=${3:-$archive_script}
-  timeout --kill-after=2s 15s env -i HOME="$directory" PATH="$original_path" \
+  local directory=$1 code=$2 helper=${3:-$archive_script} invocation
+  printf -v invocation '%q ' env -i HOME="$directory" PATH="$original_path" \
     TERM=dumb TEST_HISTORY_LIBRARY="$history_library" TEST_ARCHIVER="$helper" \
     TEST_REAL_FLOCK="$(command -v flock)" \
     bash --noprofile --norc -i -c '
+      exec >"$HOME/shell.log" 2>"$HOME/shell.err"
       set -e
       set +o history
       _dotfiles_warn() { printf "dotfiles: %s\n" "$*" >&2; }
@@ -66,7 +68,9 @@ run_shell() {
       history -c
       [[ ! -f $HISTFILE ]] || history -r
       eval "$1"
-    ' history-test "$code" >"$directory/shell.log" 2>"$directory/shell.err"
+    ' history-test "$code"
+  timeout --kill-after=2s 15s env SHELL=/bin/bash "$script_executable" \
+    --quiet --return --command "$invocation" /dev/null </dev/null
 }
 
 [[ -f $archive_script ]] || fail 'history archiver is missing'

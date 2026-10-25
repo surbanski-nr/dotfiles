@@ -4,8 +4,9 @@ set -euo pipefail
 
 : "${TEST_BATCH_READY:?}"
 
-# Exercise cleanup of a nested process group and an interactive Bash child.
-timeout 30s bash --noprofile --norc -i <<'BASH'
-printf '%s\n' "$BASHPID" >"$TEST_BATCH_READY"
-sleep 30
-BASH
+# Exercise cleanup across the private terminal's additional session boundary.
+# shellcheck disable=SC2016
+printf -v invocation '%q ' bash --noprofile --norc -i -c \
+  'set +o history; unset HISTFILE; printf "%s\n" "$BASHPID" >"$TEST_BATCH_READY"; sleep 30'
+timeout 30s env HISTFILE=/dev/null SHELL=/bin/bash script \
+  --quiet --return --command "$invocation" /dev/null </dev/null

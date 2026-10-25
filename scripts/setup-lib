@@ -113,7 +113,7 @@ parse_release_record() {
   fi
   RELEASE_ASSET=${RELEASE_URL##*/}
   if [[ $tool == python && $RELEASE_URL != - ]]; then
-    RELEASE_ASSET="cpython-${RELEASE_VERSION}+${PYTHON_STANDALONE_BUILD}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+    RELEASE_ASSET=${RELEASE_ASSET//%2B/+}
   fi
 }
 

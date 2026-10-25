@@ -2,9 +2,19 @@
 
 set -eu
 
-if [[ $# -eq 3 && $1 == -m && $2 == venv ]]; then
-  mkdir -p "$3/bin"
-  ln -s "$0" "$3/bin/python"
+if [[ ${1:-} == -I ]]; then
+  shift
+fi
+if [[ ${1:-} == --version ]]; then
+  printf 'Python 3.12.12\n'
+  exit 0
+fi
+if [[ ${1:-} == -m && ${2:-} == venv ]]; then
+  shift 2
+  [[ ${1:-} != --symlinks ]] || shift
+  [[ $# -eq 1 ]] || exit 62
+  mkdir -p "$1/bin"
+  ln -s "$0" "$1/bin/python"
   exit 0
 fi
 

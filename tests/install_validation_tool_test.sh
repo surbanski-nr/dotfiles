@@ -119,6 +119,22 @@ run_installer actionlint
 [[ $(sha256sum "$tools_dir/actionlint") == "$old_actionlint_hash" ]] ||
   fail 'invalid candidate replaced the existing actionlint'
 
+python_candidate=$test_root/python-candidate/python/bin
+python_archive=$test_root/python.tar.gz
+mkdir -p "$python_candidate"
+cp "$repo_dir/tests/fixtures/scripts/python3-venv" "$python_candidate/python3"
+tar -czf "$python_archive" -C "$test_root/python-candidate" python
+python_hash=$(sha256sum "$python_archive")
+python_hash=${python_hash%% *}
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[python]='
+3.12.12|https://example.invalid/python.tar.gz|$python_hash
+'
+EOF
+TEST_DOWNLOAD_FILE=$python_archive
+export TEST_DOWNLOAD_FILE
+ln -s /bin/false "$test_bin/python3"
+
 cat >"$tools_dir/yamllint" <<'EOF'
 #!/usr/bin/env bash
 printf 'yamllint 1.0.0\n'
@@ -130,7 +146,6 @@ printf 'yamllint==8.0.0\n' \
   >"$test_repo/nvim2/.config/nvim2/python-locks/yamllint.in"
 printf 'yamllint==8.0.0 --hash=sha256:%064d\n' 0 \
   >"$test_repo/nvim2/.config/nvim2/python-locks/yamllint.lock"
-ln -s "$repo_dir/tests/fixtures/scripts/python3-venv" "$test_bin/python3"
 TEST_VENV_PIP_FAIL=1
 export TEST_VENV_PIP_FAIL
 run_installer yamllint
@@ -139,6 +154,10 @@ run_installer yamllint
   fail 'failed pip install replaced the existing Yamllint'
 [[ $("$tools_dir/yamllint" --version) == 'yamllint 1.0.0' ]] ||
   fail 'Yamllint stopped working after a failed pip install'
+private_python=$(readlink -f "$tools_dir/python/bin/python3")
+[[ $("$private_python" --version) == 'Python 3.12.12' ]] ||
+  fail 'Yamllint did not bootstrap its pinned private Python without OS Python'
+[[ ! -e $tools_dir/python3 ]] || fail 'validation added a public Python shim'
 
 TEST_VENV_PIP_FAIL=0
 export TEST_VENV_PIP_FAIL
@@ -147,6 +166,60 @@ run_installer yamllint
 [[ -L $tools_dir/yamllint ]] || fail 'Yamllint activation did not publish a link'
 [[ $("$tools_dir/yamllint" --version) == 'yamllint 2.0.0' ]] ||
   fail 'activated Yamllint did not use the validation pin independently of the editor pin'
+yaml_executable=$(readlink -f "$tools_dir/yamllint")
+[[ $(readlink -f "${yaml_executable%/*}/python") == "$private_python" ]] ||
+  fail 'Yamllint venv still depends on the OS Python'
+
+(
+  exec 9>"$tools_dir/.install-python.lock"
+  flock 9
+  run_installer python
+  [[ $status -ne 0 && $output == *'another validation Python installation is running'* &&
+    $(readlink -f "$tools_dir/python/bin/python3") == "$private_python" ]] ||
+    fail 'concurrent private Python setup ignored its lock or changed the active runtime'
+)
+
+TEST_DOWNLOAD_FAIL=1
+TEST_VENV_PIP_FAIL=1
+export TEST_DOWNLOAD_FAIL TEST_VENV_PIP_FAIL
+run_installer yamllint
+[[ $status -eq 0 && $(readlink -f "$tools_dir/yamllint") == "$yaml_executable" ]] ||
+  fail 'matching private Python and Yamllint were not reused without network access'
+TEST_DOWNLOAD_FAIL=0
+export TEST_DOWNLOAD_FAIL
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[python]='
+3.12.13|https://example.invalid/python.tar.gz|$python_hash
+'
+EOF
+run_installer yamllint
+[[ $status -ne 0 && $output == *'python 3.12.13 candidate validation failed'* &&
+  $(readlink -f "$tools_dir/python/bin/python3") == "$private_python" &&
+  $(readlink -f "$tools_dir/yamllint") == "$yaml_executable" ]] ||
+  fail 'invalid private Python replaced the working validation environment'
+
+sed 's/Python 3.12.12/Python 3.12.13/' "$repo_dir/tests/fixtures/scripts/python3-venv" \
+  >"$python_candidate/python3"
+tar -czf "$python_archive" -C "$test_root/python-candidate" python
+python_hash=$(sha256sum "$python_archive")
+python_hash=${python_hash%% *}
+cat >>"$test_repo/validation.env" <<EOF
+VALIDATION_RELEASES[python]='
+3.12.13|https://example.invalid/python.tar.gz|$python_hash
+'
+EOF
+run_installer yamllint
+[[ $status -ne 0 && $("$tools_dir/python/bin/python3" --version) == 'Python 3.12.13' &&
+  $(readlink -f "$tools_dir/yamllint") == "$yaml_executable" && -x $private_python ]] ||
+  fail 'failed Yamllint upgrade removed the previous venv or its Python'
+TEST_VENV_PIP_FAIL=0
+export TEST_VENV_PIP_FAIL
+run_installer yamllint
+[[ $status -eq 0 && $(readlink -f "$tools_dir/yamllint") != "$yaml_executable" ]] ||
+  fail 'unchanged Yamllint pin did not rebuild its venv for a new Python'
+yaml_executable=$(readlink -f "$tools_dir/yamllint")
+[[ $(readlink -f "${yaml_executable%/*}/python") == $(readlink -f "$tools_dir/python/bin/python3") &&
+  -x $private_python ]] || fail 'Yamllint upgrade did not retain independent versioned Python runtimes'
 
 task_version=9.8.7
 task_candidate_dir=$test_root/task-candidate

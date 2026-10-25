@@ -85,8 +85,9 @@ case $TEST_SCENARIO in
     history -s 'shared history seed'
     run_prompt_hooks
     for round in 1 2; do
+      # shellcheck disable=SC2016
       TEST_SCENARIO=shared-history-peer TEST_HISTORY_ROUND=$round \
-        bash --noprofile --norc -i "${BASH_SOURCE[0]}"
+        bash --noprofile --norc -i -c 'source "$1"' bash-peer "${BASH_SOURCE[0]}"
       history -s "command from second shell $round"
       run_prompt_hooks
       load_bashrc

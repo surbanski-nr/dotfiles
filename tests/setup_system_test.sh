@@ -183,6 +183,10 @@ grep $'^apt-get\tinstall' "$package_log" | grep -F $'\tbuild-essential\t' >/dev/
   fail 'connected setup omitted build prerequisites'
 grep $'^apt-get\tinstall' "$package_log" | grep -F $'\tpython3\t' >/dev/null ||
   fail 'connected setup omitted its Python provider'
+for package in bsdutils procps; do
+  grep $'^apt-get\tinstall' "$package_log" | grep -F $'\t'"$package"$'\t' >/dev/null ||
+    fail "connected setup omitted the validation prerequisite $package"
+done
 if grep $'^apt-get\tinstall' "$package_log" | grep -Eq $'\t(htop|tmux)(\t|$)'; then
   fail 'connected setup retained htop or tmux as an OS package'
 fi
@@ -195,6 +199,24 @@ fi
   fail 'host setup did not enable and start the container services'
 [[ $(grep -c $'^docker\t--host\tunix:///var/run/docker.sock\tinfo$' "$TEST_DOCKER_LOG") -eq 1 ]] ||
   fail 'host setup did not verify the local Docker daemon'
+for missing_command in pkill ps script; do
+  mv "$fixture_bin/$missing_command" "$fixture_bin/$missing_command.saved"
+  if missing_output=$(PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
+    SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" "$online_setup_script" 2>&1); then
+    fail "connected setup accepted a missing validation prerequisite $missing_command"
+  fi
+  [[ $missing_output == *"package installation did not provide $missing_command"* ]] ||
+    fail "connected setup did not report missing $missing_command"
+  warning_output=$(PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
+    TEST_PACKAGE_NETWORK_FAIL=apt-get:install SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
+    "$online_setup_script" 2>&1) || fail 'missing validation prerequisite after network failure stopped setup'
+  [[ $warning_output == *"warning: package installation did not provide $missing_command"* &&
+    $warning_output == *'completed with '* && $warning_output != *'host setup packages ready'* ]] ||
+    fail "setup hid missing $missing_command after a network failure"
+  PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
+    SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" /bin/bash "$release_manager" setup >/dev/null
+  mv "$fixture_bin/$missing_command.saved" "$fixture_bin/$missing_command"
+done
 docker_source=$SETUP_SYSTEM_ETC_DIR/apt/sources.list.d/docker.sources
 docker_key=$SETUP_SYSTEM_ETC_DIR/apt/keyrings/docker.asc
 grep -Fx 'URIs: https://download.docker.com/linux/debian' "$docker_source" >/dev/null ||
@@ -252,6 +274,8 @@ if grep $'^dnf\tinstall' "$package_log" | grep -Eq $'\t(cargo|clang-devel)(\t|$)
 fi
 grep $'^dnf\tinstall' "$package_log" | grep -F $'\t--allowerasing\t' >/dev/null ||
   fail 'Amazon setup omitted --allowerasing'
+grep $'^dnf\tinstall' "$package_log" | grep -F $'\tprocps-ng\t' >/dev/null ||
+  fail 'Amazon connected setup omitted its process tools'
 if grep -Fx $'dnf\tinstall\t-y\tdocker' "$package_log" >/dev/null; then
   fail 'Amazon setup replaced its existing Docker installation'
 fi

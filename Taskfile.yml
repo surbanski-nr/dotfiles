@@ -22,8 +22,8 @@ tasks:
       - validate:workflows
 
   validate:bash:
-    desc: Lint Bash startup files, check Bash syntax in Markdown and run Bash tests
-    deps: [tools:shellcheck]
+    desc: Lint Bash and Markdown, test shell logic and real terminal interaction
+    deps: [tools:python, tools:shellcheck]
     cmds:
       - bash scripts/validate bash
 
@@ -47,7 +47,7 @@ tasks:
 
   validate:tmux:
     desc: Check tmux configuration and test config reload and the eye timer
-    deps: [tools:shellcheck]
+    deps: [tools:python, tools:shellcheck]
     cmds:
       - bash scripts/validate tmux
 
@@ -112,8 +112,15 @@ tasks:
   tools:yamllint:
     internal: true
     run: once
+    deps: [tools:python]
     cmds:
       - bash scripts/install-validation-tool yamllint
+
+  tools:python:
+    internal: true
+    run: once
+    cmds:
+      - bash scripts/install-validation-tool python
 
   tools:zizmor:
     internal: true

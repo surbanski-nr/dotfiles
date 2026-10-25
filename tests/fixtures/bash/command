@@ -29,7 +29,7 @@ case "$command_name:$mode" in
       printf '%s %s\n' "$command_name" "$RELEASE_VERSION"
     fi
     ;;
-  zoxide:reload)
+  zoxide:reload | zoxide:terminal)
     # shellcheck disable=SC2016
     printf '%s\n' \
       '__zoxide_hook() { printf "zoxide\n" >>"$TEST_PROMPT_LOG"; }' \
@@ -54,6 +54,26 @@ case "$command_name:$mode" in
   fzf:fzf-init)
     [[ ${1:-} == --bash ]] || exit 2
     printf '%s\n' '__fzf_test_binding() { :; }'
+    ;;
+  fzf:terminal)
+    [[ ${1:-} == --bash ]] || exit 2
+    # The fixture supplies a selected command; Bash must invoke the generated
+    # Readline binding and retain it after reloading the dotfiles.
+    # shellcheck disable=SC2016
+    printf '%s\n' \
+      'fzf-history-widget() { READLINE_LINE=$TEST_FZF_SELECTION; READLINE_POINT=${#READLINE_LINE}; }' \
+      'bind -x "\"\C-r\":fzf-history-widget"'
+    ;;
+  clear:terminal)
+    printf '\n__BOUND_CLEAR__\n'
+    ;;
+  oh-my-posh:terminal)
+    if [[ ${1:-}:${2:-} == init:bash ]]; then
+      # shellcheck disable=SC2016
+      printf '%s\n' \
+        '_omp_hook() { printf "posh\n" >>"$TEST_PROMPT_LOG"; }' \
+        'PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }_omp_hook"'
+    fi
     ;;
   fzf:broken-integration | oh-my-posh:broken-integration)
     exit 9

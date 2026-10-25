@@ -42,6 +42,8 @@ _dotfiles_history_save_and_reload() {
     _dotfiles_history_preserve || return 1
     unset _DOTFILES_HISTORY_NEEDS_BACKUP
   fi
+  # With no new commands, Bash does not create HISTFILE at the first prompt.
+  [[ -e $HISTFILE || -L $HISTFILE ]] || return 0
   if [[ ! -r $HISTFILE ]]; then
     _dotfiles_warn "cannot read history file: $HISTFILE"
     return 1

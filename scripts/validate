@@ -6,7 +6,7 @@ export DOTFILES_IGNORE_USER_BIN=1
 IFS=: read -r -a path_entries <<<"$PATH"
 clean_path=
 for entry in "${path_entries[@]}"; do
-  [[ -n $entry && $entry != "$HOME/bin" ]] || continue
+  [[ -n $entry ]] || continue
   clean_path+=${clean_path:+:}$entry
 done
 export PATH=$clean_path
@@ -35,7 +35,7 @@ cleanup_tmux_home=
 cleanup_tmux_socket=
 cleanup_tmux_client_pid=
 test_pid=
-export PATH="$tools_dir:$PATH"
+export PATH="$tools_dir/python/bin:$tools_dir:$PATH"
 cd "$repo_dir"
 
 cleanup() {
@@ -154,7 +154,9 @@ check_markdown_bash() {
 
 validate_bash() {
   need bash
+  need python3
   need shellcheck
+  need script
   need timeout
   local files=(
     bash/.bashrc
@@ -173,6 +175,7 @@ validate_bash() {
   check_shell_files tests/fixtures/bash/*
   run_test 120s bash tests/bash_test.sh
   run_test 120s bash tests/bash_history_test.sh
+  run_test 60s python3 tests/bash_pty_test.py
 }
 
 validate_scripts() {

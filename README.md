@@ -101,6 +101,9 @@ bash scripts/install-validation-tool task
 bin/task validate
 ```
 
+Task installs a pinned private Python from `validation.env` under `bin/` for
+Yamllint and Python-backed tests. It does not use or replace the OS Python.
+
 Workflow validation runs locally without GitHub credentials. Set `GH_TOKEN`,
 `GITHUB_TOKEN` or use an active `gh` login to additionally enable Zizmor's
 online audits. The GitHub Actions workflow supplies its repository token.
@@ -110,6 +113,8 @@ Focused tasks include `validate:bash`, `validate:configs`, `validate:nvim2`,
 
 `validate:bash` lints and tests Bash startup files and checks the syntax of
 `bash` code blocks read directly from Markdown documentation with `bash -n`.
+It also runs real pseudo-terminal sessions to test keyboard bindings, automatic
+cross-shell history synchronization and archiving.
 
 `validate:configs` checks YAML, JSON and Git configuration syntax and trailing
 spaces and tabs in current text files, including tracked files and new files
