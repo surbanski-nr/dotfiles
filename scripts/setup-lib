@@ -9,9 +9,10 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || report_error "required command is missing: $1"
 }
 
-# The kernel releases flock when its last descriptor closes, even after SIGKILL.
-# Children may hold inherited descriptors until they exit. Keep the file in place
-# so concurrent processes cannot lock different inodes for the same operation.
+# The descriptor stays open until process exit. The kernel releases flock when
+# its last descriptor closes, even after SIGKILL. Children may keep inherited
+# descriptors until they exit. Keep the file in place so concurrent processes
+# cannot lock different inodes for the same operation.
 acquire_setup_lock() {
   local path=$1 message=$2 descriptor
 
@@ -25,14 +26,17 @@ acquire_setup_lock() {
     report_error "$message"
     return 1
   fi
-  HELD_LOCK_FDS+=("$descriptor")
 }
 
-release_setup_locks() {
-  local descriptor
-  for descriptor in "${HELD_LOCK_FDS[@]}"; do
-    exec {descriptor}>&-
+cleanup_setup() {
+  local status=$? path
+
+  trap - EXIT
+  set +e
+  for path in "${TEMP_PATHS[@]:-}"; do
+    if [[ -e $path || -L $path ]]; then find "$path" -depth -delete; fi
   done
+  exit "$status"
 }
 
 acquire_online_setup_lock() {
@@ -601,17 +605,10 @@ extract_artifact() {
       archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_SECOND_MEMBER" \
         "$destination/${SPEC_DESTS[1]}"
       ;;
-    gz-tree)
+    gz-tree | xz-tree)
       validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" "$SPEC_MEMBER" || return
-      tar -xzf "$archive" -C "$destination" \
-        --no-same-owner --no-same-permissions --keep-directory-symlink -- "$SPEC_MEMBER" || return
-      if [[ $SPEC_MEMBER != "${SPEC_DESTS[0]}" ]]; then
-        mv -- "$destination/$SPEC_MEMBER" "$destination/${SPEC_DESTS[0]}"
-      fi
-      ;;
-    xz-tree)
-      validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" "$SPEC_MEMBER" || return
-      tar -xJf "$archive" -C "$destination" \
+      # GNU tar detects compression when reading a named archive.
+      tar -xf "$archive" -C "$destination" \
         --no-same-owner --no-same-permissions --keep-directory-symlink -- "$SPEC_MEMBER" || return
       if [[ $SPEC_MEMBER != "${SPEC_DESTS[0]}" ]]; then
         mv -- "$destination/$SPEC_MEMBER" "$destination/${SPEC_DESTS[0]}"

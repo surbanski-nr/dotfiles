@@ -136,12 +136,9 @@ list and the alphabetical no-argument install order; plugin downloads and
 verification remain asdf's responsibility. It selects the first version for
 each runtime as the home default. A project `.tool-versions` file continues to
 override those defaults.
-An installation made by the immediately preceding `setup-asdf` layout can be
-adopted only when its relative `asdf-VERSION` link is the current pin and its
-executable is byte-for-byte equal to the executable extracted from the
-checksum-verified official archive. Provider conflicts are checked before any
-ownership state is written. Similar names, version output alone and modified
-binaries are rejected without changing them.
+`setup-asdf` reuses only binaries whose SHA256 matches its installation record.
+Existing binaries or links without that record are rejected without being
+changed; there is no automatic adoption.
 
 Edit OS package lists and their expected commands in `system.env`. Common
 runtime packages are included in every role; build and setup roles add
@@ -1064,6 +1061,8 @@ Terminals supporting this mode display each redraw as one frame, including
 cursor visibility changes, so activity in another pane does not flash the
 cursor. Reattach the client after changing terminal features; the session and
 pane processes keep running.
+
+Reloads append these terminal entries again; duplicate entries are accepted.
 
 ## Tmux eye-break timer
 

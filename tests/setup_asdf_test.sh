@@ -162,25 +162,23 @@ set -e
 [[ $(readlink -- "$test_home/bin/asdf") == asdf-manual ]] ||
   fail 'foreign asdf link was changed'
 
-legacy_repo=$test_root/legacy-repository
-legacy_home=$test_root/legacy-home
-legacy_log=$test_root/legacy.log
-legacy_archive_root=$test_root/legacy-archive
-legacy_archive=$test_root/asdf.tar.gz
-mkdir -p "$legacy_repo/scripts" "$legacy_home/bin" "$legacy_archive_root"
-cp "$repo_dir/setup-asdf" "$legacy_repo/setup-asdf"
-cp "$repo_dir/scripts/setup-lib" "$legacy_repo/scripts/setup-lib"
-cp "$test_catalog" "$legacy_repo/tools.env"
-cp "$repo_dir/system.env" "$legacy_repo/system.env"
-prepare_plugin "$legacy_home" "$legacy_repo"
-write_asdf_fixture "$legacy_archive_root/asdf" "$ASDF_VERSION"
-tar -C "$legacy_archive_root" -czf "$legacy_archive" asdf
-legacy_archive_digest=$(sha256sum "$legacy_archive" | awk '{print $1}')
-append_release "$legacy_repo/tools.env" asdf "$ASDF_VERSION" \
-  https://example.invalid/asdf.tar.gz "$legacy_archive_digest"
-cp "$legacy_archive_root/asdf" "$legacy_home/bin/asdf-$ASDF_VERSION"
-ln -s "asdf-$ASDF_VERSION" "$legacy_home/bin/asdf"
-cat >"$legacy_home/bin/curl" <<'EOF'
+install_repo=$test_root/install-repository
+install_home=$test_root/install-home
+install_log=$test_root/install.log
+archive_root=$test_root/archive
+asdf_archive=$test_root/asdf.tar.gz
+mkdir -p "$install_repo/scripts" "$install_home/bin" "$archive_root"
+cp "$repo_dir/setup-asdf" "$install_repo/setup-asdf"
+cp "$repo_dir/scripts/setup-lib" "$install_repo/scripts/setup-lib"
+cp "$test_catalog" "$install_repo/tools.env"
+cp "$repo_dir/system.env" "$install_repo/system.env"
+prepare_plugin "$install_home" "$install_repo"
+write_asdf_fixture "$archive_root/asdf" "$ASDF_VERSION"
+tar -C "$archive_root" -czf "$asdf_archive" asdf
+archive_digest=$(sha256sum "$asdf_archive" | awk '{print $1}')
+append_release "$install_repo/tools.env" asdf "$ASDF_VERSION" \
+  https://example.invalid/asdf.tar.gz "$archive_digest"
+cat >"$install_home/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 destination=
@@ -193,67 +191,57 @@ done
 [[ -n $destination ]]
 cp "$TEST_ASDF_ARCHIVE" "$destination"
 EOF
-chmod 0755 "$legacy_home/bin/curl"
+chmod 0755 "$install_home/bin/curl"
 
-legacy_conflict_home=$test_root/legacy-conflict-home
-mkdir -p "$legacy_conflict_home/bin"
-cp "$legacy_archive_root/asdf" "$legacy_conflict_home/bin/asdf-$ASDF_VERSION"
-ln -s "asdf-$ASDF_VERSION" "$legacy_conflict_home/bin/asdf"
-cp "$legacy_home/bin/curl" "$legacy_conflict_home/bin/curl"
-printf '#!/usr/bin/env bash\nexit 0\n' >"$legacy_conflict_home/bin/terraform"
-chmod 0755 "$legacy_conflict_home/bin/terraform"
-set +e
-legacy_conflict_output=$(HOME="$legacy_conflict_home" \
-  PATH="$legacy_conflict_home/bin:/usr/bin:/bin" \
-  TEST_ASDF_ARCHIVE="$legacy_archive" TEST_ASDF_LOG="$test_root/legacy-conflict.log" \
-  "$legacy_repo/setup-asdf" terraform 2>&1)
-legacy_conflict_status=$?
-set -e
-[[ $legacy_conflict_status -ne 0 &&
-  $legacy_conflict_output == *'conflicts with the direct launcher'* ]] ||
-  fail 'provider conflict did not stop verified legacy adoption'
-[[ $(readlink -- "$legacy_conflict_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
-  fail 'provider conflict changed the verified legacy link'
-[[ ! -e $legacy_conflict_home/.local/state/dotfiles/setup-asdf/installations ]] ||
-  fail 'provider conflict partially adopted verified legacy asdf'
-[[ ! -e $test_root/legacy-conflict.log ]] ||
-  fail 'provider conflict reached legacy download or runtime installation'
+# Even an exact pinned binary is foreign without its installation record.
+unmanaged_home=$test_root/unmanaged-home
+mkdir -p "$unmanaged_home/bin"
+cp -a "$install_home/.asdf" "$unmanaged_home/.asdf"
+cp "$archive_root/asdf" "$unmanaged_home/bin/asdf-$ASDF_VERSION"
+ln -s "asdf-$ASDF_VERSION" "$unmanaged_home/bin/asdf"
+cp "$install_home/bin/curl" "$unmanaged_home/bin/curl"
+unmanaged_digest=$(sha256sum "$unmanaged_home/bin/asdf-$ASDF_VERSION")
+for selection in linked unlinked; do
+  if [[ $selection == unlinked ]]; then unlink "$unmanaged_home/bin/asdf"; fi
+  set +e
+  unmanaged_output=$(HOME="$unmanaged_home" PATH="$unmanaged_home/bin:/usr/bin:/bin" \
+    TEST_ASDF_ARCHIVE="$asdf_archive" TEST_ASDF_LOG="$test_root/unmanaged.log" \
+    "$install_repo/setup-asdf" terraform 2>&1)
+  unmanaged_status=$?
+  set -e
+  [[ $unmanaged_status -ne 0 && $unmanaged_output == *'refusing unmanaged asdf installation'* ]] ||
+    fail "$selection unrecorded asdf installation was accepted"
+  [[ $(sha256sum "$unmanaged_home/bin/asdf-$ASDF_VERSION") == "$unmanaged_digest" ]] ||
+    fail 'unrecorded asdf binary was changed'
+  if [[ $selection == linked ]]; then
+    [[ $(readlink -- "$unmanaged_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+      fail 'unrecorded asdf command link was changed'
+  else
+    [[ ! -e $unmanaged_home/bin/asdf && ! -L $unmanaged_home/bin/asdf ]] ||
+      fail 'unrecorded asdf binary was selected'
+  fi
+  [[ ! -e $unmanaged_home/.local/state/dotfiles/setup-asdf/installations &&
+    ! -e $test_root/unmanaged.log ]] || fail 'unrecorded asdf rejection changed installation state'
+done
 
-HOME="$legacy_home" PATH="$legacy_home/bin:/usr/bin:/bin" \
-  TEST_ASDF_ARCHIVE="$legacy_archive" TEST_ASDF_LOG="$legacy_log" \
-  "$legacy_repo/setup-asdf" terraform
-[[ $(readlink -- "$legacy_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
-  fail 'verified legacy asdf link changed unexpectedly'
-[[ -f $legacy_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256 ]] ||
-  fail 'verified legacy asdf installation digest was not recorded'
-legacy_state_digest=$(sha256sum \
-  "$legacy_home/bin/asdf-$ASDF_VERSION" \
-  "$legacy_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256")
-HOME="$legacy_home" PATH="$legacy_home/bin:/usr/bin:/bin" \
-  TEST_ASDF_ARCHIVE="$test_root/absent-archive" TEST_ASDF_LOG="$legacy_log" \
-  "$legacy_repo/setup-asdf" terraform
+HOME="$install_home" PATH="$install_home/bin:/usr/bin:/bin" \
+  TEST_ASDF_ARCHIVE="$asdf_archive" TEST_ASDF_LOG="$install_log" \
+  "$install_repo/setup-asdf" terraform
+[[ $(readlink -- "$install_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+  fail 'fresh asdf installation was not selected'
+[[ $(sha256sum "$install_home/bin/asdf-$ASDF_VERSION" | awk '{print $1}') == \
+  $(<"$install_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") ]] ||
+  fail 'fresh asdf installation digest was not recorded'
+install_state_digest=$(sha256sum \
+  "$install_home/bin/asdf-$ASDF_VERSION" \
+  "$install_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256")
+HOME="$install_home" PATH="$install_home/bin:/usr/bin:/bin" \
+  TEST_ASDF_ARCHIVE="$test_root/absent-archive" TEST_ASDF_LOG="$install_log" \
+  "$install_repo/setup-asdf" terraform
 [[ $(sha256sum \
-  "$legacy_home/bin/asdf-$ASDF_VERSION" \
-  "$legacy_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") == \
-  "$legacy_state_digest" ]] || fail 'legacy asdf adoption retry changed ownership state'
-
-tampered_home=$test_root/tampered-legacy-home
-mkdir -p "$tampered_home/bin"
-write_asdf_fixture "$tampered_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
-printf '# tampered\n' >>"$tampered_home/bin/asdf-$ASDF_VERSION"
-ln -s "asdf-$ASDF_VERSION" "$tampered_home/bin/asdf"
-cp "$legacy_home/bin/curl" "$tampered_home/bin/curl"
-set +e
-tampered_output=$(HOME="$tampered_home" PATH="$tampered_home/bin:/usr/bin:/bin" \
-  TEST_ASDF_ARCHIVE="$legacy_archive" TEST_ASDF_LOG="$test_root/tampered.log" \
-  "$legacy_repo/setup-asdf" terraform 2>&1)
-tampered_status=$?
-set -e
-[[ $tampered_status -ne 0 &&
-  $tampered_output == *'legacy asdf binary does not match the verified upstream archive'* ]] ||
-  fail 'tampered legacy asdf was adopted'
-[[ ! -e $tampered_home/.local/state/dotfiles/setup-asdf/installations ]] ||
-  fail 'failed legacy asdf adoption wrote ownership state'
+  "$install_home/bin/asdf-$ASDF_VERSION" \
+  "$install_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") == \
+  "$install_state_digest" ]] || fail 'fresh asdf installation retry changed ownership state'
 
 reconcile_repo=$test_root/reconcile-repository
 reconcile_home=$test_root/reconcile-home
@@ -443,16 +431,16 @@ for point in digest binary after-binary selection after-selection; do
   mkdir -p "$recovery_home/bin" "$recovery_repo/scripts"
   cp "$repo_dir/setup-asdf" "$recovery_repo/setup-asdf"
   cp "$repo_dir/scripts/setup-lib" "$recovery_repo/scripts/setup-lib"
-  cp "$legacy_repo/tools.env" "$recovery_repo/tools.env"
+  cp "$install_repo/tools.env" "$recovery_repo/tools.env"
   cp "$repo_dir/system.env" "$recovery_repo/system.env"
   prepare_plugin "$recovery_home" "$recovery_repo"
-  cp "$legacy_home/bin/curl" "$recovery_home/bin/curl"
+  cp "$install_home/bin/curl" "$recovery_home/bin/curl"
   write_asdf_fixture "$recovery_home/bin/asdf-0.0.1" 0.0.1
   record_asdf_fixture "$recovery_home" asdf-0.0.1
   ln -s asdf-0.0.1 "$recovery_home/bin/asdf"
   set +e
   HOME="$recovery_home" PATH="$recovery_bin:$recovery_home/bin:/usr/bin:/bin" \
-    TEST_ASDF_ARCHIVE="$legacy_archive" TEST_ASDF_LOG="$recovery_log" \
+    TEST_ASDF_ARCHIVE="$asdf_archive" TEST_ASDF_LOG="$recovery_log" \
     TEST_ASDF_FAIL_POINT="$point" TEST_ASDF_FAIL_MARKER="$test_root/failed-$point" \
     "$recovery_repo/setup-asdf" terraform >"$test_root/failure-$point.log" 2>&1
   publication_status=$?
@@ -466,7 +454,7 @@ for point in digest binary after-binary selection after-selection; do
     fail "$point interruption changed selection unexpectedly"
   if [[ $point == after-binary || $point == selection || $point == after-selection ]]; then
     recovery_archive=$test_root/absent-archive
-  else recovery_archive=$legacy_archive
+  else recovery_archive=$asdf_archive
   fi
   HOME="$recovery_home" PATH="$recovery_home/bin:/usr/bin:/bin" \
     TEST_ASDF_ARCHIVE="$recovery_archive" TEST_ASDF_LOG="$recovery_log" \

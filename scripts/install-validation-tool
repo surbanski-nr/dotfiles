@@ -49,7 +49,6 @@ else
 fi
 executable=$tools_dir/$tool
 if [[ $tool == python ]]; then
-  HELD_LOCK_FDS=()
   acquire_setup_lock "$tools_dir/.install-python.lock" 'another validation Python installation is running'
   executable=$tools_dir/python/bin/python3
 elif [[ $tool == yamllint ]]; then

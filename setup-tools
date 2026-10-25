@@ -397,8 +397,7 @@ install_version() {
   TEMP_PATHS+=("$STAGE_DIR")
   input="$STAGE_DIR/$SPEC_ASSET"
   download_file "$RELEASE_URL" "$input"
-  verify_sha256 "$input" "$RELEASE_SHA256"
-  extract_artifact "$input" "$STAGE_DIR"
+  prepare_artifact TOOL_RELEASES "$name" "$version" "$input" "$STAGE_DIR"
   if [[ $name == htop || $name == tmux ]]; then
     source_tree=$STAGE_DIR/${SPEC_DESTS[0]}
     built_tree=$STAGE_DIR/.built-$name-$version
@@ -494,19 +493,6 @@ install_selected_tools() {
   done
 }
 
-cleanup() {
-  local status=$?
-  local path
-
-  trap - EXIT
-  set +e
-  for path in "${TEMP_PATHS[@]:-}"; do
-    if [[ -e $path || -L $path ]]; then find "$path" -depth -delete; fi
-  done
-  release_setup_locks
-  exit "$status"
-}
-
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/setup-lib
 source "$REPO_DIR/scripts/setup-lib"
@@ -516,6 +502,5 @@ source "$REPO_DIR/scripts/setup-lib"
 source "$REPO_DIR/tools.env"
 # Cleanup must also work when --help returns before any installation starts.
 declare -a TEMP_PATHS=()
-declare -a HELD_LOCK_FDS=()
-trap cleanup EXIT
+trap cleanup_setup EXIT
 main "$@"

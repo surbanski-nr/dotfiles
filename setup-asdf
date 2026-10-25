@@ -115,31 +115,10 @@ verify_asdf_payload() {
   fi
 }
 
-# Legacy adoption is deliberately narrow and later requires byte-for-byte
-# comparison with the checksum-verified upstream executable.
-preflight_legacy_asdf() {
-  local target=$1 output
-
-  if [[ $target != "asdf-$ASDF_VERSION" ]]; then
-    report_error "legacy asdf target is not the current pinned version: $BIN_DIR/asdf -> $target"
-    return 1
-  fi
-  if [[ ! -f $BIN_DIR/$target || ! -x $BIN_DIR/$target || -L $BIN_DIR/$target ]]; then
-    report_error "invalid legacy asdf target: $BIN_DIR/$target"
-    return 1
-  fi
-  output=$("$BIN_DIR/$target" version 2>&1) || return
-  if [[ $output != *"$ASDF_VERSION"* ]]; then
-    report_error "legacy asdf target did not report $ASDF_VERSION"
-    return 1
-  fi
-  LEGACY_ASDF_TARGET=$target
-}
-
-# Distinguish a fresh home, verified managed selection, and eligible legacy link.
+# Distinguish a fresh home from a verified managed selection.
 preflight_asdf_link() {
   local link="$BIN_DIR/asdf"
-  local target record
+  local target
 
   if [[ -L $link ]]; then
     target=$(readlink -- "$link")
@@ -147,19 +126,13 @@ preflight_asdf_link() {
       report_error "refusing foreign asdf link: $link -> $target"
       return 1
     fi
-    record="$STATE_DIR/installations/$target.sha256"
-    if [[ ! -e $record && ! -L $record ]]; then
-      preflight_legacy_asdf "$target"
-    else
-      verify_asdf_payload "$target"
-    fi
+    verify_asdf_payload "$target"
   elif [[ -e $link ]]; then
     report_error "refusing unmanaged path: $link"
     return 1
   fi
 
   target="asdf-$ASDF_VERSION"
-  if [[ $LEGACY_ASDF_TARGET == "$target" ]]; then return 0; fi
   if [[ -e $BIN_DIR/$target || -L $BIN_DIR/$target ]]; then
     verify_asdf_payload "$target"
   fi
@@ -251,7 +224,7 @@ install_asdf() {
   select_release TOOL_RELEASES asdf "$ASDF_VERSION"
   artifact_layout asdf "$ASDF_VERSION" "$RELEASE_ASSET"
 
-  if [[ -f $destination && -z $LEGACY_ASDF_TARGET ]]; then
+  if [[ -f $destination ]]; then
     output=$("$destination" version 2>&1)
     [[ $output == *"$ASDF_VERSION"* ]] ||
       report_error "existing asdf binary did not report $ASDF_VERSION"
@@ -265,10 +238,6 @@ install_asdf() {
     output=$("$executable" version 2>&1)
     [[ $output == *"$ASDF_VERSION"* ]] ||
       report_error "downloaded asdf did not report $ASDF_VERSION"
-    if [[ -n $LEGACY_ASDF_TARGET ]]; then
-      cmp -s "$executable" "$destination" ||
-        report_error 'legacy asdf binary does not match the verified upstream archive'
-    fi
     mkdir -p "$STATE_DIR/installations"
     digest=$(sha256sum "$executable" | awk '{print $1}')
     if [[ -e $install_state || -L $install_state ]]; then
@@ -280,14 +249,9 @@ install_asdf() {
     # Record verified ownership before moving the binary so a failed publication
     # is retryable without treating our own executable as an unmanaged file.
     write_asdf_record "$install_state" "$digest"
-    if [[ -z $LEGACY_ASDF_TARGET ]]; then mv -- "$executable" "$destination"; fi
-    if [[ -n $LEGACY_ASDF_TARGET ]]; then
-      printf 'setup-asdf: adopted verified legacy asdf %s\n' "$ASDF_VERSION"
-    else
-      printf 'setup-asdf: installed asdf %s\n' "$ASDF_VERSION"
-    fi
+    mv -- "$executable" "$destination"
+    printf 'setup-asdf: installed asdf %s\n' "$ASDF_VERSION"
   fi
-  LEGACY_ASDF_TARGET=
 }
 
 select_asdf() {
@@ -359,27 +323,12 @@ reconcile_tools() {
   for name in "$@"; do select_tool "$name"; done
 }
 
-cleanup() {
-  local status=$?
-  local path
-
-  trap - EXIT
-  set +e
-  for path in "${TEMP_PATHS[@]:-}"; do
-    if [[ -e $path || -L $path ]]; then find "$path" -depth -delete; fi
-  done
-  release_setup_locks
-  exit "$status"
-}
-
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/setup-lib
 source "$REPO_DIR/scripts/setup-lib"
 # shellcheck source=tools.env
 source "$REPO_DIR/tools.env"
-# Traps need empty cleanup collections even when --help does no setup work.
+# Initialize cleanup paths even when --help exits before setup.
 declare -a TEMP_PATHS=()
-declare -a HELD_LOCK_FDS=()
-LEGACY_ASDF_TARGET=
-trap cleanup EXIT
+trap cleanup_setup EXIT
 main "$@"
