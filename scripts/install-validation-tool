@@ -10,7 +10,7 @@ die() {
 [[ $# -eq 1 ]] || die 'usage: install-validation-tool TOOL'
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/.bin}
+tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}
 tool=$1
 
 # shellcheck source=setup-lib

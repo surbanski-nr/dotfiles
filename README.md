@@ -98,7 +98,7 @@ Bootstrap the pinned Task executable and run repository validation with:
 
 ```bash
 bash scripts/install-validation-tool task
-.bin/task validate
+bin/task validate
 ```
 
 Workflow validation runs locally without GitHub credentials. Set `GH_TOKEN`,

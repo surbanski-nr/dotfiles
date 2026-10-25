@@ -31,4 +31,4 @@ jobs:
       - name: Validate with Task-managed tools
         env:
           GH_TOKEN: ${{ github.token }}
-        run: .bin/task --output=group validate
+        run: bin/task --output=group validate

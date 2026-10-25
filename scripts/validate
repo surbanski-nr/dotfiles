@@ -29,7 +29,7 @@ need() {
 }
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/.bin}
+tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}
 cleanup_paths=()
 cleanup_tmux_home=
 cleanup_tmux_socket=

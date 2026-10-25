@@ -186,6 +186,16 @@ run_installer task
 [[ $("$tools_dir/task" --version) == "Task version: v$task_version" ]] ||
   fail 'privately installed Task does not run'
 
+default_output=$(
+  cd "$test_root"
+  env -u VALIDATION_TOOLS_DIR PATH="$test_bin:$PATH" \
+    bash "$test_repo/scripts/install-validation-tool" task 2>&1
+) || fail "default validation Task installation failed: $default_output"
+[[ -x $test_repo/bin/task ]] || fail 'default installation did not provide repository-local bin/task'
+[[ $("$test_repo/bin/task" --version) == "Task version: v$task_version" ]] ||
+  fail 'default repository-local Task does not run'
+[[ ! -e $test_repo/.bin ]] || fail 'default installation created the old hidden tools directory'
+
 cat >"$test_bin/task" <<'EOF'
 #!/usr/bin/env bash
 printf 'Task version: v0.0.0\n'

@@ -82,7 +82,7 @@ ln -s "$(command -v shellcheck)" "$test_bin/shellcheck"
 
 set +e
 syntax_output=$(
-  PATH="$test_bin" VALIDATION_TOOLS_DIR="$repo_dir/.bin" \
+  PATH="$test_bin" VALIDATION_TOOLS_DIR="$repo_dir/bin" \
     /bin/bash "$syntax_repo/scripts/validate" bash 2>&1
 )
 syntax_status=$?
@@ -101,7 +101,7 @@ if then
 EOF
   set +e
   syntax_output=$(
-    PATH="$test_bin" VALIDATION_TOOLS_DIR="$repo_dir/.bin" \
+    PATH="$test_bin" VALIDATION_TOOLS_DIR="$repo_dir/bin" \
       /bin/bash "$syntax_repo/scripts/validate" bash 2>&1
   )
   syntax_status=$?

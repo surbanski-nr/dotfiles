@@ -2,7 +2,7 @@
 version: '3'
 
 env:
-  VALIDATION_TOOLS_DIR: '{{.ROOT_DIR}}/.bin'
+  VALIDATION_TOOLS_DIR: '{{.ROOT_DIR}}/bin'
 
 tasks:
   default:
