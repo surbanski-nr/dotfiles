@@ -117,7 +117,7 @@ archive_prerequisites() {
 operation_prerequisites() {
   local command_name
   archive_prerequisites || return
-  for command_name in bash chmod cp env flock ln mkdir mv stat timeout uname unlink; do
+  for command_name in bash chmod cp env flock gawk ln mkdir mv stat timeout uname unlink; do
     need "$command_name" || return
   done
 }
@@ -427,6 +427,13 @@ validate_release_directory() {
     [[ -f $release/$path && ! -L $release/$path ]] ||
       { die "release payload file is missing: $path"; return 1; }
   done
+  # Older releases keep history directly in .bashrc and need no extra files.
+  if [[ $(<"$release/dotfiles/bash/.bashrc") == *'/bash/.bash_history_lib'* ]]; then
+    for path in dotfiles/bash/.bash_history_lib dotfiles/scripts/bash-history-archive; do
+      [[ -f $release/$path && ! -L $release/$path ]] ||
+        { die "release payload file is missing: $path"; return 1; }
+    done
+  fi
   [[ -s $release/build-manifest.txt && -x $release/dotfiles-release &&
     -x $release/config/nvim2/tests/check.sh &&
     -x $release/tools/nvim/bin/nvim &&

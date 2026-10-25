@@ -1,0 +1,154 @@
+# shellcheck shell=bash
+
+HISTSIZE=100000
+# Bash truncates files by lines, not entries. Only the archiver trims this file.
+HISTFILESIZE=-1
+HISTFILE="$HOME/.histfile"
+HISTTIMEFORMAT='%F %T '
+HISTCONTROL=ignoreboth:erasedups
+shopt -s histappend histverify
+
+_DOTFILES_HISTORY_ARCHIVE=$1
+_DOTFILES_HISTORY_SHELL_PID=$BASHPID
+_DOTFILES_HISTORY_NEXT_CHECK=${_DOTFILES_HISTORY_NEXT_CHECK:-0}
+
+_dotfiles_history_with_lock() {
+  local fd status
+
+  if ! exec {fd}>>"$HISTFILE.lock"; then
+    _dotfiles_warn "cannot open history lock: $HISTFILE.lock"
+    return 1
+  fi
+  if command flock -w 2 "$fd"; then
+    if "$@"; then status=0; else status=$?; fi
+    # A child may inherit the descriptor. Explicitly unlock before closing it.
+    command flock -u "$fd" || _dotfiles_warn "cannot unlock history: $HISTFILE"
+  else
+    _dotfiles_warn "cannot lock history: $HISTFILE"
+    status=1
+  fi
+  exec {fd}>&-
+  return "$status"
+}
+
+_dotfiles_history_save_and_reload() {
+  if ! builtin history -a; then
+    # A failed write can still reset Bash's pending-entry counter. Preserve a
+    # copy now, before any later successful reload clears the memory list.
+    if ! _dotfiles_history_preserve; then _DOTFILES_HISTORY_NEEDS_BACKUP=1; fi
+    return 1
+  fi
+  if [[ ${_DOTFILES_HISTORY_NEEDS_BACKUP:-} == 1 ]]; then
+    _dotfiles_history_preserve || return 1
+    unset _DOTFILES_HISTORY_NEEDS_BACKUP
+  fi
+  if [[ ! -r $HISTFILE ]]; then
+    _dotfiles_warn "cannot read history file: $HISTFILE"
+    return 1
+  fi
+  # Incremental reads can skip peers' commands and reread ours after appending.
+  # Clear only the memory cache, after successfully saving pending commands.
+  builtin history -c
+  builtin history -r
+}
+
+_dotfiles_history_sync() {
+  [[ -n ${HISTFILE:-} ]] || return 0
+  if ((SECONDS >= _DOTFILES_HISTORY_NEXT_CHECK)); then
+    _DOTFILES_HISTORY_NEXT_CHECK=$((SECONDS + 300))
+    if ! command timeout --kill-after=2s 20s bash "$_DOTFILES_HISTORY_ARCHIVE" "$HISTFILE"; then
+      _dotfiles_warn "history archiving failed; continuing synchronization: $HISTFILE"
+    fi
+  fi
+  _dotfiles_history_with_lock _dotfiles_history_save_and_reload
+}
+
+_dotfiles_history_preserve() {
+  local copy template
+
+  for template in "$HOME/.histfile-unsaved.XXXXXX" /tmp/dotfiles-history-unsaved.XXXXXX; do
+    copy=$(mktemp "$template" 2>/dev/null) || continue
+    if builtin history -w "$copy"; then
+      _dotfiles_warn "history save failed; preserved memory history in: $copy"
+      return 0
+    else
+      _dotfiles_warn "cannot save recovery history; inspect partial copy: $copy"
+    fi
+  done
+  _dotfiles_warn 'history save failed; cannot preserve a recovery copy; keeping memory history'
+  return 1
+}
+
+_dotfiles_history_exit() {
+  local status=$1
+
+  [[ $BASHPID == "$_DOTFILES_HISTORY_SHELL_PID" ]] || return "$status"
+  if [[ -n ${HISTFILE:-} ]]; then
+    if ! _dotfiles_history_with_lock builtin history -a ||
+      [[ ${_DOTFILES_HISTORY_NEEDS_BACKUP:-} == 1 ]]; then
+      _dotfiles_history_preserve || true
+    fi
+  fi
+  # Prevent Bash's implicit exit write from bypassing our lock. Keep HISTFILE
+  # available to existing EXIT handlers, including ones which call exit again.
+  set +o history
+  return "$status"
+}
+
+_dotfiles_install_history_exit() {
+  local current quoted previous wrapper
+
+  current=$(builtin trap -p EXIT)
+  quoted=${current#trap -- }
+  quoted=${quoted% EXIT}
+  previous=
+  [[ -z $quoted ]] || eval "previous=$quoted"
+  # Both branches preserve the incoming status for the foreign handler, even
+  # with errexit enabled. The condition lets our save finish on a failed exit.
+  # shellcheck disable=SC2016
+  wrapper='if _dotfiles_history_exit "$?"; then
+    eval "${_DOTFILES_HISTORY_PREVIOUS_EXIT_COMMAND:-}"
+  else
+    eval "${_DOTFILES_HISTORY_PREVIOUS_EXIT_COMMAND:-}"
+  fi'
+  # Also accept foreign code appended around our trap; do not wrap ourselves.
+  [[ $previous != *"$wrapper"* ]] || return 0
+  _DOTFILES_HISTORY_PREVIOUS_EXIT_COMMAND=$previous
+  builtin trap -- "$wrapper" EXIT
+}
+
+_dotfiles_install_prompt_command() {
+  local duplicate entry existing
+  local -a current=() normalized=()
+
+  if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a'* ]]; then
+    current=("${PROMPT_COMMAND[@]}")
+  elif [[ -n ${PROMPT_COMMAND:-} ]]; then
+    current=("$PROMPT_COMMAND")
+  fi
+
+  for entry in "${current[@]}"; do
+    case $entry in
+    'history -a; history -r' | 'history -a; history -n' | '_dotfiles_history_sync')
+      continue
+      ;;
+    *';history -a; history -r') entry=${entry%';history -a; history -r'} ;;
+    *'; history -a; history -r') entry=${entry%'; history -a; history -r'} ;;
+    *';history -a; history -n') entry=${entry%';history -a; history -n'} ;;
+    *'; history -a; history -n') entry=${entry%'; history -a; history -n'} ;;
+    esac
+    entry=${entry%;}
+    [[ -n $entry ]] || continue
+
+    duplicate=false
+    for existing in "${normalized[@]}"; do
+      if [[ $existing == "$entry" ]]; then
+        duplicate=true
+        break
+      fi
+    done
+    $duplicate || normalized+=("$entry")
+  done
+
+  PROMPT_COMMAND=("${normalized[@]}" '_dotfiles_history_sync')
+}

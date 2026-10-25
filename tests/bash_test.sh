@@ -387,7 +387,8 @@ printf '#!/usr/bin/env bash\nprintf "asdf\\n"\n' >"$transition_home/.asdf/shims/
 chmod 0755 "$transition_home/.asdf/shims/asdf-only-tool"
 for root in "$transition_connected" "$transition_a/dotfiles" "$transition_b/dotfiles"; do
   mkdir -p "$root/bash" "$root/scripts"
-  cp "$repo_dir/bash/.bashrc" "$root/bash/.bashrc"
+  cp "$repo_dir/bash/.bashrc" "$repo_dir/bash/.bash_history_lib" "$root/bash/"
+  cp "$repo_dir/scripts/bash-history-archive" "$root/scripts/"
 done
 printf 'RELEASE_ID=dotfiles-aaaaaaaaaaaa\n' >"$transition_a/release.env"
 printf 'RELEASE_ID=dotfiles-bbbbbbbbbbbb\n' >"$transition_b/release.env"
@@ -511,8 +512,9 @@ for setup_mode in connected repo-with-release offline custom-store; do
   fallback=.asdf/shims
   if [[ $setup_mode != connected ]]; then
     override_release=$override_store/dotfiles-cccccccccccc
-    mkdir -p "$override_release/dotfiles/bash" "$override_release/bin"
-    cp "$override_bashrc" "$override_release/dotfiles/bash/.bashrc"
+    mkdir -p "$override_release/dotfiles/bash" "$override_release/dotfiles/scripts" "$override_release/bin"
+    cp "$override_bashrc" "$repo_dir/bash/.bash_history_lib" "$override_release/dotfiles/bash/"
+    cp "$repo_dir/scripts/bash-history-archive" "$override_release/dotfiles/scripts/"
     printf 'RELEASE_ID=dotfiles-cccccccccccc\n' >"$override_release/release.env"
     printf '#!/usr/bin/env bash\nprintf "release\\n"\n' >"$override_release/bin/path-probe"
     chmod 0755 "$override_release/bin/path-probe"

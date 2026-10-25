@@ -78,6 +78,9 @@ fi
 export WORK="${WORK:-$HOME/work}"
 # Keep virtual environment activation from modifying the prompt.
 export VIRTUAL_ENV_DISABLE_PROMPT=1
+# shellcheck source=.bash_history_lib
+source "$_dotfiles_source_root/bash/.bash_history_lib" \
+  "$_dotfiles_source_root/scripts/bash-history-archive"
 unset _dotfiles_source _dotfiles_source_root
 
 # Drop private paths inherited from a release launcher or tmux pane. Shell
@@ -162,67 +165,8 @@ _dotfiles_init_ssh_agent() {
 _dotfiles_init_ssh_agent
 unset -f _dotfiles_init_ssh_agent _dotfiles_ssh_agent_reachable
 
-_dotfiles_history_sync() {
-  [[ -n ${HISTFILE:-} ]] || return 0
-  history -a || return
-  if [[ ! -r $HISTFILE ]]; then
-    _dotfiles_warn "cannot read history file: $HISTFILE"
-    return 1
-  fi
-  # Incremental reads can skip peers' commands and reread ours after appending.
-  # Clear only the memory cache, after successfully saving pending commands.
-  history -c
-  history -r
-}
-
-_dotfiles_install_prompt_command() {
-  local duplicate entry existing
-  local -a current=() normalized=()
-
-  if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a'* ]]; then
-    current=("${PROMPT_COMMAND[@]}")
-  elif [[ -n ${PROMPT_COMMAND:-} ]]; then
-    current=("$PROMPT_COMMAND")
-  fi
-
-  for entry in "${current[@]}"; do
-    case $entry in
-    'history -a; history -r' | 'history -a; history -n' | '_dotfiles_history_sync')
-      continue
-      ;;
-    *';history -a; history -r') entry=${entry%';history -a; history -r'} ;;
-    *'; history -a; history -r') entry=${entry%'; history -a; history -r'} ;;
-    *';history -a; history -n') entry=${entry%';history -a; history -n'} ;;
-    *'; history -a; history -n') entry=${entry%'; history -a; history -n'} ;;
-    esac
-    entry=${entry%;}
-    [[ -n $entry ]] || continue
-
-    duplicate=false
-    for existing in "${normalized[@]}"; do
-      if [[ $existing == "$entry" ]]; then
-        duplicate=true
-        break
-      fi
-    done
-    $duplicate || normalized+=("$entry")
-  done
-
-  PROMPT_COMMAND=("${normalized[@]}" '_dotfiles_history_sync')
-}
-
-# Keep a large bounded history and share new commands between open shells.
-HISTSIZE=100000
-HISTFILESIZE=100000
-HISTFILE="$HOME/.histfile"
-HISTTIMEFORMAT='%F %T '
-
-# Filter newly recorded commands, not entries read from the shared file.
-HISTCONTROL=ignoreboth:erasedups
-
-# Append history, verify history expansion, warn about active jobs on exit, and
-# keep terminal dimensions current.
-shopt -s histappend histverify checkjobs checkwinsize
+# Warn about active jobs on exit and keep terminal dimensions current.
+shopt -s checkjobs checkwinsize
 
 # Preserve failures from the left side of pipelines used by shell helpers.
 set -o pipefail
@@ -412,3 +356,4 @@ if [ -f ~/.extras ]; then
 fi
 
 _dotfiles_install_prompt_command
+_dotfiles_install_history_exit

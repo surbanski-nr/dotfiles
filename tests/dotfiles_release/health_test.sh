@@ -13,18 +13,20 @@ if run_manager health >"$test_root/empty-health.log" 2>&1; then
 fi
 [[ ! -e $test_home/dotfiles-releases ]] || fail 'health created a release store'
 
-test_home=$test_root/prerequisites-home
-mkdir -p "$test_home" "$test_root/no-sort"
-for executable in /usr/bin/*; do
-  [[ $executable != /usr/bin/sort && -f $executable && -x $executable ]] || continue
-  ln -s "$executable" "$test_root/no-sort/${executable##*/}"
+for missing in sort gawk; do
+  test_home=$test_root/prerequisites-$missing
+  mkdir -p "$test_home" "$test_root/no-$missing"
+  for executable in /usr/bin/*; do
+    [[ $executable != /usr/bin/$missing && -f $executable && -x $executable ]] || continue
+    ln -s "$executable" "$test_root/no-$missing/${executable##*/}"
+  done
+  if PATH="$test_root/no-$missing" run_manager install "$artifact_one" >"$test_root/prerequisites.log" 2>&1; then
+    fail 'installation accepted a missing system prerequisite'
+  fi
+  [[ $(<"$test_root/prerequisites.log") == *"required command is missing: $missing"* &&
+    ! -e $test_home/dotfiles-releases ]] ||
+    fail 'system prerequisite failure modified HOME or omitted its cause'
 done
-if PATH="$test_root/no-sort" run_manager install "$artifact_one" >"$test_root/prerequisites.log" 2>&1; then
-  fail 'installation accepted a missing system prerequisite'
-fi
-[[ $(<"$test_root/prerequisites.log") == *'required command is missing: sort'* &&
-  ! -e $test_home/dotfiles-releases ]] ||
-  fail 'system prerequisite failure modified HOME or omitted its cause'
 
 test_home=$test_root/health-home
 mkdir -p "$test_home/bin"

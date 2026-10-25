@@ -29,10 +29,12 @@ fi
 syntax_repo=$test_root/syntax-repo
 mkdir -p "$syntax_repo/bash" "$syntax_repo/scripts" "$syntax_repo/tests"
 cp "$repo_dir/scripts/validate" "$syntax_repo/scripts/validate"
-for file in .bashrc .bash_profile .bash_aliases; do
+for file in .bashrc .bash_profile .bash_aliases .bash_history_lib; do
   printf ':\n' >"$syntax_repo/bash/$file"
 done
-cp "$repo_dir/tests/fixtures/validation/batch-test" "$syntax_repo/tests/bash_test.sh"
+for file in bash_test.sh bash_history_test.sh; do
+  cp "$repo_dir/tests/fixtures/validation/batch-test" "$syntax_repo/tests/$file"
+done
 mkdir -p "$syntax_repo/tests/fixtures/bash"
 printf '#!/usr/bin/env bash\n:\n' >"$syntax_repo/tests/fixtures/bash/input"
 printf '# Validation fixture\n' >"$syntax_repo/README.md"

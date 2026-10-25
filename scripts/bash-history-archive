@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+umask 077
+
+die() {
+  printf 'bash-history-archive: %s\n' "$*" >&2
+  exit 1
+}
+
+[[ $# -le 1 ]] || die 'usage: bash-history-archive [HISTORY_FILE]'
+history_file=${1-${HISTFILE:-$HOME/.histfile}}
+[[ -n $history_file ]] || die 'history file must not be empty'
+[[ -e $history_file || -L $history_file ]] || exit 0
+
+archive_stage=
+retained_stage=
+cleanup() {
+  [[ -z $archive_stage ]] || rm -f -- "$archive_stage"
+  [[ -z $retained_stage ]] || rm -f -- "$retained_stage"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+exec {lock_fd}>>"$history_file.lock"
+flock -w 5 "$lock_fd" || die "cannot lock history: $history_file"
+target=$(readlink -f -- "$history_file")
+[[ -f $target && -O $target && -r $target && -w $target ]] ||
+  die "history must be an owned, readable and writable regular file: $history_file"
+[[ $(stat -c %h -- "$target") == 1 ]] || die 'cannot rotate hard-linked history'
+
+# Bash timestamps delimit multiline entries. Older, untimestamped leading
+# lines are individual entries. Count commands, not physical lines.
+count=$(LC_ALL=C gawk -- '
+  /^#[0-9]+$/ { timestamped = 1; entries++; next }
+  !timestamped && length($0) { entries++ }
+  END { print entries + 0 }
+' "$target")
+((count >= 90000)) || exit 0
+
+archive_dir=$history_file.d
+if [[ ! -e $archive_dir && ! -L $archive_dir ]]; then
+  mkdir -- "$archive_dir"
+fi
+[[ -d $archive_dir && ! -L $archive_dir && -O $archive_dir ]] ||
+  die "archive directory must be an owned directory, not a symlink: $archive_dir"
+chmod 700 -- "$archive_dir"
+parent=${target%/*}
+archive_stage=$(mktemp "$archive_dir/.history-archive.XXXXXX")
+retained_stage=$(mktemp "$parent/.history-retained.XXXXXX")
+
+# ENVIRON preserves backslashes in paths; awk -v would interpret escapes.
+# RT also preserves a last line without a newline, byte for byte.
+HISTORY_ARCHIVE_STAGE=$archive_stage HISTORY_RETAINED_STAGE=$retained_stage \
+  LC_ALL=C gawk -- '
+    /^#[0-9]+$/ { timestamped = 1; entries++ }
+    !timestamped && length($0) { entries++ }
+    {
+      output = ENVIRON[entries <= 80000 ? "HISTORY_ARCHIVE_STAGE" : "HISTORY_RETAINED_STAGE"]
+      printf "%s%s", $0, RT > output
+    }
+    END {
+      if (close(ENVIRON["HISTORY_ARCHIVE_STAGE"]) || close(ENVIRON["HISTORY_RETAINED_STAGE"])) exit 1
+    }
+  ' "$target"
+chmod --reference="$target" -- "$retained_stage"
+sync -- "$archive_stage" "$retained_stage"
+
+# Publish a complete, durable archive before replacing the live file. An
+# interruption can leave duplicate history, but never discard the only copy.
+archive=$archive_dir/history-$(date -u +%Y%m%dT%H%M%SZ)-${archive_stage##*.}.hist
+ln -- "$archive_stage" "$archive"
+sync -- "$archive_dir"
+mv -T -- "$retained_stage" "$target"
+retained_stage=
+sync -- "$parent"

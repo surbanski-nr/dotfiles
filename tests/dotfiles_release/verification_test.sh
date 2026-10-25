@@ -7,6 +7,9 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/fixture.sh"
 create_fixture
 
 release=$test_root/stage-one/$id_one
+# Releases whose .bashrc predates the library must still verify and install.
+unlink "$release/dotfiles/bash/.bash_history_lib"
+unlink "$release/dotfiles/scripts/bash-history-archive"
 printf 'Go UTF-8 fixture\n' >"$release/tools/Þfoo.go"
 ln -s Þfoo.go "$release/tools/utf8-link"
 ln -s lib/tmux-test/run_tests "$release/share/tmux/plugins/tmux-resurrect/run_tests"
@@ -49,7 +52,7 @@ fi
 [[ ! -e $test_home/dotfiles-releases/$id_two && ! -L $test_home/dotfiles-releases/current ]] ||
   fail 'failed runtime probe activated or retained the candidate'
 
-for defect in missing-layout missing-executable missing-plugin missing-wheelhouse \
+for defect in missing-layout missing-executable missing-plugin missing-wheelhouse missing-history-library missing-history-archiver \
   dangling-plugin-runtime missing-private-nvim missing-private-tmux missing-nvim-runtime \
   missing-private-python-link public-python public-python3 \
   incomplete-ssh checksum missing-checksum extra-file extra-root dangling-link duplicate-member installed-state \
@@ -60,6 +63,14 @@ for defect in missing-layout missing-executable missing-plugin missing-wheelhous
   release=$test_root/stage-$marker/$id_three
   case $defect in
     missing-layout) find "$release/config" -depth -delete ;;
+    missing-history-library | missing-history-archiver)
+      cp "$repo_dir/bash/.bashrc" "$release/dotfiles/bash/.bashrc"
+      if [[ $defect == missing-history-library ]]; then
+        unlink "$release/dotfiles/bash/.bash_history_lib"
+      else
+        unlink "$release/dotfiles/scripts/bash-history-archive"
+      fi
+      ;;
     missing-executable) unlink "$release/bin/uvx" ;;
     missing-plugin) find "$release/share/tmux/plugins/tmux-sensible" -depth -delete ;;
     missing-wheelhouse) find "$release/python-wheelhouse" -depth -delete ;;

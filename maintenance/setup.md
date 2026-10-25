@@ -49,21 +49,52 @@ enabled automatically. A pre-existing `~/.ssh/config` is a deliberate stow
 conflict and must be reviewed before installation.
 
 Both deployment flows keep interactive Bash history in `~/.histfile`, outside
-the repository and release payloads. Before each prompt, `history -a` appends
-this shell's new commands. After a successful save, `history -c` clears only
-the in-memory list and `history -r` reloads the shared file. This avoids missed
-or duplicated entries when several shells append between prompts. A failed
-save preserves pending commands in memory; an unset or empty `HISTFILE`
-disables synchronization. `histappend` keeps normal shell exits from
-overwriting the shared file. Reloading `.bashrc` preserves unrelated prompt
-hooks without duplicating them or the synchronization hook.
-This is bounded history, not an unlimited archive: `HISTSIZE` and `HISTFILESIZE`
-are both 100000. Commands beginning with a space are omitted, consecutive
-duplicates are skipped, and older repetitions are removed from the in-memory
-list when recording commands with `HISTCONTROL=ignoreboth:erasedups`. Imported
-entries are not filtered, so repeated executions already saved in the shared
-file can reappear after a refresh. Synchronization does not deduplicate or
-rewrite the file.
+the repository and release payloads. Before each prompt, synchronization takes
+`~/.histfile.lock` and uses `history -a` to append this shell's new commands.
+After a successful save, `history -c` clears only the in-memory list and
+`history -r` reloads the shared file. This avoids missed or duplicated entries
+when several shells append between prompts, including after archiving. A
+failed save leaves commands in memory; an unset or empty `HISTFILE` disables
+synchronization. Normal exits append under the same lock and disable Bash's
+implicit exit write. A failed append, or a failed exit lock, also preserves a
+private `~/.histfile-unsaved.*` memory snapshot (or a temporary-directory fallback)
+and prints its path. Review that copy manually; it is not merged automatically.
+Bash can reset its pending-entry counter even after a failed disk write, so
+this copy protects commands that a later refresh could otherwise discard.
+If both recovery locations fail, refresh keeps the memory list until a copy
+can be saved; repeated sourcing does not remove that protection. If storage
+still cannot accept a copy at exit, the warning cannot guarantee recovery.
+Reloading `.bashrc` preserves unrelated prompt and EXIT hooks without adding
+duplicates or changing the exit status. These are hooks from other shell
+integrations, such as zoxide and Oh My Posh, or your own `~/.extras` cleanup
+commands; they belong to the same shell, not to other users.
+
+No systemd service or timer is used for history. At the first prompt and then
+at most once every five minutes per shell, `scripts/bash-history-archive`
+checks the shared file under the same lock. At 90000 or more entries it archives
+the oldest 80000 into a private `~/.histfile.d/history-*.hist` file and leaves
+every remaining entry, including any threshold overshoot. Timestamps and
+multiline commands stay together. The archive is fully written and flushed
+before atomically replacing the live file. A failed check warns and lets
+synchronization continue; an interruption between publication and replacement
+can leave duplicate entries in an archive, not lose their only copy. Archives
+are retained without an automatic expiry policy and do not appear in Up-arrow
+searches. Inspect them with `less ~/.histfile.d/history-*.hist`, or run a manual
+check with `bash "$DOTFILES/scripts/bash-history-archive" "$HISTFILE"`.
+
+The per-prompt archive trigger is only a Bash time comparison, not a file count.
+Each actual check has a 20-second deadline. Writer locks wait up to two seconds
+and archive locks up to five seconds. `HISTSIZE=100000` bounds only memory;
+`HISTFILESIZE=-1` prevents Bash's line-based truncation from deleting unarchived
+commands. Close or reload every older shell before relying on coordinated
+archiving: older writers do not take this lock. Unsaved commands in a forcibly
+killed shell cannot be recovered. Do not remove the lock file to bypass a lock.
+
+Commands beginning with a space are omitted, consecutive duplicates are
+skipped, and older repetitions are removed from the in-memory list when
+recording commands with `HISTCONTROL=ignoreboth:erasedups`. Imported entries are
+not filtered, so repeated executions already saved in the shared file can
+reappear after a refresh. Synchronization does not deduplicate the file.
 
 `tools.env` owns tool profiles, release records, version checks and asdf/tmux
 plugin pins. It stores direct releases in `TOOL_RELEASES`. Each tool has ordered
