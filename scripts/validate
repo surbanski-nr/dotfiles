@@ -203,13 +203,13 @@ validate_scripts() {
     tests/validate_test.sh
   )
 
-  for file in scripts/setup-lib tests/dotfiles_release/fixture.sh tests/setup_tools/fixture.sh; do
+  for file in scripts/setup-lib scripts/setup-system-lib tests/dotfiles_release/fixture.sh tests/setup_tools/fixture.sh; do
     [[ ! -x $file ]] || die "source-only library is executable: $file"
   done
   for file in scripts/* tests/fixtures/*/* \
     tests/dotfiles_release/*_test.sh tests/setup_tools/*_test.sh \
     bstow vim/setup nvim2/.config/nvim2/tests/check.sh; do
-    [[ $file == scripts/setup-lib ]] && continue
+    [[ $file == scripts/setup-lib || $file == scripts/setup-system-lib ]] && continue
     [[ -x $file ]] || die "executable bit is missing: $file"
   done
 

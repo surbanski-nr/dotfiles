@@ -57,6 +57,7 @@ case $1 in
       exit 83
     fi
     ;;
-  cp | commit | rm | image | info) ;;
+  cp) [[ -e $2 ]] || exit 1 ;;
+  commit | rm | image | info) ;;
   *) exit 2 ;;
 esac

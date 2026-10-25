@@ -9,9 +9,17 @@ command_name=${0##*/}
   printf '\n'
 } >>"$TEST_DOCKER_LOG"
 
+if [[ ${TEST_DOCKER_TIMEOUT:-} == "$command_name" ]]; then
+  exit 124
+fi
+
 case $command_name in
   curl)
     [[ ${TEST_DOCKER_FAIL:-} != curl ]] || exit 75
+    if [[ ${TEST_DOCKER_NETWORK_FAIL:-0} == 1 ]]; then
+      printf 'curl: (6) Could not resolve host: download.docker.com\n' >&2
+      exit 6
+    fi
     while (($#)); do
       case $1 in
         --output)

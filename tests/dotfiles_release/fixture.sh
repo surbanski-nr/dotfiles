@@ -160,16 +160,7 @@ make_artifact() {
     "$release/tools/bin" "$release/tools/nvim/bin" "$release/tools/tmux/bin" \
     "$release/tools/nvim/share/nvim/runtime"
 
-  {
-    printf '#!/usr/bin/env bash\n'
-    (
-      # shellcheck source=../../tools.env
-      source "$repo_dir/tools.env"
-      declare -p TOOL_CHECKS
-    )
-    cat "$repo_dir/scripts/dotfiles-release"
-  } >"$release/dotfiles-release"
-  chmod 0755 "$release/dotfiles-release"
+  bash "$repo_dir/scripts/build-standalone-script" "$repo_dir" "$release/dotfiles-release"
   ln -s ../dotfiles-release "$release/bin/dotfiles-release"
   for command_name in nvim tmux; do
     write_fake_tool "$release/tools/$command_name/bin/$command_name" "$release_version"

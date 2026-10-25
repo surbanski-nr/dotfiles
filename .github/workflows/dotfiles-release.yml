@@ -89,7 +89,7 @@ jobs:
           bash ci/scripts/dotfiles-release-ci build
           "$GITHUB_WORKSPACE/release-source" "$RUNNER_TEMP/dotfiles-output"
 
-      - name: Publish archive, checksum and standalone manager
+      - name: Publish archive, checksums and standalone manager
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+embed_file() {
+  local source=$1
+  printf '\n##### BEGIN %s #####\n' "$source"
+  cat "$source_dir/$source"
+  printf '\n##### END %s #####\n\n' "$source"
+}
+
+(($# == 2)) || {
+  printf 'Usage: build-standalone-script SOURCE_DIR OUTPUT_FILE\n' >&2
+  exit 2
+}
+source_dir=$1 output=$2
+mkdir -p -- "$(dirname -- "$output")"
+{
+  printf '#!/usr/bin/env bash\n# Generated from repository sources; edit those sources, not this artifact.\n\n'
+  printf '##### BEGIN system.env (runtime and Docker) #####\n'
+  (
+    # shellcheck source=../system.env
+    source "$source_dir/system.env"
+    declare -p SYSTEM_RUNTIME_PACKAGES SYSTEM_RUNTIME_COMMANDS \
+      SYSTEM_DEBIAN_RUNTIME_PACKAGES SYSTEM_AMZN_RUNTIME_PACKAGES \
+      SYSTEM_DEBIAN_DOCKER_PACKAGES SYSTEM_AMZN_DOCKER_PACKAGES \
+      SYSTEM_DEBIAN_DOCKER_PREREQUISITE_PACKAGES SYSTEM_AMZN_DOCKER_PREREQUISITE_PACKAGES \
+      SYSTEM_DEBIAN_DOCKER_CONFLICTS SYSTEM_AMZN_DOCKER_CONFLICTS
+  )
+  printf '##### END system.env (runtime and Docker) #####\n'
+  printf '\n##### BEGIN tools.env (TOOL_CHECKS) #####\n'
+  (
+    # shellcheck source=../tools.env
+    source "$source_dir/tools.env"
+    declare -p TOOL_CHECKS
+  )
+  printf '##### END tools.env (TOOL_CHECKS) #####\n'
+  embed_file scripts/setup-system-lib
+  embed_file scripts/dotfiles-release
+} >"$output"
+bash -n "$output"
+chmod 0755 "$output"
+(cd -- "$(dirname -- "$output")" && sha256sum "${output##*/}" >"${output##*/}.sha256")

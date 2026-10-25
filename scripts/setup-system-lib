@@ -1,0 +1,289 @@
+#!/usr/bin/env bash
+
+system_error() {
+  printf '%s: %s\n' "${SETUP_NAME:-${0##*/}}" "$*" >&2
+  return 1
+}
+
+setup_system() {
+  local package_profile=$1
+  SETUP_NAME=${SETUP_NAME:-${0##*/}}
+  system_validate_host
+  SETUP_WARNINGS=0
+  SETUP_TEMP_DIR=$(mktemp -d)
+  trap 'find "$SETUP_TEMP_DIR" -depth -delete' EXIT
+  install_system_packages "$PLATFORM" "$package_profile" false system_setup_package_command
+  system_install_docker
+  system_verify_packages "$package_profile"
+  if ((SETUP_WARNINGS > 0)); then
+    printf '%s: completed with %s warnings; host preparation may be incomplete. Rerun when network access is available.\n' "$SETUP_NAME" "$SETUP_WARNINGS" >&2
+  fi
+}
+
+system_validate_host() {
+  local os_release_file=${SETUP_SYSTEM_OS_RELEASE_FILE:-/etc/os-release}
+
+  [[ $(uname -s) == Linux ]] || system_error 'only Linux is supported'
+  [[ $(uname -m) == x86_64 ]] || system_error 'only Linux x86-64 is supported'
+  [[ -r $os_release_file ]] || system_error "cannot read $os_release_file"
+  # shellcheck disable=SC1090
+  source "$os_release_file"
+  case "${ID:-}:${VERSION_ID:-}" in
+    debian:13 | ubuntu:24.04 | ubuntu:26.04 | amzn:2023)
+      PLATFORM="$ID:$VERSION_ID"
+      ;;
+    *) system_error "unsupported distribution: ${ID:-unknown} ${VERSION_ID:-unknown}" ;;
+  esac
+  ROOT_COMMAND=()
+  if ((EUID != 0)); then
+    command -v sudo >/dev/null 2>&1 || system_error 'required command is missing: sudo'
+    ROOT_COMMAND=(sudo --)
+  fi
+}
+
+system_warning() {
+  printf '%s: warning: %s\n' "$SETUP_NAME" "$*" >&2
+  SETUP_WARNINGS=$((SETUP_WARNINGS + 1))
+}
+
+system_setup_command() {
+  local description=$1 status
+  shift
+  printf '%s: %s\n' "$SETUP_NAME" "$description"
+  if "$@" >"$SETUP_TEMP_DIR/command.log" 2>&1; then
+    cat "$SETUP_TEMP_DIR/command.log"
+    return 0
+  else
+    status=$?
+  fi
+  cat "$SETUP_TEMP_DIR/command.log"
+  # Do not misclassify an integrity failure when another repository timed out.
+  if grep -Eiq 'NO_PUBKEY|EXPKEYSIG|BADSIG|not signed|invalid signature|signatures.*couldn.t be verified|Hash Sum mismatch|checksum mismatch' "$SETUP_TEMP_DIR/command.log"; then
+    exit "$status"
+  fi
+  if [[ $status == 124 || $status == 137 ]] ||
+    [[ $1 == curl && $status =~ ^(5|6|7|18|22|28|35|47|52|55|56|60|97)$ ]] ||
+    grep -Eiq 'Temporary failure resolving|Could(n.t| not) (resolve|connect)|Failed to connect|Connection (timed out|refused|reset)|Network is unreachable|Cannot initiate the connection|timed? *out|timeout|Curl error \((5|6|7|28|52|55|56)\)|All mirrors were tried|[45][0-9][0-9] (Forbidden|Unauthorized|Not Found|Bad Gateway|Service Unavailable|Gateway Timeout)' "$SETUP_TEMP_DIR/command.log" ||
+    { ((SETUP_WARNINGS > 0)) && grep -Eiq 'Unable to locate package|has no installation candidate|No match for argument|Unable to find a match' "$SETUP_TEMP_DIR/command.log"; }; then
+    system_warning "$description failed (exit $status); continuing"
+    return 1
+  fi
+  exit "$status"
+}
+
+system_setup_package_command() {
+  system_setup_command 'OS package installation' "${ROOT_COMMAND[@]}" \
+    timeout --kill-after=5s 600s env LC_ALL=C "$@" || true
+}
+
+system_existing_docker() {
+  local package
+  case $PLATFORM in
+    debian:* | ubuntu:*)
+      for package in "${SYSTEM_DEBIAN_DOCKER_PACKAGES[@]}" "${SYSTEM_DEBIAN_DOCKER_CONFLICTS[@]}"; do
+        if [[ $(dpkg-query -W -f '${db:Status-Status}' -- "$package" 2>/dev/null || true) == installed ]]; then
+          printf 'package %s\n' "$package"
+          return 0
+        fi
+      done
+      ;;
+    amzn:2023)
+      for package in "${SYSTEM_AMZN_DOCKER_PACKAGES[@]}" "${SYSTEM_AMZN_DOCKER_CONFLICTS[@]}"; do
+        if rpm -q "$package" >/dev/null 2>&1; then
+          printf 'package %s\n' "$package"
+          return 0
+        fi
+      done
+      ;;
+  esac
+  if command -v docker >/dev/null 2>&1; then
+    printf 'command %s\n' "$(command -v docker)"
+    return 0
+  fi
+  return 1
+}
+
+system_install_docker_repository() {
+  local distribution suite stage
+  local etc_dir=${SETUP_SYSTEM_ETC_DIR:-/etc}
+  local key_file=$etc_dir/apt/keyrings/docker.asc
+  local source_file=$etc_dir/apt/sources.list.d/docker.sources
+
+  case $PLATFORM in
+    debian:13) distribution=debian; suite=trixie ;;
+    ubuntu:24.04) distribution=ubuntu; suite=noble ;;
+    ubuntu:26.04) distribution=ubuntu; suite=resolute ;;
+  esac
+  if [[ -e $etc_dir/apt/sources.list.d/docker.list || -L $etc_dir/apt/sources.list.d/docker.list ]]; then
+    system_error 'legacy Docker repository docker.list exists; review and migrate it before rerunning' || exit 1
+  fi
+
+  stage=$SETUP_TEMP_DIR/docker
+  mkdir -m 0700 "$stage" || exit
+  printf '%s\n' \
+    'Types: deb' \
+    "URIs: https://download.docker.com/linux/$distribution" \
+    "Suites: $suite" \
+    'Components: stable' \
+    'Architectures: amd64' \
+    "Signed-By: $key_file" >"$stage/docker.sources" || exit
+  if [[ -e $source_file || -L $source_file ]]; then
+    if [[ -L $source_file ]] || ! cmp -s "$stage/docker.sources" "$source_file"; then
+      system_error "existing Docker repository differs: $source_file; review it before rerunning" || exit 1
+    fi
+  fi
+  system_setup_command 'Docker signing key download' \
+    curl --fail --silent --show-error --location --max-time 120 \
+    "https://download.docker.com/linux/$distribution/gpg" --output "$stage/docker.asc" || return 1
+  gpg --batch --no-options --homedir "$stage" --show-keys "$stage/docker.asc" >/dev/null || exit
+  "${ROOT_COMMAND[@]}" install -m 0755 -d "$etc_dir/apt/keyrings" "$etc_dir/apt/sources.list.d" || exit
+  "${ROOT_COMMAND[@]}" install -m 0644 "$stage/docker.asc" "$key_file" || exit
+  "${ROOT_COMMAND[@]}" install -m 0644 "$stage/docker.sources" "$source_file" || exit
+}
+
+system_install_docker() {
+  local existing user_id prerequisite
+  local -a prerequisites=(systemctl)
+  if existing=$(system_existing_docker); then
+    printf '%s: skipping Docker setup (%s already present); leaving packages, services and user groups unchanged\n' "$SETUP_NAME" "$existing"
+    return 0
+  fi
+  if ((EUID == 0)); then
+    SETUP_USER=${SUDO_USER:-}
+    [[ -n $SETUP_USER ]] || system_error 'run Docker installation as the intended ordinary user, directly or through sudo'
+  else
+    SETUP_USER=$(id -un)
+  fi
+  user_id=$(id -u -- "$SETUP_USER") || system_error "unknown setup user: $SETUP_USER"
+  [[ $user_id != 0 ]] || system_error 'Docker installation needs an ordinary user for group membership'
+
+  case $PLATFORM in
+    debian:* | ubuntu:*)
+      prerequisites+=(curl gpg)
+      if ! command -v curl >/dev/null || ! command -v gpg >/dev/null ||
+        ! command -v systemctl >/dev/null; then
+        system_setup_command 'Docker prerequisites' "${ROOT_COMMAND[@]}" \
+          timeout --kill-after=5s 600s env LC_ALL=C DEBIAN_FRONTEND=noninteractive \
+          apt-get install -y "${SYSTEM_DEBIAN_DOCKER_PREREQUISITE_PACKAGES[@]}" || return 0
+      fi
+      for prerequisite in "${prerequisites[@]}"; do
+        if ! command -v "$prerequisite" >/dev/null; then
+          if ((SETUP_WARNINGS > 0)); then
+            system_warning "Docker setup needs $prerequisite; skipping Docker installation"
+            return 0
+          fi
+          system_error "Docker setup needs $prerequisite"
+        fi
+      done
+      system_install_docker_repository || return 0
+      system_setup_package_command env DEBIAN_FRONTEND=noninteractive apt-get update --error-on=any
+      system_setup_command 'Docker package installation' "${ROOT_COMMAND[@]}" \
+        timeout --kill-after=5s 600s env LC_ALL=C DEBIAN_FRONTEND=noninteractive \
+        apt-get install -y "${SYSTEM_DEBIAN_DOCKER_PACKAGES[@]}" || return 0
+      ;;
+    amzn:2023)
+      if ! command -v systemctl >/dev/null; then
+        system_setup_command 'Docker prerequisites' "${ROOT_COMMAND[@]}" \
+          timeout --kill-after=5s 600s env LC_ALL=C \
+          dnf install -y "${SYSTEM_AMZN_DOCKER_PREREQUISITE_PACKAGES[@]}" || return 0
+      fi
+      system_setup_command 'Docker package installation' "${ROOT_COMMAND[@]}" \
+        timeout --kill-after=5s 600s env LC_ALL=C \
+        dnf install -y "${SYSTEM_AMZN_DOCKER_PACKAGES[@]}" || return 0
+      ;;
+  esac
+  "${ROOT_COMMAND[@]}" groupadd --force docker
+  "${ROOT_COMMAND[@]}" usermod --append --groups docker -- "$SETUP_USER"
+  printf '%s: %s added to docker (root-equivalent); log out and back in before using Docker without sudo\n' "$SETUP_NAME" "$SETUP_USER"
+  system_setup_command 'Docker service startup' "${ROOT_COMMAND[@]}" \
+    timeout --kill-after=5s 180s env LC_ALL=C \
+    systemctl enable --now containerd.service docker.service || return 0
+  system_setup_command 'Docker daemon check' "${ROOT_COMMAND[@]}" \
+    timeout --kill-after=5s 30s env LC_ALL=C \
+    docker --host unix:///var/run/docker.sock info || return 0
+}
+
+system_verify_packages() {
+  local package_profile=$1
+  local command_name
+  local -a commands=("${SYSTEM_RUNTIME_COMMANDS[@]}")
+
+  if [[ $package_profile == setup ]]; then
+    commands+=("${SYSTEM_SETUP_COMMANDS[@]}")
+  fi
+  for command_name in "${commands[@]}"; do
+    if command -v "$command_name" >/dev/null 2>&1; then
+      continue
+    elif ((SETUP_WARNINGS > 0)); then
+      system_warning "package installation did not provide $command_name"
+    else
+      system_error "package installation did not provide $command_name"
+    fi
+  done
+  ((SETUP_WARNINGS == 0)) || return 0
+  if [[ $package_profile == setup ]]; then
+    printf '%s: host setup packages ready on %s\n' "$SETUP_NAME" "$PLATFORM"
+  else
+    printf '%s: release prerequisites ready on %s\n' "$SETUP_NAME" "$PLATFORM"
+  fi
+}
+
+system_package_list() {
+  local platform=$1 role=$2 family
+  local -a role_common=() role_platform=()
+
+  case $platform in
+    debian:* | ubuntu:* | debian-*-x86_64 | ubuntu-*-x86_64) family=DEBIAN ;;
+    amzn:2023 | amzn-2023-x86_64) family=AMZN ;;
+    *) system_error "unsupported system package platform: $platform"; return ;;
+  esac
+  local -n runtime_platform=SYSTEM_${family}_RUNTIME_PACKAGES
+  case $role in
+    runtime) ;;
+    build | setup)
+      local -n common=SYSTEM_${role^^}_PACKAGES
+      local -n specific=SYSTEM_${family}_${role^^}_PACKAGES
+      role_common=("${common[@]}")
+      role_platform=("${specific[@]}")
+      ;;
+    *) system_error "unknown system package role: $role"; return ;;
+  esac
+  # Shared by host setup and disposable release builders.
+  # shellcheck disable=SC2034
+  SETUP_SYSTEM_PACKAGES=(
+    "${SYSTEM_RUNTIME_PACKAGES[@]}"
+    "${runtime_platform[@]}"
+    "${role_common[@]}"
+    "${role_platform[@]}"
+  )
+}
+
+install_system_packages() {
+  local platform=$1 role=$2 no_recommends=$3
+  shift 3
+  # The prefix may be a privilege command or the host's best-effort runner.
+  local -a command_prefix=("$@")
+  local -a install_args=(install -y)
+
+  system_package_list "$platform" "$role" || return
+  case $platform in
+    debian:* | ubuntu:* | debian-*-x86_64 | ubuntu-*-x86_64)
+      [[ $no_recommends != true ]] || install_args+=(--no-install-recommends)
+      "${command_prefix[@]}" env DEBIAN_FRONTEND=noninteractive apt-get update --error-on=any || return
+      "${command_prefix[@]}" env DEBIAN_FRONTEND=noninteractive apt-get \
+        "${install_args[@]}" "${SETUP_SYSTEM_PACKAGES[@]}"
+      ;;
+    amzn:2023 | amzn-2023-x86_64)
+      if [[ $role == setup ]]; then
+        if rpm -q gnupg2-minimal >/dev/null 2>&1; then
+          "${command_prefix[@]}" dnf swap -y gnupg2-minimal gnupg2 || return
+        else
+          "${command_prefix[@]}" dnf install -y gnupg2 || return
+        fi
+      fi
+      "${command_prefix[@]}" dnf install -y --allowerasing \
+        "${SETUP_SYSTEM_PACKAGES[@]}"
+      ;;
+    *) system_error "unsupported system package platform: $platform" ;;
+  esac
+}

@@ -25,15 +25,17 @@ ssh -o IdentitiesOnly=yes -i "$HOME/.ssh/github" -T git@github.com
 ```
 
 The preferred deployment of this dotfiles is a built offline release attached to the GitHub release.
-No asdf installation is needed for this route.
-Prepare the target's system prerequisites with `./setup-system --offline-release`
-while its package repositories are reachable, then install the complete archive
-with the standalone `dotfiles-release` script downloaded from the same GitHub
-release. Do not run `setup-tools` or `setup-asdf` for this option.
-
-On the prepared target, only the archive and downloaded manager are needed:
+Download the standalone `dotfiles-release`, platform archive and their `.sha256` files
+from the same GitHub release.
 
 ```bash
+sha256sum --check --strict dotfiles-release.sha256
+bash ./dotfiles-release setup
+```
+
+```bash
+sha256sum --check --strict dotfiles-release.sha256 \
+  dotfiles-COMMIT-PLATFORM.tar.gz.sha256
 bash ./dotfiles-release verify ./dotfiles-COMMIT-PLATFORM.tar.gz
 bash ./dotfiles-release install ./dotfiles-COMMIT-PLATFORM.tar.gz
 bash ./dotfiles-release list
@@ -46,6 +48,9 @@ bash ./dotfiles-release uninstall dotfiles-COMMIT
 checksums without installing or running its programs. `health [ID]` checks an
 installed release and, for `current`, its public links. Install and set run the
 same light runtime checks; `--skip-health` skips it.
+`setup` detects the host OS and uses embedded runtime package lists to install.
+`install` never runs setup, uses sudo or downloads tools. On a prepared host,
+skip `setup` and install directly.
 
 Alternatively on a machine with full internet access clone the repository and run below setup commands. Only `setup-system` uses `sudo`:
 

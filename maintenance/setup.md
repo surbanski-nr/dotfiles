@@ -2,7 +2,9 @@
 
 The supported setup target is Linux x86-64 on Debian 13, Ubuntu 24.04,
 Ubuntu 26.04 or Amazon Linux 2023. Run the scripts as the intended ordinary
-user, from the repository root. Only `setup-system` uses `sudo`.
+user. In the connected workflow, run from the repository root; only
+`setup-system` uses `sudo`. Release host preparation uses `dotfiles-release setup`,
+while payload installation and selection never use `sudo`.
 
 ## Connected machine
 
@@ -115,9 +117,10 @@ and release runtime checks. Arguments are whitespace-separated; empty arguments 
 `--version`. The metadata field is empty for kubectl and Helm, whose retained
 versions are checked through separate lists. Commands such as `node` and `uvx`
 have their own entries even when their releases share a tool record. The
-builder embeds only this map in the generated standalone manager, so it works
-outside the checkout. Edit `tools.env` and rebuild; do not edit generated
-managers.
+builder embeds only this map from the tool catalog in the standalone manager,
+alongside the runtime OS configuration and shared setup library, so it works
+outside the checkout. Edit the repository sources and rebuild; do not edit
+generated managers.
 
 Kubectl and Helm are installed directly by `setup-tools`, not `setup-asdf`.
 You can select just those tools:
@@ -174,8 +177,9 @@ Python and hashed wheels independently of uv or any project.
 
 ### Docker
 
-When Docker is absent, normal `./setup-system` installs Docker Engine and enables
-and starts its Docker and containerd systemd services. Debian and Ubuntu use Docker's
+When Docker is absent, both `./setup-system` and `dotfiles-release setup`
+install Docker Engine and enable and start its Docker and containerd systemd
+services. No extra Docker flag is needed. Debian and Ubuntu use Docker's
 [official apt repository](https://docs.docker.com/engine/install/debian/),
 including the Compose and Buildx plugins. Amazon Linux 2023 uses the
 [distribution's Docker package](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-docker.html)
@@ -211,17 +215,34 @@ the shared conflict list is the union of their documented incompatible packages.
 Amazon Linux's conflict list is a local protection against replacing another
 provider, not an upstream Docker instruction.
 
-Full VM installations use systemd by default. Normal setup explicitly ensures
-the `systemctl` prerequisite, then starts the services; installing the package
-does not make a minimal container boot systemd. Use a VM for normal host setup.
-`./setup-system --offline-release` and release builders deliberately do not
-install Docker or systemd. Docker and container images are not bundled; kind
-is included as a CLI tool and needs a separately available container runtime.
+Full VM installations use systemd by default. Both setup profiles explicitly ensure
+the `systemctl` prerequisite, then start the services; installing the package
+does not make a minimal container boot systemd. Use a VM for host setup.
+Disposable release builder/runtime images deliberately do not install Docker
+or systemd. Docker and container images are not bundled; kind is included as a
+CLI tool and needs a separately available container runtime.
 
 ### Reruns and recovery
 
-`setup-system` repeats the ordinary package-manager operation and skips Docker
-once it is present. `setup-tools` reuses
+`setup-system` and `dotfiles-release setup` repeat the ordinary package-manager
+operation and skip Docker once it is present. OS package operations have a
+600-second deadline, signing
+key downloads 120 seconds, Docker service startup 180 seconds and the local
+daemon check 30 seconds. Timed-out commands are killed after another five seconds.
+Network/DNS/connection failures and timeouts are warnings, not fatal errors.
+The script continues independent steps, tries package installation even if
+an index refresh failed, and reports missing prerequisites after a network
+failure. It does not publish a Docker repository or install Docker when the
+signing key could not be downloaded. A warning summary replaces the "ready"
+message, and setup exits successfully so other bootstrap steps can continue.
+Restore network access and rerun setup before using the prepared release.
+Invalid arguments, unsupported hosts, missing commands without prior network
+failures, unsafe repository configuration, signing/integrity failures and
+other installation errors remain fatal. `dotfiles-release` still rejects
+missing system prerequisites and invalid or incomplete packages; warnings do
+not bypass its verification or health checks. Release builds remain strict.
+
+`setup-tools` reuses
 intact recorded payloads, completes intact pending payloads without downloading,
 and reinstalls inactive partial payloads. A failed multi-command selection
 attempt restores the prior links; after a killed process, rerunning reconciles
@@ -380,18 +401,25 @@ or module-cache dependencies separately before disconnecting. See the
 [Go guide](../nvim2/.config/nvim2/guide.md#go-development-and-debugger).
 
 `scripts/build-dotfiles-release` is the connected build and runtime-image
-preparation entry point. `scripts/dotfiles-release` is the standalone manager
-shipped inside each archive and attached to the GitHub release as
-`dotfiles-release`, together with `dotfiles-release.sha256`. The published
-script is extracted from the qualified Debian archive, includes its tool-probe
-configuration, and is the same manager for all four platforms. The manager
-has six commands: `verify`, `list`, `health`, `install`, `uninstall` and `set`.
+preparation entry point. Each archive and GitHub release includes standalone
+`dotfiles-release` and its `.sha256` file; no separate offline setup script is
+published. `scripts/build-standalone-script` generates the manager from the
+matching release sources: runtime and Docker configuration from `system.env`,
+tool probes from `tools.env`, `scripts/setup-system-lib` and
+`scripts/dotfiles-release`. `##### BEGIN SOURCE #####` and
+`##### END SOURCE #####` comments identify each embedded block. Edit the
+repository sources, not generated scripts; there is no second offline
+installer implementation. The published manager is extracted from the
+qualified Debian archive and is shared by all four platforms. The manager
+has seven commands: `setup`, `verify`, `list`, `health`, `install`, `uninstall` and `set`.
 None needs the builder or a Git checkout on the target.
 
 Release preflight uses GitHub asset names to select incomplete platforms without
 downloading packages. Before publishing missing assets, the platform job verifies
 the existing archive, checksums and standalone manager. Completing a missing
-checksum does not rebuild the archive.
+manager or checksum does not rebuild the archive. It always extracts the
+manager from the matching archive, never from a newer workflow checkout.
+A published script or checksum that differs is rejected, not overwritten.
 
 The artifact contains a Git archive of the matching dotfiles commit, not the
 main repository history. It also contains the full Neovim runtime tree, pinned
@@ -403,24 +431,23 @@ The generated payload-root `release.env` is distinct from the checked-in
 After venv creation the retained installation removes the wheelhouse and
 records a new local manifest covering file contents, modes and symlink targets.
 
-Install the target distribution prerequisites while approved repositories are
-available, then transfer `dotfiles-release`, the matching platform archive and
-their `.sha256` files from the same GitHub release. From the matching reviewed
-dotfiles snapshot:
+Download the manager, matching platform archive and their `.sha256` files from
+the same GitHub release, then prepare the target while approved repositories
+are available. No repository checkout, separate config or helper file is needed.
 
-```bash
-./setup-system --offline-release
-```
-
-This flag installs only the release's system prerequisites, not its bundled
-tools. It still needs access to apt/dnf repositories. The default invocation
-without a flag prepares normal host setup instead. It does not select either
-tool list: `setup-tools` selects `TOOLS`, and the builder selects
+`dotfiles-release setup` installs the release's system prerequisites
+and Docker if absent, not its bundled tools or development packages.
+It still needs access to apt/dnf and, for a new Debian/Ubuntu Docker
+installation, Docker's repository. It detects the host OS without an archive
+or platform argument and never installs or activates a release. The connected
+`setup-system` entry point uses the same `scripts/setup-system-lib` with its
+broader normal-host package profile; there is no copied offline implementation.
+Neither selects a tool list: `setup-tools` selects `TOOLS`, and the builder selects
 `OFFLINE_RELEASE_TOOLS`. The archive retains the old metadata key
 `OFFLINE_TOOLS` for compatibility with retained releases.
 
 On a connected machine, download these release assets into one directory with
-`gh`, then transfer them to the prepared host:
+`gh`, then transfer them to the target:
 
 ```bash
 tag=dotfiles-COMMIT
@@ -433,6 +460,20 @@ gh release download "$tag" --repo surbanski-nr/dotfiles \
 
 Replace `COMMIT` in the tag with its actual suffix and in the archive name with
 the first 12 characters of the full commit SHA.
+
+On the target, first verify the installer and prepare OS packages while the
+repositories are reachable. Run as the intended ordinary user so new Docker
+group membership is assigned correctly:
+
+```bash
+sha256sum --check --strict dotfiles-release.sha256
+bash ./dotfiles-release setup
+```
+
+Review any warnings and rerun `setup` if preparation was incomplete. On an
+already prepared host, skip this step and install directly; no `--skip-system`
+flag is needed. The manager embeds its runtime package lists and helpers, so
+this route needs no dotfiles checkout or separate setup script.
 
 After disconnecting external networking, run the downloaded installer as the intended
 ordinary user. It derives identity from that account and does not require a
@@ -459,7 +500,8 @@ platform, run package programs, install files or change the user's HOME.
 Checksums detect corruption; they do not make an untrusted archive trustworthy.
 
 `install ARCHIVE` repeats structural verification and requires the package's
-platform to match the host. It checks system prerequisites and managed-path
+platform to match the host. It never runs `setup`, installs OS packages, downloads
+tools or uses sudo. It checks system prerequisites and managed-path
 conflicts, creates isolated Python venvs at their final retained paths, removes
 the wheelhouse and records `installed.sha256`, `installed.modes` and
 `installed.symlinks`. These local manifests cover generated venvs as well as

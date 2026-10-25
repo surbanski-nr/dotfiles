@@ -59,8 +59,10 @@ verify_asset() {
 }
 
 extract_manager() {
-  tar -xOzf "$1" "dotfiles-${COMMIT_SHA:0:12}/dotfiles-release" >"$2" || return
-  chmod 0755 "$2"
+  local archive=$1 destination=$2 root=dotfiles-${COMMIT_SHA:0:12}
+  tar -xOzf "$archive" "$root/dotfiles-release" >"$destination" || return
+  chmod 0755 "$destination"
+  (cd -- "$(dirname -- "$destination")" && sha256sum dotfiles-release >dotfiles-release.sha256)
 }
 
 preflight() {
@@ -140,7 +142,7 @@ select_platform() {
 }
 
 build_and_qualify() {
-  local source_dir=$1 output_dir=$2 archive root delivered_manager size digest
+  local source_dir=$1 output_dir=$2 archive root delivered_manager size digest library
   local phase=${3:-build}
   local builder_image test_uid test_home builder container verifier
   local evidence=$RUNNER_TEMP/dotfiles-evidence/$PLATFORM
@@ -174,14 +176,16 @@ build_and_qualify() {
   cp "$archive.sha256" "$evidence/archive.sha256"
   delivered_manager=$output_dir/dotfiles-release
   extract_manager "$archive" "$delivered_manager"
-  (cd "$output_dir" && sha256sum dotfiles-release >dotfiles-release.sha256)
   [[ $phase != build-only ]] || return 0
 
   {
     docker run --detach --init --name "$container" "$builder_image" sleep infinity
     docker cp "$source_dir/scripts/build-dotfiles-release" "$container:/usr/local/bin/build-dotfiles-release"
     docker exec "$container" mkdir -p /usr/local/lib/dotfiles
-    docker cp "$source_dir/scripts/setup-lib" "$container:/usr/local/lib/dotfiles/setup-lib"
+    # Older release builders keep their OS helpers in setup-lib.
+    for library in "$source_dir"/scripts/setup*-lib; do
+      docker cp "$library" "$container:/usr/local/lib/dotfiles/${library##*/}"
+    done
     docker cp "$source_dir/system.env" "$container:/usr/local/lib/dotfiles/system.env"
     timeout --signal=TERM --kill-after=15s 900s docker exec "$container" \
       bash /usr/local/bin/build-dotfiles-release prepare-runtime "$PLATFORM" offline-test "$test_uid" "$test_home"
@@ -324,7 +328,6 @@ publish() {
       download_asset dotfiles-release.sha256 "$work"
       check_checksum "$manager" "$checksum"
     else
-      (cd "$work" && sha256sum dotfiles-release) >"$checksum"
       uploads+=("$checksum")
     fi
   fi

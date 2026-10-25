@@ -15,6 +15,10 @@ printf 'private prefixes\n' >"$test_home/kube-log-prefixes.txt"
 printf '#!/usr/bin/env bash\nexit 91\n' >"$test_home/bin-extras/helm"
 chmod 0755 "$test_home/bin-extras/helm"
 ln -s helm "$test_home/bin-extras/rg"
+export TEST_DOCKER_LOG="$test_root/unexpected-system-commands.log"
+for command_name in sudo apt-get dnf curl docker; do
+  ln -s "$repo_dir/tests/fixtures/setup-system/docker-command" "$test_home/bin-extras/$command_name"
+done
 extras_digest=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -C "$test_home" -cf - bin-extras | sha256sum)
 export PATH="$test_home/bin-extras:$PATH"
@@ -33,7 +37,9 @@ write_fake_tool "$test_home/bin/rg-0.9" 0.9
 ln -s rg-0.9 "$test_home/bin/rg"
 cp -a "$test_root/stage-one/$id_one/share/tmux/plugins/." "$test_home/.tmux/plugins/"
 
+run_manager verify "$artifact_one" >/dev/null
 run_manager install "$artifact_one" >/dev/null
+run_manager health >/dev/null
 assert_link "$test_home/dotfiles-releases/current" "$id_one"
 assert_link "$test_home/bin/rg" '../dotfiles-releases/current/bin/rg'
 assert_link "$test_home/bin/rg.before-dotfiles-release" rg-0.9
@@ -145,5 +151,6 @@ assert_link "$test_home/bin/rg" rg-0.9
 [[ $(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -C "$test_home" -cf - bin-extras | sha256sum) == "$extras_digest" ]] ||
   fail 'release lifecycle changed extras, their modes or links'
+[[ ! -e $TEST_DOCKER_LOG ]] || fail 'release operations ran host setup or attempted network downloads'
 
 printf 'dotfiles_release: lifecycle passed\n'

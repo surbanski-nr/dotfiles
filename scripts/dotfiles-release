@@ -41,6 +41,7 @@ die() {
 usage() {
   cat <<'EOF'
 Usage:
+  dotfiles-release setup
   dotfiles-release verify ARCHIVE
   dotfiles-release list
   dotfiles-release health [RELEASE_ID]
@@ -48,15 +49,33 @@ Usage:
   dotfiles-release uninstall [RELEASE_ID]
   dotfiles-release set [--skip-health] RELEASE_ID
 
+setup prepares the host's OS prerequisites and Docker when absent, using sudo.
+It needs OS repositories for missing packages, never installs a release and
+leaves existing container runtimes unchanged. Network failures and timeouts
+are warnings; other installation/configuration errors stop setup.
 verify checks archive safety, metadata, checksums and payload structure.
 It reads the platform from the archive and never installs or runs its tools.
 install prepares the release offline, checks its runtime and activates it.
+It never runs setup, installs OS packages or uses sudo.
 health checks installed integrity and runtime, defaulting to current.
 --skip-health skips runtime probes, never integrity or safety checks.
 set activates an installed release. uninstall removes a release, defaulting
 to current, and restores saved files when removing the active release.
 EOF
 }
+
+setup_host() (
+  if ! declare -F setup_system >/dev/null; then
+    local script_dir
+    script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || return
+    # shellcheck source=../system.env
+    source "$script_dir/../system.env" || return
+    # shellcheck source=setup-system-lib
+    source "$script_dir/setup-system-lib" || return
+  fi
+  SETUP_NAME="${0##*/} setup"
+  setup_system runtime
+)
 
 cleanup_path() {
   local path=$1
@@ -1163,6 +1182,7 @@ main() {
     shift
   fi
   case $command in
+    setup) (($# == 0)) || { usage; return 2; }; setup_host ;;
     verify) (($# == 1)) || { usage; return 2; }; verify_archive "$1" ;;
     list) (($# == 0)) || { usage; return 2; }; list_releases ;;
     health) (($# <= 1)) || { usage; return 2; }; health_release "${1:-}" ;;

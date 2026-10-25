@@ -17,8 +17,11 @@ cp "$repo_dir/tools.env" "$source_dir/tools.env"
 cp "$repo_dir/scripts/dotfiles-release" "$source_dir/scripts/dotfiles-release"
 printf '\n# Fixture release snapshot differs from workflow tooling.\n' >>"$source_dir/scripts/dotfiles-release"
 printf '#!/bin/sh\nexit 0\n' >"$source_dir/scripts/build-dotfiles-release"
-printf '#!/bin/sh\nexit 0\n' >"$source_dir/scripts/setup-lib"
-printf 'fixture config\n' >"$source_dir/system.env"
+cp "$repo_dir/scripts/build-standalone-script" "$source_dir/scripts/build-standalone-script"
+cp "$repo_dir/scripts/setup-lib" "$source_dir/scripts/setup-lib"
+cp "$repo_dir/scripts/setup-system-lib" "$source_dir/scripts/setup-system-lib"
+cp "$repo_dir/system.env" "$source_dir/system.env"
+printf 'SYSTEM_RUNTIME_PACKAGES+=(fixture-release-package)\n' >>"$source_dir/system.env"
 git -C "$source_dir" init -q
 git -C "$source_dir" add .
 GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid \
@@ -54,15 +57,7 @@ make_archive() {
   make_artifact "$TEST_COMMIT" ci-archive "$test_root/ci-fixture.tar.gz" 1.0 false false
   mv "$test_root/stage-ci-archive" "$stage"
   printf 'fixture payload\n' >"$stage/$RELEASE_TAG/payload"
-  {
-    printf '#!/usr/bin/env bash\n'
-    (
-      # shellcheck source=../tools.env
-      source "$source_dir/tools.env"
-      declare -p TOOL_CHECKS
-    )
-    cat "$source_dir/scripts/dotfiles-release"
-  } >"$stage/$RELEASE_TAG/dotfiles-release"
+  bash "$source_dir/scripts/build-standalone-script" "$source_dir" "$stage/$RELEASE_TAG/dotfiles-release"
   printf 'fixture build manifest\n' >"$stage/$RELEASE_TAG/build-manifest.txt"
   printf '%s\n' \
     "RELEASE_ID=$RELEASE_TAG" "PLATFORM_ID=$platform" "SOURCE_COMMIT=$TEST_COMMIT" \
@@ -163,7 +158,7 @@ matrix | jq -e 'length == 4 and .[0].build_archive == false and all(.[1:][]; .bu
 
 run_ci publish "$test_root/nonexistent-output"
 [[ $(<"$TEST_UPLOAD_LOG") == "$archive.sha256"$'\n'dotfiles-release$'\n'dotfiles-release.sha256 ]] ||
-  fail 'checksum/manager repair uploaded an existing archive'
+  fail 'checksum/script repair uploaded an existing archive'
 cmp -s "$TEST_RELEASE_ASSETS/dotfiles-release" "$test_root/payload/$RELEASE_TAG/dotfiles-release" ||
   fail 'published manager differs from the release snapshot'
 HOME="$test_root/empty-home" bash "$TEST_RELEASE_ASSETS/dotfiles-release" verify \
@@ -172,6 +167,14 @@ HOME="$test_root/empty-home" bash "$TEST_RELEASE_ASSETS/dotfiles-release" verify
 (cd "$TEST_RELEASE_ASSETS" && sha256sum --check --strict "$archive.sha256" >/dev/null)
 [[ -s $TEST_RELEASE_ASSETS/dotfiles-release.sha256 ]] || fail 'published standalone manager has no checksum'
 (cd "$TEST_RELEASE_ASSETS" && sha256sum --check --strict dotfiles-release.sha256 >/dev/null)
+for source in 'system.env (runtime and Docker)' 'tools.env (TOOL_CHECKS)' scripts/setup-system-lib scripts/dotfiles-release; do
+  if ! grep -Fx "##### BEGIN $source #####" "$TEST_RELEASE_ASSETS/dotfiles-release" >/dev/null ||
+    ! grep -Fx "##### END $source #####" "$TEST_RELEASE_ASSETS/dotfiles-release" >/dev/null; then
+    fail "published manager does not identify its $source source block"
+  fi
+done
+grep -F 'fixture-release-package' "$TEST_RELEASE_ASSETS/dotfiles-release" >/dev/null ||
+  fail 'standalone manager used the workflow OS configuration instead of the release snapshot'
 run_preflight
 matrix | jq -e 'length == 3 and all(.[]; .platform != "debian-13-x86_64")' >/dev/null || fail 'complete platform was not skipped'
 upload_before=$(sha256sum "$TEST_UPLOAD_LOG")
@@ -274,6 +277,14 @@ grep -F 'fixture offline health succeeded' "$RUNNER_TEMP/dotfiles-evidence/$PLAT
 for file in build.log prepare-runtime.log release.env build-manifest.txt archive.sha256; do
   [[ -s $RUNNER_TEMP/dotfiles-evidence/$PLATFORM/$file ]] || fail 'build evidence was not preserved'
 done
+
+mv "$source_dir/scripts/setup-system-lib" "$test_root/setup-system-lib"
+: >"$TEST_DOCKER_LOG"
+run_ci verify "$source_dir" "$test_root/output" >"$test_root/legacy-verify.log"
+mv "$test_root/setup-system-lib" "$source_dir/scripts/setup-system-lib"
+grep -F "cp $source_dir/scripts/setup-lib dotfiles-runtime-fixture-1-$PLATFORM:/usr/local/lib/dotfiles/setup-lib" \
+  "$TEST_DOCKER_LOG" >/dev/null || fail 'qualification lost the OS helpers for an older release source'
+
 for stage in BUILD VERIFY PREPARE; do
   failure_runner=$test_root/runner-$stage
   mkdir -p "$failure_runner"
