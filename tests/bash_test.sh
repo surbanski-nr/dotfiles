@@ -337,44 +337,45 @@ transition_connected="$test_root/connected checkout/dotfiles"
 transition_a="$transition_home/dotfiles-releases/dotfiles-aaaaaaaaaaaa"
 transition_b="$transition_home/dotfiles-releases/dotfiles-bbbbbbbbbbbb"
 mkdir -p "$transition_home/.asdf/shims"
-ln -s "$command_fixture" "$transition_home/.asdf/shims/terragrunt"
+printf '#!/usr/bin/env bash\nprintf "asdf\\n"\n' >"$transition_home/.asdf/shims/asdf-only-tool"
+chmod 0755 "$transition_home/.asdf/shims/asdf-only-tool"
 for root in "$transition_connected" "$transition_a/dotfiles" "$transition_b/dotfiles"; do
   mkdir -p "$root/bash" "$root/scripts"
   cp "$repo_dir/bash/.bashrc" "$root/bash/.bashrc"
 done
 printf 'RELEASE_ID=dotfiles-aaaaaaaaaaaa\n' >"$transition_a/release.env"
 printf 'RELEASE_ID=dotfiles-bbbbbbbbbbbb\n' >"$transition_b/release.env"
-printf '#!/usr/bin/env bash\nprintf "connected\\n"\n' \
-  >"$transition_connected/scripts/snapshot-marker"
-printf '#!/usr/bin/env bash\nprintf "release-a\\n"\n' \
-  >"$transition_a/dotfiles/scripts/snapshot-marker"
-printf '#!/usr/bin/env bash\nprintf "release-b\\n"\n' \
-  >"$transition_b/dotfiles/scripts/snapshot-marker"
-chmod 0755 "$transition_connected/scripts/snapshot-marker" \
-  "$transition_a/dotfiles/scripts/snapshot-marker" \
-  "$transition_b/dotfiles/scripts/snapshot-marker"
+for release in "$transition_a" "$transition_b"; do
+  mkdir -p "$release/bin"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" %q\n' "release-${release: -1}" \
+    >"$release/bin/release-command"
+  cp "$release/bin/release-command" "$release/dotfiles/scripts/config-marker"
+  chmod 0755 "$release/bin/release-command" "$release/dotfiles/scripts/config-marker"
+done
+for provider in bin share/nvim2/mason/bin share/nvim2/mason/packages/ansible-lint/venv/bin dotfiles/scripts; do
+  mkdir -p "$transition_a/$provider"
+done
+cp "$transition_a/bin/release-command" "$transition_a/bin/removed-release-command"
+cp "$transition_a/bin/release-command" "$transition_a/share/nvim2/mason/bin/removed-mason-command"
+cp "$transition_a/bin/release-command" "$transition_a/share/nvim2/mason/packages/ansible-lint/venv/bin/removed-venv-command"
+cp "$transition_a/bin/release-command" "$transition_a/dotfiles/scripts/removed-script-command"
+ln -s "${transition_a##*/}" "$transition_home/dotfiles-releases/current"
+ln -s dotfiles-releases/current/dotfiles/bash/.bashrc "$transition_home/.bashrc"
 transition_output=$(
-  run_scenario root-transition \
+  run_scenario release-switch \
     env HOME="$transition_home" PATH="$test_root/bin:$original_path" \
-    TERM=xterm-256color TEST_CONNECTED_ROOT="$transition_connected" \
-    TEST_RELEASE_A="$transition_a" TEST_RELEASE_B="$transition_b" \
+    TERM=xterm-256color TEST_RELEASE_A="$transition_a" TEST_RELEASE_B="$transition_b" \
     bash --noprofile --norc -i
 )
+assert_contains "$transition_output" 'before=release-a config=release-a'
 assert_contains "$transition_output" \
-  "connected=$transition_connected:unset:connected"
-assert_contains "$transition_output" \
-  "release-a=$transition_a/dotfiles:$transition_a:release-a"
-assert_contains "$transition_output" \
-  "release-b=$transition_b/dotfiles:$transition_b:release-b"
-assert_contains "$transition_output" \
-  "rollback-a=$transition_a/dotfiles:$transition_a:release-a"
-assert_contains "$transition_output" \
-  "baseline=$transition_connected:unset:connected"
-assert_contains "$transition_output" \
-  "connected-asdf=$transition_home/.asdf/shims/terragrunt"
-assert_contains "$transition_output" 'offline-asdf=absent'
-assert_contains "$transition_output" \
-  "baseline-asdf=$transition_home/.asdf/shims/terragrunt"
+  "after=release-b config=release-b asdf=$transition_home/.asdf/shims/asdf-only-tool"
+assert_contains "$transition_output" 'reselected=release-a'
+[[ -x $transition_a/bin/removed-release-command &&
+  -x $transition_a/share/nvim2/mason/bin/removed-mason-command &&
+  -x $transition_a/share/nvim2/mason/packages/ansible-lint/venv/bin/removed-venv-command &&
+  -x $transition_a/dotfiles/scripts/removed-script-command ]] ||
+  fail 'switching releases removed retained tools instead of cleaning PATH'
 
 custom_root="$test_root/custom root"
 second_custom_root="$test_root/second custom root"
@@ -445,7 +446,7 @@ path_line=$(grep '^path=' <<<"$path_output")
 [[ ${path_line#path=} == "$path_home/.venv/bin:"* ]] ||
   fail 'active virtual environment lost PATH precedence'
 
-for setup_mode in connected offline custom-store; do
+for setup_mode in connected repo-with-release offline custom-store; do
   override_home="$test_root/$setup_mode override home"
   override_store=$override_home/dotfiles-releases
   [[ $setup_mode != custom-store ]] || override_store="$override_home/releases with spaces"
@@ -457,6 +458,7 @@ for setup_mode in connected offline custom-store; do
     chmod 0755 "$override_home/$provider/path-probe"
   done
   cp "$override_home/bin/path-probe" "$override_home/bin/unique-user-tool"
+  cp "$override_home/.asdf/shims/path-probe" "$override_home/.asdf/shims/asdf-only-tool"
   printf '#!/usr/bin/env bash\nprintf "cwd\\n"\n' >"$test_root/cwd-only"
   chmod 0755 "$test_root/cwd-only"
   override_bashrc=$repo_dir/bash/.bashrc
@@ -469,7 +471,9 @@ for setup_mode in connected offline custom-store; do
     printf '#!/usr/bin/env bash\nprintf "release\\n"\n' >"$override_release/bin/path-probe"
     chmod 0755 "$override_release/bin/path-probe"
     ln -s dotfiles-cccccccccccc "$override_store/current"
-    override_bashrc=$override_release/dotfiles/bash/.bashrc
+    if [[ $setup_mode != repo-with-release ]]; then
+      override_bashrc=$override_release/dotfiles/bash/.bashrc
+    fi
     fallback=release
   fi
   override_output=$(
@@ -481,6 +485,7 @@ for setup_mode in connected offline custom-store; do
       TERM=xterm-256color bash --noprofile --norc -i
   )
   assert_contains "$override_output" 'override=bin unique=bin'
+  assert_contains "$override_output" 'asdf-only=.asdf/shims'
   assert_contains "$override_output" 'venv=project venv/bin'
   if [[ $setup_mode == connected ]]; then
     [[ $override_output != *"$override_store/current/bin"* ]] ||
@@ -510,6 +515,22 @@ fzf_output=$(
 )
 assert_contains "$fzf_output" 'fzf-init=yes'
 
+fzf_failure_output=$(
+  TEST_COMMAND_MODE=broken-integration run_scenario fzf-failure \
+    env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color \
+    bash --noprofile --norc -i 2>&1
+)
+assert_contains "$fzf_failure_output" 'dotfiles: fzf initialization failed'
+assert_contains "$fzf_failure_output" 'continued=yes'
+
+kube_completion_output=$(
+  TEST_COMMAND_MODE=kube-completion run_scenario kube-completion \
+    env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color \
+    bash --noprofile --norc -i
+)
+assert_contains "$kube_completion_output" 'complete -F __start_kubectl k'
+assert_contains "$kube_completion_output" 'k-completion=fixture-pod'
+
 stale_vz_output=$(
   run_scenario stale-vz \
     env HOME="$reload_home" PATH="$test_root/bin:$original_path"
@@ -522,6 +543,18 @@ posh_state=$test_root/kubectl-prompt-disabled
 ln -s "$command_fixture" "$test_root/bin/oh-my-posh"
 ln -s "$repo_dir/oh-my-posh/.oh-my-posh.omp.json" \
   "$reload_home/.oh-my-posh.omp.json"
+for terminal in dumb xterm-256color; do
+  fallback_output=$(
+    TEST_COMMAND_MODE=broken-integration run_scenario fallback-prompt \
+      env HOME="$reload_home" PATH="$test_root/bin:$original_path" TERM="$terminal" \
+      bash --noprofile --norc -i 2>&1
+  )
+  assert_contains "$fallback_output" 'dotfiles: Oh My Posh initialization failed'
+  assert_contains "$fallback_output" "$(id -un)@"
+  [[ $terminal != dumb || $fallback_output != *$'\e'* ]] ||
+    fail 'fallback prompt emitted terminal escapes on a dumb terminal'
+done
+
 kube_init_output=$(
   TEST_COMMAND_MODE=kube-prompt TEST_POSH_LOG="$posh_log" \
     TEST_POSH_STATE="$posh_state" run_scenario kube-prompt-init \

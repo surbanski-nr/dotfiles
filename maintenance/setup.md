@@ -48,6 +48,16 @@ the agent or rebooting requires adding them again. User lingering is not
 enabled automatically. A pre-existing `~/.ssh/config` is a deliberate stow
 conflict and must be reviewed before installation.
 
+Both deployment flows keep interactive Bash history in `~/.histfile`, outside
+the repository and release payloads. Before each prompt, `history -a` appends
+this shell's new commands and `history -n` imports new entries from other
+shells. `histappend` keeps normal shell exits from overwriting the shared file;
+reloading `.bashrc` does not add duplicate synchronization or prompt hooks.
+This is bounded history, not an unlimited archive: `HISTSIZE` and `HISTFILESIZE`
+are both 100000. Commands beginning with a space are omitted, consecutive
+duplicates are skipped, and older repetitions are removed from the in-memory
+list by `HISTCONTROL=ignoreboth:erasedups`.
+
 `tools.env` owns tool profiles, release records, version checks and asdf/tmux
 plugin pins. It stores direct releases in `TOOL_RELEASES`. Each tool has ordered
 `version|full_URL|SHA256` records, and the first record is the default. A
@@ -618,7 +628,11 @@ Stale legacy state is not used for recovery. No automatic migration of old
 `~/bin` links is performed; the cleanup command below is optional.
 
 The shell PATH contains `current/bin` literally, and configuration links also
-point through `current`. The Nvim, tmux and Kubernetes client launchers resolve
+point through `current`. An ordinary offline A-to-B upgrade needs no migration
+or manual deletion of command links: install B or select it with `set`. The
+PATH cleanup on Bash startup removes physical release paths inherited from
+older application processes; it does not modify either release's payload.
+The Nvim, tmux and Kubernetes client launchers resolve
 one physical release when each process starts. After a switch, reload
 Bash with `source "$HOME/.bashrc" && hash -r`; new shells and applications use
 the new release, while an existing Nvim process and tmux server remain on their
@@ -694,10 +708,10 @@ through these launchers. It does not change Kubernetes/Helm libraries embedded
 inside other programs. kubectl must be within one minor version of the cluster
 API server, as described in the upstream version-skew policy.
 
-Offline Bash does not add asdf shims and removes inherited shim paths from
-`PATH`, without modifying asdf's files or settings. Connected Bash continues
-to use asdf. Avoid overlapping providers for the same public commands in one
-HOME; there is no automatic fallback between them.
+Bash keeps asdf shims below `current/bin` in both deployment workflows.
+Bundled commands take priority over those shims; commands missing from the
+release can fall back to asdf. Executables in `~/bin` take priority over both
+providers, so review intentional overrides with `type -a TOOL`.
 
 ### Helm schema plugin and project validation
 
@@ -773,7 +787,14 @@ puts an active `VIRTUAL_ENV/bin` first, then `~/bin`, then the selected
 release's `current/bin` and remaining providers. Nvim2 keeps the same user
 priority ahead of its physically pinned release and Mason tools. Missing
 directories are ignored safely, so the connected flow works without a release
-store. Connected `setup-tools` and `setup-asdf` still install into `~/bin`;
+store. Bash uses the same provider order whether its configuration comes from
+the repository or a release. It does not detect a repository/release mode or
+automatically disable asdf; existing shims remain below `current/bin` as a fallback.
+For a nondefault store, export `DOTFILES_RELEASE_ROOT` before starting or
+reloading Bash; its location is not inferred from the configuration.
+Switching between repository and release deployment is a manual choice, not
+a startup migration.
+Connected `setup-tools` and `setup-asdf` still install into `~/bin`;
 the offline release manager never changes it. The old `bin-extras` directory
 is no longer added to PATH. The private `~/.extras` configuration hook is separate.
 
@@ -1144,16 +1165,21 @@ bash tests/setup_tools_test.sh recovery
 
 Repository-owned shell sources are linted from their real checked-in paths.
 The Bash startup also conditionally loads distribution-owned Midnight
-Commander, bash-completion and fzf files. Their paths differ by supported
+Commander and bash-completion files. Their paths differ by supported
 platform, so each distribution qualification uses the actual packaged files
 and exercises startup there; upstream package contents are not copied into the
 repository or replaced with empty lint fixtures. Generated Python and uv
 activation scripts are exercised in isolated prompt tests.
 
-`~/.fzf.bash` and `~/.extras` are optional private inputs outside repository
-static analysis. The supported contract is that they are loaded only when
-present and that a load failure emits a warning without aborting startup. Their
-contents remain the user's responsibility.
+fzf key bindings use `fzf --bash` from the managed version. Old distribution
+key-binding files and `~/.fzf.bash` are no longer sourced. Missing optional
+integration tools are skipped; failed initialization emits a warning without
+aborting startup. A plain or colored fallback prompt remains available when
+Oh My Posh is absent or fails.
+
+`~/.extras` is an optional private input outside repository static analysis.
+It is loaded only when present; a load failure emits a warning without aborting
+startup. Its contents remain the user's responsibility.
 
 Workflow validation runs locally without GitHub credentials. Set `GH_TOKEN`,
 `GITHUB_TOKEN` or use an active `gh` login to additionally enable Zizmor's

@@ -55,6 +55,15 @@ case "$command_name:$mode" in
     [[ ${1:-} == --bash ]] || exit 2
     printf '%s\n' '__fzf_test_binding() { :; }'
     ;;
+  fzf:broken-integration | oh-my-posh:broken-integration)
+    exit 9
+    ;;
+  kubectl:kube-completion)
+    [[ ${1:-}:${2:-} == completion:bash ]] || exit 2
+    printf '%s\n' \
+      '__start_kubectl() { COMPREPLY=(fixture-pod); }' \
+      'complete -F __start_kubectl kubectl'
+    ;;
   kubectl:filter)
     printf '%s\n' pod-a=-v pod-b
     ;;

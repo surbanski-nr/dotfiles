@@ -64,21 +64,11 @@ _dotfiles_source=$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null ||
   printf '%s\n' "${BASH_SOURCE[0]}")
 _dotfiles_source_root=$(CDPATH='' cd -- "$(dirname -- "$_dotfiles_source")/.." && pwd)
 _dotfiles_previous_auto_root=${DOTFILES_AUTO_ROOT:-}
-_dotfiles_previous_snapshot_root=${DOTFILES_SNAPSHOT_ROOT:-}
 _dotfiles_release_store=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}
 export GITUSER="${GITUSER:-surbanski}"
 export GHREPOS="${GHREPOS:-$HOME/github.com/$GITUSER}"
 export LAB="${LAB:-$GHREPOS/lab}"
 export NOTES="${NOTES:-$GHREPOS/notes-md}"
-if [[ $_dotfiles_source_root =~ /dotfiles-[0-9a-f]{12}/dotfiles$ &&
-  -f ${_dotfiles_source_root%/dotfiles}/release.env ]]; then
-  _dotfiles_release_mode=true
-  export DOTFILES_SNAPSHOT_ROOT=${_dotfiles_source_root%/dotfiles}
-  _dotfiles_release_store=${DOTFILES_RELEASE_ROOT:-${DOTFILES_SNAPSHOT_ROOT%/*}}
-else
-  _dotfiles_release_mode=false
-  unset DOTFILES_SNAPSHOT_ROOT
-fi
 if [[ ! -v DOTFILES || (-n $_dotfiles_previous_auto_root && $DOTFILES == "$_dotfiles_previous_auto_root") ]]; then
   export DOTFILES=$_dotfiles_source_root
   export DOTFILES_AUTO_ROOT=$_dotfiles_source_root
@@ -101,15 +91,6 @@ for _dotfiles_path_entry in "${_dotfiles_path_entries[@]}"; do
   if [[ $_dotfiles_path_entry =~ /dotfiles-[0-9a-f]{12}/(bin|dotfiles/scripts|share/nvim2/mason/bin|share/nvim2/mason/packages/ansible-lint/venv/bin)$ ]]; then
     continue
   fi
-  if [[ -n $_dotfiles_previous_snapshot_root &&
-    $_dotfiles_path_entry == "${_dotfiles_previous_snapshot_root%/*}/current/bin" ]]; then
-    continue
-  fi
-  if $_dotfiles_release_mode &&
-    [[ $_dotfiles_path_entry == "$HOME/.asdf/shims" ||
-      $_dotfiles_path_entry == "${ASDF_DATA_DIR:-$HOME/.asdf}/shims" ]]; then
-    continue
-  fi
   if [[ -n $_dotfiles_previous_auto_root &&
     $_dotfiles_path_entry == "$_dotfiles_previous_auto_root/scripts" ]]; then
     continue
@@ -120,33 +101,20 @@ done
 PATH=$_dotfiles_clean_path
 export PATH
 unset _dotfiles_path_entries _dotfiles_path_entry _dotfiles_clean_path \
-  _dotfiles_previous_auto_root _dotfiles_previous_snapshot_root
+  _dotfiles_previous_auto_root
 
-if $_dotfiles_release_mode; then
-  add_to_path "$HOME/.krew/bin"
-  add_to_path "$DOTFILES/scripts"
-  add_to_path "$HOME/.local/bin"
-  add_to_path "$HOME/.local/share/nvim2/mason/bin"
-else
-  add_to_path "$HOME/.local/share/nvim2/mason/bin"
-  add_to_path "$HOME/.local/bin"
-  add_to_path "$DOTFILES/scripts"
-  add_to_path "$HOME/.krew/bin"
-  add_to_path "$HOME/.asdf/shims"
-fi
-unset _dotfiles_release_mode
+add_to_path "$HOME/.local/share/nvim2/mason/bin"
+add_to_path "$HOME/.local/bin"
+add_to_path "$DOTFILES/scripts"
+add_to_path "$HOME/.krew/bin"
+add_to_path "$HOME/.asdf/shims"
 add_to_path "$_dotfiles_release_store/current/bin"
 unset _dotfiles_release_store
 if [[ ${DOTFILES_IGNORE_USER_BIN:-} != 1 ]]; then
   add_to_path "$HOME/bin"
 fi
-if [[ -n ${VIRTUAL_ENV:-} && -d $VIRTUAL_ENV/bin ]]; then
-  PATH=":$PATH:"
-  PATH=${PATH//":$VIRTUAL_ENV/bin:"/:}
-  PATH=${PATH#:}
-  PATH=${PATH%:}
-  PATH="$VIRTUAL_ENV/bin${PATH:+":$PATH"}"
-  export PATH
+if [[ -n ${VIRTUAL_ENV:-} ]]; then
+  add_to_path "$VIRTUAL_ENV/bin"
 fi
 
 _dotfiles_ssh_agent_reachable() {
@@ -265,46 +233,19 @@ if [ -x /usr/bin/lesspipe ]; then
   _dotfiles_eval_init lesspipe env SHELL=/bin/sh /usr/bin/lesspipe || true
 fi
 
-# set variable identifying the chroot you work in (used in the prompt below)
-if [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then
-  debian_chroot=$(cat /etc/debian_chroot)
-fi
-
-# set a fancy prompt (non-color, unless we know we "want" color)
-case "$TERM" in
-xterm-color | *-256color) color_prompt=yes ;;
+# Keep a usable fallback when Oh My Posh is absent or fails to initialize.
+case ${TERM:-} in
+xterm-color | *-256color)
+  PS1='\[\e[38;5;214m\]$?\[\e[0m\] \[\e[38;5;214m\]\u@\h\[\e[0m\] \[\e[38;5;214m\]\W\[\e[0m\] \[\e[38;5;142m\]\\$\[\e[0m\] '
+  ;;
+*) PS1='\u@\h:\w\$ ' ;;
 esac
 
-# uncomment for a colored prompt, if the terminal has the capability; turned
-# off by default to not distract the user: the focus in a terminal window
-# should be on the output of commands, not on the prompt
-#force_color_prompt=yes
-
-if [ -n "$force_color_prompt" ]; then
-  if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
-    # We have color support; assume it's compliant with Ecma-48
-    # (ISO/IEC-6429). (Lack of such support is extremely rare, and such
-    # a case would tend to support setf rather than setaf.)
-    color_prompt=yes
-  else
-    color_prompt=
-  fi
-fi
-
-if [ "$color_prompt" = yes ]; then
-  #PS1='${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
-  PS1='\[\e[38;5;214m\]$?\[\e[0m\] \[\e[38;5;214m\]\u@\h\[\e[0m\] \[\e[38;5;214m\]\W\[\e[0m\] \[\e[38;5;142m\]\\$\[\e[0m\] '
-else
-  PS1='${debian_chroot:+($debian_chroot)}\u@\h:\w\$ '
-fi
-unset color_prompt force_color_prompt
-
 # If this is an xterm set the title to user@host:dir
-case "$TERM" in
+case ${TERM:-} in
 xterm* | rxvt*)
-  PS1="\[\e]0;${debian_chroot:+($debian_chroot)}\u@\h: \w\a\]$PS1"
+  PS1="\[\e]0;\u@\h: \w\a\]$PS1"
   ;;
-*) ;;
 esac
 
 # enable color support of ls and also add handy aliases
@@ -411,27 +352,7 @@ if [[ -n $_dotfiles_fzf_provider ]]; then
     unset -f __fzf_select__ __fzf_cd__ __fzf_history__ 2>/dev/null || true
     _DOTFILES_FZF_PROVIDER=$_dotfiles_fzf_provider
   fi
-  if fzf --bash >/dev/null 2>&1; then
-    _dotfiles_eval_init fzf fzf --bash || true
-  elif [ -r /usr/share/doc/fzf/examples/key-bindings.bash ]; then
-    # Distribution-owned optional integration.
-    # shellcheck disable=SC1091
-    if ! source /usr/share/doc/fzf/examples/key-bindings.bash 2>/dev/null; then
-      _dotfiles_warn 'failed to load fzf key bindings'
-    fi
-  elif [ -r /usr/share/fzf/shell/key-bindings.bash ]; then
-    # Distribution-owned optional integration.
-    # shellcheck disable=SC1091
-    if ! source /usr/share/fzf/shell/key-bindings.bash 2>/dev/null; then
-      _dotfiles_warn 'failed to load fzf key bindings'
-    fi
-  elif [ -r ~/.fzf.bash ]; then
-    # User-installed optional integration outside this repository.
-    # shellcheck disable=SC1090
-    if ! source ~/.fzf.bash 2>/dev/null; then
-      _dotfiles_warn 'failed to load ~/.fzf.bash'
-    fi
-  fi
+  _dotfiles_eval_init fzf fzf --bash || true
 fi
 unset _dotfiles_fzf_provider
 
@@ -447,18 +368,11 @@ unset _dotfiles_zoxide_provider
 
 if command -v kubectl >/dev/null 2>&1; then
   if ! declare -F __start_kubectl >/dev/null; then
-    if kubectl_completion=$(kubectl completion bash 2>/dev/null); then
-      if ! eval "$kubectl_completion" 2>/dev/null; then
-        _dotfiles_warn 'kubectl returned invalid Bash completion'
-      fi
-    else
-      _dotfiles_warn 'kubectl completion generation failed'
-    fi
+    _dotfiles_eval_init kubectl kubectl completion bash || true
   fi
   if declare -F __start_kubectl >/dev/null && ! complete -F __start_kubectl k; then
     _dotfiles_warn 'failed to register kubectl completion for k'
   fi
-  unset kubectl_completion
 fi
 
 _dotfiles_omp_provider=$(type -P oh-my-posh 2>/dev/null || true)

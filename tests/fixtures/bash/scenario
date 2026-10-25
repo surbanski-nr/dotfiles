@@ -123,27 +123,26 @@ case $TEST_SCENARIO in
     eval cddot
     printf 'dotfiles=%s pwd=%s\n' "$DOTFILES" "$PWD"
     ;;
-  root-transition)
+  release-switch)
     unset DOTFILES DOTFILES_AUTO_ROOT
-    source "$TEST_CONNECTED_ROOT/bash/.bashrc"
-    printf 'connected=%s:%s:%s\n' "$DOTFILES" \
-      "${DOTFILES_SNAPSHOT_ROOT:-unset}" "$(snapshot-marker)"
-    printf 'connected-asdf=%s\n' "$(command -v terragrunt)"
-    source "$TEST_RELEASE_A/dotfiles/bash/.bashrc"
-    printf 'release-a=%s:%s:%s\n' "$DOTFILES" \
-      "$DOTFILES_SNAPSHOT_ROOT" "$(snapshot-marker)"
-    if command -v terragrunt >/dev/null; then exit 95; fi
-    printf 'offline-asdf=absent\n'
-    source "$TEST_RELEASE_B/dotfiles/bash/.bashrc"
-    printf 'release-b=%s:%s:%s\n' "$DOTFILES" \
-      "$DOTFILES_SNAPSHOT_ROOT" "$(snapshot-marker)"
-    source "$TEST_RELEASE_A/dotfiles/bash/.bashrc"
-    printf 'rollback-a=%s:%s:%s\n' "$DOTFILES" \
-      "$DOTFILES_SNAPSHOT_ROOT" "$(snapshot-marker)"
-    source "$TEST_CONNECTED_ROOT/bash/.bashrc"
-    printf 'baseline=%s:%s:%s\n' "$DOTFILES" \
-      "${DOTFILES_SNAPSHOT_ROOT:-unset}" "$(snapshot-marker)"
-    printf 'baseline-asdf=%s\n' "$(command -v terragrunt)"
+    source "$HOME/.bashrc"
+    printf 'before=%s config=%s\n' "$(release-command)" "$(config-marker)"
+    PATH="$TEST_RELEASE_A/bin:$TEST_RELEASE_A/share/nvim2/mason/bin:$TEST_RELEASE_A/share/nvim2/mason/packages/ansible-lint/venv/bin:$PATH"
+    export PATH
+    unlink "$HOME/dotfiles-releases/current"
+    ln -s "${TEST_RELEASE_B##*/}" "$HOME/dotfiles-releases/current"
+    source "$HOME/.bashrc"
+    source "$HOME/.bashrc"
+    hash -r
+    printf 'after=%s config=%s asdf=%s\n' "$(release-command)" \
+      "$(config-marker)" "$(command -v asdf-only-tool)"
+    for removed in removed-release-command removed-mason-command removed-venv-command removed-script-command; do
+      if command -v "$removed" >/dev/null; then exit 95; fi
+    done
+    unlink "$HOME/dotfiles-releases/current"
+    ln -s "${TEST_RELEASE_A##*/}" "$HOME/dotfiles-releases/current"
+    hash -r
+    printf 'reselected=%s\n' "$(release-command)"
     ;;
   root-override)
     unset DOTFILES DOTFILES_AUTO_ROOT
@@ -184,6 +183,10 @@ case $TEST_SCENARIO in
     declare -F __fzf_test_binding >/dev/null
     printf 'fzf-init=yes\n'
     ;;
+  fzf-failure)
+    load_bashrc
+    printf 'continued=yes\n'
+    ;;
   user-bin)
     # shellcheck disable=SC1090
     source "$TEST_BASHRC"
@@ -191,6 +194,7 @@ case $TEST_SCENARIO in
     source "$TEST_BASHRC"
     hash -r
     printf 'override=%s unique=%s\n' "$(path-probe)" "$(unique-user-tool)"
+    printf 'asdf-only=%s\n' "$(asdf-only-tool)"
     printf 'path=%s\n' "$PATH"
     entries=0
     IFS=: read -r -a paths <<<"$PATH"
@@ -238,6 +242,17 @@ case $TEST_SCENARIO in
     load_bashrc
     load_bashrc
     printf 'kube-default=%s\n' "$(test -e "$TEST_POSH_STATE" && printf disabled || printf enabled)"
+    ;;
+  kube-completion)
+    load_bashrc
+    load_bashrc
+    complete -p k
+    __start_kubectl
+    printf 'k-completion=%s\n' "${COMPREPLY[*]}"
+    ;;
+  fallback-prompt)
+    load_bashrc
+    printf 'prompt=%s\n' "${PS1@P}"
     ;;
   kube-prompt-toggle)
     load_aliases
