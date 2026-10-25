@@ -38,6 +38,7 @@ main() {
   select_requested_tools "${requested[@]}"
   preflight
   install_asdf
+  select_asdf
   export PATH="$BIN_DIR:$ASDF_DATA_DIR/shims:$PATH"
   reconcile_tools "${SELECTED_TOOLS[@]}"
 }
@@ -137,34 +138,23 @@ preflight_legacy_asdf() {
 
 # Distinguish a fresh home, verified managed selection, and eligible legacy link.
 preflight_asdf_link() {
-  local link="$BIN_DIR/asdf" state="$STATE_DIR/asdf-target"
-  local target recorded
+  local link="$BIN_DIR/asdf"
+  local target record
 
   if [[ -L $link ]]; then
     target=$(readlink -- "$link")
-    if [[ ! -e $state && ! -L $state ]]; then
+    if [[ ! $target =~ ^asdf-v?[0-9]+([.][0-9]+){1,3}$ ]]; then
+      report_error "refusing foreign asdf link: $link -> $target"
+      return 1
+    fi
+    record="$STATE_DIR/installations/$target.sha256"
+    if [[ ! -e $record && ! -L $record ]]; then
       preflight_legacy_asdf "$target"
-      return
+    else
+      verify_asdf_payload "$target"
     fi
-    if [[ ! -f $state || -L $state ]]; then
-      report_error "invalid asdf ownership state: $state"
-      return 1
-    fi
-    recorded=$(<"$state")
-    if [[ ! $recorded =~ ^asdf-v?[0-9]+([.][0-9]+){1,3}$ ]]; then
-      report_error "invalid asdf state: $state"
-      return 1
-    fi
-    if [[ $recorded != "$target" ]]; then
-      report_error "managed asdf link differs from recorded target: $link"
-      return 1
-    fi
-    verify_asdf_payload "$target"
   elif [[ -e $link ]]; then
     report_error "refusing unmanaged path: $link"
-    return 1
-  elif [[ -e $state || -L $state ]]; then
-    report_error "asdf ownership state exists without its managed link: $state"
     return 1
   fi
 
@@ -230,13 +220,12 @@ preflight() {
     report_error "invalid asdf installation state directory: $STATE_DIR/installations"
     return 1
   fi
+  acquire_online_setup_lock
   mkdir -p "$BIN_DIR" "$STATE_DIR"
-  acquire_setup_lock "$STATE_DIR/lock" 'another setup-asdf process is running'
   for name in "${SELECTED_TOOLS[@]}"; do
     preflight_project_command "$name"
     preflight_plugin "$name"
   done
-  recover_asdf_publication
   preflight_asdf_link
 }
 
@@ -250,64 +239,14 @@ write_asdf_record() {
   mv -T -- "$temporary" "$path"
 }
 
-# A journal bridges the link/ownership-record renames. Retry may finish only the
-# recorded old or new selection; an unrelated link is never replaced.
-recover_asdf_publication() {
-  local recovering=${1:-true}
-  local pending="$STATE_DIR/pending-selection" state="$STATE_DIR/asdf-target"
-  local target previous extra current=- recorded=- temporary
-
-  if [[ ! -e $pending && ! -L $pending ]]; then return 0; fi
-  if [[ ! -f $pending || -L $pending || $(wc -l <"$pending") != 1 ]]; then
-    report_error "invalid asdf selection journal: $pending"
-    return 1
-  fi
-  IFS=$'\t' read -r target previous extra <"$pending"
-  if [[ -n $extra || ! $target =~ ^asdf-v?[0-9]+([.][0-9]+){1,3}$ ||
-    ( $previous != - && ! $previous =~ ^asdf-v?[0-9]+([.][0-9]+){1,3}$ ) ]]; then
-    report_error "invalid asdf selection journal: $pending"
-    return 1
-  fi
-  if [[ -L $BIN_DIR/asdf ]]; then
-    current=$(readlink -- "$BIN_DIR/asdf")
-  elif [[ -e $BIN_DIR/asdf ]]; then
-    report_error "refusing unmanaged path: $BIN_DIR/asdf"
-    return 1
-  fi
-  if [[ -e $state || -L $state ]]; then
-    if [[ ! -f $state || -L $state ]]; then
-      report_error "invalid asdf ownership state: $state"
-      return 1
-    fi
-    recorded=$(<"$state")
-  fi
-  if [[ ( $current != "$previous" && $current != "$target" ) ||
-    ( $recorded != "$previous" && $recorded != "$target" ) ]]; then
-    report_error 'asdf selection changed outside the pending operation'
-    return 1
-  fi
-  verify_asdf_payload "$target"
-  temporary="$BIN_DIR/.asdf.link.$$"
-  ln -s -- "$target" "$temporary"
-  TEMP_PATHS+=("$temporary")
-  mv -T -- "$temporary" "$BIN_DIR/asdf"
-  write_asdf_record "$state" "$target"
-  unlink -- "$pending"
-  if [[ $recovering == true ]]; then
-    printf 'setup-asdf: recovered selection %s\n' "$target"
-  fi
-}
-
 install_asdf() {
   local destination="$BIN_DIR/asdf-$ASDF_VERSION"
-  local link="$BIN_DIR/asdf"
   local archive
   local executable
   local output
   local stage
-  local state="$STATE_DIR/asdf-target"
   local install_state="$STATE_DIR/installations/asdf-$ASDF_VERSION.sha256"
-  local digest previous=-
+  local digest
 
   select_release TOOL_RELEASES asdf "$ASDF_VERSION"
   artifact_layout asdf "$ASDF_VERSION" "$RELEASE_ASSET"
@@ -348,12 +287,21 @@ install_asdf() {
       printf 'setup-asdf: installed asdf %s\n' "$ASDF_VERSION"
     fi
   fi
-  if [[ -L $link ]]; then previous=$(readlink -- "$link"); fi
-  if [[ $previous == "asdf-$ASDF_VERSION" && -z $LEGACY_ASDF_TARGET ]]; then return 0; fi
-  # Verified legacy adoption establishes the old selection before journaling it.
-  if [[ -n $LEGACY_ASDF_TARGET ]]; then write_asdf_record "$state" "$previous"; fi
-  write_asdf_record "$STATE_DIR/pending-selection" "asdf-$ASDF_VERSION"$'\t'"$previous"
-  recover_asdf_publication false
+  LEGACY_ASDF_TARGET=
+}
+
+select_asdf() {
+  local link="$BIN_DIR/asdf" target="asdf-$ASDF_VERSION"
+  local temporary="$BIN_DIR/.asdf.link.$$"
+
+  preflight_asdf_link
+  if [[ -L $link && $(readlink -- "$link") == "$target" ]]; then return 0; fi
+  [[ ! -e $temporary && ! -L $temporary ]] ||
+    report_error "temporary link exists: $temporary"
+  ln -s -- "$target" "$temporary"
+  TEMP_PATHS+=("$temporary")
+  mv -T -- "$temporary" "$link"
+  printf 'setup-asdf: selected asdf %s\n' "$ASDF_VERSION"
 }
 
 pin_plugin() {

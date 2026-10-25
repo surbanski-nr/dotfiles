@@ -2,16 +2,18 @@
 
 set -euo pipefail
 
-export DOTFILES_IGNORE_BIN_EXTRAS=1
 unset VIRTUAL_ENV
-IFS=: read -r -a path_entries <<<"$PATH"
-clean_path=
-for entry in "${path_entries[@]}"; do
-  [[ -n $entry && $entry != "$HOME/bin-extras" ]] || continue
-  clean_path+=${clean_path:+:}$entry
-done
-export PATH=$clean_path
-unset path_entries entry clean_path
+# Connected tools live in HOME/bin; release build and qualification opt out.
+if [[ ${DOTFILES_IGNORE_USER_BIN:-} == 1 ]]; then
+  IFS=: read -r -a path_entries <<<"$PATH"
+  clean_path=
+  for entry in "${path_entries[@]}"; do
+    [[ -n $entry && $entry != "$HOME/bin" ]] || continue
+    clean_path+=${clean_path:+:}$entry
+  done
+  export PATH=$clean_path
+  unset path_entries entry clean_path
+fi
 
 config_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 xdg_config_home=$(dirname -- "$config_dir")

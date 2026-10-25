@@ -86,7 +86,7 @@ EOF
     cat >>"$path" <<'EOF'
 release=${self%/tools/nvim/bin/nvim}
 [[ ${DOTFILES_OFFLINE_RELEASE_ROOT:-} == "$release" ]] || exit 96
-[[ ${DOTFILES_IGNORE_BIN_EXTRAS:-} == 1 ]] || exit 99
+[[ ${DOTFILES_IGNORE_USER_BIN:-} == 1 ]] || exit 99
 [[ -z ${VIRTUAL_ENV:-} ]] || exit 98
 EOF
   fi
@@ -223,8 +223,7 @@ EOF
     chmod 0755 "$plugin_dir/schema"
     offline_profile+=,yq
   fi
-  ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python"
-  ln -s ../tools/python-3.12.12/bin/python3 "$release/bin/python3"
+  ln -s python-3.12.12 "$release/tools/python"
   for command_name in nvim tmux; do
     install -m 0755 "$repo_dir/scripts/offline-$command_name" "$release/bin/$command_name"
   done

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+unset DOTFILES_IGNORE_USER_BIN
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 command_fixture=$repo_dir/tests/fixtures/bash/command
@@ -439,44 +440,56 @@ path_output=$(
     bash --noprofile --norc -i
 )
 assert_contains "$path_output" "python=$path_home/.venv/bin/python"
-assert_contains "$path_output" "terraform=$path_home/.asdf/shims/terraform"
+assert_contains "$path_output" "terraform=$path_home/bin/terraform"
 path_line=$(grep '^path=' <<<"$path_output")
 [[ ${path_line#path=} == "$path_home/.venv/bin:"* ]] ||
   fail 'active virtual environment lost PATH precedence'
 
-for setup_mode in connected offline; do
-  extras_home="$test_root/$setup_mode extras home"
-  for provider in bin bin-extras .asdf/shims .krew/bin .local/bin \
+for setup_mode in connected offline custom-store; do
+  override_home="$test_root/$setup_mode override home"
+  override_store=$override_home/dotfiles-releases
+  [[ $setup_mode != custom-store ]] || override_store="$override_home/releases with spaces"
+  for provider in bin .asdf/shims .krew/bin .local/bin \
     .local/share/nvim2/mason/bin 'project venv/bin'; do
-    mkdir -p "$extras_home/$provider"
+    mkdir -p "$override_home/$provider"
     printf '#!/usr/bin/env bash\nprintf "%%s\\n" %q\n' "$provider" \
-      >"$extras_home/$provider/path-probe"
-    chmod 0755 "$extras_home/$provider/path-probe"
+      >"$override_home/$provider/path-probe"
+    chmod 0755 "$override_home/$provider/path-probe"
   done
-  cp "$extras_home/bin-extras/path-probe" "$extras_home/bin-extras/unique-extra"
+  cp "$override_home/bin/path-probe" "$override_home/bin/unique-user-tool"
   printf '#!/usr/bin/env bash\nprintf "cwd\\n"\n' >"$test_root/cwd-only"
   chmod 0755 "$test_root/cwd-only"
-  extras_bashrc=$repo_dir/bash/.bashrc
+  override_bashrc=$repo_dir/bash/.bashrc
   fallback=.asdf/shims
-  if [[ $setup_mode == offline ]]; then
-    extras_release=$extras_home/dotfiles-releases/dotfiles-cccccccccccc
-    mkdir -p "$extras_release/dotfiles/bash"
-    cp "$extras_bashrc" "$extras_release/dotfiles/bash/.bashrc"
-    printf 'RELEASE_ID=dotfiles-cccccccccccc\n' >"$extras_release/release.env"
-    extras_bashrc=$extras_release/dotfiles/bash/.bashrc
-    fallback=bin
+  if [[ $setup_mode != connected ]]; then
+    override_release=$override_store/dotfiles-cccccccccccc
+    mkdir -p "$override_release/dotfiles/bash" "$override_release/bin"
+    cp "$override_bashrc" "$override_release/dotfiles/bash/.bashrc"
+    printf 'RELEASE_ID=dotfiles-cccccccccccc\n' >"$override_release/release.env"
+    printf '#!/usr/bin/env bash\nprintf "release\\n"\n' >"$override_release/bin/path-probe"
+    chmod 0755 "$override_release/bin/path-probe"
+    ln -s dotfiles-cccccccccccc "$override_store/current"
+    override_bashrc=$override_release/dotfiles/bash/.bashrc
+    fallback=release
   fi
-  extras_output=$(
+  override_output=$(
     cd "$test_root"
-    run_scenario bin-extras \
-      env -u DOTFILES_IGNORE_BIN_EXTRAS HOME="$extras_home" TEST_BASHRC="$extras_bashrc" \
-      PATH=":$extras_home/bin-extras:$test_root/bin::$original_path:$extras_home/bin-extras:" \
+    run_scenario user-bin \
+      env -u DOTFILES_IGNORE_USER_BIN HOME="$override_home" TEST_BASHRC="$override_bashrc" \
+      DOTFILES_RELEASE_ROOT="$override_store" \
+      PATH=":$override_home/bin:$test_root/bin::$original_path:$override_home/bin:" \
       TERM=xterm-256color bash --noprofile --norc -i
   )
-  assert_contains "$extras_output" 'override=bin-extras unique=bin-extras'
-  assert_contains "$extras_output" 'venv=project venv/bin'
+  assert_contains "$override_output" 'override=bin unique=bin'
+  assert_contains "$override_output" 'venv=project venv/bin'
+  if [[ $setup_mode == connected ]]; then
+    [[ $override_output != *"$override_store/current/bin"* ]] ||
+      fail 'missing release directory was added to PATH'
+  else
+    assert_contains "$override_output" "$override_store/current/bin"
+  fi
   for phase in nonexecutable ignored removed regular-file; do
-    assert_contains "$extras_output" "$phase=$fallback"
+    assert_contains "$override_output" "$phase=$fallback"
   done
 done
 

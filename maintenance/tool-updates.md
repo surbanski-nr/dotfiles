@@ -459,7 +459,7 @@ Qualify new candidates on all four supported platforms with the prepared OS
 baseline and network disabled for installation and CI qualification. Check every
 Helm version with the bundled plugin, actual schema generation with local
 references, yq multi-document processing and jq overlay merges. Qualification ignores
-caller plugin overrides and bin-extras. The tool-enabled editor checks must
+caller plugin overrides and user-owned `~/bin`. The tool-enabled editor checks must
 opt in explicitly when they qualify save formatting; ordinary sessions start
 with format on save disabled. Manual formatting is a one-time action.
 
@@ -528,6 +528,13 @@ byte-for-byte, and records ownership only after all requested provider and
 plugin preflight checks pass. A conflicting direct launcher, modified binary,
 different target or older unverified pin is left untouched and must be resolved
 explicitly before retrying.
+
+For a recorded, intact asdf binary, the relative `~/bin/asdf` link is the selected
+version. A manual switch between those verified binaries is accepted; the next
+`setup-asdf` selects the catalog pin again. Old `asdf-target` and
+`pending-selection` records do not override that link. Both online installers
+share `~/.local/state/dotfiles/setup.lock` (or its XDG state equivalent), so do not
+run them concurrently or remove the lock file to force an installation.
 
 ## Nvim2 candidate and health evidence
 

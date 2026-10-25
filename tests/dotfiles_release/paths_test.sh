@@ -31,17 +31,30 @@ if run_manager install "$artifact_one" >/dev/null 2>&1; then fail 'symlink relea
   fail 'symlink root modified outside data'
 
 test_home=$test_root/parent-link-home
-outside_bin=$test_root/outside-bin
-mkdir -p "$test_home" "$outside_bin"
-printf 'outside bin marker\n' >"$outside_bin/marker"
-ln -s "$outside_bin" "$test_home/bin"
+outside_config=$test_root/outside-config
+mkdir -p "$test_home" "$outside_config"
+printf 'outside config marker\n' >"$outside_config/marker"
+ln -s "$outside_config" "$test_home/.config"
 if run_manager install "$artifact_one" >"$test_root/parent-link.log" 2>&1; then
   fail 'symlink parent was accepted'
 fi
 [[ $(<"$test_root/parent-link.log") == *'symlink parent'* &&
-  $(<"$outside_bin/marker") == 'outside bin marker' &&
+  $(<"$outside_config/marker") == 'outside config marker' &&
   ! -e $test_home/dotfiles-releases/$id_one ]] ||
   fail 'symlink parent rejection changed outside data or retained a candidate'
+
+test_home=$test_root/user-bin-link-home
+outside_bin=$test_root/outside-bin
+mkdir -p "$test_home" "$outside_bin"
+printf 'outside bin marker\n' >"$outside_bin/marker"
+ln -s "$outside_bin" "$test_home/bin"
+run_manager install "$artifact_one" >/dev/null
+run_manager health >/dev/null
+run_manager uninstall >/dev/null
+assert_link "$test_home/bin" "$outside_bin"
+[[ $(<"$outside_bin/marker") == 'outside bin marker' &&
+  $(find "$outside_bin" -mindepth 1 -maxdepth 1 | wc -l) == 1 ]] ||
+  fail 'release lifecycle changed the user-owned bin directory'
 
 test_home=$test_root/saved-conflict-home
 mkdir -p "$test_home"
@@ -59,7 +72,8 @@ test_home=$test_root/foreign-link-home
 mkdir -p "$test_home/bin"
 ln -s /usr/bin/true "$test_home/bin/rg"
 run_manager install "$artifact_one" >/dev/null
-assert_link "$test_home/bin/rg.before-dotfiles-release" /usr/bin/true
+assert_link "$test_home/bin/rg" /usr/bin/true
+[[ ! -e $test_home/bin/rg.before-dotfiles-release ]] || fail 'release backed up a user executable'
 run_manager uninstall >/dev/null
 assert_link "$test_home/bin/rg" /usr/bin/true
 
@@ -67,9 +81,10 @@ test_home=$test_root/custom-store-home
 custom_root="$test_home/releases with spaces"
 mkdir -p "$test_home"
 DOTFILES_RELEASE_ROOT="$custom_root" run_manager install "$artifact_one" >/dev/null
-assert_link "$test_home/bin/rg" "$custom_root/current/bin/rg"
+[[ -x $custom_root/current/bin/rg && ! -e $test_home/bin ]] ||
+  fail 'custom release did not expose commands directly or touched user bin'
 DOTFILES_RELEASE_ROOT="$custom_root" run_manager uninstall >/dev/null
-[[ ! -L $test_home/bin/rg && ! -e $custom_root/$id_one ]] ||
+[[ ! -e $test_home/bin && ! -e $custom_root/$id_one ]] ||
   fail 'custom release root was not respected on uninstall'
 
 for unsafe_root in / "$test_home" "$test_home/../elsewhere"; do

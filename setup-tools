@@ -274,15 +274,8 @@ preflight() {
   if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
     [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || report_error "invalid state directory: $STATE_DIR"
   fi
-  if [[ -L $STATE_DIR/locks || ( -e $STATE_DIR/locks && ! -d $STATE_DIR/locks ) ]]; then
-    report_error "invalid lock directory: $STATE_DIR/locks"
-    return 1
-  fi
-  mkdir -p "$BIN_DIR" "$STATE_DIR/locks"
-  # Acquire in a stable order before checking ownership to avoid check/use races.
-  local -a lock_names=()
-  mapfile -t lock_names < <(printf '%s\n' "$@" | LC_ALL=C sort)
-  for name in "${lock_names[@]}"; do acquire_lock "$name"; done
+  acquire_online_setup_lock
+  mkdir -p "$BIN_DIR" "$STATE_DIR"
   for name in "$@"; do
     if [[ $name == htop || $name == tmux ]]; then
       for build_command in cc getconf make pkg-config; do
@@ -298,13 +291,6 @@ preflight() {
     load_tool_release "$name" "${TOOL_VERSIONS[0]}"
     for entry in "${SPEC_LINKS[@]}"; do preflight_link "$name" "$entry"; done
   done
-}
-
-acquire_lock() {
-  local name=$1
-  local lock="$STATE_DIR/locks/$name.lock"
-
-  acquire_setup_lock "$lock" "another setup-tools process owns $name"
 }
 
 write_state() {

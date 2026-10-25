@@ -46,7 +46,7 @@ bash ./dotfiles-release uninstall dotfiles-COMMIT
 
 `verify` reads the platform from the archive and checks its structure and
 checksums without installing or running its programs. `health [ID]` checks an
-installed release and, for `current`, its public links. Install and set run the
+installed release and, for `current`, its configuration links. Install and set run the
 same light runtime checks; `--skip-health` skips it.
 `setup` detects the host OS and uses embedded runtime package lists to install.
 `install` never runs setup, uses sudo or downloads tools. On a prepared host,

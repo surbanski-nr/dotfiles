@@ -39,7 +39,7 @@ function M.python()
     directory = parent
   end
 
-  local fallback = release and vim.fs.joinpath(release, 'bin', 'python') or vim.fn.exepath 'python3'
+  local fallback = release and vim.fs.joinpath(release, 'tools', 'python', 'bin', 'python3') or vim.fn.exepath 'python3'
   return executable(fallback, 'Python; select a project .venv or NVIM2_DEBUG_PYTHON')
 end
 

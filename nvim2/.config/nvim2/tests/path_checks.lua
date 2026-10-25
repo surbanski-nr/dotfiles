@@ -8,11 +8,12 @@ local function executable(path, output)
   assert(vim.fn.setfperm(path, 'rwxr-xr-x') == 1)
 end
 
-for directory, output in pairs { bin = 'home-bin', ['bin-extras'] = 'extras', ['project venv/bin'] = 'venv' } do
+for directory, output in pairs { bin = 'home-bin', ['project venv/bin'] = 'venv' } do
   executable(root .. '/' .. directory .. '/stylua', output)
   executable(root .. '/' .. directory .. '/path-probe', output)
 end
-executable(root .. '/bin-extras/unique-extra', 'unique')
+executable(root .. '/bin/unique-user-tool', 'unique')
+executable(root .. '/managed/bin/path-probe', 'managed')
 local fixture = root .. '/check.lua'
 assert(vim.fn.writefile(
   vim.split(
@@ -32,9 +33,9 @@ assert(vim.fn.exepath('stylua') == expected, 'repeated setup changed selection')
 local count = 0
 for _, path in ipairs(vim.split(vim.env.PATH, ':', { plain = true })) do
   assert(path ~= '', 'PATH permits implicit current-directory lookup')
-  if path == vim.env.HOME .. '/bin-extras' then count = count + 1 end
+  if path == vim.env.HOME .. '/bin' then count = count + 1 end
 end
-assert(count == tonumber(vim.env.TEST_EXTRAS_COUNT), 'extras entry was duplicated or retained')
+assert(count == tonumber(vim.env.TEST_USER_BIN_COUNT), 'user bin entry was duplicated or retained')
 vim.cmd 'enew'
 vim.cmd 'terminal stylua --version'
 assert(vim.fn.jobwait({ vim.b.terminal_job_id }, 10000)[1] == 0, 'terminal command failed')
@@ -43,11 +44,11 @@ assert(terminal:find(selected, 1, true), 'terminal selected a different provider
 local shell = output { 'bash', '--noprofile', '--norc', '-ic', 'source "$TEST_BASHRC"; path-probe' }
 assert(shell == vim.env.TEST_SHELL_EXPECTED, 'nested Bash lost provider selection')
 if count == 1 then
-  assert(output { 'unique-extra' } == 'unique')
-  assert(vim.uv.fs_rename(vim.env.HOME .. '/bin-extras', vim.env.HOME .. '/saved-extras'))
+  assert(output { 'unique-user-tool' } == 'unique')
+  assert(vim.uv.fs_rename(vim.env.HOME .. '/bin', vim.env.HOME .. '/saved-user-bin'))
   require('custom.lsp').restore_path()
-  assert(not vim.env.PATH:find(vim.env.HOME .. '/bin-extras', 1, true), 'deleted extras survived rebuilding')
-  assert(vim.uv.fs_rename(vim.env.HOME .. '/saved-extras', vim.env.HOME .. '/bin-extras'))
+  assert(not vim.env.PATH:find(vim.env.HOME .. '/bin', 1, true), 'deleted user bin survived rebuilding')
+  assert(vim.uv.fs_rename(vim.env.HOME .. '/saved-user-bin', vim.env.HOME .. '/bin'))
 end
 vim.cmd 'qa!'
 ]=],
@@ -70,16 +71,16 @@ assert(vim.fn.filereadable(bashrc) == 1, 'dotfiles Bash configuration is require
 for _, mode in ipairs { 'enabled', 'venv', 'ignored', 'nonexecutable' } do
   local environment = vim.fn.environ()
   environment.HOME = root
-  environment.PATH = root .. '/bin:' .. root .. '/bin-extras:' .. vim.env.PATH .. '::'
-  environment.DOTFILES_IGNORE_BIN_EXTRAS = mode == 'ignored' and '1' or ''
+  environment.PATH = root .. '/bin:' .. root .. '/managed/bin:' .. vim.env.PATH .. '::'
+  environment.DOTFILES_IGNORE_USER_BIN = mode == 'ignored' and '1' or ''
   environment.VIRTUAL_ENV = mode == 'venv' and (root .. '/project venv') or ''
-  environment.TEST_EXPECTED = mode == 'venv' and (root .. '/project venv/bin/stylua') or mode == 'enabled' and (root .. '/bin-extras/stylua') or managed
-  environment.TEST_EXTRAS_COUNT = mode == 'ignored' and '0' or '1'
-  environment.TEST_SHELL_EXPECTED = mode == 'ignored' and 'home-bin' or mode == 'venv' and 'venv' or 'extras'
+  environment.TEST_EXPECTED = mode == 'venv' and (root .. '/project venv/bin/stylua') or mode == 'enabled' and (root .. '/bin/stylua') or managed
+  environment.TEST_USER_BIN_COUNT = mode == 'ignored' and '0' or '1'
+  environment.TEST_SHELL_EXPECTED = mode == 'ignored' and 'managed' or mode == 'venv' and 'venv' or 'home-bin'
   environment.TEST_BASHRC = bashrc
   environment.TEST_PATH_FIXTURE = fixture
   environment.TERM = 'xterm-256color'
-  if mode == 'nonexecutable' then assert(vim.fn.setfperm(root .. '/bin-extras/stylua', 'rw-r--r--') == 1) end
+  if mode == 'nonexecutable' then assert(vim.fn.setfperm(root .. '/bin/stylua', 'rw-r--r--') == 1) end
   local invocation =
     "+lua local ok, message = xpcall(function() dofile(vim.env.TEST_PATH_FIXTURE) end, debug.traceback); if not ok then vim.api.nvim_err_writeln(message); vim.cmd('cquit 1') end"
   local result = vim.system({ vim.v.progpath, '--headless', invocation }, { env = environment, text = true }):wait(30000)

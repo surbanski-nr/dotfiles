@@ -27,20 +27,23 @@ run_manager uninstall >/dev/null
   fail 'uninstall retained optional links'
 
 test_home=$test_root/current-profile-home
+release_bin=$test_home/dotfiles-releases/current/bin
 mkdir -p "$test_home"
 run_manager install "$artifact_two" >/dev/null
 run_manager install "$artifact_three" >/dev/null
 for command_name in kind uv uvx actionlint shellcheck yamllint gh htop kubeconform kyverno trivy; do
-  [[ -x $test_home/bin/$command_name ]] || fail "profile did not publish $command_name"
+  [[ -x $release_bin/$command_name ]] || fail "profile did not expose $command_name"
 done
+[[ ! -e $test_home/bin ]] || fail 'release created a user bin directory'
 run_manager set "$id_two" >/dev/null
 for command_name in kind uv uvx actionlint shellcheck yamllint gh htop kubeconform kyverno trivy; do
-  [[ ! -x $test_home/bin/$command_name ]] || fail "old profile borrowed $command_name"
+  [[ ! -e $release_bin/$command_name && ! -L $release_bin/$command_name ]] ||
+    fail "old profile borrowed or left a dangling link for $command_name"
 done
 run_manager set "$id_three" >/dev/null
 run_manager uninstall >/dev/null
 for command_name in kind uv uvx actionlint shellcheck yamllint gh htop kubeconform kyverno trivy; do
-  [[ ! -L $test_home/bin/$command_name ]] || fail "uninstall retained $command_name"
+  [[ ! -L $release_bin/$command_name ]] || fail "uninstall retained $command_name"
 done
 
 for command_name in kind uv uvx fd go gofmt; do
@@ -77,13 +80,14 @@ for field in FD_VERSION GO_VERSION; do
 done
 
 test_home=$test_root/pre-go-home
+release_bin=$test_home/dotfiles-releases/current/bin
 mkdir -p "$test_home"
 old_go_artifact=$test_root/pre-go.tar.gz
 make_artifact "$commit_one" pre-go "$old_go_artifact" 1.0 true false
 run_manager install "$old_go_artifact" >/dev/null
 run_manager install "$artifact_two" >/dev/null
 run_manager set "$id_one" >/dev/null
-[[ -x $test_home/bin/fd && ! -x $test_home/bin/go && ! -x $test_home/bin/gofmt ]] ||
+[[ -x $release_bin/fd && ! -x $release_bin/go && ! -x $release_bin/gofmt ]] ||
   fail 'pre-Go selection did not keep only the supported tools'
 
 test_home=$test_root/provider-backup-home

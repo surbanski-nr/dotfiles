@@ -35,7 +35,7 @@ and use its final venv without builder paths, user site-packages or bytecode
 writes into the release. Neovim retains that physical adapter path even when
 another release becomes `current`. The program uses its own selected Python,
 preferring an explicit override, active environment or nearest project venv;
-only the no-venv offline fallback uses `release/bin/python`.
+only the no-venv offline fallback uses `release/tools/python/bin/python3`.
 Project dependencies and application-specific Python versions are not bundled.
 There is no TypeScript/Node or browser debug adapter.
 
@@ -73,7 +73,8 @@ For Go-bearing releases, the launcher clears an inherited `GOROOT` and selects
 `GOTOOLCHAIN=local`. Go and the Go editor tools use that physical release's SDK
 and cannot auto-download a different version. Bash terminals restore the
 original Go environment together with the XDG values. The newer manager also
-supports original and fd-only retained releases that have no Go metadata.
+supports original and fd-only tool profiles with no Go metadata, packaged
+with the current private-Python layout described in the setup guide.
 
 ## Mutable data
 

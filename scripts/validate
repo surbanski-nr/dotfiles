@@ -2,11 +2,11 @@
 
 set -euo pipefail
 
-export DOTFILES_IGNORE_BIN_EXTRAS=1
+export DOTFILES_IGNORE_USER_BIN=1
 IFS=: read -r -a path_entries <<<"$PATH"
 clean_path=
 for entry in "${path_entries[@]}"; do
-  [[ -n $entry && $entry != "$HOME/bin-extras" ]] || continue
+  [[ -n $entry && $entry != "$HOME/bin" ]] || continue
   clean_path+=${clean_path:+:}$entry
 done
 export PATH=$clean_path

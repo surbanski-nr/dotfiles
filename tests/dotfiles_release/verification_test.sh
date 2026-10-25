@@ -51,6 +51,7 @@ fi
 
 for defect in missing-layout missing-executable missing-plugin missing-wheelhouse \
   dangling-plugin-runtime missing-private-nvim missing-private-tmux missing-nvim-runtime \
+  missing-private-python-link public-python public-python3 \
   incomplete-ssh checksum missing-checksum extra-file extra-root dangling-link duplicate-member installed-state \
   inventory-mismatch duplicate-inventory extra-lock control-character control-link; do
   marker=verify-$defect
@@ -64,6 +65,9 @@ for defect in missing-layout missing-executable missing-plugin missing-wheelhous
     missing-wheelhouse) find "$release/python-wheelhouse" -depth -delete ;;
     missing-private-nvim) unlink "$release/tools/nvim/bin/nvim" ;;
     missing-private-tmux) unlink "$release/tools/tmux/bin/tmux" ;;
+    missing-private-python-link) unlink "$release/tools/python" ;;
+    public-python) ln -s ../tools/python/bin/python3 "$release/bin/python" ;;
+    public-python3) ln -s ../tools/python/bin/python3 "$release/bin/python3" ;;
     missing-nvim-runtime) find "$release/tools/nvim/share/nvim/runtime" -depth -delete ;;
     incomplete-ssh) unlink "$release/dotfiles/ssh/.ssh/config" ;;
     dangling-link) ln -s missing "$release/tools/dangling" ;;

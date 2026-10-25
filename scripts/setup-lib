@@ -35,6 +35,17 @@ release_setup_locks() {
   done
 }
 
+acquire_online_setup_lock() {
+  local directory=${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles
+
+  if [[ -L $directory || ( -e $directory && ! -d $directory ) ]]; then
+    report_error "invalid online setup state directory: $directory"
+    return 1
+  fi
+  mkdir -p "$directory" || return
+  acquire_setup_lock "$directory/setup.lock" 'another online installer is running'
+}
+
 require_setup_commands() {
   local command_name
   local -a commands=()

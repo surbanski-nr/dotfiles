@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-export DOTFILES_IGNORE_BIN_EXTRAS=1
+export DOTFILES_IGNORE_USER_BIN=1
 unset VIRTUAL_ENV
 
 TEMP_PATHS=()
@@ -203,8 +203,7 @@ install_release_tools() {
 
   prepare_release_artifact TOOL_RELEASES python "$python_version" "$inputs" || return
   mv -- "$PREPARED_ARTIFACT" "$release/tools/python-$python_version" || return
-  ln -s "../tools/python-$python_version/bin/python3" "$release/bin/python" || return
-  ln -s "../tools/python-$python_version/bin/python3" "$release/bin/python3" || return
+  ln -s "python-$python_version" "$release/tools/python" || return
 
   prepare_release_artifact TOOL_RELEASES go "${BUILD_VERSIONS[go]}" "$inputs" || return
   mv -- "$PREPARED_ARTIFACT" "$release/tools/go" || return

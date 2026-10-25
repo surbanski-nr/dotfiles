@@ -110,32 +110,15 @@ _dotfiles_check_release_version() {
 dotfiles-check() (
   local manifest_dir=${DOTFILES:-}
   local missing=0
-  local release_id release_root
+  local release_root
 
   if [[ -z $manifest_dir ]]; then
     manifest_dir=$(CDPATH='' cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
   fi
   release_root=${manifest_dir%/dotfiles}
   if [[ -f $release_root/release.env && -x $release_root/bin/dotfiles-release ]]; then
-    release_id=${release_root##*/}
-    "$release_root/bin/dotfiles-release" health "$release_id" || return
-    for command_name in dotfiles-release nvim tmux node npm npx corepack rg \
-      zoxide k9s kubectx kubens oh-my-posh task fzf terraform; do
-      [[ $(readlink -f -- "$HOME/bin/$command_name" 2>/dev/null) == \
-        "$release_root/"* ]] || {
-        printf '  MISMATCH active release command: %s\n' "$command_name" >&2
-        return 1
-      }
-    done
-    for command_name in go gofmt kind uv uvx actionlint shellcheck yamllint \
-      gh htop kubeconform kyverno trivy; do
-      [[ -x $release_root/bin/$command_name ]] || continue
-      [[ $(readlink -f -- "$HOME/bin/$command_name" 2>/dev/null) == "$release_root/"* ]] || {
-        printf '  MISMATCH active release command: %s\n' "$command_name" >&2
-        return 1
-      }
-    done
-    return 0
+    DOTFILES_RELEASE_ROOT=${release_root%/*} "$release_root/bin/dotfiles-release" health
+    return
   fi
   if [[ -r $manifest_dir/tools.env ]]; then
     # shellcheck source=../tools.env

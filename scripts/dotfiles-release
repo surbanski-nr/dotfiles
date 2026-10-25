@@ -436,6 +436,13 @@ validate_release_directory() {
     -d $release/share/nvim2/mason/bin &&
     -d $release/dotfiles/k9s/.config/k9s/skins ]] ||
     { die 'release runtime layout is incomplete'; return 1; }
+  [[ -L $release/tools/python &&
+    $(readlink -- "$release/tools/python") == "python-${release_metadata[PYTHON_VERSION]}" ]] ||
+    { die 'private Python SDK link is missing or incorrect'; return 1; }
+  for path in bin/python bin/python3; do
+    [[ ! -e $release/$path && ! -L $release/$path ]] ||
+      { die "private Python must not be exposed in $path; rebuild the release"; return 1; }
+  done
   if [[ -e $release/dotfiles/ssh || -L $release/dotfiles/ssh ]]; then
     for path in dotfiles/ssh/.ssh/config dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service; do
       [[ -f $release/$path && ! -L $release/$path ]] ||
@@ -725,17 +732,9 @@ add_projection() {
 }
 
 release_projection() {
-  local release=$1 current=$RELEASE_ROOT/current command_output command_name file relative skin_list
+  local release=$1 current=$RELEASE_ROOT/current file relative skin_list
   LINK_PATHS=()
   LINK_TARGETS=()
-  command_output=$(release_commands "$release") || return
-  while IFS= read -r command_name; do
-    if [[ $RELEASE_ROOT == "$HOME/dotfiles-releases" ]]; then
-      add_projection "$HOME/bin/$command_name" "../dotfiles-releases/current/bin/$command_name"
-    else
-      add_projection "$HOME/bin/$command_name" "$current/bin/$command_name"
-    fi
-  done <<<"$command_output"
   add_projection "$HOME/.config/nvim2" "$current/config/nvim2"
   add_projection "$HOME/.local/share/nvim2" "$current/share/nvim2"
   for file in .bashrc .bash_profile .bash_aliases; do
@@ -956,7 +955,7 @@ PY
 check_runtime() {
   local release=$1 runtime_home command_name expected field serialized output tool version
   local command_output
-  local PATH=$PATH DOTFILES_OFFLINE_RELEASE_ROOT=$1 DOTFILES_IGNORE_BIN_EXTRAS=1 VIRTUAL_ENV=''
+  local PATH=$PATH DOTFILES_OFFLINE_RELEASE_ROOT=$1 DOTFILES_IGNORE_USER_BIN=1 VIRTUAL_ENV=''
   local KUBECTL_VERSION='' HELM_VERSION='' PYTHONDONTWRITEBYTECODE=1
   local HELM_PLUGINS=''
   local LC_ALL=C.UTF-8 LANG=C.UTF-8
@@ -967,7 +966,7 @@ check_runtime() {
   runtime_home=$(mktemp -d) || return
   TEMP_PATHS+=("$runtime_home")
   PATH="$release/bin:$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/share/nvim2/mason/bin:/usr/bin:/bin"
-  export PATH DOTFILES_OFFLINE_RELEASE_ROOT DOTFILES_IGNORE_BIN_EXTRAS VIRTUAL_ENV
+  export PATH DOTFILES_OFFLINE_RELEASE_ROOT DOTFILES_IGNORE_USER_BIN VIRTUAL_ENV
   command_output=$(release_commands "$release") || return
   while IFS= read -r command_name; do
     [[ $(type -P -- "$command_name") == "$release/bin/$command_name" ]] ||
@@ -1118,10 +1117,6 @@ managed_home_links() {
     "$HOME/.tmux/plugins/tmux-sensible" "$HOME/.tmux/plugins/tmux-resurrect"
     "$HOME/.tmux/plugins/tmux-continuum"
   )
-  for path in "$HOME/bin/"*; do
-    [[ -L $path ]] || continue
-    paths+=("$path")
-  done
   if [[ -d $HOME/.config/k9s/skins && ! -L $HOME/.config/k9s/skins ]]; then
     file=$(mktemp) || return
     TEMP_PATHS+=("$file")
@@ -1131,9 +1126,7 @@ managed_home_links() {
   for path in "${paths[@]}"; do
     [[ -L $path ]] || continue
     target=$(readlink -- "$path") || return
-    if [[ $target == "$RELEASE_ROOT/current/"* ||
-      ( $RELEASE_ROOT == "$HOME/dotfiles-releases" && $path == "$HOME/bin/"* &&
-        $target == "../dotfiles-releases/current/bin/${path##*/}" ) ]]; then
+    if [[ $target == "$RELEASE_ROOT/current/"* ]]; then
       validate_link_parent "$path" || return
       printf '%s\0' "$path"
     fi

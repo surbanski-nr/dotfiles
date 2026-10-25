@@ -9,6 +9,9 @@ cleanup() {
   local status=$?
   trap - EXIT
   set +e
+  if [[ -n ${killed_lock_child_pid:-} ]]; then
+    kill "$killed_lock_child_pid" 2>/dev/null
+  fi
   if [[ -n ${killed_lock_pid:-} ]]; then
     kill "$killed_lock_pid" 2>/dev/null
     wait "$killed_lock_pid" 2>/dev/null

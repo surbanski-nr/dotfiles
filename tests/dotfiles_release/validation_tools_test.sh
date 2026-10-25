@@ -9,6 +9,7 @@ create_fixture
 candidate=$test_root/validation-tools.tar.gz
 make_artifact "$commit_three" validation-tools "$candidate" 3.0 true true true true
 test_home=$test_root/'validation tools home'
+release_bin=$test_home/dotfiles-releases/current/bin
 mkdir -p "$test_home/bin" "$test_root/user-plugins"
 write_fake_tool "$test_home/bin/yq-0.9" 0.9
 ln -s yq-0.9 "$test_home/bin/yq"
@@ -16,13 +17,14 @@ export HELM_PLUGINS="$test_root/user-plugins"
 run_manager install "$artifact_two" >/dev/null
 run_manager install "$candidate" >/dev/null
 run_manager install "$candidate" >/dev/null
-[[ $("$test_home/bin/yq" --version) == *'version v3.0' ]] || fail 'new profile did not select yq'
-output=$(HELM_PLUGINS='' "$test_home/bin/helm" fixture-plugins)
+[[ $("$release_bin/yq" --version) == *'version v3.0' ]] || fail 'new profile did not select yq'
+assert_link "$test_home/bin/yq" yq-0.9
+output=$(HELM_PLUGINS='' "$release_bin/helm" fixture-plugins)
 [[ $output == *"plugins=$test_home/dotfiles-releases/$id_three/share/helm/plugins"* ]] ||
   fail 'Helm plugin directory did not follow its release'
 run_manager set "$id_two" >/dev/null
-[[ ! -x $test_home/bin/yq ]] || fail 'older profile retained new yq'
-output=$(env -u HELM_PLUGINS "$test_home/bin/helm" fixture-plugins)
+[[ ! -e $release_bin/yq && ! -L $release_bin/yq ]] || fail 'older profile retained new yq'
+output=$(env -u HELM_PLUGINS "$release_bin/helm" fixture-plugins)
 [[ $output == *'plugins=unset'* ]] || fail 'old Helm borrowed the new plugin'
 run_manager set "$id_three" >/dev/null
 run_manager uninstall >/dev/null

@@ -140,6 +140,17 @@ local function check_selection(fixture)
   assert(not valid and tostring(message):find('VIRTUAL_ENV', 1, true), 'invalid active environment silently fell back to another Python')
   vim.env.VIRTUAL_ENV = nil
 
+  local standalone = vim.fs.joinpath(fixture.outside, 'standalone.py')
+  write(standalone, { 'import ssl', 'print(7 * 6)' })
+  vim.api.nvim_cmd({ cmd = 'edit', args = { standalone } }, {})
+  local release = vim.env.DOTFILES_OFFLINE_RELEASE_ROOT
+  local fallback = debugger.python()
+  local expected = release and vim.fs.joinpath(release, 'tools', 'python', 'bin', 'python3') or vim.fn.exepath 'python3'
+  assert(fallback == expected, 'no-venv application did not select the private release Python or connected PATH fallback')
+  local result = vim.system({ fallback, '-I', '-B', standalone }, { text = true }):wait(5000)
+  assert(result.code == 0 and vim.trim(result.stdout) == '42', 'selected fallback Python could not run the application: ' .. (result.stderr or ''))
+  breakpoint(sample, 5)
+
   local prompt = vim.fn.input
   local prompts_ok, prompt_error = pcall(function()
     vim.fn.input = function() return '' end

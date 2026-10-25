@@ -64,14 +64,17 @@ _dotfiles_source=$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null ||
   printf '%s\n' "${BASH_SOURCE[0]}")
 _dotfiles_source_root=$(CDPATH='' cd -- "$(dirname -- "$_dotfiles_source")/.." && pwd)
 _dotfiles_previous_auto_root=${DOTFILES_AUTO_ROOT:-}
+_dotfiles_previous_snapshot_root=${DOTFILES_SNAPSHOT_ROOT:-}
+_dotfiles_release_store=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}
 export GITUSER="${GITUSER:-surbanski}"
 export GHREPOS="${GHREPOS:-$HOME/github.com/$GITUSER}"
 export LAB="${LAB:-$GHREPOS/lab}"
 export NOTES="${NOTES:-$GHREPOS/notes-md}"
-if [[ $_dotfiles_source_root =~ /dotfiles-releases/dotfiles-[0-9a-f]{12}/dotfiles$ &&
+if [[ $_dotfiles_source_root =~ /dotfiles-[0-9a-f]{12}/dotfiles$ &&
   -f ${_dotfiles_source_root%/dotfiles}/release.env ]]; then
   _dotfiles_release_mode=true
   export DOTFILES_SNAPSHOT_ROOT=${_dotfiles_source_root%/dotfiles}
+  _dotfiles_release_store=${DOTFILES_RELEASE_ROOT:-${DOTFILES_SNAPSHOT_ROOT%/*}}
 else
   _dotfiles_release_mode=false
   unset DOTFILES_SNAPSHOT_ROOT
@@ -87,20 +90,21 @@ export WORK="${WORK:-$HOME/work}"
 export VIRTUAL_ENV_DISABLE_PROMPT=1
 unset _dotfiles_source _dotfiles_source_root
 
-# Drop private paths inherited from a release launcher or tmux pane. Public
-# shell selection is always made through HOME/bin and the active `current`.
+# Drop private paths inherited from a release launcher or tmux pane. Shell
+# commands follow current; application jobs retain their physical release.
 IFS=: read -r -a _dotfiles_path_entries <<<"${PATH:-}"
 _dotfiles_clean_path=
 for _dotfiles_path_entry in "${_dotfiles_path_entries[@]}"; do
   case $_dotfiles_path_entry in
-    "$HOME/bin-extras") continue ;;
-  "$HOME"/dotfiles-releases/dotfiles-*/bin | \
-    "$HOME"/dotfiles-releases/dotfiles-*/dotfiles/scripts | \
-    "$HOME"/dotfiles-releases/dotfiles-*/share/nvim2/mason/bin | \
-    "$HOME"/dotfiles-releases/dotfiles-*/share/nvim2/mason/packages/ansible-lint/venv/bin)
-    continue
-    ;;
+    "$HOME/bin" | "$_dotfiles_release_store/current/bin") continue ;;
   esac
+  if [[ $_dotfiles_path_entry =~ /dotfiles-[0-9a-f]{12}/(bin|dotfiles/scripts|share/nvim2/mason/bin|share/nvim2/mason/packages/ansible-lint/venv/bin)$ ]]; then
+    continue
+  fi
+  if [[ -n $_dotfiles_previous_snapshot_root &&
+    $_dotfiles_path_entry == "${_dotfiles_previous_snapshot_root%/*}/current/bin" ]]; then
+    continue
+  fi
   if $_dotfiles_release_mode &&
     [[ $_dotfiles_path_entry == "$HOME/.asdf/shims" ||
       $_dotfiles_path_entry == "${ASDF_DATA_DIR:-$HOME/.asdf}/shims" ]]; then
@@ -115,25 +119,26 @@ for _dotfiles_path_entry in "${_dotfiles_path_entries[@]}"; do
 done
 PATH=$_dotfiles_clean_path
 export PATH
-unset _dotfiles_path_entries _dotfiles_path_entry _dotfiles_clean_path _dotfiles_previous_auto_root
+unset _dotfiles_path_entries _dotfiles_path_entry _dotfiles_clean_path \
+  _dotfiles_previous_auto_root _dotfiles_previous_snapshot_root
 
 if $_dotfiles_release_mode; then
   add_to_path "$HOME/.krew/bin"
   add_to_path "$DOTFILES/scripts"
   add_to_path "$HOME/.local/bin"
   add_to_path "$HOME/.local/share/nvim2/mason/bin"
-  add_to_path "$HOME/bin"
 else
   add_to_path "$HOME/.local/share/nvim2/mason/bin"
-  add_to_path "$HOME/bin"
   add_to_path "$HOME/.local/bin"
   add_to_path "$DOTFILES/scripts"
   add_to_path "$HOME/.krew/bin"
   add_to_path "$HOME/.asdf/shims"
 fi
 unset _dotfiles_release_mode
-if [[ ${DOTFILES_IGNORE_BIN_EXTRAS:-} != 1 ]]; then
-  add_to_path "$HOME/bin-extras"
+add_to_path "$_dotfiles_release_store/current/bin"
+unset _dotfiles_release_store
+if [[ ${DOTFILES_IGNORE_USER_BIN:-} != 1 ]]; then
+  add_to_path "$HOME/bin"
 fi
 if [[ -n ${VIRTUAL_ENV:-} && -d $VIRTUAL_ENV/bin ]]; then
   PATH=":$PATH:"

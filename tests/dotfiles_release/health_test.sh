@@ -27,26 +27,26 @@ fi
   fail 'system prerequisite failure modified HOME or omitted its cause'
 
 test_home=$test_root/health-home
-mkdir -p "$test_home/bin-extras"
+mkdir -p "$test_home/bin"
 for command_name in helm rg node; do
-  printf '#!/usr/bin/env bash\nexit 91\n' >"$test_home/bin-extras/$command_name"
-  chmod 0755 "$test_home/bin-extras/$command_name"
+  printf '#!/usr/bin/env bash\nexit 91\n' >"$test_home/bin/$command_name"
+  chmod 0755 "$test_home/bin/$command_name"
 done
-PATH="$test_home/bin-extras:$PATH" VIRTUAL_ENV="$test_home/bin-extras" \
+PATH="$test_home/bin:$PATH" VIRTUAL_ENV="$test_home/bin" \
   run_manager install "$artifact_one" >/dev/null
 home_digest=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -C "$test_home" -cf - . | sha256sum)
 for requested in '' "$id_one"; do
   arguments=(health)
   [[ -z $requested ]] || arguments+=("$requested")
-  output=$(PATH="$test_home/bin-extras:$PATH" VIRTUAL_ENV="$test_home/bin-extras" \
+  output=$(PATH="$test_home/bin:$PATH" VIRTUAL_ENV="$test_home/bin" \
     run_manager "${arguments[@]}")
   [[ $output == *"$id_one is healthy"* ]] || fail 'health did not report the selected release'
 done
 [[ $(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -C "$test_home" -cf - . | sha256sum) == "$home_digest" ]] ||
   fail 'health changed HOME or installed payloads'
-for public_path in bin/rg .config/nvim2 .local/share/nvim2 \
+for public_path in .config/nvim2 .local/share/nvim2 \
   .config/k9s/config.yaml .tmux/plugins/tmux-resurrect; do
   path=$test_home/$public_path
   original_target=$(readlink -- "$path")
@@ -63,13 +63,11 @@ for public_path in bin/rg .config/nvim2 .local/share/nvim2 \
   run_manager set "$id_one" >/dev/null
   assert_link "$path" "$original_target"
 done
-unlink "$test_home/bin/rg"
-ln -s "../dotfiles-releases/$id_one/bin/rg" "$test_home/bin/rg"
+unlink "$test_home/.gitconfig"
+ln -s "dotfiles-releases/$id_one/dotfiles/git/.gitconfig" "$test_home/.gitconfig"
 if run_manager health >"$test_root/pinned-public-link.log" 2>&1; then
   fail 'health accepted a public link pinned to a physical release instead of current'
 fi
-unlink "$test_home/bin/rg"
-ln -s '../dotfiles-releases/current/bin/rg' "$test_home/bin/rg"
 unlink "$test_home/.gitconfig"
 printf 'private config replacement\n' >"$test_home/.gitconfig"
 if run_manager health >"$test_root/replaced-public-path.log" 2>&1; then

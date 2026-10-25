@@ -13,7 +13,7 @@ health_cli_operations() {
   mkdir -p "$work/project" || return
   if [[ -x $release/bin/uv ]]; then
     PYTHONDONTWRITEBYTECODE=1 "$release/bin/uv" venv --no-config --offline \
-      --no-cache --no-python-downloads --python "$release/bin/python" "$work/uv-venv" || return
+      --no-cache --no-python-downloads --python "$release/tools/python/bin/python3" "$work/uv-venv" || return
     "$work/uv-venv/bin/python" -I -B -c \
       'import json, ssl, sys; assert sys.prefix != sys.base_prefix; print("uv-venv-ok")' || return
   fi
@@ -183,21 +183,10 @@ health_tmux() {
 }
 
 health_bash() {
-  local release=$1 health_home=$2 command_name check invocation
+  local release=$1 health_home=$2 check invocation
 
-  mkdir -p "$health_home/bin" || return
-  for command_name in dotfiles-release nvim tmux node npm npx corepack rg zoxide \
-    k9s kubectx kubens oh-my-posh task fzf terraform kubectl helm; do
-    ln -s "$release/bin/$command_name" "$health_home/bin/$command_name" || return
-  done
-  if [[ -x $release/bin/fd ]]; then
-    ln -s "$release/bin/fd" "$health_home/bin/fd" || return
-  fi
-  if [[ -x $release/bin/go ]]; then
-    for command_name in go gofmt; do
-      ln -s "$release/bin/$command_name" "$health_home/bin/$command_name" || return
-    done
-  fi
+  mkdir -p "$health_home/dotfiles-releases" || return
+  ln -s "$release" "$health_home/dotfiles-releases/current" || return
   ln -s "$release/dotfiles/bash/.bashrc" "$health_home/.bashrc" || return
   ln -s "$release/dotfiles/bash/.bash_aliases" "$health_home/.bash_aliases" || return
   ln -s "$release/dotfiles/oh-my-posh/.oh-my-posh.omp.json" "$health_home/.oh-my-posh.omp.json" || return
@@ -224,6 +213,7 @@ health_bash() {
     'exit 0' >"$check" || return
   printf -v invocation '%q ' env -u DOTFILES -u DOTFILES_AUTO_ROOT \
     HOME="$health_home" EXPECTED_RELEASE="$release" \
+    DOTFILES_RELEASE_ROOT="$health_home/dotfiles-releases" \
     TERM=xterm-256color PATH=/usr/bin:/bin bash --noprofile --norc -i "$check"
   timeout 120s script --quiet --return --command "$invocation" /dev/null </dev/null || return
 }
@@ -317,7 +307,7 @@ health_nvim() {
 
 main() {
   local release=${1:-} health_home
-  local DOTFILES_IGNORE_BIN_EXTRAS=1 VIRTUAL_ENV='' KUBECTL_VERSION='' HELM_VERSION=''
+  local DOTFILES_IGNORE_USER_BIN=1 VIRTUAL_ENV='' KUBECTL_VERSION='' HELM_VERSION=''
   local PYTHONDONTWRITEBYTECODE=1
   local LC_ALL=C.UTF-8 LANG=C.UTF-8
   local -A release_metadata=()
@@ -330,7 +320,7 @@ main() {
   health_home=$(mktemp -d) || return
   TEMP_PATHS+=("$health_home")
   local PATH="$release/bin:$release/share/nvim2/mason/bin:/usr/bin:/bin"
-  export PATH DOTFILES_IGNORE_BIN_EXTRAS VIRTUAL_ENV KUBECTL_VERSION HELM_VERSION PYTHONDONTWRITEBYTECODE LC_ALL LANG
+  export PATH DOTFILES_IGNORE_USER_BIN VIRTUAL_ENV KUBECTL_VERSION HELM_VERSION PYTHONDONTWRITEBYTECODE LC_ALL LANG
   mkdir -p "$health_home/.cache" "$health_home/.local/state" || return
   if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
     health_stage 'validation tools' health_validation_tools "$release" "$health_home" \

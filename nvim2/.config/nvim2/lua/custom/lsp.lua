@@ -165,7 +165,7 @@ function M.setup_tools()
 end
 
 function M.restore_path()
-  local extras = vim.env.HOME .. '/bin-extras'
+  local user_bin = vim.env.HOME .. '/bin'
   local venv = vim.env.VIRTUAL_ENV
   venv = venv and venv ~= '' and (venv .. '/bin') or nil
   local function directory(path)
@@ -175,9 +175,9 @@ function M.restore_path()
   if not directory(venv) then venv = nil end
   local paths = {}
   if venv then paths[#paths + 1] = venv end
-  if vim.env.DOTFILES_IGNORE_BIN_EXTRAS ~= '1' and directory(extras) then paths[#paths + 1] = extras end
+  if vim.env.DOTFILES_IGNORE_USER_BIN ~= '1' and directory(user_bin) then paths[#paths + 1] = user_bin end
   for _, entry in ipairs(vim.split(vim.env.PATH or '', ':', { plain = true, trimempty = true })) do
-    if entry ~= extras and entry ~= venv then paths[#paths + 1] = entry end
+    if entry ~= user_bin and entry ~= venv then paths[#paths + 1] = entry end
   end
   vim.env.PATH = table.concat(paths, ':')
 end

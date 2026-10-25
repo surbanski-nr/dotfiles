@@ -36,14 +36,14 @@ EOF
     fail "$phase failure reported success"
   if [[ $phase == selection ]]; then
     assert_link "$test_home/dotfiles-releases/current" "$id_one"
-    [[ ! -e $test_home/dotfiles-releases/$id_two && ! -L $test_home/bin/fd &&
-      ! -L $test_home/bin/go ]] || fail 'failed selection retained candidate commands'
+    [[ ! -e $test_home/dotfiles-releases/$id_two && ! -e $test_home/bin ]] ||
+      fail 'failed selection retained a candidate or touched user bin'
   else
     [[ $(<"$test_home/.bashrc") == baseline &&
       $(stat -c %a "$test_home/.bashrc") == 640 &&
       ! -e $test_home/.bashrc.before-dotfiles-release &&
       ! -e $test_home/dotfiles-releases/$id_one &&
-      ! -L $test_home/dotfiles-releases/current && ! -L $test_home/bin/rg ]] ||
+      ! -L $test_home/dotfiles-releases/current && ! -e $test_home/bin ]] ||
       fail "$phase failure did not restore the original paths"
   fi
   unlink "$failure_bin/mv"

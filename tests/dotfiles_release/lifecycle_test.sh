@@ -7,21 +7,19 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/fixture.sh"
 create_fixture
 
 test_home="$test_root/nonstandard home"
-mkdir -p "$test_home/.config/k9s" "$test_home/bin" "$test_home/bin-extras"
+mkdir -p "$test_home/.config/k9s" "$test_home/bin"
+release_bin=$test_home/dotfiles-releases/current/bin
 printf 'original bashrc\n' >"$test_home/.bashrc"
 chmod 0640 "$test_home/.bashrc"
 printf 'private contexts\n' >"$test_home/kube-backup-contexts.txt"
 printf 'private prefixes\n' >"$test_home/kube-log-prefixes.txt"
-printf '#!/usr/bin/env bash\nexit 91\n' >"$test_home/bin-extras/helm"
-chmod 0755 "$test_home/bin-extras/helm"
-ln -s helm "$test_home/bin-extras/rg"
+printf '#!/usr/bin/env bash\nexit 91\n' >"$test_home/bin/helm"
+chmod 0755 "$test_home/bin/helm"
 export TEST_DOCKER_LOG="$test_root/unexpected-system-commands.log"
 for command_name in sudo apt-get dnf curl docker; do
-  ln -s "$repo_dir/tests/fixtures/setup-system/docker-command" "$test_home/bin-extras/$command_name"
+  ln -s "$repo_dir/tests/fixtures/setup-system/docker-command" "$test_home/bin/$command_name"
 done
-extras_digest=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-  -C "$test_home" -cf - bin-extras | sha256sum)
-export PATH="$test_home/bin-extras:$PATH"
+export PATH="$test_home/bin:$PATH"
 
 legacy_source="$test_root/legacy configuration"
 legacy_data="$legacy_source/.local/share/nvim2"
@@ -35,14 +33,20 @@ printf 'legacy prompts\n' >"$legacy_data/telescope_history"
 printf 'newer telescope\n' >"$test_home/.local/state/nvim2/telescope_history.sqlite3"
 write_fake_tool "$test_home/bin/rg-0.9" 0.9
 ln -s rg-0.9 "$test_home/bin/rg"
+printf 'saved private provider\n' >"$test_home/bin/rg.before-dotfiles-release"
+ln -s ../dotfiles-releases/current/bin/rg "$test_home/bin/legacy-link"
+ln -s ../dotfiles-releases/current/bin/retired-tool "$test_home/bin/retired-tool"
+user_bin_digest=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+  -C "$test_home" -cf - bin | sha256sum)
 cp -a "$test_root/stage-one/$id_one/share/tmux/plugins/." "$test_home/.tmux/plugins/"
 
 run_manager verify "$artifact_one" >/dev/null
 run_manager install "$artifact_one" >/dev/null
 run_manager health >/dev/null
 assert_link "$test_home/dotfiles-releases/current" "$id_one"
-assert_link "$test_home/bin/rg" '../dotfiles-releases/current/bin/rg'
-assert_link "$test_home/bin/rg.before-dotfiles-release" rg-0.9
+assert_link "$test_home/bin/rg" rg-0.9
+[[ $(PATH="$test_home/bin:$release_bin:/usr/bin:/bin" command -v rg) == "$test_home/bin/rg" ]] ||
+  fail 'user executable did not override the release'
 [[ $(<"$test_home/.bashrc.before-dotfiles-release") == 'original bashrc' &&
   $(stat -c %a "$test_home/.bashrc.before-dotfiles-release") == 640 ]] ||
   fail 'install did not preserve baseline bytes and mode'
@@ -50,7 +54,9 @@ assert_link "$test_home/bin/rg.before-dotfiles-release" rg-0.9
   $(<"$test_home/.local/state/nvim2/telescope_history") == 'legacy prompts' &&
   $(<"$legacy_data/telescope_history") == 'legacy prompts' ]] ||
   fail 'legacy state migration did not preserve old and new user data'
-[[ ! -e $test_home/bin/python && ! -e $test_home/bin/python3 ]] ||
+[[ ! -e $release_bin/python && ! -L $release_bin/python &&
+  ! -e $release_bin/python3 && ! -L $release_bin/python3 &&
+  -x $test_home/dotfiles-releases/current/tools/python/bin/python3 ]] ||
   fail 'private Python was published globally'
 [[ -x $test_home/dotfiles-releases/$id_one/share/nvim2/mason/packages/ansible-lint/venv/bin/ansible-lint &&
   -x $test_home/dotfiles-releases/$id_one/share/nvim2/mason/packages/yamllint/venv/bin/yamllint ]] ||
@@ -65,17 +71,17 @@ assert_link "$test_home/.config/systemd/user/dotfiles-ssh-agent.service" \
   "$test_home/dotfiles-releases/current/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service"
 
 for client in kubectl helm; do
-  [[ $(env -u KUBECTL_VERSION -u HELM_VERSION "$test_home/bin/$client") == *'fixture 1.0'* &&
-    $(env "${client^^}_VERSION=0.9" "$test_home/bin/$client") == *'fixture 0.9'* ]] ||
+  [[ $(env -u KUBECTL_VERSION -u HELM_VERSION "$release_bin/$client") == *'fixture 1.0'* &&
+    $(env "${client^^}_VERSION=0.9" "$release_bin/$client") == *'fixture 0.9'* ]] ||
     fail "$client did not select the default and requested versions"
-  [[ $(env "${client^^}_VERSION=0.9" "$test_home/bin/$client" fixture-args \
+  [[ $(env "${client^^}_VERSION=0.9" "$release_bin/$client" fixture-args \
     'argument with spaces' '*' '--flag=value') == *$'<argument with spaces>\n<*>\n<--flag=value>' ]] ||
     fail "$client changed its arguments"
   status=0
-  env "${client^^}_VERSION=0.9" "$test_home/bin/$client" fixture-fail >/dev/null || status=$?
+  env "${client^^}_VERSION=0.9" "$release_bin/$client" fixture-fail >/dev/null || status=$?
   [[ $status == 42 ]] || fail "$client changed the exit status"
   for requested_version in 99.0 ../../bin/rg; do
-    if env "${client^^}_VERSION=$requested_version" "$test_home/bin/$client" >/dev/null 2>&1; then
+    if env "${client^^}_VERSION=$requested_version" "$release_bin/$client" >/dev/null 2>&1; then
       fail "$client accepted an unavailable or invalid version"
     fi
   done
@@ -99,7 +105,7 @@ process_record=$test_root/process-record
 process_gate=$test_root/process-continue
 running_release=$test_home/dotfiles-releases/$id_two
 HOME=$test_home NVIM_APPNAME=nvim2 timeout 30s \
-  "$test_home/bin/nvim" hold "$process_record" "$process_gate" &
+  "$release_bin/nvim" hold "$process_record" "$process_gate" &
 old_process=$!
 for ((attempt = 0; attempt < 200; attempt++)); do
   [[ ! -s $process_record ]] || break
@@ -116,11 +122,16 @@ expected_record=$(printf 'before=%s\nconfig-before=%s\nafter=%s\nconfig-after=%s
 [[ $(<"$process_record") == "$expected_record" ]] ||
   fail 'running process changed its physical executable or configuration after set'
 HOME=$test_home NVIM_APPNAME=nvim2 \
-  "$test_home/bin/nvim" hold "$test_root/new-process-record" "$process_gate"
+  "$release_bin/nvim" hold "$test_root/new-process-record" "$process_gate"
 [[ $(<"$test_root/new-process-record") == *"$id_one/tools/nvim/bin/nvim"* ]] ||
   fail 'new process did not use the selected release'
-[[ ! -x $test_home/bin/fd && ! -x $test_home/bin/go && ! -x $test_home/bin/gofmt ]] ||
-  fail 'switching to an older profile borrowed tools from a newer release'
+for command_name in fd go gofmt; do
+  [[ ! -e $release_bin/$command_name && ! -L $release_bin/$command_name &&
+    ! -L $test_home/bin/$command_name ]] || fail "removed tool left a public link: $command_name"
+  if PATH="$release_bin" command -v "$command_name" >/dev/null; then
+    fail "switching to an older profile borrowed $command_name"
+  fi
+done
 
 run_manager uninstall "$id_two" >/dev/null
 [[ ! -e $test_home/dotfiles-releases/$id_two ]] || fail 'uninstall retained an inactive release'
@@ -149,8 +160,8 @@ assert_link "$test_home/dotfiles-releases/current" "$id_three"
 run_manager uninstall "$id_three" >/dev/null
 assert_link "$test_home/bin/rg" rg-0.9
 [[ $(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-  -C "$test_home" -cf - bin-extras | sha256sum) == "$extras_digest" ]] ||
-  fail 'release lifecycle changed extras, their modes or links'
+  -C "$test_home" -cf - bin | sha256sum) == "$user_bin_digest" ]] ||
+  fail 'release lifecycle changed user bin, its modes, backups or links'
 [[ ! -e $TEST_DOCKER_LOG ]] || fail 'release operations ran host setup or attempted network downloads'
 
 printf 'dotfiles_release: lifecycle passed\n'

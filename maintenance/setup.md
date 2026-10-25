@@ -236,6 +236,10 @@ failure. It does not publish a Docker repository or install Docker when the
 signing key could not be downloaded. A warning summary replaces the "ready"
 message, and setup exits successfully so other bootstrap steps can continue.
 Restore network access and rerun setup before using the prepared release.
+On Debian and Ubuntu, an interrupted package transaction can also leave dpkg
+needing repair. If a rerun reports "dpkg was interrupted", run
+`sudo dpkg --configure -a`, then rerun host setup. This package-manager recovery
+is separate from the user-tool publication recovery described below.
 Invalid arguments, unsupported hosts, missing commands without prior network
 failures, unsafe repository configuration, signing/integrity failures and
 other installation errors remain fatal. `dotfiles-release` still rejects
@@ -249,19 +253,26 @@ attempt restores the prior links; after a killed process, rerunning reconciles
 each link to the first configured version. This is not a transaction across
 all requested tools: earlier successfully selected tools remain selected.
 
-`setup-asdf` records verified binary ownership before publishing the binary and
-journals the selected link before changing it. Rerunning finishes interrupted
-publication, verifies retained binary content, reuses installed runtimes and
-regenerates shims. Partial runtime builds remain the asdf plugin's responsibility;
-a broken provider installation may require provider-specific repair. Home
-defaults are changed only after all requested runtime installations succeed.
+`setup-asdf` records verified binary ownership before publishing the binary, then
+selects it with an atomic replacement of `~/bin/asdf`. That link is the only
+selected-version record. Rerunning finishes interrupted publication, verifies
+retained binary content, reuses installed runtimes and regenerates shims. It can
+restore a missing command link and accepts a manual selection of another intact,
+recorded binary before selecting the catalog pin again. Obsolete `asdf-target`
+and `pending-selection` files are ignored and left untouched. Partial runtime
+builds remain the asdf plugin's responsibility; a broken provider installation
+may require provider-specific repair. Home defaults are changed only after all
+requested runtime installations succeed.
 
-Both installers use nonblocking process-held locks. The kernel releases them
-when the last holding process exits, including a killed process; a running child
-may retain an inherited lock until it exits. Empty lock files are retained.
-Old directory locks are not removed automatically because another older
-installer may still own them. Stop that installer and remove only its exact
-empty lock directory after checking it, then rerun.
+Both installers share one nonblocking process-held lock at
+`${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup.lock`. This serializes
+`setup-tools` and `setup-asdf`, including requests for different tools, without a
+shared tool inventory. The kernel releases the lock when the last holding
+descriptor closes, including after a killed process; a running child may retain
+an inherited lock until it exits. The empty lock file is retained and must not
+be deleted to bypass an active lock. Stop any older installer before using the
+new scripts: their old per-tool and asdf locks are no longer used or removed
+automatically.
 
 Modified managed binaries, malformed ownership state, foreign paths and dirty
 plugin checkouts fail safely instead of being overwritten. Do not delete state
@@ -298,16 +309,20 @@ Each release owns its complete tool payload, even when another retained release
 contains the same versions. Asdf, its plugins and its shims are not part of the
 offline package. Optional online `setup-asdf` remains available independently.
 
-The current manager can check and select retained releases from before `fd`,
-Go, kind, uv or the expanded operations-tool set was bundled. Selecting one
-makes its absent tools unavailable through the release launcher. It supports
-the original, fd-only and fd/Go profiles. Keep a downloaded copy of the newer
-manager when selecting older releases: older managers do not understand newer
-metadata. Releases from before the SSH package remain selectable. Their
-optional SSH links do not resolve, just like commands absent from an older
-tool profile; selecting a newer release restores them.
+The current manager supports the original, fd-only, fd/Go and expanded
+operations-tool profiles when packaged with the current layout. Selecting a
+smaller profile removes its absent commands from `current/bin`, without stale
+links in `~/bin`. Keep a downloaded copy of the newer manager when selecting
+older profiles: older managers do not understand newer metadata. Profiles
+without the SSH package remain supported; their optional SSH links do not
+resolve until a release containing that package is selected.
 The new yq profile requires `YQ_VERSION` and `HELM_SCHEMA_PLUGIN_VERSION`;
 retained profiles keep their original requirements and plugin discovery.
+
+Adding `current/bin` directly to PATH requires a newly built archive: private
+Python now lives only under `tools`, not in public `bin`. The new manager
+rejects the old layout with public Python links rather than exposing that SDK
+as your shell's Python. It does not rewrite older archives or installed payloads.
 
 The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
 `ubuntu-26.04-x86_64` and `amzn-2023-x86_64`. For a complete local qualification,
@@ -535,7 +550,7 @@ archive. A later `health` checks the selected release again.
 
 These are installation checks, not a repeat of development qualification.
 Health does not load personal shell startup files or examine aliases, shell
-command caches, intentional `~/bin-extras` overrides or project venvs. It cannot
+command caches, intentional `~/bin` overrides or project venvs. It cannot
 change the PATH of an already running shell; reload `.bashrc` and run `hash -r`
 after selection. Full Bash initialization, plugin features, formatting, LSP
 and debugger behavior remain covered by the offline CI functional checker.
@@ -553,9 +568,11 @@ directory to `<path>.before-dotfiles-release`. Backups stay on the same
 filesystem and survive later selections. A conflicting existing backup or
 symlink parent stops activation; foreign links are backed up like other
 originals. This deliberately needs no setup-tools or bstow ownership records.
-Only known release commands, dotfiles, packaged k9s skins and the three tmux
-plugin paths are managed. `~/bin-extras`, private k9s files, kubeconfig inputs
-and unrelated tmux plugins are not touched.
+Only configuration links, packaged k9s skins and the three tmux plugin paths
+are managed. Release commands are available directly from `current/bin` on
+PATH. `~/bin` is user-owned in this flow: the manager never creates it, scans
+its contents, backs up its files or changes its links. Private k9s files,
+kubeconfig inputs and unrelated tmux plugins are also untouched.
 
 Use the manager for every selection change:
 
@@ -571,7 +588,7 @@ dotfiles-release uninstall dotfiles-INACTIVE12
 `set ID` selects an installed unit, including older releases. It never installs
 an archive. `uninstall ID` deletes that retained directory, including damaged
 or unfinished imports. If it is current, uninstall also removes the release's
-public links, restores adjacent original-file backups and removes `current`;
+configuration links, restores adjacent original-file backups and removes `current`;
 it does not automatically select another release. Plain `uninstall` means the
 current ID. Other retained releases remain available for a later `set`.
 Uninstall preserves a managed path that the user replaced with another file
@@ -596,11 +613,13 @@ installed payloads or generated manifests, and never move a completed venv.
 When migrating an installation created by the older stateful manager, first
 use a saved copy of that manager to run its plain `uninstall` and restore the
 original baseline. Its backup names and ownership database are not read by the
-new manager. Then install or select with the new downloaded script. Historical
-archive formats remain supported; stale legacy state is not used for recovery.
+new manager. Then install a newly built archive with the new downloaded script.
+Stale legacy state is not used for recovery. No automatic migration of old
+`~/bin` links is performed; the cleanup command below is optional.
 
-Stable public links contain `current` literally. The Nvim, tmux and Kubernetes
-client launchers resolve one physical release when each process starts. After a switch, reload
+The shell PATH contains `current/bin` literally, and configuration links also
+point through `current`. The Nvim, tmux and Kubernetes client launchers resolve
+one physical release when each process starts. After a switch, reload
 Bash with `source "$HOME/.bashrc" && hash -r`; new shells and applications use
 the new release, while an existing Nvim process and tmux server remain on their
 old physical configuration and plugins. `prefix` + `Shift-R` reloads that
@@ -626,8 +645,10 @@ because native daemon state would modify the immutable installation. A project's
 own ESLint still uses the native daemon. CI qualification verifies installed
 content both before and after its functional checks.
 
-The release does not own `~/bin/python` or `~/bin/python3`; standalone Python
-is private to its tool payload. kubectl and Helm are public release commands.
+The release does not own anything in `~/bin`. Standalone Python is private to
+its tool payload, available explicitly as `current/tools/python/bin/python3`;
+neither `python` nor `python3` is exposed in `current/bin`. kubectl and Helm
+are public release commands.
 Cluster access still needs the appropriate network, kubeconfig, credentials
 and any external authentication executables. Krew plugins and optional k9s
 helpers are not automatically bundled.
@@ -661,8 +682,8 @@ leading `v`: `HELM_VERSION=v3.21.0` and
 `HELM_VERSION=3.21.0` select the same executable. The Helm default remains
 `4.3.0`; `3.21.0` is also bundled. An invalid or unbundled
 version fails clearly, without falling back to another tool
-provider. Explicit binaries such as `current/bin/kubectl-1.34.12` also work;
-only the two canonical client launchers are projected into `~/bin`.
+provider. Explicit binaries such as `current/bin/kubectl-1.34.12` also work
+and are on the release PATH alongside the canonical client launchers.
 `release.env` records ordered `KUBECTL_VERSIONS` and `HELM_VERSIONS` lists.
 Installation checks every version and the default independently of the
 caller's selection. CI also reads an isolated kubeconfig and renders a local
@@ -714,11 +735,11 @@ whole Task invocation, not just one helper:
 ```bash
 # Create this environment only if it does not already exist.
 if [[ ! -e .venv-dotfiles ]]; then
-  "$HOME/dotfiles-releases/current/bin/python3" -m venv .venv-dotfiles
+  "$HOME/dotfiles-releases/current/tools/python/bin/python3" -m venv .venv-dotfiles
 fi
 
 (
-  export PATH="$PWD/.venv-dotfiles/bin:$HOME/bin:/usr/bin:/bin"
+  export PATH="$PWD/.venv-dotfiles/bin:$HOME/bin:$HOME/dotfiles-releases/current/bin:/usr/bin:/bin"
   unset HELM_PLUGINS
   export HELM_CONFIG_HOME="$PWD/.validation-helm/config"
   export HELM_CACHE_HOME="$PWD/.validation-helm/cache"
@@ -739,7 +760,7 @@ fi
 
 Inspect and reuse an existing suitable `.venv-dotfiles`; never replace it
 silently. The private release interpreter is Python `3.12.12`; no public
-`~/bin/python3` link is added. For PR parity, run `task split-generate` before
+`python3` is exposed on the release PATH. For PR parity, run `task split-generate` before
 `task validate` in the same subshell; its `PyYAML==6.0.2` download is allowed.
 Task `3.53.1` and kubeconform `0.8.0` keep their defaults. Their version
 differences from project pins need a real workflow run, not an automatic
@@ -747,14 +768,17 @@ downgrade. No chart/schema mirror, Trivy database or live cluster is added.
 
 ### User executable overrides
 
-`~/bin-extras` is an optional user-owned directory for trusted executables and
-wrappers. Bash and Nvim2 put an active `VIRTUAL_ENV/bin` first, then extras,
-then their existing managed providers. Dotfiles never creates, packages,
-backs up or removes this directory. The private `~/.extras` configuration hook
-is separate.
+`~/bin` holds your trusted tools, wrappers and executable overrides. Bash
+puts an active `VIRTUAL_ENV/bin` first, then `~/bin`, then the selected
+release's `current/bin` and remaining providers. Nvim2 keeps the same user
+priority ahead of its physically pinned release and Mason tools. Missing
+directories are ignored safely, so the connected flow works without a release
+store. Connected `setup-tools` and `setup-asdf` still install into `~/bin`;
+the offline release manager never changes it. The old `bin-extras` directory
+is no longer added to PATH. The private `~/.extras` configuration hook is separate.
 
 ```bash
-mkdir -p "$HOME/bin-extras"
+mkdir -p "$HOME/bin"
 # Put an executable here using the command name to override.
 source "$HOME/.bashrc"
 hash -r
@@ -762,32 +786,60 @@ type -a helm
 type -P helm
 ```
 
-An extra `helm` bypasses the release launcher's version selection and plugin
+Your own `helm` bypasses the release launcher's version selection and plugin
 defaults. Its owner supplies that behavior. Remove or move an override and run
 `hash -r` to return to the managed executable; reinstalling is unnecessary.
 New tmux panes load Bash normally. Existing panes need the same deliberate
 reload. Noninteractive jobs and shells that do not load this configuration
 receive their inherited PATH.
 
-To start Nvim2 without extras, use:
+To start the offline Nvim2 without user-bin overrides, use:
 
 ```bash
-DOTFILES_IGNORE_BIN_EXTRAS=1 "$HOME/bin/nvim"
+DOTFILES_IGNORE_USER_BIN=1 "$HOME/dotfiles-releases/current/bin/nvim"
 ```
 
 In an existing Bash session, export that variable and reload `.bashrc` to
 rebuild PATH. Prefixing an arbitrary command with the variable does not rebuild
 its inherited PATH. Release runtime checks, builds and repository checks enforce this
-setting so local replacements cannot hide a broken payload. `dotfiles-check`
-reports interactive selection and can truthfully report a version mismatch
-for an intentional override; release runtime checks inspect the release itself.
+setting so local replacements cannot hide a broken payload. In release mode,
+`dotfiles-check` delegates to the same isolated `health`; connected checks can
+report a version mismatch for an intentional override. Use `type -a TOOL` or
+`type -P TOOL` to inspect your interactive selection.
 
 Aliases, absolute executable paths and project-local tools such as
 `node_modules` have their own selection rules. The offline launcher's core
 Neovim runtime remains fixed; personal `NVIM_APPNAME` profiles retain their
 own configuration. Older retained Bash/Neovim configurations can restore older
-PATH behavior, and existing processes can retain inherited extras after a
-selection change. `set` and uninstall leave the extras directory untouched.
+PATH behavior, and existing processes retain their inherited PATH after a
+selection change. `set` and uninstall leave `~/bin` untouched.
+
+Older installers may have left `~/bin/TOOL` links pointing through
+`dotfiles-releases/current/bin/TOOL`. They still follow selection, but can
+dangle when the new release lacks that tool. There is no automatic cleanup.
+After reviewing `ls -la "$HOME/bin"`, this optional command removes only links
+with the exact old release target and matching command name. It leaves your
+executables, foreign links and `.before-dotfiles-release` backups alone. If
+`~/bin` itself is a symlink, review its destination separately instead:
+
+```bash
+release_root=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}
+if [[ -d $HOME/bin && ! -L $HOME/bin ]]; then
+  for link in "$HOME/bin/"*; do
+    [[ -L $link ]] || continue
+    target=$(readlink -- "$link") || continue
+    if [[ $target == "../dotfiles-releases/current/bin/${link##*/}" ||
+      $target == "$release_root/current/bin/${link##*/}" ]]; then
+      printf 'Removing %s -> %s\n' "$link" "$target"
+      unlink -- "$link"
+    fi
+  done
+fi
+hash -r
+```
+
+Restore any original-file backups manually only after reviewing them. A
+restored executable in `~/bin` takes priority over the release by design.
 
 The historical 2026-10-01 qualification of source commit
 `d4536234f5730fdb0e1f43335f9e0d5c0e79e935` measured the following apparent
@@ -888,7 +940,7 @@ kyverno apply ./policy.yaml --resource ./resource.yaml
 KUBECONFIG="$HOME/disposable-kubeconfig" kubectx
 KUBECONFIG="$HOME/disposable-kubeconfig" kubens NAMESPACE --force
 uv venv --offline --no-python-downloads \
-  --python "$HOME/dotfiles-releases/current/bin/python" "$HOME/offline-venv"
+  --python "$HOME/dotfiles-releases/current/tools/python/bin/python3" "$HOME/offline-venv"
 uv pip install --python "$HOME/offline-venv/bin/python" \
   --offline --no-index --find-links "$HOME/wheels" PACKAGE
 uvx --offline --no-index --from "$HOME/wheels/TOOL.whl" TOOL

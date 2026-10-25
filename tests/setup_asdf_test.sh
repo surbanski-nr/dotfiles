@@ -76,13 +76,11 @@ EOF
 }
 
 record_asdf_fixture() {
-  local home=$1 target=$2 state installs
-  state=$home/.local/state/dotfiles/setup-asdf/asdf-target
+  local home=$1 target=$2 installs
   installs=$home/.local/state/dotfiles/setup-asdf/installations
   mkdir -p "$installs"
-  printf '%s\n' "$target" >"$state"
   sha256sum "$home/bin/$target" | awk '{print $1}' >"$installs/$target.sha256"
-  chmod 0600 "$state"
+  chmod 0600 "$installs/$target.sha256"
 }
 
 prepare_plugin() {
@@ -140,15 +138,15 @@ set -e
   fail 'provider conflict changed the asdf installation'
 
 rm "$test_home/bin/terraform"
-mkdir -p "$test_home/.local/state/dotfiles/setup-asdf"
-exec {test_lock_fd}>"$test_home/.local/state/dotfiles/setup-asdf/lock"
+mkdir -p "$test_home/.local/state/dotfiles"
+exec {test_lock_fd}>"$test_home/.local/state/dotfiles/setup.lock"
 flock -n "$test_lock_fd"
 set +e
 lock_output=$(HOME="$test_home" "$test_repo/setup-asdf" terraform 2>&1)
 lock_status=$?
 set -e
 [[ $lock_status -ne 0 ]] || fail 'concurrent setup-asdf lock was ignored'
-[[ $lock_output == *'another setup-asdf process is running'* ]] ||
+[[ $lock_output == *'another online installer is running'* ]] ||
   fail 'concurrent setup-asdf did not report the lock'
 [[ ! -e $test_home/bin/asdf ]] || fail 'lock conflict installed asdf'
 
@@ -159,7 +157,7 @@ set +e
 foreign_output=$(HOME="$test_home" "$test_repo/setup-asdf" terraform 2>&1)
 foreign_status=$?
 set -e
-[[ $foreign_status -ne 0 && $foreign_output == *'legacy asdf target is not the current pinned version'* ]] ||
+[[ $foreign_status -ne 0 && $foreign_output == *'refusing foreign asdf link'* ]] ||
   fail 'foreign asdf-manual link was accepted'
 [[ $(readlink -- "$test_home/bin/asdf") == asdf-manual ]] ||
   fail 'foreign asdf link was changed'
@@ -216,8 +214,7 @@ set -e
   fail 'provider conflict did not stop verified legacy adoption'
 [[ $(readlink -- "$legacy_conflict_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
   fail 'provider conflict changed the verified legacy link'
-[[ ! -e $legacy_conflict_home/.local/state/dotfiles/setup-asdf/asdf-target &&
-  ! -e $legacy_conflict_home/.local/state/dotfiles/setup-asdf/installations ]] ||
+[[ ! -e $legacy_conflict_home/.local/state/dotfiles/setup-asdf/installations ]] ||
   fail 'provider conflict partially adopted verified legacy asdf'
 [[ ! -e $test_root/legacy-conflict.log ]] ||
   fail 'provider conflict reached legacy download or runtime installation'
@@ -227,18 +224,16 @@ HOME="$legacy_home" PATH="$legacy_home/bin:/usr/bin:/bin" \
   "$legacy_repo/setup-asdf" terraform
 [[ $(readlink -- "$legacy_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
   fail 'verified legacy asdf link changed unexpectedly'
-[[ -f $legacy_home/.local/state/dotfiles/setup-asdf/asdf-target ]] ||
-  fail 'verified legacy asdf target was not adopted'
 [[ -f $legacy_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256 ]] ||
   fail 'verified legacy asdf installation digest was not recorded'
 legacy_state_digest=$(sha256sum \
-  "$legacy_home/.local/state/dotfiles/setup-asdf/asdf-target" \
+  "$legacy_home/bin/asdf-$ASDF_VERSION" \
   "$legacy_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256")
 HOME="$legacy_home" PATH="$legacy_home/bin:/usr/bin:/bin" \
-  TEST_ASDF_ARCHIVE="$legacy_archive" TEST_ASDF_LOG="$legacy_log" \
+  TEST_ASDF_ARCHIVE="$test_root/absent-archive" TEST_ASDF_LOG="$legacy_log" \
   "$legacy_repo/setup-asdf" terraform
 [[ $(sha256sum \
-  "$legacy_home/.local/state/dotfiles/setup-asdf/asdf-target" \
+  "$legacy_home/bin/asdf-$ASDF_VERSION" \
   "$legacy_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") == \
   "$legacy_state_digest" ]] || fail 'legacy asdf adoption retry changed ownership state'
 
@@ -257,7 +252,7 @@ set -e
 [[ $tampered_status -ne 0 &&
   $tampered_output == *'legacy asdf binary does not match the verified upstream archive'* ]] ||
   fail 'tampered legacy asdf was adopted'
-[[ ! -e $tampered_home/.local/state/dotfiles/setup-asdf/asdf-target ]] ||
+[[ ! -e $tampered_home/.local/state/dotfiles/setup-asdf/installations ]] ||
   fail 'failed legacy asdf adoption wrote ownership state'
 
 reconcile_repo=$test_root/reconcile-repository
@@ -281,14 +276,45 @@ HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
 [[ $(readlink -- "$reconcile_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
   fail 'managed asdf was not upgraded to the selected version'
 [[ -x $reconcile_home/bin/asdf-0.0.1 ]] || fail 'previous asdf binary was removed'
-[[ $(<"$reconcile_home/.local/state/dotfiles/setup-asdf/asdf-target") == "asdf-$ASDF_VERSION" ]] ||
-  fail 'selected asdf target was not recorded'
 HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
   "$reconcile_repo/setup-asdf" terraform
 [[ $(grep -c '^install' "$reconcile_log") -eq 2 ]] ||
   fail 'second setup-asdf run reinstalled a runtime'
 [[ $(grep -c '^set' "$reconcile_log") -eq 2 ]] ||
   fail 'setup-asdf did not select the home default after each successful run'
+
+# A verified retained binary may be selected manually. Obsolete selection
+# records are ignored and neither override the link nor get rewritten.
+unlink "$reconcile_home/bin/asdf"
+ln -s asdf-0.0.1 "$reconcile_home/bin/asdf"
+obsolete_state=$reconcile_home/.local/state/dotfiles/setup-asdf
+printf 'obsolete selection\n' >"$obsolete_state/asdf-target"
+printf 'obsolete journal\n' >"$obsolete_state/pending-selection"
+obsolete_digest=$(sha256sum "$obsolete_state/asdf-target" "$obsolete_state/pending-selection")
+HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
+  "$reconcile_repo/setup-asdf" terraform >/dev/null
+[[ $(readlink -- "$reconcile_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+  fail 'a manual managed selection did not reconcile to the catalog pin'
+[[ $(sha256sum "$obsolete_state/asdf-target" "$obsolete_state/pending-selection") == "$obsolete_digest" ]] ||
+  fail 'obsolete selection records were rewritten'
+
+# A missing command link can be recreated from a verified retained binary.
+unlink "$reconcile_home/bin/asdf"
+HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
+  "$reconcile_repo/setup-asdf" terraform >/dev/null
+[[ $(readlink -- "$reconcile_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+  fail 'missing managed asdf command link was not restored'
+
+printf '# local edit\n' >>"$reconcile_home/bin/asdf-$ASDF_VERSION"
+modified_digest=$(sha256sum "$reconcile_home/bin/asdf-$ASDF_VERSION")
+if HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
+  "$reconcile_repo/setup-asdf" terraform >"$test_root/modified-asdf.log" 2>&1; then
+  fail 'a modified managed asdf binary was accepted'
+fi
+grep -F 'managed asdf installation was modified' "$test_root/modified-asdf.log" >/dev/null ||
+  fail 'modified managed asdf binary was not diagnosed'
+[[ $(sha256sum "$reconcile_home/bin/asdf-$ASDF_VERSION") == "$modified_digest" ]] ||
+  fail 'modified managed asdf binary was overwritten'
 
 order_repo=$test_root/order-repository
 order_home=$test_root/order-home
@@ -387,7 +413,7 @@ HOME="$failure_home" TEST_ASDF_LOG="$failure_log" \
   fail 'runtime retry did not reuse success and finish the failed version'
 
 # Interrupt each publication boundary, then retry with downloads disabled once
-# the verified binary is present. Canonical links and ownership must agree.
+# the verified binary is present. Selection needs only the atomic command link.
 recovery_bin=$test_root/recovery-bin
 mkdir -p "$recovery_bin"
 cat >"$recovery_bin/mv" <<'EOF'
@@ -395,17 +421,22 @@ cat >"$recovery_bin/mv" <<'EOF'
 set -euo pipefail
 destination=${!#}
 case "$TEST_ASDF_FAIL_POINT:$destination" in
-  binary:*/bin/asdf-* | digest:*/installations/asdf-*.sha256 | selection:*/asdf-target)
+  binary:*/bin/asdf-* | digest:*/installations/asdf-*.sha256 | selection:*/bin/asdf)
     if [[ ! -e $TEST_ASDF_FAIL_MARKER ]]; then
       : >"$TEST_ASDF_FAIL_MARKER"
       exit 74
     fi
     ;;
+  after-binary:*/bin/asdf-* | after-selection:*/bin/asdf)
+    /usr/bin/mv "$@"
+    kill -KILL "$PPID"
+    exit 0
+    ;;
 esac
 exec /usr/bin/mv "$@"
 EOF
 chmod 0755 "$recovery_bin/mv"
-for point in digest binary selection; do
+for point in digest binary after-binary selection after-selection; do
   recovery_home=$test_root/recovery-$point
   recovery_repo=$test_root/recovery-repository-$point
   recovery_log=$test_root/recovery-$point.log
@@ -416,6 +447,9 @@ for point in digest binary selection; do
   cp "$repo_dir/system.env" "$recovery_repo/system.env"
   prepare_plugin "$recovery_home" "$recovery_repo"
   cp "$legacy_home/bin/curl" "$recovery_home/bin/curl"
+  write_asdf_fixture "$recovery_home/bin/asdf-0.0.1" 0.0.1
+  record_asdf_fixture "$recovery_home" asdf-0.0.1
+  ln -s asdf-0.0.1 "$recovery_home/bin/asdf"
   set +e
   HOME="$recovery_home" PATH="$recovery_bin:$recovery_home/bin:/usr/bin:/bin" \
     TEST_ASDF_ARCHIVE="$legacy_archive" TEST_ASDF_LOG="$recovery_log" \
@@ -423,35 +457,39 @@ for point in digest binary selection; do
     "$recovery_repo/setup-asdf" terraform >"$test_root/failure-$point.log" 2>&1
   publication_status=$?
   set -e
-  [[ $publication_status -eq 74 ]] || fail "$point publication failure was hidden"
-  if [[ $point == selection ]]; then
-    [[ -L $recovery_home/bin/asdf &&
-      -f $recovery_home/.local/state/dotfiles/setup-asdf/pending-selection ]] ||
-      fail 'selection failure did not leave recoverable ownership'
-    # Journal recovery must not need the archive a second time.
+  if [[ $point == after-* ]]; then expected_status=137; else expected_status=74; fi
+  [[ $publication_status -eq $expected_status ]] || fail "$point publication failure was hidden"
+  if [[ $point == after-selection ]]; then expected_target=asdf-$ASDF_VERSION
+  else expected_target=asdf-0.0.1
+  fi
+  [[ $(readlink -- "$recovery_home/bin/asdf") == "$expected_target" ]] ||
+    fail "$point interruption changed selection unexpectedly"
+  if [[ $point == after-binary || $point == selection || $point == after-selection ]]; then
     recovery_archive=$test_root/absent-archive
-  else
-    recovery_archive=$legacy_archive
+  else recovery_archive=$legacy_archive
   fi
   HOME="$recovery_home" PATH="$recovery_home/bin:/usr/bin:/bin" \
     TEST_ASDF_ARCHIVE="$recovery_archive" TEST_ASDF_LOG="$recovery_log" \
     "$recovery_repo/setup-asdf" terraform >/dev/null
-  [[ $(readlink -- "$recovery_home/bin/asdf") == "asdf-$ASDF_VERSION" &&
-    $(<"$recovery_home/.local/state/dotfiles/setup-asdf/asdf-target") == "asdf-$ASDF_VERSION" &&
+  [[ $(readlink -- "$recovery_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+    fail "$point retry did not select the verified binary"
+  [[ $(sha256sum "$recovery_home/bin/asdf-$ASDF_VERSION" | awk '{print $1}') == \
+    $(<"$recovery_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") ]] ||
+    fail "$point retry lost verified binary ownership"
+  [[ -x $recovery_home/bin/asdf-0.0.1 ]] || fail "$point retry removed the old binary"
+  [[ ! -e $recovery_home/.local/state/dotfiles/setup-asdf/asdf-target &&
     ! -e $recovery_home/.local/state/dotfiles/setup-asdf/pending-selection ]] ||
-    fail "$point retry did not reconcile selection and ownership"
+    fail "$point retry recreated redundant selection records"
 done
 
-# Recovery refuses external edits rather than interpreting them as interrupted work.
-printf '%s\t%s\n' "asdf-$ASDF_VERSION" - \
-  >"$recovery_home/.local/state/dotfiles/setup-asdf/pending-selection"
+# Retry must not interpret a foreign command link as interrupted publication.
 unlink "$recovery_home/bin/asdf"
 ln -s asdf-manual "$recovery_home/bin/asdf"
 if HOME="$recovery_home" TEST_ASDF_LOG="$recovery_log" \
-  "$recovery_repo/setup-asdf" terraform >"$test_root/foreign-pending.log" 2>&1; then
-  fail 'pending recovery replaced an unrelated asdf link'
+  "$recovery_repo/setup-asdf" terraform >"$test_root/foreign-retry.log" 2>&1; then
+  fail 'retry replaced an unrelated asdf link'
 fi
 [[ $(readlink -- "$recovery_home/bin/asdf") == asdf-manual ]] ||
-  fail 'pending recovery modified an unrelated asdf link'
+  fail 'retry modified an unrelated asdf link'
 
 printf 'Setup asdf tests passed\n'

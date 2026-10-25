@@ -978,7 +978,7 @@ uses the first available choice in this order:
 2. An active `VIRTUAL_ENV`, then `CONDA_PREFIX`.
 3. The nearest `.venv/bin/python` or `venv/bin/python`, searching from the
    file's directory up to its Git/project root.
-4. Offline: that physical release's `bin/python`. Connected: `python3` on PATH.
+4. Offline: that physical release's `tools/python/bin/python3`. Connected: `python3` on PATH.
 
 An invalid explicit or active interpreter is an error, not a silent fallback.
 Venv symlinks are not resolved to their base executable, so `pyvenv.cfg` and
@@ -1106,10 +1106,11 @@ inspect `:setlocal shiftwidth? tabstop? expandtab?`. A project's EditorConfig
 settings remain authoritative; detection does not replace formatting or
 language validation.
 
-Nvim2 preserves an active `VIRTUAL_ENV/bin` and optional `~/bin-extras` ahead
+Nvim2 preserves an active `VIRTUAL_ENV/bin` and optional user-owned `~/bin` ahead
 of Mason after startup. PATH-resolved child commands and `:terminal` honor
-those user overrides. `DOTFILES_IGNORE_BIN_EXTRAS=1 "$HOME/bin/nvim"` starts
-the offline editor without extras; release qualification uses this setting.
+those user overrides. Start the offline editor without them using
+`DOTFILES_IGNORE_USER_BIN=1 "$HOME/dotfiles-releases/current/bin/nvim"`;
+release qualification uses this setting.
 Explicit executable paths and project-local formatter selection retain their
 own rules. See the [setup guide](../../../maintenance/setup.md#user-executable-overrides)
 for ownership, shell reload and rollback behavior.
