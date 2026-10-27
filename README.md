@@ -111,8 +111,9 @@ online audits. The GitHub Actions workflow supplies its repository token.
 Focused tasks include `validate:bash`, `validate:configs`, `validate:nvim2`,
 `validate:scripts`, `validate:tmux`, `validate:tools` and `validate:workflows`.
 
-`validate:bash` lints and tests Bash startup files and checks the syntax of
-`bash` code blocks read directly from Markdown documentation with `bash -n`.
+`validate:bash` lints and tests Bash startup files and file previews and checks
+the syntax of `bash` code blocks read directly from Markdown documentation
+with `bash -n`.
 It also runs real pseudo-terminal sessions to test keyboard bindings, automatic
 cross-shell history synchronization and archiving.
 
@@ -127,3 +128,6 @@ installers, offline releases and the validation scripts, including failure
 handling and Ctrl+C cleanup.
 
 Nvim2 lockfiles are checked by `validate:nvim2`.
+
+`validate:tmux` checks config reload, current-directory inheritance for new
+windows and both split directions, and the eye timer on private terminals.

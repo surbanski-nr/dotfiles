@@ -1,5 +1,8 @@
 require('mini.align').setup()
 require('mini.splitjoin').setup()
+require('mini.move').setup {
+  mappings = { left = '', right = '', line_left = '', line_right = '' },
+}
 
 local jump2d = require 'mini.jump2d'
 jump2d.setup { mappings = { start_jumping = '' } }

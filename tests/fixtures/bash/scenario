@@ -40,6 +40,10 @@ case $TEST_SCENARIO in
     load_aliases
     v 'file with space'
     ;;
+  fzf-preview)
+    load_aliases
+    ff
+    ;;
   missing-kubectl)
     load_aliases
     kl pod-name

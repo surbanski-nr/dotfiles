@@ -135,6 +135,10 @@ reach their displayed edges. `g;`/`g,` revisit edits, unlike the jump list's
 navigation locations. Use `q:` or `q/` to edit command or search history in a
 normal buffer, then Enter to execute the selected line.
 
+Markdown, text and Git commit buffers wrap on screen at word boundaries.
+This does not insert newlines or reflow the saved file. Plain `j`/`k` still
+move by file lines; use `gj`/`gk` when you want displayed lines.
+
 Bundled Matchit extends `%` to supported block keywords, for example Bash
 `if`/`else`/`fi`. Its filetype rules are not a universal structural parser;
 see `:help matchit`.
@@ -254,7 +258,8 @@ to update a stale position.
 | Start, expand or shrink syntax selection                        | `<C-Space>`, then `<C-Space>` or `<BS>` |
 | Reselect last visual selection                                  | `gv`                                    |
 | Adjust the other end of a selection                             | `o` in Visual mode                      |
-| Indent or unindent selection                                    | `>`, `<`                                |
+| Indent or unindent and keep selection                           | `>`, `<`                                |
+| Move line or selection down or up                               | `<A-j>`, `<A-k>`                         |
 | Join current line with next                                     | `J`                                     |
 | Toggle boolean-like value under cursor                          | `<leader>tv`                            |
 | Toggle indentation guides                                       | `<leader>ti` or `:IBLToggle`            |
@@ -266,6 +271,12 @@ to update a stale position.
 | Delete a selection without changing any register                | Select text, then `"_d`                 |
 | Yank into and paste from named register `a`                     | `"ay{motion}`, then `"ap`               |
 | Use system clipboard explicitly                                 | `"+y`, `"+p`                            |
+| Copy the current file's absolute path                           | `<leader>yp`                            |
+
+Visual `>` and `<` keep the same selection active so you can repeat the
+indentation. Normal `>>` and `<<` retain their native behavior.
+`<leader>yp` copies the absolute file path to `+` and reports it. Unnamed and
+special buffers leave the clipboard unchanged.
 
 Registers are small text storage slots. The `"{register}` prefix selects a
 register for the next operation:
@@ -341,7 +352,12 @@ Use a macro for several operations per target: record with `qa`, stop with
 `q`, replay with `@a`, repeat with `@@`, or replay three times with `3@a`.
 Check the first replay before applying a count.
 
-These occasional operations need no extra movement/operator plugin:
+For repeated line or selection movement, use `Alt+j`/`Alt+k` in Normal or
+Visual mode. Mini Move is enabled from the existing `mini.nvim` bundle, with
+only vertical mappings. Counts work, the selection remains active, and
+consecutive moves form one undo step without changing your yank history.
+If the terminal intercepts Alt, the native `:move` commands below remain
+available alongside the other occasional editing commands:
 
 | Task | Native flow |
 | --- | --- |
@@ -851,12 +867,18 @@ buffer when the target is not an LSP symbol.
 | Next or previous diagnostic         | `]d`, `[d`                           |
 | Last or first diagnostic in buffer  | `]D`, `[D`                           |
 | Show diagnostic at cursor           | `<C-w>d`                             |
+| Hide or show this buffer's diagnostics | `<leader>td`                       |
 | Put diagnostics in location list    | `<leader>q`                          |
 | Search diagnostics with Telescope   | `<leader>sd`                         |
 | Next or previous location-list item | `]l`, `[l` or `:lnext`, `:lprevious` |
 | Next or previous quickfix item      | `]q`, `[q` or `:cnext`, `:cprevious` |
 
 The diagnostic float opens automatically after jumping with `[d` or `]d`.
+
+`<leader>td` toggles diagnostic decorations only in the current buffer and
+reports the state. Other buffers stay unchanged. LSP and linters keep running
+and updating diagnostics while hidden; pressing the shortcut again restores
+their latest results.
 
 Fidget displays transient LSP progress. With current defaults,
 `progress.display.skip_history=true` and

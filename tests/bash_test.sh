@@ -89,6 +89,31 @@ editor_output=$(
 [[ $editor_output == 'app=nvim2 argc=1 first=file with space' ]] ||
   fail 'v did not preserve the Nvim2 profile or argument quoting'
 
+preview_home=$test_root/preview-home
+mkdir -p "$preview_home"
+preview_file=$preview_home/"file with spaces and 'quotes'"
+for ((line = 1; line <= 501; line++)); do
+  printf 'preview-line-%s\n' "$line"
+done >"$preview_file"
+for viewer in bat batcat sed; do
+  preview_bin=$preview_home/"$viewer tools with 'quotes'"
+  mkdir -p "$preview_bin"
+  ln -s "$command_fixture" "$preview_bin/fzf"
+  for command_name in bash sed; do
+    ln -s "$(command -v "$command_name")" "$preview_bin/$command_name"
+  done
+  if [[ $viewer != sed ]]; then
+    ln -s "$command_fixture" "$preview_bin/$viewer"
+  fi
+  preview_output=$(
+    TEST_COMMAND_MODE=fzf-preview TEST_FZF_FILE="$preview_file" \
+      run_scenario fzf-preview env HOME="$preview_home" PATH="$preview_bin"
+  )
+  assert_contains "$preview_output" 'preview-line-1'
+  assert_contains "$preview_output" 'preview-line-500'
+  [[ $preview_output != *preview-line-501* ]] || fail "$viewer preview exceeded 500 lines"
+done
+
 python_home=$test_root/python-home
 python_xdg=$test_root/'python config'
 python_manifest=$test_root/python-manifest

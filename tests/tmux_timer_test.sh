@@ -12,6 +12,7 @@ from pathlib import Path
 import pty
 import re
 import select
+import shlex
 import shutil
 import signal
 import struct
@@ -74,10 +75,46 @@ def attach(width, terminal=None):
 
 def choose(master, key):
     os.write(master, b'\x01t')
-    output = read_terminal(master)
-    assert b'Eye break timer' in output, 'Ctrl+a t did not open the timer menu'
+    output = bytearray()
+
+    def menu_open():
+        output.extend(read_terminal(master, .05))
+        return b'Eye break timer' in output
+
+    wait_until(menu_open, 'Ctrl+a t did not open the timer menu')
     os.write(master, key)
-    read_terminal(master)
+    return read_terminal(master)
+
+
+def check_cwd(master):
+    original = tmux('display-message', '-p', '#{window_id}')
+    default_command = tmux('show-option', '-gv', 'default-command')
+    tmux('set-option', '-g', 'default-command', 'bash --noprofile --norc -i')
+    cwd = root / "project with spaces and 'quotes'"
+    cwd.mkdir()
+    origin = tmux('new-window', '-P', '-F', '#{window_id}', '-c', str(root))
+    tmux('send-keys', 'cd -- ' + shlex.quote(str(cwd)), 'Enter')
+    wait_until(lambda: tmux('display-message', '-p', '#{pane_current_path}') == str(cwd),
+               'shell did not change to the cwd fixture')
+    previous = tmux('display-message', '-p', '#{pane_id}')
+    os.write(master, b'\x01c')
+    wait_until(lambda: tmux('display-message', '-p', '#{pane_id}') != previous,
+               'Ctrl+a c did not create a window')
+    created = tmux('display-message', '-p', '#{window_id}')
+    assert tmux('display-message', '-p', '#{pane_current_path}') == str(cwd), 'new window lost the pane cwd'
+    for key, dimension in ((b'%', 'pane_width'), (b'"', 'pane_height')):
+        previous = tmux('display-message', '-p', '#{pane_id}')
+        size = int(tmux('display-message', '-p', '#{' + dimension + '}'))
+        os.write(master, b'\x01' + key)
+        wait_until(lambda: tmux('display-message', '-p', '#{pane_id}') != previous,
+                   f'Ctrl+a {key!r} did not split the window')
+        assert tmux('display-message', '-p', '#{pane_current_path}') == str(cwd), 'split lost the pane cwd'
+        assert int(tmux('display-message', '-p', '#{' + dimension + '}')) < size, 'split used the wrong direction'
+    tmux('select-window', '-t', original)
+    tmux('kill-window', '-t', origin)
+    tmux('kill-window', '-t', created)
+    tmux('set-option', '-g', 'default-command', default_command)
+    print('Tmux: new window and both splits inherited the active pane cwd')
 
 
 def stop_test(signum, _frame):
@@ -105,6 +142,7 @@ try:
     wait_until(lambda: option('state') == 'off', 'timer did not initialize')
     tmux('set-option', '-g', 'status-interval', '5')
     master = attach(148)
+    check_cwd(master)
     client = tmux('list-clients', '-F', '#{client_name}').splitlines()[0]
     # A second attach from the same terminal leaves the suspended client name ambiguous.
     suspended = clients[-1][2]
@@ -112,13 +150,24 @@ try:
     os.kill(suspended.pid, signal.SIGSTOP)
     master = attach(148, clients[-1][:2])
 
-    choose(master, b's')
-    assert run('status') in ('60:00', '59:59'), 'default timer is not 60 minutes'
-    tmux('refresh-client')
-    output = read_terminal(master)
-    pattern = rb'(?:60:00|59:59) \| 192\.0\.2\.1 \| ' + clock
-    assert re.search(pattern, output), 'timer hid IP/time/date on a wide terminal: ' + repr(output)
+    started = int(time.time())
+    output = bytearray(choose(master, b's'))
+    wait_until(lambda: option('state') == 'running', 'Start did not run the timer')
     deadline = int(option('deadline'))
+    assert option('minutes') == '60' and started + 3600 <= deadline <= int(time.time()) + 3600, (
+        'default timer is not 60 minutes')
+    pattern = rb'(\d{2}:[0-5]\d) \| 192\.0\.2\.1 \| ' + clock
+
+    # #() produces the countdown asynchronously; read its output without
+    # forcing redraws that can restart a still-running format job.
+    def status_drawn():
+        output.extend(read_terminal(master, .05))
+        return re.search(pattern, output)
+
+    wait_until(status_drawn, 'timer hid IP/time/date on a wide terminal')
+    minutes, seconds = map(int, re.search(pattern, output)[1].split(b':'))
+    assert deadline - int(time.time()) <= minutes * 60 + seconds <= min(3600, deadline - started), (
+        'status bar countdown did not match the timer deadline')
     run('start')
     assert int(option('deadline')) == deadline, 'Start restarted a running timer'
 
@@ -182,6 +231,7 @@ try:
     assert b'BREAK' not in output and re.search(clock, output), 'completion hid the clock/date or added a label'
 
     choose(master, b'r')
+    wait_until(lambda: option('state') == 'ready', 'Reset did not reset the timer')
     assert run('status') == '12:00', 'Reset did not restore the configured duration'
     assert tmux('display-message', '-p', '#{E:status-style}') == 'bg=#008080,fg=#ffffff'
     narrow = attach(30)
@@ -194,6 +244,7 @@ try:
     assert fields == '', 'narrow terminal did not give the timer priority'
 
     choose(master, b'o')
+    wait_until(lambda: option('state') == 'off', 'Off did not stop the timer')
     assert run('status') == '', 'Off did not hide the timer'
     assert tmux('show-options', '-gv', 'status-interval') == '5', 'timer changed the status refresh interval'
     print('Tmux eye timer tests passed')

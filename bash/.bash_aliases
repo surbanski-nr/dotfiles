@@ -196,18 +196,24 @@ dotfiles-check() (
 
 # Remove the old alias before parsing its function replacement on reload.
 unalias ff 2>/dev/null || true
+_dotfiles_fzf_preview() {
+  local viewer
+  if viewer=$(_bat_path); then
+    printf '%q --style=numbers --color=always --line-range=:500 -- {}\n' "$viewer"
+  else
+    printf '%s\n' 'sed -n "1,500p" -- {}'
+  fi
+}
+# FZF parses the option string before passing the preview command to a shell.
+printf -v FZF_CTRL_T_OPTS '%s %q' --preview "$(_dotfiles_fzf_preview)"
+export FZF_CTRL_T_OPTS
+
 ff() {
-  local preview viewer
   if ! command -v fzf >/dev/null 2>&1; then
     printf 'ff requires fzf\n' >&2
     return 127
   fi
-  if viewer=$(_bat_path); then
-    preview="$viewer --style=numbers --color=always --line-range=:500 -- {}"
-  else
-    preview='sed -n "1,500p" -- {}'
-  fi
-  fzf -m --preview "$preview"
+  fzf -m --preview "$(_dotfiles_fzf_preview)"
 }
 
 unalias ffv 2>/dev/null || true

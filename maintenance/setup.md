@@ -1252,6 +1252,18 @@ integration tools are skipped; failed initialization emits a warning without
 aborting startup. A plain or colored fallback prompt remains available when
 Oh My Posh is absent or fails.
 
+Ctrl+T inserts a selected file path into the Bash command line and previews
+the file with the same bat/batcat/sed selection as `ff`, limited to 500 lines.
+Esc cancels without replacing the command you were typing. The dotfiles set
+`FZF_CTRL_T_OPTS` when loading `.bash_aliases`; private `.extras` can override
+these options after startup. Ctrl+R and history synchronization are unchanged.
+
+Tmux's `Ctrl+a c`, `Ctrl+a %` and `Ctrl+a "` create a window or split in the
+active local pane's current directory. This does not discover a remote SSH
+session's directory. `validate:tmux` exercises all three actual key bindings,
+including a directory containing spaces and quotes, as well as config reload
+and the eye timer.
+
 `~/.extras` is an optional private input outside repository static analysis.
 It is loaded only when present; a load failure emits a warning without aborting
 startup. Its contents remain the user's responsibility.

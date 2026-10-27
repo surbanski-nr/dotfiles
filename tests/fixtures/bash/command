@@ -55,6 +55,16 @@ case "$command_name:$mode" in
     [[ ${1:-} == --bash ]] || exit 2
     printf '%s\n' '__fzf_test_binding() { :; }'
     ;;
+  fzf:fzf-preview)
+    [[ $1 == -m && $2 == --preview ]] || exit 2
+    printf -v file '%q' "$TEST_FZF_FILE"
+    preview=${3//\{\}/$file}
+    bash -c "$preview"
+    ;;
+  bat:fzf-preview | batcat:fzf-preview)
+    [[ $1 == --style=numbers && $2 == --color=always && $3 == --line-range=:500 && $4 == -- ]] || exit 2
+    sed -n '1,500p' -- "$5"
+    ;;
   fzf:terminal)
     [[ ${1:-} == --bash ]] || exit 2
     # The fixture supplies a selected command; Bash must invoke the generated

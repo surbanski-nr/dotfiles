@@ -46,7 +46,7 @@ tasks:
       - bash scripts/validate scripts
 
   validate:tmux:
-    desc: Check tmux configuration and test config reload and the eye timer
+    desc: Check tmux configuration and test reload, pane directories and the eye timer
     deps: [tools:python, tools:shellcheck]
     cmds:
       - bash scripts/validate tmux

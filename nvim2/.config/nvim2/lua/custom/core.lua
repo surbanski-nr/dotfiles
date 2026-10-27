@@ -70,6 +70,25 @@ vim.keymap.set('n', 'C', '"_C')
 vim.keymap.set('n', 'd', '"_d', { desc = 'Delete with motion without replacing yank register' })
 vim.keymap.set('n', 'D', '"_D', { desc = 'Delete to end of line without replacing yank register' })
 vim.keymap.set('x', 'c', '"_c')
+vim.keymap.set('x', '<', '<gv', { desc = 'Indent left and keep selection' })
+vim.keymap.set('x', '>', '>gv', { desc = 'Indent right and keep selection' })
+
+vim.keymap.set('n', '<leader>yp', function()
+  local path = vim.api.nvim_buf_get_name(0)
+  if path == '' or vim.bo.buftype ~= '' then
+    vim.notify('No ordinary file path to copy', vim.log.levels.INFO)
+    return
+  end
+  vim.fn.setreg('+', path)
+  vim.notify('Copied path: ' .. path)
+end, { desc = '[Y]ank file [P]ath' })
+
+vim.keymap.set('n', '<leader>td', function()
+  local filter = { bufnr = 0 }
+  local enabled = not vim.diagnostic.is_enabled(filter)
+  vim.diagnostic.enable(enabled, filter)
+  vim.notify('Buffer diagnostics: ' .. (enabled and 'shown' or 'hidden'))
+end, { desc = '[T]oggle buffer [D]iagnostics' })
 
 vim.keymap.set('n', '<leader>tl', function()
   vim.wo.number = true
@@ -95,6 +114,8 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   desc = 'Highlight yanked text and update the yank ring',
   group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
   callback = function()
+    -- Mini Move marks internal copies so they do not enter a user's yank history.
+    if vim.b.minibracketed_disable == true then return end
     vim.hl.on_yank { higroup = 'IncSearch', timeout = 300 }
     if vim.v.event.operator == 'y' then
       for index = 9, 1, -1 do
@@ -105,10 +126,11 @@ vim.api.nvim_create_autocmd('TextYankPost', {
 })
 
 vim.api.nvim_create_autocmd('FileType', {
-  desc = 'Enable spell checking for prose',
+  desc = 'Enable spell checking and word-boundary wrapping for prose',
   group = vim.api.nvim_create_augroup('nvim2-prose-spell', { clear = true }),
   pattern = { 'gitcommit', 'markdown', 'text' },
   callback = function()
+    vim.opt_local.linebreak = true
     vim.opt_local.spell = true
     vim.opt_local.spelllang = { 'en_us', 'en_gb' }
   end,
