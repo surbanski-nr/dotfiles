@@ -196,6 +196,31 @@ case $TEST_SCENARIO in
       -c core.hooksPath=/dev/null commit -q --allow-empty
     [[ $(git -C "$HOME/repository" log -1 --format=%s) == 'system vi commit' ]]
     ;;
+  git-log-reload)
+    shopt -s expand_aliases
+    alias gl='git log --oneline'
+    load_aliases
+    load_aliases
+    # Parse the call after reload, as an interactive prompt would.
+    eval 'gl 1'
+    ;;
+  git-commit-message)
+    shopt -s expand_aliases
+    load_aliases
+    eval 'gc "initial message with spaces"'
+    ;;
+  git-amend-message)
+    shopt -s expand_aliases
+    load_aliases
+    eval 'gca "amended message with spaces"'
+    ;;
+  git-amend-no-message)
+    shopt -s expand_aliases
+    alias gca='git commit --amend -m'
+    load_aliases
+    load_aliases
+    eval 'gca'
+    ;;
   custom-dotfiles)
     load_bashrc
     eval cddot

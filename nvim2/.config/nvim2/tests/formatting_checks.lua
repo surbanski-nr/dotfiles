@@ -215,6 +215,36 @@ local function run()
     'buffer disable blocked one-time LSP formatting'
   )
 
+  vim.cmd 'FormatDisable'
+  assert(vim.fn.writefile({ 'formatter:', '  type: basic', '  indent: 2' }, root .. '/.yamlfmt') == 0)
+  conform.formatters.yamlfmt.cwd = function() return root end
+  local yaml_lines = { 'root: value', '', 'nested:', ' child: 1', '', 'text: |-', '  alpha', '', '', '  beta' }
+  local yaml_formatted = vim.deepcopy(yaml_lines)
+  yaml_formatted[4] = '  child: 1'
+  for _, filetype in ipairs { 'yaml', 'yaml.ansible', 'yaml.docker-compose', 'yaml.helm-values' } do
+    vim.cmd 'enew'
+    local path = root .. '/' .. filetype .. '.yaml'
+    vim.api.nvim_buf_set_name(0, path)
+    vim.bo.filetype = filetype
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, yaml_lines)
+    vim.cmd 'silent write'
+    assert(vim.deep_equal(vim.fn.readfile(path), yaml_lines), filetype .. ' formatted without opting in')
+    keys '<leader>f'
+    assert(
+      vim.wait(3000, function() return vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), yaml_formatted) end),
+      filetype .. ' manual formatting did not preserve blank lines or literal text'
+    )
+    assert(not policy.is_enabled() and vim.deep_equal(vim.fn.readfile(path), yaml_lines), filetype .. ' manual format enabled automatic formatting or saved')
+    keys '<leader>tf'
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, yaml_lines)
+    vim.cmd 'silent write'
+    assert(vim.deep_equal(vim.fn.readfile(path), yaml_formatted), filetype .. ' opted-in save did not preserve blank lines or literal text')
+    keys '<leader>tf'
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, yaml_lines)
+    vim.cmd 'silent write'
+    assert(vim.deep_equal(vim.fn.readfile(path), yaml_lines), filetype .. ' did not disable automatic formatting')
+  end
+
   vim.cmd 'FormatEnable'
   local fresh = root .. '/fresh.lua'
   assert(vim.fn.writefile({

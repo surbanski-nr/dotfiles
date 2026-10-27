@@ -1113,6 +1113,11 @@ Native `gq`, explicit `vim.lsp.buf.format()`, direct Conform API calls,
 project EditorConfig cleanup and user autocmds remain independent editing
 actions.
 
+YAML uses yamlfmt with blank-line retention: a separating empty line between
+keys remains in the formatted file. Empty lines inside multiline text values
+also remain part of their content. This applies to plain YAML, Ansible,
+Compose and Helm values, for both manual and opted-in automatic formatting.
+
 Diagnostics, completion, navigation and indentation still work while format
 on save is disabled. `nvim-lint` runs diagnostic CLI linters after saving; it
 does not apply fixes and has no manual mapping. Actionlint runs only for

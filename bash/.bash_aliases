@@ -346,6 +346,27 @@ alias gdc='git diff --cached'
 alias gc='git commit -m'
 alias gti='git'
 
+unalias gca 2>/dev/null || true
+gca() {
+  if (($#)); then
+    command git commit --amend -m "$@"
+  else
+    command git commit --amend --no-edit
+  fi
+}
+
+unalias gl 2>/dev/null || true
+gl() {
+  local -a limit=()
+  if [[ ${1:-} =~ ^[0-9]+$ ]]; then
+    limit=(-n "$1")
+    shift
+  fi
+  command git log --color=auto --decorate=short \
+    --date=format:'%d.%m.%Y' \
+    --format='%C(auto)%h%d%C(reset) %s | %an %ad' "${limit[@]}" "$@"
+}
+
 # finds all files recursively and sorts by last modification, ignore hidden files
 alias last='find . -type f -not -path "*/\.*" -exec ls -lrt {} +'
 

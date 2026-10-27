@@ -114,6 +114,95 @@ for viewer in bat batcat sed; do
   [[ $preview_output != *preview-line-501* ]] || fail "$viewer preview exceeded 500 lines"
 done
 
+git_log_home=$test_root/git-log-home
+mkdir -p "$git_log_home"
+(
+  export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_AUTHOR_NAME='Log Author' GIT_AUTHOR_EMAIL=author@example.invalid
+  export GIT_COMMITTER_NAME='Log Committer' GIT_COMMITTER_EMAIL=committer@example.invalid
+  export GIT_AUTHOR_DATE='2026-10-27T12:00:00+00:00' GIT_COMMITTER_DATE='2026-10-28T12:00:00+00:00'
+  export GIT_PAGER=cat
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+  git init --quiet --initial-branch=main "$git_log_home/checkout"
+  cd "$git_log_home/checkout"
+  for number in {1..6}; do
+    git -c commit.gpgsign=false commit --quiet --allow-empty -m "commit $number"
+  done
+  git checkout --quiet -b side
+  GIT_COMMITTER_DATE='2026-10-29T12:00:00+00:00' \
+    git -c commit.gpgsign=false commit --quiet --allow-empty -m 'side branch commit'
+  git checkout --quiet main
+  git tag v1.0.0
+  git update-ref refs/remotes/origin/main HEAD
+
+  # shellcheck source=../bash/.bash_aliases
+  source "$repo_dir/bash/.bash_aliases"
+
+  log_output=$(gl)
+  mapfile -t log_entries <<<"$log_output"
+  [[ ${#log_entries[@]} -eq 6 ]] || fail 'gl did not show only the current branch history'
+  [[ ${log_entries[0]} == "$(git rev-parse --short HEAD) ("*") commit 6 | Log Author 27.10.2026" ]] ||
+    fail 'gl did not show the short hash, subject, author and author date in the approved format'
+  for reference in 'HEAD -> main' 'tag: v1.0.0' 'origin/main'; do
+    assert_contains "${log_entries[0]}" "$reference"
+  done
+  [[ $log_output != *$'\e['* ]] || fail 'gl emitted ANSI colors into redirected output'
+  reload_output=$(run_scenario git-log-reload)
+  [[ $reload_output == "${log_entries[0]}" ]] || fail 'gl did not replace a stale alias on reload'
+
+  log_output=$(gl 5)
+  mapfile -t log_entries <<<"$log_output"
+  [[ ${#log_entries[@]} -eq 5 && ${log_entries[4]} == *' commit 2 | Log Author 27.10.2026' ]] ||
+    fail 'gl 5 did not limit the output to the last five commits'
+  filtered_output=$(gl 5 --grep='commit 3')
+  [[ $filtered_output == *' commit 3 | Log Author 27.10.2026' && $filtered_output != *$'\n'* ]] ||
+    fail 'gl did not preserve a quoted Git filter after the numeric limit'
+  all_output=$(gl --all --grep='side branch commit')
+  [[ $all_output == *' side branch commit | Log Author 27.10.2026' ]] ||
+    fail 'gl did not forward Git arguments without a numeric limit'
+  if gl --invalid-log-option >/dev/null 2>&1; then
+    fail 'gl hid an invalid Git option'
+  fi
+
+  export -f gl
+  printf -v log_command '%q ' "$bash_executable" --noprofile --norc -c 'gl 1'
+  color_output=$(
+    SHELL="$bash_executable" TERM=xterm-256color "$script_executable" \
+      --quiet --return --command "$log_command" /dev/null </dev/null
+  )
+  assert_contains "$color_output" $'\e['
+
+  commit_parent=$(git rev-parse HEAD)
+  printf 'original content\n' >commit-message.txt
+  git add -- commit-message.txt
+  run_scenario git-commit-message >/dev/null
+  [[ $(git log -1 --format=%s) == 'initial message with spaces' ]] ||
+    fail 'gc did not preserve the commit message'
+  [[ $(git rev-parse HEAD^) == "$commit_parent" ]] || fail 'gc did not create a new commit'
+  original_commit=$(git rev-parse HEAD)
+  printf 'staged amendment\n' >commit-message.txt
+  git add -- commit-message.txt
+  printf 'unstaged content\n' >commit-message.txt
+  run_scenario git-amend-message >/dev/null
+  [[ $(git rev-parse HEAD) != "$original_commit" && $(git rev-parse HEAD^) == "$commit_parent" ]] ||
+    fail 'gca did not replace the last commit while preserving its parent'
+  [[ $(git log -1 --format=%s) == 'amended message with spaces' ]] ||
+    fail 'gca did not preserve the replacement message'
+  [[ $(git show HEAD:commit-message.txt) == 'staged amendment' &&
+    $(<commit-message.txt) == 'unstaged content' ]] ||
+    fail 'gca did not commit only the staged content and preserve unstaged changes'
+
+  amended_commit=$(git rev-parse HEAD)
+  printf 'additional amendment\n' >commit-message.txt
+  git add -- commit-message.txt
+  GIT_EDITOR=false run_scenario git-amend-no-message >/dev/null
+  [[ $(git log -1 --format=%s) == 'amended message with spaces' ]] ||
+    fail 'gca without arguments changed the existing message'
+  [[ $(git rev-parse HEAD) != "$amended_commit" && $(git rev-parse HEAD^) == "$commit_parent" &&
+    $(git show HEAD:commit-message.txt) == 'additional amendment' ]] ||
+    fail 'gca without arguments did not amend staged changes into the last commit'
+)
+
 python_home=$test_root/python-home
 python_xdg=$test_root/'python config'
 python_manifest=$test_root/python-manifest

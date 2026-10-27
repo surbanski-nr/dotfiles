@@ -1258,6 +1258,31 @@ Esc cancels without replacing the command you were typing. The dotfiles set
 `FZF_CTRL_T_OPTS` when loading `.bash_aliases`; private `.extras` can override
 these options after startup. Ctrl+R and history synchronization are unchanged.
 
+`gl` shows the current branch's Git history, one line per commit: short hash,
+branch/tag decorations, subject, author and author date in `DD.MM.YYYY`.
+Colors are automatic in a terminal and omitted when redirecting output.
+An optional first number limits the commits; remaining arguments go to `git log`:
+
+```bash
+gl
+gl 5
+gl 5 --graph
+gl 10 --all
+gl 5 --author='Jan Kowalski'
+```
+
+`gc 'message'` creates a commit from staged changes. `gca` amends the last
+commit with staged changes, preserving its message without opening an editor.
+`gca 'message'` also replaces the message. Neither shortcut runs `git add` or
+pushes. Amend changes the commit ID, so avoid it for commits other people
+already use.
+
+```bash
+gc 'initial message'
+gca
+gca 'corrected message'
+```
+
 Tmux's `Ctrl+a c`, `Ctrl+a %` and `Ctrl+a "` create a window or split in the
 active local pane's current directory. This does not discover a remote SSH
 session's directory. `validate:tmux` exercises all three actual key bindings,
