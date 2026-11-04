@@ -123,6 +123,8 @@ make_test_repo() {
   mkdir -p "$destination/scripts"
   cp "$repo_dir/setup-tools" "$destination/setup-tools"
   cp "$repo_dir/scripts/setup-lib" "$destination/scripts/setup-lib"
+  cp "$repo_dir/scripts/setup-catalog-lib" "$destination/scripts/setup-catalog-lib"
+  cp "$repo_dir/scripts/setup-tmux-lib" "$destination/scripts/setup-tmux-lib"
   cp "$repo_dir/tools.env" "$destination/tools.env"
   cp "$repo_dir/system.env" "$destination/system.env"
 }

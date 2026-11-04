@@ -29,6 +29,7 @@ printf '\n# Fixture release snapshot differs from workflow tooling.\n' >>"$sourc
 printf '#!/bin/sh\nexit 0\n' >"$source_dir/scripts/build-dotfiles-release"
 cp "$repo_dir/scripts/build-standalone-script" "$source_dir/scripts/build-standalone-script"
 cp "$repo_dir/scripts/setup-lib" "$source_dir/scripts/setup-lib"
+cp "$repo_dir/scripts/setup-catalog-lib" "$source_dir/scripts/setup-catalog-lib"
 cp "$repo_dir/scripts/setup-system-lib" "$source_dir/scripts/setup-system-lib"
 cp "$repo_dir/system.env" "$source_dir/system.env"
 printf 'SYSTEM_RUNTIME_PACKAGES+=(fixture-release-package)\n' >>"$source_dir/system.env"

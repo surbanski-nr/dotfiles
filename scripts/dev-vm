@@ -28,12 +28,12 @@ for setting in DEV_PROJECT DEV_NETWORK DEV_STORAGE; do
   [[ -n ${!setting:-} ]] || die "$setting is required"
 done
 
-lxd() { timeout --kill-after=5s 600s lxc --project "$DEV_PROJECT" "$@"; }
+lxc_command() { timeout --kill-after=5s 600s lxc --project "$DEV_PROJECT" "$@"; }
 
 # Only creation/preparation is serialized; independent interactive shells must coexist.
 exec 9>"$repo_dir/.git/dotfiles-dev-$alias.lock"
 flock -w 1800 9 || die 'another VM preparation is still running'
-instances=$(lxd list --fast --format=json)
+instances=$(lxc_command list --fast --format=json)
 matches=$(printf '%s\n' "$instances" | jq -c --arg root "$repo_dir" --arg alias "$alias" '
   [.[] | select(.config["user.dotfiles.dev.root"] == $root and
     .config["user.dotfiles.dev.platform"] == $alias)]')
@@ -48,7 +48,7 @@ if ((count == 0)); then
   if [[ -n $checksum ]]; then
     [[ $checksum =~ ^[0-9a-f]{64}$ && $image == https://* ]] || die 'invalid QCOW2 image or SHA256'
     image_alias=dotfiles-dev-$alias-${checksum:0:12}
-    if ! lxd image info "$image_alias" >/dev/null 2>&1; then
+    if ! lxc_command image info "$image_alias" >/dev/null 2>&1; then
       command -v curl >/dev/null || die 'curl is required to download the QCOW2 image'
       stage=$(mktemp -d)
       curl --fail --show-error --location --retry 2 --connect-timeout 30 --max-time 1200 \
@@ -59,23 +59,23 @@ if ((count == 0)); then
           properties: {description: ("dotfiles development " + $alias),
             "user.dotfiles.dev.sha256": $checksum}}' >"$stage/metadata.yaml"
       tar -C "$stage" -czf "$stage/metadata.tar.gz" metadata.yaml
-      lxd image import "$stage/metadata.tar.gz" "$stage/rootfs.qcow2" --alias "$image_alias"
+      lxc_command image import "$stage/metadata.tar.gz" "$stage/rootfs.qcow2" --alias "$image_alias"
       find "$stage" -depth -delete
       stage=
     fi
-    [[ $(lxd image info "$image_alias" | sed -n 's/^    user.dotfiles.dev.sha256: //p') == "$checksum" ]] ||
+    [[ $(lxc_command image info "$image_alias" | sed -n 's/^    user.dotfiles.dev.sha256: //p') == "$checksum" ]] ||
       die "existing image $image_alias has an unexpected checksum property"
     image=$image_alias
   fi
   printf 'Creating %s in LXD project %s\n' "$vm" "$DEV_PROJECT"
-  lxd init "$image" "$vm" --vm --network "$DEV_NETWORK" --storage "$DEV_STORAGE" \
+  lxc_command init "$image" "$vm" --vm --network "$DEV_NETWORK" --storage "$DEV_STORAGE" \
     -c "limits.cpu=$DEV_CPUS" -c "limits.memory=$DEV_MEMORY" -d "root,size=$DEV_DISK" \
     -c security.secureboot=false \
     -c "user.dotfiles.dev.root=$repo_dir" -c "user.dotfiles.dev.platform=$alias"
-  lxd config device add "$vm" checkout disk "source=$repo_dir" path=/workspace/dotfiles
+  lxc_command config device add "$vm" checkout disk "source=$repo_dir" path=/workspace/dotfiles
   if [[ -n $checksum ]]; then
     # Official Amazon KVM images lack the LXD agent supplied by LXD cloud images.
-    lxd config set "$vm" user.user-data - <<'CLOUD_INIT'
+    lxc_command config set "$vm" user.user-data - <<'CLOUD_INIT'
 #cloud-config
 write_files:
   - path: /usr/local/sbin/dotfiles-lxd-agent-bootstrap
@@ -93,7 +93,7 @@ write_files:
 runcmd:
   - [bash, /usr/local/sbin/dotfiles-lxd-agent-bootstrap]
 CLOUD_INIT
-    lxd config device add "$vm" cloud-init disk source=cloud-init:config
+    lxc_command config device add "$vm" cloud-init disk source=cloud-init:config
   fi
 else
   printf '%s\n' "$matches" | jq -e --arg root "$repo_dir" '
@@ -104,9 +104,9 @@ else
   printf 'Reusing %s in LXD project %s\n' "$vm" "$DEV_PROJECT"
 fi
 
-state=$(lxd list "$vm" --fast --format=json | jq -er '.[0].status')
+state=$(lxc_command list "$vm" --fast --format=json | jq -er '.[0].status')
 case $state in
-  Stopped) lxd start "$vm" ;;
+  Stopped) lxc_command start "$vm" ;;
   Running) ;;
   *) die "VM $vm is $state; inspect it before continuing" ;;
 esac
@@ -131,7 +131,7 @@ for attempt in 1 2 3; do
   printf 'dev-vm: warning: LXD connection failed; retrying preparation (%s/3).\n' "$((attempt + 1))" >&2
   sleep 2
 done
-account=$(lxd exec "$vm" --disable-stdin -- getent passwd "$(id -u)")
+account=$(lxc_command exec "$vm" --disable-stdin -- getent passwd "$(id -u)")
 IFS=: read -r guest_user _ _ _ _ guest_home _ <<<"$account"
 [[ -n $guest_user && $guest_home == /home/* ]] || die 'guest account has an unexpected home'
 exec 9>&-

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+loaded=$(tmux show-options -gqv @validation-plugins)
+tmux set-option -g @validation-plugins "${loaded:+$loaded|}$0"

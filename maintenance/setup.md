@@ -106,6 +106,9 @@ record. Actionlint, ShellCheck and Task are also regular development tools;
 their records supply connected setup and offline releases. `dotfiles-check`
 checks this development catalog. Repository validation has independent pins
 in `validation.env`. Mason ShellCheck remains an independent editor pin.
+`ASDF_PLUGINS` and `TMUX_PLUGINS` both map plugin names to `repository|commit`.
+Git plugins use commit identity, not an archive version or a separate SHA-256
+ownership record.
 
 Yamllint has no prebuilt executable archive. Repository validation installs
 the exact `YAMLLINT_VERSION` from `validation.env` with pip in an isolated
@@ -113,7 +116,9 @@ venv. Offline releases use the Nvim Python lock and expose that executable
 in `release/bin`.
 
 `TOOLS` and `OFFLINE_RELEASE_TOOLS` are the authoritative tool profiles, with
-one tool per line. Both include `fd`, installed from its verified official
+one tool per line. Each includes tmux-sensible, tmux-resurrect and tmux-continuum
+as separate Git-backed tools, in startup order. The tmux binary remains a
+separate source-archive tool. Both include `fd`, installed from its verified official
 Linux musl archive rather than an OS package. GNU `find` remains a system
 prerequisite for scripts that depend on its semantics.
 
@@ -129,7 +134,9 @@ tools and standard library. No asdf Go plugin or OS Go package is required.
 official release records. Python runtime management delegates to uv as described
 below. It supports only connected installation; offline
 deployment uses the complete release described below. Without names, it
-installs all of `TOOLS`, including kubectl and Helm. Optional online
+installs all of `TOOLS`, including kubectl, Helm and the three tmux plugins.
+A named `./setup-tools tmux` request installs only the binary; plugin names are
+selected independently. Optional online
 `setup-asdf` reads runtime versions from the same catalog, but plugin repository
 and commit data from `ASDF_PLUGINS`, whose keys are also the supported tool
 list and the alphabetical no-argument install order; plugin downloads and
@@ -139,6 +146,15 @@ override those defaults.
 `setup-asdf` reuses only binaries whose SHA256 matches its installation record.
 Existing binaries or links without that record are rejected without being
 changed; there is no automatic adoption.
+
+The connected installers and offline builder source `scripts/setup-lib` for
+archive preparation, source compilation, prerequisites, locking and cleanup.
+It sources `scripts/setup-catalog-lib`, which owns catalog readers and validation,
+including the shared Git-plugin record reader. Catalog validation is not a
+download or installation step. `scripts/setup-tmux-lib` owns pinned tmux Git
+checkout installation and is sourced only by setup-tools and the builder.
+Asdf still installs its own executable and delegates plugins/runtimes to asdf;
+no installer is embedded in the standalone offline manager.
 
 Edit OS package lists and their expected commands in `system.env`. Common
 runtime packages are included in every role; build and setup roles add
@@ -293,7 +309,7 @@ other installation errors remain fatal. `dotfiles-release` still rejects
 missing system prerequisites and invalid or incomplete packages; warnings do
 not bypass its verification or health checks. Release builds remain strict.
 
-`setup-tools` reuses
+For binary tools, `setup-tools` reuses
 intact recorded payloads, completes intact pending payloads without downloading,
 and reinstalls inactive partial payloads. A failed multi-command selection
 attempt restores the prior links; after a killed process, rerunning reconciles
@@ -506,7 +522,10 @@ or platform argument and never installs or activates a release. The connected
 broader normal-host package profile; there is no copied offline implementation.
 Neither selects a tool list: `setup-tools` selects `TOOLS`, and the builder selects
 `OFFLINE_RELEASE_TOOLS`. The archive retains the old metadata key
-`OFFLINE_TOOLS` for compatibility with retained releases.
+`OFFLINE_TOOLS` for compatibility with retained releases. That field still lists
+only runtime/command tools, not Git plugin targets. Plugin repository and commit
+identities remain in `build-manifest.txt`, and their files in `SHA256SUMS`.
+No published archive, tag or release needs to be rewritten.
 
 On a connected machine, download these release assets into one directory with
 `gh`, then transfer them to the target:
@@ -1103,55 +1122,49 @@ timeout 60s bash tests/tmux_timer_test.sh
 
 They also run as part of `task validate:tmux` and `task validate`.
 
-## TPM and Krew
+## Tmux plugins
 
-TPM and its plugin checkouts use the commits in `tools.env`. This section is
-only for the connected setup. Complete offline releases do not bundle or run
-TPM; their tmux config loads sensible, resurrect and continuum directly from
-the physical release. TPM reads plugin declarations from
-`${XDG_CONFIG_HOME:-$HOME/.config}/tmux/tmux.conf` when it exists, otherwise
-from `~/.tmux.conf`, even if tmux starts with `-f FILE`. Keep the connected
-config in the default location, as in the setup above. For a custom
-`TMUX_PLUGIN_MANAGER_PATH`, use an absolute path without whitespace.
+Connected setup and offline builds use the same pinned Git-checkout installer.
+`TMUX_PLUGINS` in `tools.env` owns the repository and commit of each plugin;
+`TOOLS` and `OFFLINE_RELEASE_TOOLS` select them and define startup order.
+There is no TPM install/update step or first-session plugin download.
 
-On a connected machine, reconcile the managed checkouts with:
+The normal `./setup-tools` installs the binary and all three plugins. Select
+the complete tmux setup or an individual plugin explicitly with:
 
 ```bash
-set -euo pipefail
-. ./tools.env
-plugins=$HOME/.tmux/plugins
-mkdir -p "$plugins"
-
-install_tmux_plugin() {
-  name=$1
-  url=$2
-  commit=$3
-  destination=$plugins/$name
-  if [[ ! -d $destination/.git ]]; then
-    git clone "$url" "$destination"
-  fi
-  [[ $(git -C "$destination" remote get-url origin) == "$url" ]]
-  git -C "$destination" fetch --depth 1 origin "$commit"
-  git -C "$destination" reset --hard "$commit"
-  git -C "$destination" clean -fdx
-  [[ $(git -C "$destination" rev-parse HEAD) == "$commit" ]]
-}
-
-install_tmux_plugin tpm "$TPM_REPO" \
-  "$TPM_COMMIT"
-install_tmux_plugin tmux-sensible \
-  "$TMUX_SENSIBLE_REPO" \
-  "$TMUX_SENSIBLE_COMMIT"
-install_tmux_plugin tmux-resurrect \
-  "$TMUX_RESURRECT_REPO" \
-  "$TMUX_RESURRECT_COMMIT"
-install_tmux_plugin tmux-continuum \
-  "$TMUX_CONTINUUM_REPO" \
-  "$TMUX_CONTINUUM_COMMIT"
+./setup-tools tmux tmux-sensible tmux-resurrect tmux-continuum
+./setup-tools tmux-resurrect
 ```
 
-This resets only the four managed plugin checkouts. Session data under
-`~/.tmux/resurrect` remains intact.
+Connected checkouts live under `~/.tmux/plugins/PLUGIN`. For a custom root,
+export `DOTFILES_TMUX_PLUGIN_DIR` before setup and before starting the tmux
+server. Plugin roots must be absolute paths without whitespace because the
+upstream plugins embed them in tmux shell commands. Configuration paths may
+contain spaces. This replaces the TPM-specific `TMUX_PLUGIN_MANAGER_PATH` setting.
+
+The installer verifies the repository, selected commit and executable entry
+point. It refuses symlinks, non-Git paths, different origins and tracked/staged
+edits before installing any requested tool. Untracked and ignored files are
+preserved; a conflicting file stops a checkout. A selected pin is reused without
+network access. A failed clone leaves no partially published plugin directory.
+Plugin-only requests do not create `~/bin` or setup-tools ownership state.
+The existing common `setup.lock` still serializes connected installers.
+Session data under `~/.tmux/resurrect` or the plugin's XDG data path is untouched.
+
+Offline builds place the same checkouts under `release/share/tmux/plugins`.
+The shared `tmux/.tmux/load-plugins.sh` reads the catalog/profile beside the
+loaded configuration and runs sensible, resurrect and continuum directly.
+For offline sessions it uses the launcher's physical release path, ignoring the
+online plugin-root override. Startup and reload never fetch or update plugins.
+An explicit `tmux -f FILE` is authoritative in both flows.
+
+An existing `~/.tmux/plugins/tpm` is left untouched and is no longer loaded.
+Start a new server when moving from TPM to this configuration: a server that
+previously loaded TPM may retain its old key bindings until it exits.
+Do not use TPM's former install/update keys to manage these pinned checkouts.
+
+## Krew
 
 Krew remains separate from `setup-tools`. Read its first release record,
 download and verify `krew-linux_amd64.tar.gz`, extract `krew-linux_amd64`, then

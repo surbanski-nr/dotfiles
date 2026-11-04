@@ -134,7 +134,12 @@ try:
     ip.chmod(0o755)
     environment = {**os.environ, 'HOME': str(root), 'TMUX': '',
                    'PATH': str(ip.parent) + ':' + os.environ['PATH'],
-                   'TMUX_OFFLINE_RELEASE_ROOT': '', 'TMUX_PLUGIN_MANAGER_PATH': ''}
+                   'TMUX_OFFLINE_RELEASE_ROOT': '', 'DOTFILES_TMUX_PLUGIN_DIR': ''}
+    for plugin in ('tmux-sensible', 'tmux-resurrect', 'tmux-continuum'):
+        directory = root / '.tmux/plugins' / plugin
+        directory.mkdir(parents=True)
+        shutil.copy2(repo / 'tests/fixtures/validation/tmux-plugin',
+                     directory / (plugin.removeprefix('tmux-') + '.tmux'))
     pane_command = 'bash -c \'while IFS= read -r line; do printf "PANE_INPUT=%s\\n" "$line"; done\''
     subprocess.run(command + ['-f', str(root / 'tmux.conf'), 'new-session', '-d',
                               '-s', 'timer', '-n', 'work', pane_command],

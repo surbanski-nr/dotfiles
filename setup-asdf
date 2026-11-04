@@ -82,11 +82,7 @@ select_requested_tools() {
 plugin_spec() {
   local name=$1
 
-  if [[ ! -v ASDF_PLUGINS[$name] ]]; then
-    report_error "missing asdf plugin mapping for $name"
-    return 1
-  fi
-  IFS='|' read -r PLUGIN_REPO PLUGIN_COMMIT <<<"${ASDF_PLUGINS[$name]}"
+  select_git_plugin ASDF_PLUGINS "$name" || return
   release_versions TOOL_RELEASES "$name" || return
   TOOL_VERSIONS=("${RELEASE_VERSIONS[@]}")
 }

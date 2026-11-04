@@ -114,4 +114,27 @@ append_release "$single_repository/tools.env" TOOL_RELEASES terraform \
 run_setup "$single_home" "$single_repository" "$single_archives" k9s
 assert_link "$single_home/bin/k9s" "k9s-$K9S_VERSION"
 
+invalid_plugin_index=0
+for invalid_plugin in \
+  'http://example.invalid/plugin.git|0000000000000000000000000000000000000000' \
+  'https://example.invalid/plugin.git|not-a-commit' \
+  'https://example.invalid/plugin.git|0000000000000000000000000000000000000000|extra' \
+  'https://example.invalid/plugin.git|'; do
+  invalid_plugin_index=$((invalid_plugin_index + 1))
+  invalid_plugin_repository=$test_root/invalid-plugin-$invalid_plugin_index
+  invalid_plugin_home=$test_root/invalid-plugin-home-$invalid_plugin_index
+  make_test_repo "$invalid_plugin_repository"
+  printf 'TMUX_PLUGINS[tmux-sensible]=%q\n' "$invalid_plugin" \
+    >>"$invalid_plugin_repository/tools.env"
+  if invalid_plugin_output=$(run_setup "$invalid_plugin_home" \
+    "$invalid_plugin_repository" "$archive_root" k9s 2>&1); then
+    fail 'setup-tools accepted an invalid Git plugin record'
+  fi
+  [[ $invalid_plugin_output == *'TMUX_PLUGINS[tmux-sensible]'* ]] ||
+    fail 'invalid plugin error did not identify its catalog record'
+  [[ ! -e $invalid_plugin_home/bin && ! -e $invalid_plugin_home/.local &&
+    ! -e $invalid_plugin_home/.tmux ]] ||
+    fail 'an invalid Git plugin record changed HOME'
+done
+
 printf 'setup_tools: configuration passed\n'

@@ -1,9 +1,10 @@
 # Tool updates and rollback notes
 
-Use this runbook to test a new version before changing the normal setup. Every
-candidate needs an exact version, a SHA-256 digest from the upstream release,
-and the same checks used for a normal installation. Keep the current and the
-candidate installations until rollback has been tested.
+Use this runbook to test a new version before changing the normal setup.
+Archive candidates need an exact version and an upstream SHA-256 digest;
+Git plugins need a repository and full commit pin. Run the same checks used
+for normal installation. Keep current and candidate installations until
+rollback has been tested.
 
 Run the commands below from the repository root.
 
@@ -40,6 +41,16 @@ images for both `dev` and `test`. Debian and Ubuntu use
 LXD cloud images; Amazon Linux uses the official KVM image with a checked SHA256
 and a small cloud-init bootstrap for the LXD agent. Docker build images remain
 pinned independently in `release.env`.
+
+The Amazon Linux entries in `images:` currently provide containers, not VM
+images. Amazon's generic KVM image is not preconfigured with the guest LXD agent
+needed for `lxc exec` and the checkout mount. Its first-boot cloud-config runs
+LXD's [documented agent installation](https://documentation.ubuntu.com/lxd/latest/howto/instances_create/#install-the-lxd-agent-into-virtual-machine-instances),
+using the agent and installer exposed by LXD through its `config` filesystem
+(9p or virtiofs). It does not reinstall host LXD or download/install dotfiles.
+The script-local `lxc_command` wrapper only adds an explicit project and timeout
+to noninteractive client operations; it does not override the daemon's `lxd`
+command or change the client's default project.
 
 The default VM has 1 vCPU, 16 GiB RAM and an 80 GiB root disk. The current Azure
 host is itself a Hyper-V VM; both two- and eight-vCPU nested guests stalled under
@@ -92,9 +103,10 @@ exit
 ```
 
 Reopen with `task dev` on the host to pick up Docker group membership and the
-new shell configuration. Tmux and Nvim plugins are not preinstalled by `dev`;
-use their normal setup when testing those configurations. Edit and commit on
-the host, then run the relevant checks in the guest:
+new shell configuration. `dev` itself does not preinstall editor or tmux
+plugins. The normal `./setup-tools` step above installs tmux plugins; use
+Nvim's normal setup when testing that profile. Edit and commit on the host,
+then run the relevant checks in the guest:
 
 ```bash
 ./setup-tools nvim
@@ -371,8 +383,10 @@ validation and GitHub Actions use independent `VALIDATION_RELEASES` in
 and offline-package Python locks.
 `ASDF_PLUGINS` owns plugin repository and commit pins, while runtime versions
 still come from `TOOL_RELEASES`.
-For a tmux plugin bump, change its `*_COMMIT` in `tools.env`; change the
-adjacent `*_REPO` only when deliberately moving to a different repository.
+`TMUX_PLUGINS` uses the same `repository|commit` records. For a tmux plugin
+bump, change its commit there, and the repository only when deliberately moving
+upstream. Plugin targets in `TOOLS` and `OFFLINE_RELEASE_TOOLS` use the same
+installer; their ordered profile entries also define startup order.
 
 For a normal dependency bump, edit only its first record in `tools.env`. Run
 the focused setup in the disposable candidate, then `task validate` and the
@@ -848,19 +862,16 @@ temporarily, or put the required version first and rerun setup:
 
 To roll back asdf itself or a plugin, restore its executable version, digest
 or plugin commit in `tools.env`, run `setup-asdf`, and verify every retained
-runtime. For connected tmux, restore the TPM and plugin checkout commits
-without deleting tmux-resurrect data. Complete offline releases load sensible,
-resurrect and continuum directly from their physical release and do not bundle
-TPM. Use Krew's supported manager install or downgrade process so its plugin
-inventory is retained.
+runtime. For connected tmux, restore the commit in `TMUX_PLUGINS` and rerun
+`./setup-tools PLUGIN`, without deleting tmux-resurrect data. Both flows load
+plugins directly without TPM. Offline rollback selects the complete retained
+release, including its pinned plugins. Use Krew's supported manager install or
+downgrade process so its plugin inventory is retained.
 
-The current `setup-asdf` can adopt only the exact historical
-`~/bin/asdf-VERSION` plus relative `~/bin/asdf` layout for the current pin. It
-downloads and verifies the official archive, compares the extracted executable
-byte-for-byte, and records ownership only after all requested provider and
-plugin preflight checks pass. A conflicting direct launcher, modified binary,
-different target or older unverified pin is left untouched and must be resolved
-explicitly before retrying.
+`setup-asdf` requires its own SHA-256 installation record even for the
+current pin. It does not adopt an unrecorded historical binary or link.
+A conflicting direct launcher, modified binary, different target or unrecorded
+installation is left untouched and must be resolved explicitly before retrying.
 
 For a recorded, intact asdf binary, the relative `~/bin/asdf` link is the selected
 version. A manual switch between those verified binaries is accepted; the next

@@ -90,6 +90,8 @@ load_build_config() {
     { die "missing $source_dir/scripts/setup-lib"; return 1; }
   # shellcheck source=setup-lib
   source "$source_dir/scripts/setup-lib" || return
+  # shellcheck source=setup-tmux-lib
+  source "$source_dir/scripts/setup-tmux-lib" || return
   # shellcheck source=setup-system-lib
   source "$source_dir/scripts/setup-system-lib" || return
   # shellcheck source=../system.env
@@ -99,7 +101,14 @@ load_build_config() {
   validate_tool_config || return
   local tool
   SIMPLE_RELEASE_TOOLS=()
+  BUILD_TOOL_PROFILE=()
+  BUILD_TMUX_PLUGINS=()
   for tool in "${OFFLINE_RELEASE_TOOLS[@]}"; do
+    if [[ -v TMUX_PLUGINS[$tool] ]]; then
+      BUILD_TMUX_PLUGINS+=("$tool")
+      continue
+    fi
+    BUILD_TOOL_PROFILE+=("$tool")
     [[ $tool == yamllint ]] && continue
     select_default_release TOOL_RELEASES "$tool" || return
     [[ $RELEASE_URL != - ]] ||
@@ -268,28 +277,6 @@ platformCommand:
   - os: linux
     command: "\$HELM_PLUGIN_DIR/schema"
 EOF
-}
-
-clone_pinned() {
-  local url=$1 commit=$2 destination=$3
-
-  git clone --no-checkout "$url" "$destination" >/dev/null 2>&1 || return
-  git -C "$destination" checkout --detach "$commit" >/dev/null 2>&1 || return
-  [[ $(git -C "$destination" rev-parse HEAD) == "$commit" ]] ||
-    { die "failed to pin $url at $commit"; return 1; }
-}
-
-install_tmux_plugins() {
-  local release=$1
-  local root=$release/share/tmux/plugins
-
-  mkdir -p "$root" || return
-  clone_pinned "$TMUX_SENSIBLE_REPO" \
-    "$TMUX_SENSIBLE_COMMIT" "$root/tmux-sensible" || return
-  clone_pinned "$TMUX_RESURRECT_REPO" \
-    "$TMUX_RESURRECT_COMMIT" "$root/tmux-resurrect" || return
-  clone_pinned "$TMUX_CONTINUUM_REPO" \
-    "$TMUX_CONTINUUM_COMMIT" "$root/tmux-continuum" || return
 }
 
 write_python_inventory() {
@@ -509,7 +496,7 @@ write_release_metadata() {
       >>"$release/release.env" || return
   done
   printf '%s\n' \
-    "OFFLINE_TOOLS=$(IFS=,; printf '%s' "${OFFLINE_RELEASE_TOOLS[*]}")" \
+    "OFFLINE_TOOLS=$(IFS=,; printf '%s' "${BUILD_TOOL_PROFILE[*]}")" \
     'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
     >>"$release/release.env" || return
 
@@ -542,8 +529,8 @@ write_release_metadata() {
       find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) || return
     value=$(sha256sum "$release/config/nvim2/nvim-pack-lock.json" | cut -d ' ' -f1) || return
     printf 'nvim_pack_lock_sha256=%s\n' "$value" || return
-    for package in tmux-sensible tmux-resurrect tmux-continuum; do
-      origin=$(git -C "$release/share/tmux/plugins/$package" remote get-url origin) || return
+    for package in "${BUILD_TMUX_PLUGINS[@]}"; do
+      origin=$(git -C "$release/share/tmux/plugins/$package" config --get remote.origin.url) || return
       plugin_commit=$(git -C "$release/share/tmux/plugins/$package" rev-parse HEAD) || return
       printf '%s_origin=%s\n' "$package" "$origin" || return
       printf '%s_commit=%s\n' "$package" "$plugin_commit" || return
@@ -597,7 +584,7 @@ build_release() {
   install_release_tools "$release" "$inputs" || return
   install_helm_schema_plugin "$release" "$inputs" || return
   ln -s ../dotfiles-release "$release/bin/dotfiles-release" || return
-  install_tmux_plugins "$release" || return
+  install_tmux_plugins "$release/share/tmux/plugins" "${BUILD_TMUX_PLUGINS[@]}" || return
   prepare_nvim_payload "$release" "$build_home" "$platform" || return
   verify_release_symlinks "$release" || return
   write_release_metadata "$release" "$platform" "$source_commit" "$source_tree" \

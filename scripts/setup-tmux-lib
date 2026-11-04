@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+
+tmux_plugin_git() {
+  GIT_TERMINAL_PROMPT=0 timeout --kill-after=10s 300s \
+    git -c core.hooksPath=/dev/null "$@"
+}
+
+preflight_tmux_plugins() {
+  local root=${1%/} name destination origin changes
+  shift
+
+  require_command git || return
+  require_command timeout || return
+  if [[ $root != /* || $root == *[[:space:][:cntrl:]]* || -L $root ||
+    ( -e $root && ! -d $root ) ]]; then
+    report_error "tmux plugin directory must be absolute, without whitespace, and not a symlink: $root"
+    return 1
+  fi
+  for name in "$@"; do
+    select_git_plugin TMUX_PLUGINS "$name" || return
+    destination=$root/$name
+    [[ -e $destination || -L $destination ]] || continue
+    if [[ -L $destination || ! -d $destination/.git || -L $destination/.git ]]; then
+      report_error "refusing unmanaged tmux plugin path: $destination"
+      return 1
+    fi
+    origin=$(tmux_plugin_git -C "$destination" config --get remote.origin.url) || return
+    if [[ ${origin%.git} != "${PLUGIN_REPO%.git}" ]]; then
+      report_error "unexpected tmux plugin origin: $destination -> $origin"
+      return 1
+    fi
+    changes=$(tmux_plugin_git -C "$destination" status --porcelain --untracked-files=no) || return
+    if [[ -n $changes ]]; then
+      report_error "modified tmux plugin checkout: $destination"
+      return 1
+    fi
+  done
+}
+
+verify_tmux_plugin() {
+  local name=$1 destination=$2 commit=$3 actual
+
+  actual=$(tmux_plugin_git -C "$destination" rev-parse HEAD) || return
+  if [[ $actual != "$commit" || ! -x $destination/${name#tmux-}.tmux ]]; then
+    report_error "incomplete tmux plugin $name at $commit"
+    return 1
+  fi
+}
+
+validate_tmux_plugin_revision() {
+  local name=$1 destination=$2 commit=$3 record mode kind object entry
+
+  record=$(tmux_plugin_git -C "$destination" ls-tree "$commit" -- "${name#tmux-}.tmux") || return
+  read -r mode kind object entry <<<"$record"
+  if [[ $mode != 100755 || $kind != blob || -z $object || $entry != "${name#tmux-}.tmux" ]]; then
+    report_error "tmux plugin $name at $commit has no executable entry point"
+    return 1
+  fi
+}
+
+install_tmux_plugin() {
+  local name=$1 root=${2%/} destination stage repository commit current
+
+  preflight_tmux_plugins "$root" "$name" || return
+  repository=$PLUGIN_REPO
+  commit=$PLUGIN_COMMIT
+  destination=$root/$name
+  if [[ -d $destination ]]; then
+    current=$(tmux_plugin_git -C "$destination" rev-parse HEAD) || return
+    if [[ $current != "$commit" ]]; then
+      if ! tmux_plugin_git -C "$destination" cat-file -e "$commit^{commit}" 2>/dev/null; then
+        tmux_plugin_git -C "$destination" fetch --no-tags origin "$commit" || return
+      fi
+      validate_tmux_plugin_revision "$name" "$destination" "$commit" || return
+      # Native checkout preserves untracked files and refuses conflicting files.
+      tmux_plugin_git -C "$destination" checkout --detach --no-overwrite-ignore "$commit" || return
+    fi
+    verify_tmux_plugin "$name" "$destination" "$commit" || return
+  else
+    mkdir -p "$root" || return
+    stage=$(mktemp -d "$root/.$name.XXXXXX") || return
+    TEMP_PATHS+=("$stage")
+    tmux_plugin_git clone --no-checkout "$repository" "$stage/checkout" || return
+    validate_tmux_plugin_revision "$name" "$stage/checkout" "$commit" || return
+    tmux_plugin_git -C "$stage/checkout" checkout --detach "$commit" || return
+    verify_tmux_plugin "$name" "$stage/checkout" "$commit" || return
+    mv -T -n -- "$stage/checkout" "$destination" || return
+    if [[ -e $stage/checkout ]]; then
+      report_error "tmux plugin destination appeared during installation: $destination"
+      return 1
+    fi
+    rmdir "$stage" || return
+  fi
+  printf '%s: pinned %s at %s\n' "${0##*/}" "$name" "$commit"
+}
+
+install_tmux_plugins() {
+  local root=$1 name
+  shift
+
+  preflight_tmux_plugins "$root" "$@" || return
+  for name in "$@"; do
+    install_tmux_plugin "$name" "$root" || return
+  done
+}

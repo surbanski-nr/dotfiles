@@ -6,7 +6,8 @@ usage() {
   cat <<'EOF'
 Usage: setup-tools [NAME ...]
 
-Download and install selected Linux x86-64 tools under ~/bin.
+Install selected Linux x86-64 tools under ~/bin and tmux Git plugins
+under ~/.tmux/plugins (or DOTFILES_TMUX_PLUGIN_DIR).
 For offline deployment, use the complete dotfiles release instead.
 EOF
   printf 'Names:'
@@ -45,6 +46,7 @@ load_setup_config() {
 
   BIN_DIR=${SETUP_TOOLS_BIN_DIR:-$HOME/bin}
   STATE_DIR=${SETUP_TOOLS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup-tools}
+  TMUX_PLUGIN_DIR=${DOTFILES_TMUX_PLUGIN_DIR:-$HOME/.tmux/plugins}
 }
 
 validate_host() {
@@ -267,16 +269,33 @@ preflight() {
   local name
   local version
   local entry
+  local -a plugins=() binary_tools=()
 
-  if [[ -e $BIN_DIR || -L $BIN_DIR ]]; then
-    [[ -d $BIN_DIR && ! -L $BIN_DIR ]] || report_error "invalid bin directory: $BIN_DIR"
+  for name in "$@"; do
+    if [[ -v TMUX_PLUGINS[$name] ]]; then
+      plugins+=("$name")
+    else
+      binary_tools+=("$name")
+    fi
+  done
+  if ((${#binary_tools[@]})); then
+    if [[ -e $BIN_DIR || -L $BIN_DIR ]]; then
+      [[ -d $BIN_DIR && ! -L $BIN_DIR ]] || report_error "invalid bin directory: $BIN_DIR"
+    fi
+    if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
+      [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || report_error "invalid state directory: $STATE_DIR"
+    fi
   fi
-  if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
-    [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || report_error "invalid state directory: $STATE_DIR"
+  if ((${#plugins[@]})); then
+    require_command git || return
+    require_command timeout || return
   fi
   acquire_online_setup_lock
-  mkdir -p "$BIN_DIR" "$STATE_DIR"
-  for name in "$@"; do
+  if ((${#plugins[@]})); then
+    preflight_tmux_plugins "$TMUX_PLUGIN_DIR" "${plugins[@]}" || return
+  fi
+  if ((${#binary_tools[@]})); then mkdir -p "$BIN_DIR" "$STATE_DIR"; fi
+  for name in "${binary_tools[@]}"; do
     if [[ $name == htop || $name == tmux ]]; then
       for build_command in cc getconf make pkg-config; do
         require_command "$build_command" || return
@@ -477,6 +496,10 @@ install_selected_tools() {
   local selected
 
   for name in "$@"; do
+    if [[ -v TMUX_PLUGINS[$name] ]]; then
+      install_tmux_plugin "$name" "$TMUX_PLUGIN_DIR" || return
+      continue
+    fi
     load_tool_versions "$name"
     selected=${TOOL_VERSIONS[0]}
     if [[ $name == python ]]; then
@@ -496,6 +519,8 @@ install_selected_tools() {
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/setup-lib
 source "$REPO_DIR/scripts/setup-lib"
+# shellcheck source=scripts/setup-tmux-lib
+source "$REPO_DIR/scripts/setup-tmux-lib"
 # Profiles are data needed by --help and by the default selection. Sourcing
 # this file does not download, install or validate anything.
 # shellcheck source=tools.env

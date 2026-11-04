@@ -17,7 +17,7 @@ fail() {
 }
 
 mkdir -p "$test_bin"
-for command_name in bash cp cut dirname env find flock git grep head jq mkdir mkfifo mktemp pkill ps python3 readlink script setsid sh sleep sort timeout tmux yamllint; do
+for command_name in bash cp cut dirname env find flock git grep head jq ln mkdir mkfifo mktemp pkill ps python3 readlink script setsid sh sleep sort timeout tmux yamllint; do
   command_path=$(command -v "$command_name")
   ln -s "$command_path" "$test_bin/$command_name"
 done
