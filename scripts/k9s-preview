@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+umask 077
+
+die() { printf 'k9s-preview: %s\n' "$*" >&2; exit 1; }
+action=${1:-open}
+[[ $# -le 1 && ( $action == open || $action == clean ) ]] || die 'usage: k9s-preview [clean]'
+for command_name in docker kind timeout sha256sum flock find; do
+  command -v "$command_name" >/dev/null || die "required command is missing: $command_name"
+done
+if [[ $action == open ]]; then
+  for command_name in kubectl k9s; do
+    command -v "$command_name" >/dev/null || die "run ./setup-tools kubectl kind k9s; missing $command_name"
+  done
+fi
+
+repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+repo_key=$(printf '%s' "$repo_dir" | sha256sum)
+repo_key=${repo_key:0:12}
+base_dir=${XDG_DATA_HOME:-$HOME/.local/share}/dotfiles-k9s
+[[ $base_dir == /* && ! -L $base_dir ]] || die 'preview data directory must be absolute and not a symlink'
+mkdir -p -- "$base_dir"
+base_dir=$(CDPATH='' cd -- "$base_dir" && pwd -P)
+preview_root=$base_dir/$repo_key
+cluster=dotfiles-k9s-$repo_key
+context=kind-$cluster
+namespace=dotfiles-k9s-preview
+
+# Keep the lock outside the directory removed by clean, and hold it through k9s.
+[[ ! -L $base_dir/$repo_key.lock ]] || die 'unexpected preview lock symlink'
+exec 9>"$base_dir/$repo_key.lock"
+flock -n 9 || die 'another preview is running; close k9s before reopening or cleaning'
+
+docker_context=$(timeout --kill-after=5s 30s docker context show)
+docker_host=${DOCKER_HOST:-}
+if [[ -n ${DOCKER_CONTEXT:-} || -z $docker_host ]]; then
+  docker_host=$(timeout --kill-after=5s 30s docker context inspect "$docker_context" --format '{{.Endpoints.docker.Host}}')
+fi
+[[ $docker_host == unix://* ]] || die 'use a local Docker daemon in the development VM, not a remote Docker context'
+timeout --kill-after=5s 30s docker info >/dev/null || die 'Docker is unavailable; check setup-system and group membership'
+export KIND_EXPERIMENTAL_PROVIDER=docker
+kind_command() { timeout --foreground --kill-after=10s 300s kind "$@"; }
+clusters=$(kind_command get clusters)
+cluster_exists=false
+while IFS= read -r candidate; do
+  [[ $candidate != "$cluster" ]] || cluster_exists=true
+done <<<"$clusters"
+
+owner=$(printf '%s\n%s' "$repo_dir" "$docker_host")
+if [[ ! -e $preview_root && ! -L $preview_root ]]; then
+  [[ $cluster_exists == false ]] || die "cluster $cluster already exists without this preview's ownership record"
+  if [[ $action == clean ]]; then
+    printf 'No k9s preview exists for this checkout.\n'
+    exit 0
+  fi
+  mkdir -- "$preview_root"
+  printf '%s\n' "$owner" >"$preview_root/owner"
+fi
+[[ -d $preview_root && ! -L $preview_root && -f $preview_root/owner && ! -L $preview_root/owner ]] ||
+  die 'unexpected preview directory or ownership record; inspect it before continuing'
+[[ $(<"$preview_root/owner") == "$owner" ]] || die 'preview belongs to another checkout or Docker daemon'
+[[ ! -L $preview_root/kubeconfig ]] || die 'unexpected preview kubeconfig symlink'
+
+if [[ $action == clean ]]; then
+  if [[ $cluster_exists == true ]]; then
+    kind_command delete cluster --name "$cluster" --kubeconfig "$preview_root/kubeconfig"
+  fi
+  find "$preview_root" -depth -delete
+  printf 'Removed k9s preview %s and %s. Docker images and the empty lock file are retained.\n' "$cluster" "$preview_root"
+  exit 0
+fi
+
+config_dir=$preview_root/config/k9s
+mkdir -p -- "$config_dir/skins" "$preview_root/data" "$preview_root/state/k9s" "$preview_root/cache/kube"
+# Drop dangling links so k9s defaults cannot recreate files removed from the repo.
+for config_file in "$config_dir"/*.yaml "$config_dir"/skins/*.yaml; do
+  if [[ -L $config_file && ! -e $config_file ]]; then unlink -- "$config_file"; fi
+done
+# Link only existing YAML files, not directories where k9s generates its own data.
+source_config=$repo_dir/k9s/.config/k9s
+for source_file in "$source_config"/*.yaml "$source_config"/skins/*.yaml; do
+  [[ -f $source_file ]] || continue
+  relative=${source_file#"$source_config/"}
+  ln -sfnT -- "$source_file" "$config_dir/$relative"
+done
+
+if [[ $cluster_exists == false ]]; then
+  # Match the catalog's kind version with its documented compatible node image.
+  kind_command create cluster --name "$cluster" \
+    --image kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed \
+    --kubeconfig "$preview_root/kubeconfig" --wait 120s
+fi
+kind_command export kubeconfig --name "$cluster" --kubeconfig "$preview_root/kubeconfig"
+
+preview_kubectl() {
+  timeout --foreground --kill-after=5s 120s kubectl \
+    --kubeconfig "$preview_root/kubeconfig" --cache-dir "$preview_root/cache/kube" \
+    --context "$context" --namespace "$namespace" --request-timeout=10s "$@"
+}
+existing_namespace=$(preview_kubectl get namespace "$namespace" --ignore-not-found -o name)
+[[ -n $existing_namespace ]] || preview_kubectl create namespace "$namespace"
+preview_kubectl apply -f "$repo_dir/tests/k9s-preview.yaml"
+preview_kubectl rollout status deployment/preview-logger --timeout=90s
+existing_job=$(preview_kubectl get job preview-now --ignore-not-found -o name)
+[[ -n $existing_job ]] || preview_kubectl create job preview-now --from=cronjob/preview-random
+
+printf 'Preview cluster: %s\nPreview files: %s\nExit keeps the cluster; task k9s:clean removes it.\n' "$cluster" "$preview_root"
+exec env XDG_CONFIG_HOME="$preview_root/config" XDG_DATA_HOME="$preview_root/data" \
+  XDG_STATE_HOME="$preview_root/state" XDG_CACHE_HOME="$preview_root/cache" \
+  K9S_CONFIG_DIR="$config_dir" K9S_LOGS_DIR="$preview_root/state/k9s" \
+  KUBECONFIG="$preview_root/kubeconfig" KUBECACHEDIR="$preview_root/cache/kube" \
+  k9s --kubeconfig "$preview_root/kubeconfig" --context "$context" --namespace "$namespace" --readonly

@@ -87,7 +87,11 @@ case $command in
   exec)
     name=$1
     shift
-    while [[ $1 != -- ]]; do shift; done
+    guest_colorterm=
+    while [[ $1 != -- ]]; do
+      if [[ $1 == --env && $2 == COLORTERM=* ]]; then guest_colorterm=${2#COLORTERM=}; fi
+      shift
+    done
     shift
     case $1 in
       true)
@@ -110,6 +114,7 @@ case $command in
         ;;
       getent) printf 'dev:x:%s:%s:Development:/home/dev:/bin/bash\n' "$(id -u)" "$(id -g)" ;;
       runuser)
+        printf '%s' "$guest_colorterm" >"$TEST_DEV_STATE/shell-colorterm"
         printf 'guest-shell %s\n' "$name"
         if [[ -n ${TEST_DEV_SHELL_READY:-} ]]; then
           touch "$TEST_DEV_SHELL_READY"

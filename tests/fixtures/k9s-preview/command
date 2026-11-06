@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+state=$TEST_K9S_PREVIEW_STATE
+program=${0##*/}
+fail() { printf 'preview fixture: %s\n' "$*" >&2; exit 71; }
+
+case $program in
+  docker)
+    case "$*" in
+      'context show') printf '%s\n' "${DOCKER_CONTEXT:-default}" ;;
+      context\ inspect\ *) printf '%s\n' "${TEST_K9S_DOCKER_ENDPOINT:-unix:///var/run/docker.sock}" ;;
+      info) exit "${TEST_K9S_DOCKER_STATUS:-0}" ;;
+      *) fail "unexpected docker arguments: $*" ;;
+    esac
+    ;;
+  kind)
+    [[ ${KIND_EXPERIMENTAL_PROVIDER:-} == docker ]] || fail 'kind provider is not Docker'
+    operation="$1 $2"
+    shift 2
+    if [[ $operation == 'get clusters' ]]; then
+      for file in "$state"/cluster-*; do
+        [[ ! -f $file ]] || printf '%s\n' "${file##*/cluster-}"
+      done
+      exit 0
+    fi
+    name='' kubeconfig='' image=''
+    while (($#)); do
+      case $1 in
+        --name) name=$2 ;;
+        --kubeconfig) kubeconfig=$2 ;;
+        --image) image=$2 ;;
+        --wait) ;;
+        *) fail "unexpected kind argument: $1" ;;
+      esac
+      shift 2
+    done
+    [[ -n $name && $kubeconfig == /* && -f ${kubeconfig%/*}/owner ]] || fail 'kind has no private owned kubeconfig'
+    case $operation in
+      'create cluster')
+        [[ ! -e $state/cluster-$name ]] || fail 'cluster was recreated'
+        printf '%s\n' "$image" >"$state/cluster-$name"
+        [[ ${TEST_K9S_CREATE_STATUS:-0} == 0 ]] || exit "$TEST_K9S_CREATE_STATUS"
+        printf 'fixture kubeconfig: %s\n' "$name" >"$kubeconfig"
+        ;;
+      'export kubeconfig')
+        [[ -f $state/cluster-$name ]] || fail 'missing cluster'
+        printf 'fixture kubeconfig: %s\n' "$name" >"$kubeconfig"
+        ;;
+      'delete cluster')
+        [[ ${TEST_K9S_DELETE_STATUS:-0} == 0 ]] || exit "$TEST_K9S_DELETE_STATUS"
+        rm -f -- "$state/cluster-$name" "$state/namespace-$name" "$state/job-$name" "$state/workloads-$name"
+        ;;
+      *) fail "unexpected kind operation: $operation" ;;
+    esac
+    ;;
+  kubectl)
+    kubeconfig='' context='' namespace='' cache=''
+    while (($#)); do
+      case $1 in
+        --kubeconfig) kubeconfig=$2; shift 2 ;;
+        --context) context=$2; shift 2 ;;
+        --namespace) namespace=$2; shift 2 ;;
+        --cache-dir) cache=$2; shift 2 ;;
+        --request-timeout=*) shift ;;
+        *) break ;;
+      esac
+    done
+    name=${context#kind-}
+    [[ -f $kubeconfig && -f $state/cluster-$name && $namespace == dotfiles-k9s-preview ]] ||
+      fail 'kubectl escaped the preview cluster or namespace'
+    [[ $cache == "${kubeconfig%/*}/cache/kube" ]] || fail 'kubectl used the normal discovery cache'
+    case "$1 $2" in
+      'get namespace') [[ ! -f $state/namespace-$name ]] || printf 'namespace/%s\n' "$namespace" ;;
+      'create namespace') touch "$state/namespace-$name" ;;
+      'apply -f')
+        [[ -f $state/namespace-$name && -f $3 ]] || fail 'workloads have no namespace or manifest'
+        cp -- "$3" "$state/workloads-$name"
+        ;;
+      'rollout status') exit "${TEST_K9S_ROLLOUT_STATUS:-0}" ;;
+      'get job') [[ ! -f $state/job-$name ]] || printf 'job/preview-now\n' ;;
+      'create job')
+        [[ $3 == preview-now && $4 == --from=cronjob/preview-random && ! -e $state/job-$name ]] ||
+          fail 'immediate job was duplicated or used the wrong template'
+        touch "$state/job-$name"
+        ;;
+      *) fail "unexpected kubectl operation: $*" ;;
+    esac
+    ;;
+  k9s)
+    preview_root=${K9S_CONFIG_DIR%/config/k9s}
+    [[ $* == *--readonly* && ${KUBECONFIG:?} == "$preview_root/kubeconfig" ]] || fail 'k9s escaped the private profile'
+    [[ $XDG_CONFIG_HOME == "$preview_root/config" && $XDG_DATA_HOME == "$preview_root/data" &&
+      $XDG_STATE_HOME == "$preview_root/state" && $XDG_CACHE_HOME == "$preview_root/cache" &&
+      $K9S_LOGS_DIR == "$preview_root/state/k9s" && $KUBECACHEDIR == "$preview_root/cache/kube" ]] ||
+      fail 'k9s runtime directories are not isolated'
+    printf '%s\n' "$preview_root" >"$state/preview-root"
+    cp -- "$K9S_CONFIG_DIR/config.yaml" "$state/seen-config.yaml"
+    cp -- "$K9S_CONFIG_DIR/skins/surb.yaml" "$state/seen-skin.yaml"
+    [[ -e $K9S_CONFIG_DIR/aliases.yaml ]] || printf 'default aliases\n' >"$K9S_CONFIG_DIR/aliases.yaml"
+    mkdir -p "$K9S_CONFIG_DIR/clusters/preview/context" "$K9S_CONFIG_DIR/screen-dumps" "$K9S_CONFIG_DIR/benchmarks"
+    printf 'runtime context\n' >"$K9S_CONFIG_DIR/clusters/preview/context/config.yaml"
+    printf 'default hotkeys\n' >"$K9S_CONFIG_DIR/hotkeys.yaml"
+    printf 'fixture logs\n' >"$K9S_LOGS_DIR/k9s.log"
+    if [[ -n ${TEST_K9S_READY:-} ]]; then
+      touch "$TEST_K9S_READY"
+      until [[ -e $TEST_K9S_RELEASE ]]; do sleep 0.1; done
+    fi
+    exit "${TEST_K9S_EXIT_STATUS:-0}"
+    ;;
+  *) fail "unexpected program: $program" ;;
+esac

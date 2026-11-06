@@ -349,12 +349,14 @@ install those optional clients.
 
 ### Optional local k9s skin preview
 
-The [isolated skin preview guide](tool-updates.md#isolated-k9s-and-mc-skin-previews)
-can create a disposable single-node kind cluster when no existing cluster is
-available. It uses the installed kind and a private kubeconfig, then removes its
-cluster and app profiles. Normal `./setup-system` provides Docker; log out and
-back in before using it without sudo. `./setup-tools kind` and offline releases
-provide kind. Cluster creation and container image downloads remain opt-in.
+Inside the development VM, [task k9s](tool-updates.md#k9s-tasks-inside-the-development-vm)
+creates or reuses a single-node kind cluster with preview workloads and a
+private kubeconfig. Existing configuration and skin files are symlinked from
+the checkout; generated k9s data stays in a private profile outside it.
+Closing k9s leaves the cluster running. `task k9s:clean` removes the cluster and
+profile explicitly. Normal `./setup-system` provides Docker; log out and back
+in before using it without sudo. `./setup-tools kubectl kind k9s` and offline
+releases provide the clients. Cluster creation and image downloads remain opt-in.
 
 ## Complete offline release
 

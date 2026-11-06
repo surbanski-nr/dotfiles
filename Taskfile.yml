@@ -58,6 +58,24 @@ tasks:
     cmds:
       - bash scripts/dev-vm
 
+  k9s:
+    desc: Preview k9s in the development VM using a reusable kind cluster
+    summary: |
+      Run inside the development VM with Docker, kind, kubectl and k9s installed.
+      Create or reuse this checkout's cluster, deploy preview workloads and open k9s.
+      Repository configuration is linked into a private writable preview profile.
+      Exiting k9s leaves the cluster running. Use task k9s:clean to remove it.
+    dir: '{{.ROOT_DIR}}'
+    interactive: true
+    cmds:
+      - bash scripts/k9s-preview
+
+  k9s:clean:
+    desc: Remove this checkout's k9s preview cluster and private files
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - bash scripts/k9s-preview clean
+
   validate:
     desc: Run all validation tasks in parallel
     deps:

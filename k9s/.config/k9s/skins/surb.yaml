@@ -6,14 +6,13 @@
 fg: &fg "default"
 bg: &bg "default"
 mark: &mark "darkgoldenrod"
-active: &active "#909dab"
+active: &active "aqua"
 text: &text "navajowhite"
 white: &white "#d0d0d0"
 ghost: &ghost "default"
-err: &err "#f47067"
+err: &err "pink"
 slate: &slate "#909dab"
 gray: &gray "#909dab"
-muted: &muted "#909dab"
 
 # Skin...
 k9s:
@@ -52,22 +51,21 @@ k9s:
       keyColor: *white
       numKeyColor: *text
     crumbs:
-      fgColor: *fg
-      bgColor: *bg
+      fgColor: "black"
+      bgColor: *white
       activeColor: *active
     status:
-      newColor: *white
+      newColor: "white"
       modifyColor: *text
-      addColor: *white
-      pendingColor: *mark
+      addColor: "ghostwhite"
       errorColor: *err
-      highlightColor: *text
+      highlightColor: *active
       killColor: *slate
-      completedColor: *muted
+      completedColor: "steelblue"
     title:
       fgColor: *fg
       bgColor: *bg
-      highlightColor: *muted
+      highlightColor: *active
       counterColor: *text
       filterColor: *slate
   views:
@@ -90,7 +88,7 @@ k9s:
       showIcons: false
     yaml:
       keyColor: *ghost
-      colonColor: *slate
+      colonColor: *ghost
       valueColor: *text
     logs:
       fgColor: *ghost

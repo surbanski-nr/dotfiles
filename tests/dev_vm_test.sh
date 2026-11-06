@@ -26,7 +26,8 @@ export TEST_DEV_STATE=$test_root/state TEST_DEV_LOG=$test_root/lxc.log TEST_DEV_
 export PATH="$test_root/bin:$PATH"
 
 run_dev() { "$task_executable" --dir "$checkout" dev DEV_PROJECT=fixture "$@"; }
-run_dev >"$test_root/default.log" 2>&1
+COLORTERM=truecolor run_dev >"$test_root/default.log" 2>&1
+[[ $(<"$TEST_DEV_STATE/shell-colorterm") == truecolor ]] || fail 'guest shell lost host truecolor support'
 vm=$(jq -r .name "$TEST_DEV_STATE"/vm-*.json)
 [[ $vm == dotfiles-dev-debian13-*-* ]] || fail 'default task did not create a named Debian VM'
 jq -e --arg root "$checkout" '
@@ -35,7 +36,10 @@ jq -e --arg root "$checkout" '
   .devices.checkout.source == $root and .devices.checkout.path == "/workspace/dotfiles" and
   (.devices | keys == ["checkout", "root"])' "$TEST_DEV_STATE/vm-$vm.json" >/dev/null ||
   fail 'VM resources or checkout isolation are incorrect'
-run_dev -- debian13 >"$test_root/reuse.log" 2>&1
+COLORTERM=24bit run_dev -- debian13 >"$test_root/reuse.log" 2>&1
+[[ $(<"$TEST_DEV_STATE/shell-colorterm") == 24bit ]] || fail 'guest shell changed host color capability'
+COLORTERM='' run_dev -- debian13 >"$test_root/no-colorterm.log" 2>&1
+[[ ! -s $TEST_DEV_STATE/shell-colorterm ]] || fail 'guest shell forced unadvertised truecolor support'
 grep -F "guest-shell $vm" "$test_root/reuse.log" >/dev/null || fail 'explicit Debian did not reuse the default VM'
 [[ $(grep -c '^init ' "$TEST_DEV_LOG") == 1 ]] || fail 'reopening a shell created another VM'
 

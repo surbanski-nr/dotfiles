@@ -190,8 +190,9 @@ With `features.profiles=false` or `features.images=false`, those resources are
 also shared with `default`. Inspect the selected project's settings rather than
 assuming a bridge or default profile is available there.
 
-Normally use `bin/task dev` with no network override. On the current Azure host,
-both `lxdbr0` and `k8cbr0` exist with IPv4 NAT enabled. The host's Docker firewall
+Normally use `bin/task dev` with no network override when the host firewall allows
+`lxdbr0` forwarding. On the Azure host checked on 2026-11-04, both `lxdbr0` and
+`k8cbr0` exist with IPv4 NAT enabled. The host's Docker firewall
 has `FORWARD DROP`, but `DOCKER-USER` explicitly permits traffic from `k8cbr0`
 and established replies to it, not `lxdbr0`. `k8cbr0` was already used by other
 LXD VMs; it is a local workaround, not a dotfiles isolation requirement:
@@ -199,6 +200,12 @@ LXD VMs; it is a local workaround, not a dotfiles isolation requirement:
 ```bash
 bin/task dev DEV_NETWORK=k8cbr0 -- debian13
 ```
+
+This override applies only when creating a VM. If the task prints `Reusing`, the
+existing NIC keeps its network: rerunning this command does not move a VM from
+`lxdbr0` to `k8cbr0`. Use the explicit procedure in
+[Move an existing VM to another bridge](#move-an-existing-vm-to-another-bridge)
+below instead of deleting and recreating the VM.
 
 If a separate instance namespace is useful, optionally create a project sharing
 the default project's profiles, images and bridges. This avoids rebuilding the
@@ -228,6 +235,13 @@ sudo iptables-save -c
 # LXD or another firewall manager may also install native nftables rules:
 sudo nft list ruleset
 ```
+
+Working guest DNS and a reachable bridge gateway do not prove outbound forwarding
+works. On the Azure host above, guest TCP connections to `deb.debian.org:80` and
+`github.com:443` timed out while host HTTPS requests succeeded. The missing
+`lxdbr0` exception in Docker's forwarding rules caused the fetch failures despite
+working DHCP, DNS and NAT configuration. Compare guest and host connectivity and
+inspect forwarding rules before changing guest DNS or bridge addresses.
 
 IPv4 forwarding must be `1`; NAT alone does not bypass a firewall drop. In
 `iptables -S` output, `-P FORWARD DROP` is the fallback policy, `-j ACCEPT` allows
@@ -326,17 +340,22 @@ sudo iptables -D DOCKER-USER -i "$dev_uplink" -o "$dev_bridge" \
   -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 ```
 
+### Move an existing VM to another bridge
+
 After repairing `lxdbr0`, use `bin/task dev`. After preparing `devbr0`, use
 `bin/task dev DEV_NETWORK=devbr0`. `DEV_NETWORK` is applied when creating a VM;
 changing it does not move an already-existing VM. For a dev-created VM, inspect
-its local NIC, stop only that VM, and change its device explicitly:
+its local NIC, stop only that VM, and change its device explicitly. Stopping closes
+its active shells but preserves the VM's disk, installed tools and Docker data.
+Choose `k8cbr0` for the Azure host above, or another inspected working bridge:
 
 ```bash
 dev_vm=dotfiles-dev-debian13-CHECKOUT_HASH-TIMESTAMP
+dev_network=k8cbr0
 lxc --project default config device show "$dev_vm"
 lxc --project default stop "$dev_vm" --timeout 60
-lxc --project default config device set "$dev_vm" eth0 network=devbr0
-bin/task dev DEV_NETWORK=devbr0 -- debian13
+lxc --project default config device set "$dev_vm" eth0 "network=$dev_network"
+bin/task dev DEV_NETWORK="$dev_network" -- debian13
 ```
 
 Replace the VM name, project and NIC device name with the inspected values.
@@ -490,6 +509,65 @@ paired selections. Do not switch only one of the Go SDK links.
 
 ## Isolated k9s and MC skin previews
 
+### k9s tasks inside the development VM
+
+From the dotfiles checkout inside `task dev`, run:
+
+```bash
+task k9s
+# After closing k9s, clean up whenever the preview is no longer needed:
+task k9s:clean
+```
+
+The Taskfile only invokes `scripts/k9s-preview`. The script creates or reuses
+one checkout-specific kind cluster, applies `tests/k9s-preview.yaml`, starts
+an immediate Job when absent and opens k9s in its preview namespace with
+`--readonly`. Exiting k9s, including Ctrl+C, does not clean up the cluster;
+reopening the task reuses it. Cleanup refuses to run while that preview is open.
+Read-only mode is a UI guard, not an RBAC or filesystem sandbox.
+
+Have Task, kubectl, kind, k9s and a running local Docker Engine available first.
+`docker info` must succeed for the intended user. Normal `./setup-system`
+installs and starts Docker and adds the invoking user to its group; log out and
+back in afterward. See the [Docker setup notes](setup.md#docker).
+`./setup-tools kubectl kind k9s` provides the clients. The preview task does not
+install software, change group membership or use remote Docker contexts.
+Docker daemon access is root-equivalent.
+
+Budget roughly two CPUs, 2 GiB of available memory and a few GiB of disk space.
+The first start downloads the kind node and workload images and may take a few
+minutes. The pinned node-image digest lives only in `scripts/k9s-preview`;
+keep it compatible with the kind version in `tools.env` when updating.
+Offline releases include the clients, not Docker or container images.
+
+The private profile is `${XDG_DATA_HOME:-$HOME/.local/share}/dotfiles-k9s/<checkout-hash>/`.
+It contains a private kubeconfig, caches, logs and writable k9s directories.
+Only existing configuration and skin YAML files are symlinked to the checkout,
+not the entire k9s directory. The pinned k9s reads existing configuration but
+creates context history, benchmarks, dumps and missing default files alongside it;
+those generated files must not land in the repository. No configuration is
+copied. Edit `k9s/.config/k9s/skins/surb.yaml` or `config.yaml` in the checkout
+and reopen `task k9s` to see the changes without relying on live reload.
+The normal kubeconfig and application profiles are not changed.
+
+`task dev` forwards the host's `TERM` and `COLORTERM` into the guest shell.
+K9s uses `COLORTERM=truecolor` (or `24bit`) to recognize RGB support; without
+it, `tmux-256color` can reduce skin colors to the 256-color palette, making
+blue-grey accents appear neutral grey. Re-enter `task dev` after updating an
+older shell. If the host terminal supports truecolor, an existing guest shell
+can also run `COLORTERM=truecolor task k9s`. The task does not force RGB support
+when the host has not advertised it.
+
+The checkout path and local Docker endpoint identify the owned preview. If
+creation or deployment fails, its private directory remains available for a
+retry or `task k9s:clean`. Cleanup deletes only this cluster and its profile;
+Docker images and an empty sibling `<checkout-hash>.lock` file remain. The lock
+stays outside the deleted profile so cleanup cannot race with another session.
+
+### Manual preview profile
+
+The following manual commands are for an existing disposable Kubernetes
+cluster or an MC preview. The k9s tasks above do not need these copy steps.
 Run these Bash commands from the root of a dotfiles clone. They copy the
 candidate configuration rather than stowing it or pointing a writable app
 directly at the checkout. Only the child processes receive the temporary
@@ -501,7 +579,6 @@ Prepare a private preview directory:
 ```bash
 preview_checkout=$(pwd -P)
 preview_root=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-skin-preview.XXXXXX")
-preview_kind_cluster=
 mkdir -p "$preview_root/.config/mc" "$preview_root/.cache" \
   "$preview_root/.local/share/mc" "$preview_root/.local/state"
 cp -R "$preview_checkout/k9s/.config/k9s" "$preview_root/.config/"
@@ -510,55 +587,7 @@ cp -R "$preview_checkout/mc/.local/share/mc/skins" "$preview_root/.local/share/m
 printf 'Preview directory: %s\n' "$preview_root"
 ```
 
-### k9s with disposable workloads
-
-Choose one cluster preparation below, then use the shared fixture and k9s
-commands. Both routes keep credentials in the private preview directory.
-
-#### New local cluster with kind
-
-If you do not have a disposable cluster, use a single-node
-[kind](https://kind.sigs.k8s.io/docs/user/quick-start/) cluster inside Docker.
-It needs no browser, GPU or extra VM. Have `kubectl` and a running Docker
-Engine and kind available first; `docker info` must succeed for the intended user.
-When Docker is absent, normal `./setup-system` installs and starts it and adds
-the invoking user to its group; log out and back in after running it. See the
-[Docker setup notes](setup.md#docker). Docker daemon access is root-equivalent;
-the preview commands themselves do not change group membership or install a
-system service.
-
-Budget roughly two CPUs, 2 GiB of available memory and a few GiB of disk space.
-The kind executable is about 10 MB; the pinned node image is about
-1.3 GB unpacked. The first start downloads the image and may take a few minutes.
-`./setup-tools kind` and the offline payload include kind. Docker is provided
-only by normal `setup-system`; node and workload images are not bundled.
-
-Install the catalog-selected kind and create a uniquely named cluster. The
-explicit kubeconfig is important during both creation and cleanup:
-kind must not merge this context into the host's kubeconfig.
-
-```bash
-./setup-tools kind
-kind version
-
-preview_kind_cluster="dotfiles-k9s-preview-$(date +%s)-$$"
-env KIND_EXPERIMENTAL_PROVIDER=docker \
-  timeout --signal=TERM --kill-after=10s 300s \
-  kind create cluster --name "$preview_kind_cluster" \
-  --image kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed \
-  --kubeconfig "$preview_root/kubeconfig" --wait 120s &&
-  preview_context="kind-$preview_kind_cluster"
-```
-
-Continue only after cluster creation succeeds. On failure, use the kind
-cleanup command below before deleting the preview directory.
-`KIND_EXPERIMENTAL_PROVIDER=docker` explicitly chooses Docker instead of kind's
-automatic Docker/Podman/nerdctl detection. It is redundant with Docker as the
-only runtime; here it makes creation and cleanup use the same provider without
-exporting a global setting. Keep the kind
-version and its documented compatible node-image digest together when updating.
-
-#### Existing disposable cluster
+### k9s on an existing disposable cluster
 
 Use only a disposable cluster where you are allowed to create and delete a
 namespace. Do not use a production context. Set its explicit context below;
@@ -636,7 +665,30 @@ Use a dark terminal background with its light foreground palette. Selected
 table rows keep black text on a light background so their contrast does not
 depend on the terminal's default foreground color. K9s uses each row's status
 color as its selection background, so these colors must contrast with black
-text. Completed rows use a muted grey to remain distinct from Running rows.
+text. Running rows use explicit `white` (`#ffffff`), while Completed uses
+`steelblue` to remain distinct by hue as well as brightness. Running does not
+use `default`: that would also use the terminal background for its selected
+row, losing contrast with the black selection text. Other light UI accents
+retain `#d0d0d0`.
+Breadcrumbs such as `<pod>` and `<namespace>` use black text on the muted
+white accent; the active breadcrumb uses `aqua`. These small backgrounds are
+deliberately explicit so their contrast does not depend on the terminal theme.
+The `active` palette anchor is shared with active namespace/context rows and
+view-title highlights, keeping the active accent in one place.
+Namespace labels such as `all` in view titles are bold `aqua`. Added and
+initializing rows use `ghostwhite`, and errors use `pink`, as in
+[BlackAndWtf](https://github.com/derailed/k9s/blob/master/skins/black-and-wtf.yaml).
+Active namespace/context rows use k9s's default `aqua` instead of that theme's
+low-contrast `darkslategray`. K9s shares `frame.status.highlightColor` between
+those active rows and Initialized pods, so Initialized uses `aqua` too. This
+is separate from `frame.title.highlightColor`, also set to `aqua` in titles.
+Like BlackAndWtf, `surb` leaves `pendingColor` unset, so Pending and
+ContainerCreating inherit k9s's `darkorange`.
+
+YAML keys and the `:` separator share the same `ghost` foreground anchor.
+Keep the explicit `colonColor` alias: omitting it would inherit stock `white`,
+not the key color. The upstream BlackAndWtf file uses the unsupported spelling
+`colorColor`; the pinned k9s recognizes `colonColor`.
 
 Edit the copied `$preview_root/.config/k9s/skins/surb.yaml` to experiment, or
 edit the clone and copy the changed skin over again. To try another bundled
@@ -680,24 +732,18 @@ Edit the copied `surb.ini`, or copy it again after editing the clone, then
 restart MC with the same command. MC remains a file manager with ordinary user
 permissions; temporary config is not a filesystem sandbox.
 
-### Cleanup
+### Manual cleanup
 
 After closing both applications, delete only the namespace created above and
-the private preview directory. The conditional kind command also deletes the
-cluster when this preview created it, without changing the host's kubeconfig.
-Skip the namespace command for an MC-only trial or a failed cluster creation.
+the private preview directory. This route does not create or delete a cluster.
+Skip the namespace command for an MC-only trial. For the VM task's cluster,
+use `task k9s:clean` instead of these commands.
 
 ```bash
 preview_kubectl delete namespace dotfiles-k9s-preview --wait=true --timeout=90s
-if [[ -n ${preview_kind_cluster:-} ]]; then
-  env KIND_EXPERIMENTAL_PROVIDER=docker \
-    timeout --signal=TERM --kill-after=10s 120s \
-    kind delete cluster --name "$preview_kind_cluster" \
-    --kubeconfig "$preview_root/kubeconfig"
-fi
 unset -f preview_kubectl
 find "$preview_root" -depth -delete
-unset preview_checkout preview_context preview_kind_cluster preview_root
+unset preview_checkout preview_context preview_root
 ```
 
 ## Go SDK and editor tools

@@ -202,6 +202,7 @@ validate_scripts() {
     tests/dotfiles_release_test.sh
     tests/dotfiles_release_ci_test.sh
     tests/dev_vm_test.sh
+    tests/k9s_preview_test.sh
     tests/offline_debug_adapter_test.sh
     tests/offline_go_test.sh
     tests/offline_launchers_test.sh
@@ -261,6 +262,7 @@ validate_scripts() {
   run_test 600s bash tests/dotfiles_release_test.sh
   run_test 120s bash tests/dotfiles_release_ci_test.sh
   run_test 45s bash tests/dev_vm_test.sh
+  run_test 30s bash tests/k9s_preview_test.sh
   run_test 30s bash tests/offline_debug_adapter_test.sh
   run_test 30s bash tests/offline_go_test.sh
   run_test 30s bash tests/offline_launchers_test.sh

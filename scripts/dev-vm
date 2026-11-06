@@ -138,5 +138,6 @@ exec 9>&-
 printf 'Opening %s. Exit leaves the VM running.\n' "$vm"
 # runuser initializes supplementary groups, including Docker after setup-system.
 exec lxc --project "$DEV_PROJECT" exec "$vm" --env "TERM=${TERM:-xterm-256color}" \
+  --env "COLORTERM=${COLORTERM:-}" \
   --cwd /workspace/dotfiles -- runuser --user "$guest_user" -- \
   env "HOME=$guest_home" "USER=$guest_user" "LOGNAME=$guest_user" bash -l
