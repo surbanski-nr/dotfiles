@@ -664,14 +664,13 @@ insert mode, press `<C-Space>` to switch that result set to fuzzy refinement;
 the local query operators then filter those collected lines. Refinement cannot
 find a line that the original ripgrep search did not return.
 
-After a completed native search, a compact current/total label appears at the
-end of the active match line. It uses bounded `searchcount()` work and displays
-`>999` or `?` rather than claiming an incomplete total is exact. `<leader>tS`
-toggles only this label for the session; native highlighting and the statusline
-count continue. `<Esc>` clears both search highlighting and the label. The
-first version draws one label in the active window only. It does not add a
-lens to every match or to live substitutions, and unusual offsets or patterns
-may suppress it safely.
+Native `/` and `?` searches highlight matches and show the current/total count
+in the statusline. Use `n` and `N` for the next or previous match, or a count
+such as `2n` to skip two matches; searches wrap at the buffer boundaries.
+`<Esc>` clears search highlighting and the statusline count until the next
+search. The former local search-lens overlay was removed because its labels
+could remain on previous lines after cursor movement and repeated the existing
+statusline count. There is no separate search-label toggle or per-line counter.
 
 Scope file or text search to any other repository or subdirectory without
 changing the working directory:

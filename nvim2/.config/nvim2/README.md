@@ -212,7 +212,7 @@ From this repository's Nvim2 configuration directory, the equivalent command
 is `bash tests/check.sh`. The script exits nonzero when a check fails. It runs
 focused dependency and feature regressions, the broader smoke suite, and a
 real-file language integration suite. It exercises real Git checkouts and diff
-shortcuts, persistent project marks, tab-out, search lens, Mini Jump2d,
+shortcuts, persistent project marks, tab-out, native search and its statusline count, Mini Jump2d,
 Mini Move with register-preserving undo, retained indentation selections,
 prose wrapping, file-path copying and buffer-scoped diagnostic toggles,
 Matrix lifecycle, Mini/native text objects, parser/LSP selection aliases,

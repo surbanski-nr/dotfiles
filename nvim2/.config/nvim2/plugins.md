@@ -79,13 +79,12 @@ isolated real-repository regressions for the failure paths.
 
 | Local feature module       | Purpose                                                                                           | External plugin added                            |
 | -------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `default_colors.lua`       | Apply and reapply local syntax, search-lens and Matrix colors to the built-in default theme        | No                                               |
+| `default_colors.lua`       | Apply and reapply local syntax and Matrix colors to the built-in default theme                     | No                                               |
 | `highlight_enclosing_pairs.lua` | Highlight the nearest enclosing `()`, `[]` or `{}` while the cursor is inside it              | No; extends Neovim's built-in `MatchParen` style |
 | `matrix.lua`               | Draw a bounded temporary Matrix overlay over ordinary panes in the current tab                     | No                                               |
 | `mermaid_ascii.lua`        | Preview the Mermaid fence under the cursor in a scrollable scratch tab                            | No; invokes the optional `mermaid-ascii` binary  |
 | `project_marks.lua`        | Store and navigate persistent named positions scoped to canonical Git roots                        | No                                               |
 | `scroll_marker.lua`        | Show an experimental one-cell marker for the current position at the right edge                   | No                                               |
-| `search_lens.lua`          | Show one bounded native search count in the active window                                          | No                                               |
 | `treesitter_selection.lua` | Three remapped aliases to native `van`/`an`/`in`, preserving parser-first and capable LSP fallback | No                                               |
 | `toggle_values.lua`        | Add `<leader>tv` for boolean-like values without `nvim-toggler`                                   | No                                               |
 | `snippets.lua`             | Add five global delimiter pairs and six Markdown expansions with Neovim's built-in snippet engine | No                                               |
@@ -136,7 +135,7 @@ existing roles. See the [Mini recipes](guide.md#mini-editing-modules) and
 Mini Jump2d is an enabled submodule of the already locked `mini.nvim`
 checkout. `<leader>j` starts its single-character flow only in the current
 ordinary editing window; the plugin's default `<CR>` mapping is disabled.
-Project marks, the search lens, tab-out and Matrix are local modules and add no
+Project marks, tab-out and Matrix are local modules and add no
 dependency or plugin-lock entry. The local `pairs.lua` helper only shares
 Treesitter delimiter discovery between tab-out and the enclosing-pair
 highlighter.
@@ -201,8 +200,7 @@ table's guide.
 
 Edit `lua/custom/plugins/default_colors.lua` to experiment with the local
 overrides. Restart Neovim after editing it, or run `:source $MYVIMRC`. The
-module reapplies its overrides after `:colorscheme`, including the search-lens
-and Matrix groups.
+module reapplies its overrides after `:colorscheme`, including the Matrix groups.
 
 ## Plugin decisions and migration history
 

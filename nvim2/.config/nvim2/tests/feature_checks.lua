@@ -393,58 +393,48 @@ vim.treesitter.get_parser(0, 'markdown'):parse(true)
 vim.api.nvim_win_set_cursor(0, { 2, 3 })
 assert(not require('custom.tabout').forward(), 'tab-out treated a Markdown fence as a backtick pair')
 
-local search_lens = require 'custom.plugins.search_lens'
+local search_statusline = require 'mini.statusline'
 vim.cmd.enew { bang = true }
 vim.bo.buftype = ''
 vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'needle first', 'middle needle', 'needle last' })
-vim.fn.setreg('/', 'needle')
 vim.o.hlsearch = true
 vim.api.nvim_win_set_cursor(0, { 1, 0 })
-vim.cmd.normal { args = { 'n' }, bang = true }
+vim.api.nvim_feedkeys('/needle\r', 'xt', false)
 local search_register = vim.fn.getreg '/'
 local search_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-search_lens.refresh()
-assert(search_lens.status().active and search_lens.status().text:match '%d/3', 'search lens did not show the native count')
+assert(search_statusline.section_searchcount { trunc_width = 0 } == '2/3', 'statusline did not show the completed search count')
 vim.cmd.normal { args = { 'N' }, bang = true }
 assert(vim.deep_equal(vim.api.nvim_win_get_cursor(0), { 1, 0 }), 'backward native search did not reach the previous match')
+assert(search_statusline.section_searchcount { trunc_width = 0 } == '1/3', 'statusline did not update after backward search')
 vim.cmd.normal { args = { '2n' }, bang = true }
 assert(vim.deep_equal(vim.api.nvim_win_get_cursor(0), { 3, 0 }), 'counted native search did not retain its count')
+assert(search_statusline.section_searchcount { trunc_width = 0 } == '3/3', 'statusline did not update after counted search')
+vim.cmd.normal { args = { 'n' }, bang = true }
+assert(vim.deep_equal(vim.api.nvim_win_get_cursor(0), { 1, 0 }), 'native search did not wrap to the first match')
+assert(search_statusline.section_searchcount { trunc_width = 0 } == '1/3', 'statusline did not update after wrapped search')
 local jump_list = vim.deepcopy(vim.fn.getjumplist())
-search_lens.refresh()
-assert(vim.deep_equal(vim.fn.getjumplist(), jump_list), 'search-lens rendering changed the jump list')
-local first_window = vim.api.nvim_get_current_win()
+search_statusline.section_searchcount { trunc_width = 0 }
+assert(vim.deep_equal(vim.fn.getjumplist(), jump_list), 'statusline search count changed the jump list')
 vim.cmd.vsplit()
-search_lens.refresh()
-assert(
-  search_lens.status().win == vim.api.nvim_get_current_win() and search_lens.status().win ~= first_window,
-  'search lens was not scoped to the active split'
-)
+vim.cmd.normal { args = { 'n' }, bang = true }
+assert(search_statusline.section_searchcount { trunc_width = 0 } == '2/3', 'statusline did not update in the active split')
 assert(
   vim.fn.getreg '/' == search_register and vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), search_lines),
-  'search lens changed search state or text'
+  'statusline search count changed search state or text'
 )
 vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'xt', false)
-assert(vim.wait(1000, function() return not search_lens.status().active end), 'normal-mode Escape left the search lens active')
-vim.o.hlsearch = true
-search_lens.refresh()
-assert(search_lens.status().active, 'search lens did not return after search highlighting was restored')
+assert(
+  vim.v.hlsearch == 0 and search_statusline.section_searchcount { trunc_width = 0 } == '',
+  'normal-mode Escape left search highlighting or its statusline count active'
+)
+vim.cmd.normal { args = { 'n' }, bang = true }
+assert(search_statusline.section_searchcount { trunc_width = 0 } == '3/3', 'statusline search count did not return after the next search')
 vim.cmd.nohlsearch()
-vim.api.nvim_exec_autocmds('CmdlineLeave', { pattern = ':' })
-assert(vim.wait(1000, function() return not search_lens.status().active end), 'direct nohlsearch left lens state active')
-search_lens.toggle()
-assert(not search_lens.is_enabled() and not search_lens.status().active, 'search lens did not disable')
-search_lens.toggle()
-assert(search_lens.is_enabled(), 'search lens did not re-enable')
+assert(search_statusline.section_searchcount { trunc_width = 0 } == '', 'direct nohlsearch left the statusline search count active')
 vim.cmd.only()
-vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.fn['repeat']({ 'needle' }, 1001))
-vim.fn.setreg('/', '\\Vneedle')
-vim.api.nvim_win_set_cursor(0, { 1, 0 })
-vim.o.hlsearch = true
-search_lens.refresh()
-assert(search_lens.status().text == ' 1/>999 ', 'search lens presented a max-count result as exact: ' .. vim.inspect(search_lens.status()))
 vim.fn.setreg('/', '[')
-search_lens.refresh()
-assert(not search_lens.status().active, 'invalid search pattern left a stale lens')
+vim.o.hlsearch = true
+assert(search_statusline.section_searchcount { trunc_width = 0 } == '', 'invalid search pattern left a stale statusline count')
 
 local marks = require 'custom.plugins.project_marks'
 local notify = vim.notify

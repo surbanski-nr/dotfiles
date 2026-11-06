@@ -23,7 +23,6 @@ local overrides = {
   Nvim2MatrixHead = { fg = '#8cf8f7', ctermfg = 14, bold = true },
   Nvim2MatrixMid = { fg = '#4db6ac', ctermfg = 73 },
   Number = { fg = '#ffcaff', ctermfg = 13 },
-  Nvim2SearchLens = { fg = '#07080d', bg = '#fce094', ctermfg = 0, ctermbg = 11, bold = true },
   GitSignsCurrentLineBlame = { link = 'Comment' },
   Type = { fg = '#c099ff', ctermfg = 13 },
   ['@type'] = class_module_color,
