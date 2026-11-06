@@ -196,13 +196,32 @@ You can select just those tools:
 "$HOME/bin/helm-3.21.0" version --short
 ```
 
-Versioned installations remain in `~/bin`. Canonical command links are
-relative, so an older retained installation can be selected again by running
-the setup command from the matching reviewed repository revision. An intact
-retained installation is reused without downloading it again.
+Versioned installations remain in `~/bin`. For each requested tool, setup
+installs every catalog version, then points the relative canonical command links
+at the first record. `setup-tools: selected NAME VERSION` reports that link
+selection. `setup-tools: reuse NAME VERSION` means the recorded installation
+passed its integrity check and needs no download or rebuild.
+
+To change the default, move the desired complete record first in
+`TOOL_RELEASES[TOOL]` in `tools.env`, then rerun `./setup-tools TOOL`. Running
+setup from an older reviewed repository revision can also select a retained
+version. For a temporary change, point the link at an already installed version:
+
+```bash
+readlink -- "$HOME/bin/kubectl"
+ln -sfn -- kubectl-1.27.11 "$HOME/bin/kubectl"
+kubectl version --client
+```
+
+The next `./setup-tools kubectl` restores the first catalog record. Connected
+setup uses ordinary symlinks; `KUBECTL_VERSION` and `HELM_VERSION` affect only
+the [offline client launchers](#selecting-a-bundled-kubernetes-client).
 Terraform and Terragrunt use optional `setup-asdf` in this connected flow.
 Htop and tmux are compiled by `setup-tools` from their checksum-verified
-official source archives. The Go SDK is a direct setup tool so the editor and
+official source archives. Those pinned upstream releases provide source archives
+rather than Linux executables; building against the host libraries keeps the
+catalog versions independent of apt/dnf package candidates.
+The Go SDK is a direct setup tool so the editor and
 offline builds use the same reviewed runtime.
 
 ### Python through uv

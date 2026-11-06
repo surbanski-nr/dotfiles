@@ -461,7 +461,8 @@ install_version() {
 
 activate_links() {
   local name=$1
-  shift
+  local version=$2
+  shift 2
   local entry
   local command_name
   local target
@@ -510,7 +511,7 @@ activate_links() {
       return "$status"
     fi
   done
-  printf 'setup-tools: selected %s\n' "$name"
+  printf 'setup-tools: selected %s %s\n' "$name" "$version"
 }
 
 # Reconcile every configured version, then select the first only after success.
@@ -538,7 +539,7 @@ install_selected_tools() {
       install_version "$name" "$version"
     done
     load_tool_release "$name" "$selected"
-    activate_links "$name" "${SPEC_LINKS[@]}"
+    activate_links "$name" "$selected" "${SPEC_LINKS[@]}"
   done
 }
 
