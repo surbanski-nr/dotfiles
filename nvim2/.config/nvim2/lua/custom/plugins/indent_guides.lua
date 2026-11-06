@@ -16,6 +16,7 @@ vim.api.nvim_create_autocmd('ColorScheme', {
 })
 
 require('ibl').setup {
+  viewport_buffer = { min = 15 },
   indent = {
     char = '▏',
     tab_char = '▏',

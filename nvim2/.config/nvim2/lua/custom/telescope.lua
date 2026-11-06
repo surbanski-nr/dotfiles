@@ -104,6 +104,7 @@ function M.setup()
       file_sorter = query_sorter.new,
       generic_sorter = query_sorter.new,
       sorting_strategy = 'ascending',
+      layout_config = { prompt_position = 'top' },
       history = { path = vim.fs.joinpath(vim.fn.stdpath 'state', 'telescope_history') },
     },
     pickers = {

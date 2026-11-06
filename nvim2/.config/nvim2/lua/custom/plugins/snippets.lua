@@ -19,6 +19,23 @@ local function add_pair(opening, closing)
   })
 end
 
+local function add_quote(quote)
+  -- A regular callback reads the buffer after pending Insert characters are applied.
+  vim.keymap.set('i', quote, function()
+    local column = vim.api.nvim_win_get_cursor(0)[2]
+    local line = vim.api.nvim_get_current_line()
+    local before = line:sub(1, column)
+    local has_quote = before:find(quote, 1, true) ~= nil
+    local keys = quote
+    if has_quote and before:sub(-1) ~= '\\' and line:sub(column + 1, column + 1) == quote then
+      keys = '<Right>'
+    elseif not has_quote and (before == '' or before:match '%s$') then
+      keys = quote .. quote .. '<Left>'
+    end
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), 'in', false)
+  end, { desc = 'Insert ' .. quote .. ' without duplicating closing quotes' })
+end
+
 local function text_before_cursor()
   local cursor = vim.api.nvim_win_get_cursor(0)
   return vim.api.nvim_get_current_line():sub(1, cursor[2])
@@ -42,16 +59,8 @@ function M.setup()
   add_pair('(', ')')
   add_pair('[', ']')
   add_pair('{', '}')
-  add_pair("'", "'")
-  vim.keymap.set('i', '"', function()
-    local column = vim.api.nvim_win_get_cursor(0)[2]
-    local line = vim.api.nvim_get_current_line()
-    local before = line:sub(1, column)
-    local has_quote = before:find('"', 1, true) ~= nil
-    if has_quote and before:sub(-1) ~= '\\' and line:sub(column + 1, column + 1) == '"' then return '<Right>' end
-    if not has_quote and (before == '' or before:match '%s$') then return '""<Left>' end
-    return '"'
-  end, { expr = true, desc = 'Insert double quote without duplicating closing quotes' })
+  add_quote "'"
+  add_quote '"'
 
   vim.api.nvim_create_autocmd('FileType', {
     pattern = 'markdown',

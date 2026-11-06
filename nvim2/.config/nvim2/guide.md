@@ -564,6 +564,9 @@ clipboard. Inside tmux, use `Ctrl+a` then `[`, select with `v`, and copy with
 | Resume last picker                           | `<leader>sr`                          |
 | Search this Neovim configuration             | `<leader>sn`                          |
 
+The search prompt is at the top, followed by results from top to bottom.
+The first result is selected.
+
 Common keys inside a Telescope picker:
 
 | Action                          | Insert mode      | Normal mode      |
@@ -699,8 +702,6 @@ in this profile are Telescope searches, Gitsigns (`<leader>hq` or
 `<leader>hQ`) and `:TodoQuickFix`.
 
 Inside any Telescope picker:
-
-Results run from top to bottom, with the first result selected at the top.
 
 | Action                                                           | Keys               |
 | ---------------------------------------------------------------- | ------------------ |
@@ -903,35 +904,42 @@ is available separately: `<C-x><C-n>` completes current-buffer words and
 `<C-x><C-l>` completes whole lines. These Insert prefixes are unrelated to
 Normal `<C-x>` buffer removal. LSP-provided snippets can be
 accepted with `<C-y>` and are expanded by Neovim's built-in `vim.snippet`
-engine. LuaSnip is not installed. The local pairs expand as soon as their
-opening delimiter is typed.
+engine. LuaSnip is not installed.
 
-The local expansions are defined in `lua/custom/plugins/snippets.lua`. These
-four unconditional pairs and a conditional double quote work in Insert mode:
+The local Insert mappings are defined in `lua/custom/plugins/snippets.lua`.
+Three unconditional bracket pairs and two contextual quote mappings work in
+Insert mode in every filetype:
 
-| Typed | Result |
-| ----- | ------ |
-| `(`   | `(CURSOR)`   |
-| `[`   | `[CURSOR]`   |
-| `{`   | `{CURSOR}`   |
-| `'`   | `'CURSOR'`   |
-| `"`   | `"CURSOR"`   |
+| Typed | Result when paired |
+| ----- | ------------------ |
+| `(`   | `(CURSOR)`         |
+| `[`   | `[CURSOR]`         |
+| `{`   | `{CURSOR}`         |
+| `'`   | `'CURSOR'`         |
+| `"`   | `"CURSOR"`         |
 
-`CURSOR` represents the insertion point and is not inserted. A live snippet
-field handles `<Tab>` first. Otherwise, tab-out uses Treesitter to move just
-after the nearest unambiguous `()`, `[]`, `{}`, quote or backtick node;
+`CURSOR` represents the insertion point and is not inserted. Bracket pairs
+create native snippet fields. Quote pairs insert characters and position the
+cursor without starting a snippet. A live snippet field handles `<Tab>`
+first. Otherwise, tab-out uses Treesitter to move just after the nearest
+unambiguous `()`, `[]`, `{}`, quote or backtick node;
 `<S-Tab>` moves just before it. Nested, empty, multi-line and UTF-8 content use
 byte-correct syntax ranges. A completion menu, special buffer, missing parser,
 incomplete syntax or ambiguous language construct keeps Blink's normal
 fallback. Tab-out changes no text or registers.
 
-Double quotes create a pair only at the start of a line or after whitespace,
-and only when there is no earlier double quote before the cursor on that line.
-Otherwise typing `"` inserts one quote, or moves over an existing quote on the
-right unless the previous character is a backslash. This deliberately small
-rule does not parse strings or count quote pairs. The other four expansions
-remain unconditional; paired deletion is not implemented. The disabled
-Kickstart autopairs file is only an upstream example and is not active.
+Both `'` and `"` use the same rule in every filetype: create a pair only at the
+start of a line or after whitespace, and only when there is no earlier quote
+of the same kind before the cursor on that line. Apostrophes in words such as
+`it's` therefore stay single in every filetype.
+
+When a quote of the same kind already appears before the cursor and a matching
+quote is immediately on the right, typing it moves over that character unless
+the previous character is a backslash. In all other cases, typing the key
+inserts a single quote. This deliberately small rule does not parse strings or
+count quote pairs. Paired deletion is not implemented.
+The disabled Kickstart autopairs file is only an upstream example and is not
+active.
 
 These six triggers work only in Markdown buffers:
 

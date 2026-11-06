@@ -87,7 +87,7 @@ isolated real-repository regressions for the failure paths.
 | `scroll_marker.lua`        | Show an experimental one-cell marker for the current position at the right edge                   | No                                               |
 | `treesitter_selection.lua` | Three remapped aliases to native `van`/`an`/`in`, preserving parser-first and capable LSP fallback | No                                               |
 | `toggle_values.lua`        | Add `<leader>tv` for boolean-like values without `nvim-toggler`                                   | No                                               |
-| `snippets.lua`             | Add five global delimiter pairs and six Markdown expansions with Neovim's built-in snippet engine | No                                               |
+| `snippets.lua`             | Add three native bracket pairs, shared contextual quote pairing and six Markdown expansions | No                                               |
 
 Some plugins work automatically or only support another plugin, so they do not
 need a daily key sequence:
@@ -178,13 +178,16 @@ to column zero. The lockfile pins its tested revision. Toggle all guides with
 toggle only the active-scope marker with `:IBLToggleScope`. Change the
 characters or colors in
 `lua/custom/plugins/indent_guides.lua` if they are still too visible.
+Guides are prepared for the visible lines plus 15 lines above and below the
+window to reduce work during scrolling.
 
 Neovim's built-in `matchparen` plugin highlights a matching `()`, `[]` or `{}`
 pair in orange when the cursor is on or immediately after one of the brackets.
 Only the bracket text changes color; the existing line background is preserved.
 The small local `highlight_enclosing_pairs.lua` module keeps the nearest pair orange while
 the cursor is anywhere inside it. It walks upward through the current
-Treesitter node instead of scanning the file, and silently does nothing for a
+Treesitter node instead of scanning the file and keeps the existing highlight
+while the cursor stays inside the same pair. It silently does nothing for a
 filetype without an installed parser. Press `%` on a bracket to jump to its
 match. Use `:NoMatchParen` and `:DoMatchParen` to disable or restore only the
 built-in behavior for the current session. Red is deliberately avoided because

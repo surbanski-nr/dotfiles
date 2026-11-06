@@ -5,7 +5,7 @@ vim.o.relativenumber = true
 vim.o.mouse = ''
 vim.o.winborder = 'rounded'
 vim.o.wrap = true
-vim.o.showbreak = '↪ '
+vim.o.showbreak = ''
 vim.opt.listchars = { extends = '…', nbsp = '␣', precedes = '…', tab = '> ', trail = '·' }
 vim.o.scrolloff = 15
 vim.o.foldmethod = 'marker'

@@ -12,16 +12,27 @@ function M.clear()
 end
 
 function M.update()
-  M.clear()
-  if vim.bo.buftype ~= '' then return end
+  if vim.bo.buftype ~= '' then
+    M.clear()
+    return
+  end
 
   local pair = M.find()
-  if not pair then return end
+  if not pair then
+    M.clear()
+    return
+  end
 
-  vim.w[window_match_variable] = vim.fn.matchaddpos('MatchParen', {
+  local positions = {
     { pair.start[1] + 1, pair.start[2] + 1, 1 },
     { pair.finish[1] + 1, pair.finish[2] + 1, 1 },
-  }, 9)
+  }
+  local match_id = vim.w[window_match_variable]
+  local current = vim.iter(vim.fn.getmatches()):find(function(match) return match.id == match_id end)
+  if current and vim.deep_equal(current.pos1, positions[1]) and vim.deep_equal(current.pos2, positions[2]) then return end
+
+  M.clear()
+  vim.w[window_match_variable] = vim.fn.matchaddpos('MatchParen', positions, 9)
 end
 
 vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'BufEnter', 'WinEnter' }, {
