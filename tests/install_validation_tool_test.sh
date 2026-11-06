@@ -210,7 +210,7 @@ VALIDATION_RELEASES[python]='
 EOF
 run_installer yamllint
 [[ $status -ne 0 && $("$tools_dir/python/bin/python3" --version) == 'Python 3.12.13' &&
-  $(readlink -f "$tools_dir/yamllint") == "$yaml_executable" && -x $private_python ]] ||
+$(readlink -f "$tools_dir/yamllint") == "$yaml_executable" && -x $private_python ]] ||
   fail 'failed Yamllint upgrade removed the previous venv or its Python'
 TEST_VENV_PIP_FAIL=0
 export TEST_VENV_PIP_FAIL
@@ -219,7 +219,7 @@ run_installer yamllint
   fail 'unchanged Yamllint pin did not rebuild its venv for a new Python'
 yaml_executable=$(readlink -f "$tools_dir/yamllint")
 [[ $(readlink -f "${yaml_executable%/*}/python") == $(readlink -f "$tools_dir/python/bin/python3") &&
-  -x $private_python ]] || fail 'Yamllint upgrade did not retain independent versioned Python runtimes'
+-x $private_python ]] || fail 'Yamllint upgrade did not retain independent versioned Python runtimes'
 
 task_version=9.8.7
 task_candidate_dir=$test_root/task-candidate

@@ -82,7 +82,7 @@ printf 'TMUX_PLUGINS[tmux-sensible]=%q\n' \
 run_setup "$test_home" "$test_repository" "$archive_root" tmux-sensible
 assert_plugin "$test_home/.tmux/plugins" tmux-sensible "${newer_commits[tmux-sensible]}"
 [[ $(<"$checkout/local-notes") == 'keep this note' &&
-  $(<"$test_home/.tmux/resurrect/session") == 'saved session' ]] ||
+$(<"$test_home/.tmux/resurrect/session") == 'saved session' ]] ||
   fail 'repinning a plugin changed user notes or session data'
 
 printf 'keep this ignored note\n' >"$checkout/ignored-note"
@@ -151,7 +151,7 @@ if run_setup "$dirty_home" "$test_repository" "$archive_root" tmux tmux-resurrec
   fail 'setup overwrote a modified plugin checkout'
 fi
 [[ $(sha256sum "$dirty_checkout/sensible.tmux") == "$dirty_hash" &&
-  ! -e $dirty_home/bin/tmux && ! -e $dirty_home/.tmux/plugins/tmux-resurrect ]] ||
+! -e $dirty_home/bin/tmux && ! -e $dirty_home/.tmux/plugins/tmux-resurrect ]] ||
   fail 'plugin preflight changed the checkout or installed another requested tool'
 
 foreign_home=$test_root/foreign-home

@@ -3,7 +3,9 @@
 set -euo pipefail
 
 case ${0##*/} in
-  mv | sync | mktemp) exit 27 ;;
+  mv | sync | mktemp)
+    exit 27
+    ;;
   flock)
     [[ -n ${TEST_FLOCK_READY:-} ]] || exit 27
     [[ ${1:-} == -u ]] || printf 'waiting\n' >"$TEST_FLOCK_READY"
@@ -12,5 +14,7 @@ case ${0##*/} in
   history-command)
     printf 'check\n' >>"$HOME/archive-checks"
     ;;
-  *) exit 2 ;;
+  *)
+    exit 2
+    ;;
 esac

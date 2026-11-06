@@ -3,15 +3,26 @@
 set -euo pipefail
 state=$TEST_K9S_PREVIEW_STATE
 program=${0##*/}
-fail() { printf 'preview fixture: %s\n' "$*" >&2; exit 71; }
+fail() {
+  printf 'preview fixture: %s\n' "$*" >&2
+  exit 71
+}
 
 case $program in
   docker)
     case "$*" in
-      'context show') printf '%s\n' "${DOCKER_CONTEXT:-default}" ;;
-      context\ inspect\ *) printf '%s\n' "${TEST_K9S_DOCKER_ENDPOINT:-unix:///var/run/docker.sock}" ;;
-      info) exit "${TEST_K9S_DOCKER_STATUS:-0}" ;;
-      *) fail "unexpected docker arguments: $*" ;;
+      'context show')
+        printf '%s\n' "${DOCKER_CONTEXT:-default}"
+        ;;
+      context\ inspect\ *)
+        printf '%s\n' "${TEST_K9S_DOCKER_ENDPOINT:-unix:///var/run/docker.sock}"
+        ;;
+      info)
+        exit "${TEST_K9S_DOCKER_STATUS:-0}"
+        ;;
+      *)
+        fail "unexpected docker arguments: $*"
+        ;;
     esac
     ;;
   kind)
@@ -27,11 +38,19 @@ case $program in
     name='' kubeconfig='' image=''
     while (($#)); do
       case $1 in
-        --name) name=$2 ;;
-        --kubeconfig) kubeconfig=$2 ;;
-        --image) image=$2 ;;
+        --name)
+          name=$2
+          ;;
+        --kubeconfig)
+          kubeconfig=$2
+          ;;
+        --image)
+          image=$2
+          ;;
         --wait) ;;
-        *) fail "unexpected kind argument: $1" ;;
+        *)
+          fail "unexpected kind argument: $1"
+          ;;
       esac
       shift 2
     done
@@ -51,19 +70,37 @@ case $program in
         [[ ${TEST_K9S_DELETE_STATUS:-0} == 0 ]] || exit "$TEST_K9S_DELETE_STATUS"
         rm -f -- "$state/cluster-$name" "$state/namespace-$name" "$state/job-$name" "$state/workloads-$name"
         ;;
-      *) fail "unexpected kind operation: $operation" ;;
+      *)
+        fail "unexpected kind operation: $operation"
+        ;;
     esac
     ;;
   kubectl)
     kubeconfig='' context='' namespace='' cache=''
     while (($#)); do
       case $1 in
-        --kubeconfig) kubeconfig=$2; shift 2 ;;
-        --context) context=$2; shift 2 ;;
-        --namespace) namespace=$2; shift 2 ;;
-        --cache-dir) cache=$2; shift 2 ;;
-        --request-timeout=*) shift ;;
-        *) break ;;
+        --kubeconfig)
+          kubeconfig=$2
+          shift 2
+          ;;
+        --context)
+          context=$2
+          shift 2
+          ;;
+        --namespace)
+          namespace=$2
+          shift 2
+          ;;
+        --cache-dir)
+          cache=$2
+          shift 2
+          ;;
+        --request-timeout=*)
+          shift
+          ;;
+        *)
+          break
+          ;;
       esac
     done
     name=${context#kind-}
@@ -71,20 +108,30 @@ case $program in
       fail 'kubectl escaped the preview cluster or namespace'
     [[ $cache == "${kubeconfig%/*}/cache/kube" ]] || fail 'kubectl used the normal discovery cache'
     case "$1 $2" in
-      'get namespace') [[ ! -f $state/namespace-$name ]] || printf 'namespace/%s\n' "$namespace" ;;
-      'create namespace') touch "$state/namespace-$name" ;;
+      'get namespace')
+        [[ ! -f $state/namespace-$name ]] || printf 'namespace/%s\n' "$namespace"
+        ;;
+      'create namespace')
+        touch "$state/namespace-$name"
+        ;;
       'apply -f')
         [[ -f $state/namespace-$name && -f $3 ]] || fail 'workloads have no namespace or manifest'
         cp -- "$3" "$state/workloads-$name"
         ;;
-      'rollout status') exit "${TEST_K9S_ROLLOUT_STATUS:-0}" ;;
-      'get job') [[ ! -f $state/job-$name ]] || printf 'job/preview-now\n' ;;
+      'rollout status')
+        exit "${TEST_K9S_ROLLOUT_STATUS:-0}"
+        ;;
+      'get job')
+        [[ ! -f $state/job-$name ]] || printf 'job/preview-now\n'
+        ;;
       'create job')
         [[ $3 == preview-now && $4 == --from=cronjob/preview-random && ! -e $state/job-$name ]] ||
           fail 'immediate job was duplicated or used the wrong template'
         touch "$state/job-$name"
         ;;
-      *) fail "unexpected kubectl operation: $*" ;;
+      *)
+        fail "unexpected kubectl operation: $*"
+        ;;
     esac
     ;;
   k9s)
@@ -104,9 +151,13 @@ case $program in
     printf 'fixture logs\n' >"$K9S_LOGS_DIR/k9s.log"
     if [[ -n ${TEST_K9S_READY:-} ]]; then
       touch "$TEST_K9S_READY"
-      until [[ -e $TEST_K9S_RELEASE ]]; do sleep 0.1; done
+      until [[ -e $TEST_K9S_RELEASE ]]; do
+        sleep 0.1
+      done
     fi
     exit "${TEST_K9S_EXIT_STATUS:-0}"
     ;;
-  *) fail "unexpected program: $program" ;;
+  *)
+    fail "unexpected program: $program"
+    ;;
 esac

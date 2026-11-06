@@ -22,7 +22,9 @@ load_profile() {
 
 run_prompt_hooks() {
   local prompt_command
-  for prompt_command in "${PROMPT_COMMAND[@]}"; do eval "$prompt_command"; done
+  for prompt_command in "${PROMPT_COMMAND[@]}"; do
+    eval "$prompt_command"
+  done
 }
 
 case $TEST_SCENARIO in
@@ -142,7 +144,9 @@ case $TEST_SCENARIO in
     history -s 'command awaiting successful save'
     history_file=$HISTFILE
     HISTFILE=$HOME/missing-directory/history
-    if _dotfiles_history_sync; then exit 1; fi
+    if _dotfiles_history_sync; then
+      exit 1
+    fi
     HISTTIMEFORMAT='' history
     unset HISTFILE
     _dotfiles_history_sync
@@ -152,11 +156,15 @@ case $TEST_SCENARIO in
     HISTTIMEFORMAT='' history
     ;;
   broken-integration)
-    zoxide() { return 9; }
+    zoxide() {
+      return 9
+    }
     load_bashrc
     ;;
   invalid-integration)
-    zoxide() { printf 'if broken'; }
+    zoxide() {
+      printf 'if broken'
+    }
     load_bashrc
     printf 'continued=yes\n'
     ;;
@@ -179,7 +187,9 @@ case $TEST_SCENARIO in
     ;;
   independent-editors)
     shopt -s expand_aliases
-    vi() { command vi "$@"; }
+    vi() {
+      command vi "$@"
+    }
     alias vim='command vim'
     load_bashrc
     vi first
@@ -240,7 +250,9 @@ case $TEST_SCENARIO in
     printf 'after=%s config=%s asdf=%s\n' "$(release-command)" \
       "$(config-marker)" "$(command -v asdf-only-tool)"
     for removed in removed-release-command removed-mason-command removed-venv-command removed-script-command; do
-      if command -v "$removed" >/dev/null; then exit 95; fi
+      if command -v "$removed" >/dev/null; then
+        exit 95
+      fi
     done
     unlink "$HOME/dotfiles-releases/current"
     ln -s "${TEST_RELEASE_A##*/}" "$HOME/dotfiles-releases/current"
@@ -305,7 +317,9 @@ case $TEST_SCENARIO in
       [[ $entry != "$HOME/bin" ]] || ((entries += 1))
     done
     [[ $entries -eq 1 ]] || exit 90
-    if command -v cwd-only >/dev/null; then exit 91; fi
+    if command -v cwd-only >/dev/null; then
+      exit 91
+    fi
     export VIRTUAL_ENV="$HOME/project venv"
     # shellcheck disable=SC1090
     source "$TEST_BASHRC"
@@ -322,7 +336,9 @@ case $TEST_SCENARIO in
     source "$TEST_BASHRC"
     hash -r
     printf 'ignored=%s\n' "$(path-probe)"
-    if command -v unique-user-tool >/dev/null; then exit 92; fi
+    if command -v unique-user-tool >/dev/null; then
+      exit 92
+    fi
     [[ :$PATH: != *":$HOME/bin:"* ]] || exit 93
     unset DOTFILES_IGNORE_USER_BIN
     mv "$HOME/bin" "$HOME/saved-user-bin"
@@ -363,8 +379,12 @@ case $TEST_SCENARIO in
     kp
     ;;
   stale-vz)
-    vz() { printf 'stale-vz\n'; }
-    vold() { printf 'stale-vold\n'; }
+    vz() {
+      printf 'stale-vz\n'
+    }
+    vold() {
+      printf 'stale-vold\n'
+    }
     vz >/dev/null
     vold >/dev/null
     load_aliases

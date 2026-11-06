@@ -39,17 +39,39 @@ for defect in missing-yq missing-plugin missing-manifest missing-license wrong-m
   release=$test_root/stage-$marker/$id_three
   plugin=$release/share/helm/plugins/helm-values-schema-json
   case $defect in
-    missing-yq) unlink "$release/tools/bin/yq" ;;
-    missing-plugin) unlink "$plugin/schema" ;;
-    missing-manifest) unlink "$plugin/plugin.yaml" ;;
-    missing-license) unlink "$plugin/LICENSE" ;;
-    wrong-manifest) sed -i 's/version: "3.0"/version: "9.9"/' "$plugin/plugin.yaml" ;;
-    missing-yq-version) sed -i '/^YQ_VERSION=/d' "$release/release.env" ;;
-    missing-plugin-version) sed -i '/^HELM_SCHEMA_PLUGIN_VERSION=/d' "$release/release.env" ;;
-    invalid-version) sed -i 's/^HELM_SCHEMA_PLUGIN_VERSION=.*/HELM_SCHEMA_PLUGIN_VERSION=invalid/' "$release/release.env" ;;
-    duplicate-key) printf 'YQ_VERSION=3.0\n' >>"$release/release.env" ;;
-    unknown-key) printf 'NEW_UNKNOWN_VERSION=3.0\n' >>"$release/release.env" ;;
-    legacy-fields) sed -i 's/,yq$//' "$release/release.env" ;;
+    missing-yq)
+      unlink "$release/tools/bin/yq"
+      ;;
+    missing-plugin)
+      unlink "$plugin/schema"
+      ;;
+    missing-manifest)
+      unlink "$plugin/plugin.yaml"
+      ;;
+    missing-license)
+      unlink "$plugin/LICENSE"
+      ;;
+    wrong-manifest)
+      sed -i 's/version: "3.0"/version: "9.9"/' "$plugin/plugin.yaml"
+      ;;
+    missing-yq-version)
+      sed -i '/^YQ_VERSION=/d' "$release/release.env"
+      ;;
+    missing-plugin-version)
+      sed -i '/^HELM_SCHEMA_PLUGIN_VERSION=/d' "$release/release.env"
+      ;;
+    invalid-version)
+      sed -i 's/^HELM_SCHEMA_PLUGIN_VERSION=.*/HELM_SCHEMA_PLUGIN_VERSION=invalid/' "$release/release.env"
+      ;;
+    duplicate-key)
+      printf 'YQ_VERSION=3.0\n' >>"$release/release.env"
+      ;;
+    unknown-key)
+      printf 'NEW_UNKNOWN_VERSION=3.0\n' >>"$release/release.env"
+      ;;
+    legacy-fields)
+      sed -i 's/,yq$//' "$release/release.env"
+      ;;
   esac
   repack_artifact "$marker" "$id_three" "$archive"
   if run_manager verify "$archive" >"$test_root/$marker.log" 2>&1; then
@@ -64,16 +86,24 @@ for defect in wrong-plugin broken-yaml broken-generation; do
   release=$test_root/stage-$marker/$id_three
   plugin=$release/share/helm/plugins/helm-values-schema-json
   case $defect in
-    wrong-plugin) sed -i 's/version v3.0/version v9.9/' "$plugin/schema" ;;
-    broken-yaml) sed -i '/awk.*name:/c\    exit 92' "$release/tools/bin/yq" ;;
-    broken-generation) sed -i '/^jq /,$c\exit 91' "$plugin/schema" ;;
+    wrong-plugin)
+      sed -i 's/version v3.0/version v9.9/' "$plugin/schema"
+      ;;
+    broken-yaml)
+      sed -i '/awk.*name:/c\    exit 92' "$release/tools/bin/yq"
+      ;;
+    broken-generation)
+      sed -i '/^jq /,$c\exit 91' "$plugin/schema"
+      ;;
   esac
   repack_artifact "$marker" "$id_three" "$archive"
   run_manager verify "$archive" >/dev/null
   test_home=$test_root/$marker-home
   mkdir -p "$test_home"
   if [[ $defect == wrong-plugin ]]; then
-    if run_manager install "$archive" >/dev/null 2>&1; then fail 'install accepted a wrong plugin version'; fi
+    if run_manager install "$archive" >/dev/null 2>&1; then
+      fail 'install accepted a wrong plugin version'
+    fi
   else
     run_manager install "$archive" >/dev/null
     status=0

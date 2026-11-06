@@ -24,7 +24,7 @@ for missing in sort gawk; do
     fail 'installation accepted a missing system prerequisite'
   fi
   [[ $(<"$test_root/prerequisites.log") == *"required command is missing: $missing"* &&
-    ! -e $test_home/dotfiles-releases ]] ||
+  ! -e $test_home/dotfiles-releases ]] ||
     fail 'system prerequisite failure modified HOME or omitted its cause'
 done
 
@@ -60,7 +60,7 @@ for public_path in .config/nvim2 .local/share/nvim2 \
       fail "health accepted missing active $public_path"
     fi
     [[ $(<"$test_root/missing-public-link.log") == *'active release link is missing or incorrect:'* &&
-      ! -L $path ]] || fail 'health repaired a public link or omitted the cause'
+    ! -L $path ]] || fail 'health repaired a public link or omitted the cause'
   done
   run_manager set "$id_one" >/dev/null
   assert_link "$path" "$original_target"
@@ -114,7 +114,9 @@ assert_link "$test_home/dotfiles-releases/current" "$id_two"
 run_manager health "$id_one" >/dev/null
 assert_link "$test_home/dotfiles-releases/current" "$id_two"
 run_manager uninstall >/dev/null
-if run_manager health >/dev/null 2>&1; then fail 'health without current selected another release'; fi
+if run_manager health >/dev/null 2>&1; then
+  fail 'health without current selected another release'
+fi
 run_manager health "$id_one" >/dev/null
 [[ ! -L $test_home/dotfiles-releases/current ]] || fail 'health activated the specified release'
 run_manager set "$id_one" >/dev/null
@@ -123,7 +125,9 @@ release=$test_home/dotfiles-releases/$id_one
 tampered=$release/config/nvim2/init.lua
 printf 'tampered\n' >>"$tampered"
 for command in health set; do
-  if run_manager "$command" "$id_one" >/dev/null 2>&1; then fail "$command accepted modified content"; fi
+  if run_manager "$command" "$id_one" >/dev/null 2>&1; then
+    fail "$command accepted modified content"
+  fi
 done
 if run_manager set --skip-health "$id_one" >/dev/null 2>&1; then
   fail 'runtime bypass accepted modified content'
@@ -134,16 +138,22 @@ fi
 printf 'fixture one\n' >"$tampered"
 original_mode=$(stat -c %a "$tampered")
 chmod 0600 "$tampered"
-if run_manager set "$id_one" >/dev/null 2>&1; then fail 'set accepted a modified mode'; fi
+if run_manager set "$id_one" >/dev/null 2>&1; then
+  fail 'set accepted a modified mode'
+fi
 chmod "$original_mode" "$tampered"
 release_link="$release/config/nvim2/tests/Lua 5.4 zh-cn utf8/link with space"
 unlink "$release_link"
 ln -s '../../init.lua' "$release_link"
-if run_manager set "$id_one" >/dev/null 2>&1; then fail 'set accepted a modified symlink'; fi
+if run_manager set "$id_one" >/dev/null 2>&1; then
+  fail 'set accepted a modified symlink'
+fi
 unlink "$release_link"
 ln -s 'target file' "$release_link"
 printf 'unlisted\n' >"$release/unlisted"
-if run_manager set "$id_one" >/dev/null 2>&1; then fail 'set accepted an unrecorded file'; fi
+if run_manager set "$id_one" >/dev/null 2>&1; then
+  fail 'set accepted an unrecorded file'
+fi
 unlink "$release/unlisted"
 run_manager set "$id_one" >/dev/null
 

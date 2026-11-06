@@ -104,9 +104,15 @@ check_shell_files() {
   for file in "$@"; do
     IFS= read -r first_line <"$file" || true
     case "$first_line" in
-      *bash*) bash_files+=("$file") ;;
-      '#!/bin/sh') posix_files+=("$file") ;;
-      *) die "unsupported or missing shell shebang: $file" ;;
+      *bash*)
+        bash_files+=("$file")
+        ;;
+      '#!/bin/sh')
+        posix_files+=("$file")
+        ;;
+      *)
+        die "unsupported or missing shell shebang: $file"
+        ;;
     esac
   done
   check_shell_syntax bash "${bash_files[@]}"
@@ -250,7 +256,9 @@ validate_scripts() {
     while IFS= read -r -d '' file; do
       case "$file" in
         tests/fixtures/bash/* | tests/fixtures/validation/tmux-plugin) ;;
-        *) files+=("$file") ;;
+        *)
+          files+=("$file")
+          ;;
       esac
     done < <(find tests/fixtures -type f -print0 | sort -z)
   fi
@@ -277,7 +285,10 @@ validate_nvim2() {
   need jq
   need shellcheck
   need stylua
-  local -a test_scripts=(nvim2/.config/nvim2/tests/check.sh nvim2/.config/nvim2/tests/fixtures/*.sh)
+  local -a test_scripts=(
+    nvim2/.config/nvim2/tests/check.sh
+    nvim2/.config/nvim2/tests/fixtures/*.sh
+  )
   local lock_file=nvim2/.config/nvim2/nvim-pack-lock.json
 
   for file in nvim2/.config/nvim2/python-locks/{ansible-lint,yamllint}.{in,lock}; do
@@ -365,8 +376,12 @@ validate_tmux() {
   cp "$repo_dir/tools.env" "$temporary_home/config with spaces/tools.env"
   cp "$repo_dir/tmux/.tmux/"{eye-timer,load-plugins}.sh "$temporary_home/config with spaces/tmux/.tmux/"
   offline_root=$temporary_home/offline-releases/old
-  plugin_roots=("$temporary_home/.tmux/plugins" "$temporary_home/custom-plugins"
-    "$offline_root/share/tmux/plugins" "$temporary_home/offline-releases/new/share/tmux/plugins")
+  plugin_roots=(
+    "$temporary_home/.tmux/plugins"
+    "$temporary_home/custom-plugins"
+    "$offline_root/share/tmux/plugins"
+    "$temporary_home/offline-releases/new/share/tmux/plugins"
+  )
   for plugin_root in "${plugin_roots[@]}"; do
     for plugin in tmux-sensible tmux-resurrect tmux-continuum; do
       mkdir -p "$plugin_root/$plugin"
@@ -507,12 +522,28 @@ validate_workflows() {
 }
 
 case ${1:-} in
-  bash) validate_bash ;;
-  configs) validate_configs ;;
-  nvim2) validate_nvim2 ;;
-  scripts) validate_scripts ;;
-  tmux) validate_tmux ;;
-  tools) validate_tools ;;
-  workflows) validate_workflows ;;
-  *) usage ;;
+  bash)
+    validate_bash
+    ;;
+  configs)
+    validate_configs
+    ;;
+  nvim2)
+    validate_nvim2
+    ;;
+  scripts)
+    validate_scripts
+    ;;
+  tmux)
+    validate_tmux
+    ;;
+  tools)
+    validate_tools
+    ;;
+  workflows)
+    validate_workflows
+    ;;
+  *)
+    usage
+    ;;
 esac

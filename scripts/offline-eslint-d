@@ -5,7 +5,9 @@ set -euo pipefail
 self=$(readlink -f -- "$0")
 package=${self%/eslint_d}/node_modules/eslint_d
 case ${1:-} in
-  --version | -v | --help | -h) exec node "$package/bin/eslint_d.js" "$@" ;;
+  --version | -v | --help | -h)
+    exec node "$package/bin/eslint_d.js" "$@"
+    ;;
 esac
 
 # eslint_d stores daemon state beside ESLint. The bundled copy is immutable.

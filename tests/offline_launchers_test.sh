@@ -121,9 +121,15 @@ for tool in helm kubectl; do
 done
 for selection in unset empty override; do
   case $selection in
-    unset) output=$(env -u HELM_PLUGINS "$release_bin/helm") ;;
-    empty) output=$(HELM_PLUGINS='' "$release_bin/helm") ;;
-    override) output=$(HELM_PLUGINS="$test_root/user plugins" "$release_bin/helm") ;;
+    unset)
+      output=$(env -u HELM_PLUGINS "$release_bin/helm")
+      ;;
+    empty)
+      output=$(HELM_PLUGINS='' "$release_bin/helm")
+      ;;
+    override)
+      output=$(HELM_PLUGINS="$test_root/user plugins" "$release_bin/helm")
+      ;;
   esac
   expected=$release/share/helm/plugins
   [[ $selection != override ]] || expected=$test_root/'user plugins'

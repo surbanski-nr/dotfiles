@@ -189,7 +189,7 @@ mkdir -p "$git_log_home"
   [[ $(git log -1 --format=%s) == 'amended message with spaces' ]] ||
     fail 'gca did not preserve the replacement message'
   [[ $(git show HEAD:commit-message.txt) == 'staged amendment' &&
-    $(<commit-message.txt) == 'unstaged content' ]] ||
+  $(<commit-message.txt) == 'unstaged content' ]] ||
     fail 'gca did not commit only the staged content and preserve unstaged changes'
 
   amended_commit=$(git rev-parse HEAD)
@@ -199,7 +199,7 @@ mkdir -p "$git_log_home"
   [[ $(git log -1 --format=%s) == 'amended message with spaces' ]] ||
     fail 'gca without arguments changed the existing message'
   [[ $(git rev-parse HEAD) != "$amended_commit" && $(git rev-parse HEAD^) == "$commit_parent" &&
-    $(git show HEAD:commit-message.txt) == 'additional amendment' ]] ||
+  $(git show HEAD:commit-message.txt) == 'additional amendment' ]] ||
     fail 'gca without arguments did not amend staged changes into the last commit'
 )
 
@@ -476,9 +476,9 @@ ln -s "$(PATH="$original_path" command -v git)" "$git_bin/git"
 ln -s "$command_fixture" "$git_bin/fzf"
 if ! git_editor_output=$(run_interactive_scenario git-editor timeout 15s \
   env -u GIT_EDITOR -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
-    HOME="$git_home" PATH="$git_bin:/usr/bin:/bin" TERM=xterm-256color \
-    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$git_home/.gitconfig" \
-    TEST_GIT_EDITOR_LOG="$git_editor_log"); then
+  HOME="$git_home" PATH="$git_bin:/usr/bin:/bin" TERM=xterm-256color \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$git_home/.gitconfig" \
+  TEST_GIT_EDITOR_LOG="$git_editor_log"); then
   fail "Git editor scenario failed: $git_editor_output"
 fi
 [[ $(<"$git_editor_log") == 'editor=vi visual=vi' ]] ||

@@ -15,7 +15,9 @@ block_worker() {
   [[ ${TEST_HANG_PHASE:-} == "$1" ]] || return 0
   trap 'exit 143' TERM
   printf '%s\n' "$$" >"$TEST_WORKER_READY"
-  while :; do sleep 1; done
+  while :; do
+    sleep 1
+  done
 }
 
 parallel_barrier() {
@@ -42,14 +44,19 @@ case $1 in
       parallel_barrier build
       block_worker build
       if [[ ${TEST_BUILD_FAIL:-0} == 1 || ${TEST_BUILD_FAIL:-0} == "$PLATFORM" ]]; then
-        printf 'fixture build failure\n'; exit 81
+        printf 'fixture build failure\n'
+        exit 81
       fi
       for arg in "$@"; do
-        if [[ $arg == *:/out ]]; then output_dir=${arg%:/out}; fi
+        if [[ $arg == *:/out ]]; then
+          output_dir=${arg%:/out}
+        fi
       done
       archive=dotfiles-${COMMIT_SHA:0:12}-$PLATFORM.tar.gz
       source_archive=$TEST_BUILD_ARCHIVE
-      if [[ -n ${TEST_BUILD_ARCHIVES_DIR:-} ]]; then source_archive=$TEST_BUILD_ARCHIVES_DIR/$archive; fi
+      if [[ -n ${TEST_BUILD_ARCHIVES_DIR:-} ]]; then
+        source_archive=$TEST_BUILD_ARCHIVES_DIR/$archive
+      fi
       cp "$source_archive" "$output_dir/$archive"
       (cd "$output_dir" && sha256sum "$archive" >"$archive.sha256")
       printf 'built %s\n' "$PLATFORM" >>"$TEST_DOCKER_LOG"
@@ -61,21 +68,28 @@ case $1 in
       [[ " $* " == *' install /artifact.tar.gz'* && " $* " == *'check-dotfiles-release'* ]] || exit 2
       block_worker verify
       if [[ ${TEST_VERIFY_FAIL:-0} == 1 || ${TEST_VERIFY_FAIL:-0} == "$PLATFORM" ]]; then
-        printf 'fixture offline failure\n'; exit 82
+        printf 'fixture offline failure\n'
+        exit 82
       fi
       printf 'fixture offline health succeeded\n'
     else
       printf 'fixture container started\n'
     fi
     ;;
-  pull) printf 'fixture image pulled\n' ;;
+  pull)
+    printf 'fixture image pulled\n'
+    ;;
   exec)
     if [[ ${TEST_PREPARE_FAIL:-0} == 1 && " $* " == *' prepare-runtime '* ]]; then
       printf 'fixture runtime preparation failure\n'
       exit 83
     fi
     ;;
-  cp) [[ -e $2 ]] || exit 1 ;;
+  cp)
+    [[ -e $2 ]] || exit 1
+    ;;
   commit | rm | image | info) ;;
-  *) exit 2 ;;
+  *)
+    exit 2
+    ;;
 esac

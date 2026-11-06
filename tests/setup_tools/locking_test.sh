@@ -49,8 +49,14 @@ chmod 0755 "$test_root/blocking-download/curl"
 # Exercise both directions with an actual installer holding the lock. Its
 # download child inherits the descriptor and must keep the lock after SIGKILL.
 for installer in setup-tools setup-asdf; do
-  if [[ $installer == setup-tools ]]; then name=yq; other=setup-asdf; other_name=terraform
-  else name=terraform; other=setup-tools; other_name=k9s
+  if [[ $installer == setup-tools ]]; then
+    name=yq
+    other=setup-asdf
+    other_name=terraform
+  else
+    name=terraform
+    other=setup-tools
+    other_name=k9s
   fi
   ready=$test_root/ready-$installer
   HOME="$test_home" TEST_LOCK_READY="$ready" \
@@ -73,7 +79,9 @@ for installer in setup-tools setup-asdf; do
   kill -KILL "$killed_lock_child_pid"
   killed_lock_child_pid=
   for ((attempt = 0; attempt < 100; attempt++)); do
-    if flock -n "$lock_path" true; then break; fi
+    if flock -n "$lock_path" true; then
+      break
+    fi
     sleep 0.02
   done
   run_setup "$test_home" "$test_repository" "$archive_root" k9s >/dev/null

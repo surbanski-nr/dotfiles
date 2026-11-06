@@ -16,7 +16,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+fail() {
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
 
 source_dir=$test_root/source
 mkdir -p "$source_dir/scripts"
@@ -96,11 +99,20 @@ repack_archive() {
   tar -C "$stage" -czf "$test_root/$archive" "$RELEASE_TAG"
 }
 
-run_ci() { bash "$repo_dir/scripts/dotfiles-release-ci" "$@"; }
+run_ci() {
+  bash "$repo_dir/scripts/dotfiles-release-ci" "$@"
+}
 task_executable=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}/task
-run_task_test() { "$task_executable" --dir "$source_dir" test "$@"; }
-run_preflight() { : >"$GITHUB_OUTPUT"; run_ci preflight; }
-matrix() { sed -n 's/^platforms=//p' "$GITHUB_OUTPUT"; }
+run_task_test() {
+  "$task_executable" --dir "$source_dir" test "$@"
+}
+run_preflight() {
+  : >"$GITHUB_OUTPUT"
+  run_ci preflight
+}
+matrix() {
+  sed -n 's/^platforms=//p' "$GITHUB_OUTPUT"
+}
 
 make_archive
 root=$(HOME="$test_root/empty-home" bash "$repo_dir/scripts/dotfiles-release" verify "$test_root/$archive")
@@ -159,8 +171,12 @@ make_archive
 
 TEST_RELEASE_ERROR=404 run_preflight >"$test_root/absent.log"
 grep -Fx 'should_run=false' "$GITHUB_OUTPUT" >/dev/null || fail 'missing release was not skipped'
-if TEST_RELEASE_ERROR=403 run_preflight >"$test_root/denied.log" 2>&1; then fail 'API permission failure was hidden'; fi
-if INPUT_RELEASE_TAG=bad-tag run_preflight >"$test_root/tag.log" 2>&1; then fail 'invalid tag was accepted'; fi
+if TEST_RELEASE_ERROR=403 run_preflight >"$test_root/denied.log" 2>&1; then
+  fail 'API permission failure was hidden'
+fi
+if INPUT_RELEASE_TAG=bad-tag run_preflight >"$test_root/tag.log" 2>&1; then
+  fail 'invalid tag was accepted'
+fi
 if TEST_COMMIT=2222222222222222222222222222222222222222 run_preflight >"$test_root/commit.log" 2>&1; then
   fail 'tag/commit mismatch was accepted'
 fi
@@ -210,12 +226,16 @@ fi
 (cd "$TEST_RELEASE_ASSETS" && sha256sum dotfiles-release >dotfiles-release.sha256)
 
 printf 'invalid checksum\n' >"$TEST_RELEASE_ASSETS/$archive.sha256"
-if run_ci publish "$test_root/nonexistent-output" >"$test_root/bad-publish.log" 2>&1; then fail 'publish replaced a mismatched sidecar'; fi
+if run_ci publish "$test_root/nonexistent-output" >"$test_root/bad-publish.log" 2>&1; then
+  fail 'publish replaced a mismatched sidecar'
+fi
 find "$TEST_RELEASE_ASSETS" -maxdepth 1 -type f -delete
 
 make_archive amzn-2023-x86_64
 cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
-if run_ci publish "$test_root/nonexistent-output" >"$test_root/platform.log" 2>&1; then fail 'wrong-platform archive was accepted'; fi
+if run_ci publish "$test_root/nonexistent-output" >"$test_root/platform.log" 2>&1; then
+  fail 'wrong-platform archive was accepted'
+fi
 grep -F 'archive platform or commit does not match the release job' "$test_root/platform.log" >/dev/null ||
   fail 'platform mismatch was not identified'
 
@@ -223,12 +243,16 @@ make_archive
 ln -s "$test_root/outside" "$test_root/payload/$RELEASE_TAG/escape"
 repack_archive
 cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
-if run_ci publish "$test_root/nonexistent-output" >"$test_root/escape.log" 2>&1; then fail 'absolute escaping symlink was accepted'; fi
+if run_ci publish "$test_root/nonexistent-output" >"$test_root/escape.log" 2>&1; then
+  fail 'absolute escaping symlink was accepted'
+fi
 [[ ! -e $test_root/outside ]] || fail 'unsafe archive wrote outside its root'
 unlink "$test_root/payload/$RELEASE_TAG/escape"
 tar -C "$test_root/payload" --transform="s|$RELEASE_TAG/payload|$RELEASE_TAG/../outside|" \
   -czf "$TEST_RELEASE_ASSETS/$archive" "$RELEASE_TAG"
-if run_ci publish "$test_root/nonexistent-output" >"$test_root/traversal.log" 2>&1; then fail 'archive path traversal was accepted'; fi
+if run_ci publish "$test_root/nonexistent-output" >"$test_root/traversal.log" 2>&1; then
+  fail 'archive path traversal was accepted'
+fi
 grep -F 'unsafe archive member' "$test_root/traversal.log" >/dev/null || fail 'traversal was not rejected before extraction'
 [[ ! -e $test_root/outside ]] || fail 'traversal wrote outside the archive root'
 
@@ -247,9 +271,9 @@ run_preflight
 matrix | jq -e '.[0].build_archive == false' >/dev/null || fail 'partial upload retry would rebuild the archive'
 run_ci publish "$test_root/output"
 [[ $(grep -Fxc "$archive" "$TEST_UPLOAD_LOG") -eq 1 &&
-  $(grep -Fxc "$archive.sha256" "$TEST_UPLOAD_LOG") -eq 1 &&
-  $(grep -Fxc dotfiles-release "$TEST_UPLOAD_LOG") -eq 1 &&
-  $(grep -Fxc dotfiles-release.sha256 "$TEST_UPLOAD_LOG") -eq 1 ]] ||
+$(grep -Fxc "$archive.sha256" "$TEST_UPLOAD_LOG") -eq 1 &&
+$(grep -Fxc dotfiles-release "$TEST_UPLOAD_LOG") -eq 1 &&
+$(grep -Fxc dotfiles-release.sha256 "$TEST_UPLOAD_LOG") -eq 1 ]] ||
   fail 'partial upload retry did not publish each asset exactly once'
 
 for platform in ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
@@ -310,9 +334,18 @@ for stage in BUILD VERIFY PREPARE; do
   failure_status=$?
   set -e
   case $stage in
-    BUILD) expected=81; failure_log=build.log ;;
-    VERIFY) expected=82; failure_log=offline-verify.log ;;
-    PREPARE) expected=83; failure_log=prepare-runtime.log ;;
+    BUILD)
+      expected=81
+      failure_log=build.log
+      ;;
+    VERIFY)
+      expected=82
+      failure_log=offline-verify.log
+      ;;
+    PREPARE)
+      expected=83
+      failure_log=prepare-runtime.log
+      ;;
   esac
   [[ $failure_status -eq $expected ]] || fail "build hid $stage failure"
   grep -F 'failure' "$failure_runner/dotfiles-evidence/$PLATFORM/$failure_log" >/dev/null ||
@@ -364,7 +397,9 @@ qualification_status=$?
 set -e
 [[ $qualification_status -eq 81 ]] || fail 'qualification hid a failed parallel build'
 [[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 4 ]] || fail 'qualification did not launch four parallel builds'
-if grep -q ' verify ' "$TEST_DOCKER_LOG"; then fail 'qualification installed packages when every build failed'; fi
+if grep -q ' verify ' "$TEST_DOCKER_LOG"; then
+  fail 'qualification installed packages when every build failed'
+fi
 for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
   grep -E "^rm --force dotfiles-builder-local-.*-$platform " "$TEST_DOCKER_LOG" >/dev/null ||
     fail "failed parallel qualification did not clean up $platform"
@@ -403,9 +438,15 @@ for cpu_count in 4 2 1; do
   qualification_root=$(sed -n 's/^Offline packages and logs: //p' "$test_root/qualification-partial.log")
   for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
     case $platform in
-      debian-13-x86_64) result='build=81 verify=skipped' ;;
-      ubuntu-24.04-x86_64) result='build=0 verify=82' ;;
-      *) result='build=0 verify=0' ;;
+      debian-13-x86_64)
+        result='build=81 verify=skipped'
+        ;;
+      ubuntu-24.04-x86_64)
+        result='build=0 verify=82'
+        ;;
+      *)
+        result='build=0 verify=0'
+        ;;
     esac
     grep -Fx "$platform: $result; logs: $qualification_root/dotfiles-evidence/$platform" \
       "$qualification_root/summary.md" >/dev/null || fail "qualification lost the final result for $platform"
@@ -459,7 +500,9 @@ for phase in build verify; do
   cancellation_status=0
   wait "$cancellation_pid" || cancellation_status=$?
   [[ $cancellation_status == 143 ]] || fail "qualification hid cancellation during $phase"
-  if kill -0 "$worker_pid" 2>/dev/null; then fail "cancelled $phase worker is still running"; fi
+  if kill -0 "$worker_pid" 2>/dev/null; then
+    fail "cancelled $phase worker is still running"
+  fi
   cancellation_pid=
 done
 

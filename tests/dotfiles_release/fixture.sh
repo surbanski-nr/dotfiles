@@ -253,7 +253,9 @@ EOF
   mkdir -p "$release/config/nvim2/tests/Lua 5.4 zh-cn utf8"
   printf 'fixture spaced target\n' >"$release/config/nvim2/tests/Lua 5.4 zh-cn utf8/target file"
   ln -s 'target file' "$release/config/nvim2/tests/Lua 5.4 zh-cn utf8/link with space"
-  for file in .bashrc .bash_profile .bash_aliases; do printf '%s\n' "$marker" >"$release/dotfiles/bash/$file"; done
+  for file in .bashrc .bash_profile .bash_aliases; do
+    printf '%s\n' "$marker" >"$release/dotfiles/bash/$file"
+  done
   cp "$repo_dir/bash/.bash_history_lib" "$release/dotfiles/bash/"
   mkdir -p "$release/dotfiles/scripts"
   cp "$repo_dir/scripts/bash-history-archive" "$release/dotfiles/scripts/"

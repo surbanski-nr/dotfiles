@@ -3,7 +3,10 @@
 set -euo pipefail
 umask 077
 
-die() { printf 'k9s-preview: %s\n' "$*" >&2; exit 1; }
+die() {
+  printf 'k9s-preview: %s\n' "$*" >&2
+  exit 1
+}
 action=${1:-open}
 [[ $# -le 1 && ( $action == open || $action == clean ) ]] || die 'usage: k9s-preview [clean]'
 for command_name in docker kind timeout sha256sum flock find; do
@@ -40,7 +43,9 @@ fi
 [[ $docker_host == unix://* ]] || die 'use a local Docker daemon in the development VM, not a remote Docker context'
 timeout --kill-after=5s 30s docker info >/dev/null || die 'Docker is unavailable; check setup-system and group membership'
 export KIND_EXPERIMENTAL_PROVIDER=docker
-kind_command() { timeout --foreground --kill-after=10s 300s kind "$@"; }
+kind_command() {
+  timeout --foreground --kill-after=10s 300s kind "$@"
+}
 clusters=$(kind_command get clusters)
 cluster_exists=false
 while IFS= read -r candidate; do
@@ -75,7 +80,9 @@ config_dir=$preview_root/config/k9s
 mkdir -p -- "$config_dir/skins" "$preview_root/data" "$preview_root/state/k9s" "$preview_root/cache/kube"
 # Drop dangling links so k9s defaults cannot recreate files removed from the repo.
 for config_file in "$config_dir"/*.yaml "$config_dir"/skins/*.yaml; do
-  if [[ -L $config_file && ! -e $config_file ]]; then unlink -- "$config_file"; fi
+  if [[ -L $config_file && ! -e $config_file ]]; then
+    unlink -- "$config_file"
+  fi
 done
 # Link only existing YAML files, not directories where k9s generates its own data.
 source_config=$repo_dir/k9s/.config/k9s

@@ -13,7 +13,9 @@ for phase in backup link selection; do
   mkdir -p "$test_home"
   printf 'baseline\n' >"$test_home/.bashrc"
   chmod 0640 "$test_home/.bashrc"
-  if [[ $phase == selection ]]; then run_manager install "$artifact_one" >/dev/null; fi
+  if [[ $phase == selection ]]; then
+    run_manager install "$artifact_one" >/dev/null
+  fi
   cat >"$failure_bin/mv" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -40,10 +42,10 @@ EOF
       fail 'failed selection retained a candidate or touched user bin'
   else
     [[ $(<"$test_home/.bashrc") == baseline &&
-      $(stat -c %a "$test_home/.bashrc") == 640 &&
-      ! -e $test_home/.bashrc.before-dotfiles-release &&
-      ! -e $test_home/dotfiles-releases/$id_one &&
-      ! -L $test_home/dotfiles-releases/current && ! -e $test_home/bin ]] ||
+    $(stat -c %a "$test_home/.bashrc") == 640 &&
+    ! -e $test_home/.bashrc.before-dotfiles-release &&
+    ! -e $test_home/dotfiles-releases/$id_one &&
+    ! -L $test_home/dotfiles-releases/current && ! -e $test_home/bin ]] ||
       fail "$phase failure did not restore the original paths"
   fi
   unlink "$failure_bin/mv"
@@ -74,7 +76,7 @@ assert_link "$test_home/.bashrc" "$test_home/dotfiles-releases/current/dotfiles/
 unlink "$failure_bin/mv"
 run_manager uninstall >/dev/null
 [[ $(<"$test_home/.bashrc") == 'restore baseline' &&
-  ! -e $test_home/dotfiles-releases/$id_one ]] ||
+! -e $test_home/dotfiles-releases/$id_one ]] ||
   fail 'retry did not restore and remove the active release'
 
 printf 'dotfiles_release: publication passed\n'

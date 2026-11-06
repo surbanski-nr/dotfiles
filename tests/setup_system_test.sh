@@ -270,8 +270,12 @@ for ubuntu_version in 24.04 26.04; do
   ubuntu_release=$test_root/ubuntu-$ubuntu_version-os-release
   printf 'ID=ubuntu\nVERSION_ID=%s\n' "$ubuntu_version" >"$ubuntu_release"
   case $ubuntu_version in
-    24.04) ubuntu_suite=noble ;;
-    26.04) ubuntu_suite=resolute ;;
+    24.04)
+      ubuntu_suite=noble
+      ;;
+    26.04)
+      ubuntu_suite=resolute
+      ;;
   esac
   : >"$package_log"
   PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
@@ -363,8 +367,7 @@ verification_output=$(PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
   /bin/bash "$test_root/config-manager" setup 2>&1)
 verification_status=$?
 set -e
-[[ $verification_status -ne 0 && $verification_output == \
-  *'package installation did not provide dotfiles-fixture-missing-command'* ]] ||
+[[ $verification_status -ne 0 && $verification_output == *'package installation did not provide dotfiles-fixture-missing-command'* ]] ||
   fail 'release setup ignored a configured installation check'
 
 set +e
@@ -383,8 +386,12 @@ set -e
 for failed_operation in apt-get:update apt-get:install dnf:install; do
   : >"$package_log"
   case $failed_operation in
-    apt-get:*) target_release=$debian_release ;;
-    dnf:*) target_release=$amazon_release ;;
+    apt-get:*)
+      target_release=$debian_release
+      ;;
+    dnf:*)
+      target_release=$amazon_release
+      ;;
   esac
   warning_output=$(PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
     TEST_PACKAGE_NETWORK_FAIL="$failed_operation" SETUP_SYSTEM_OS_RELEASE_FILE="$target_release" \
@@ -473,10 +480,18 @@ for failed_command in curl gpg systemctl docker; do
   failure_status=$?
   set -e
   case $failed_command in
-    curl) expected_status=75 ;;
-    gpg) expected_status=76 ;;
-    systemctl) expected_status=73 ;;
-    docker) expected_status=74 ;;
+    curl)
+      expected_status=75
+      ;;
+    gpg)
+      expected_status=76
+      ;;
+    systemctl)
+      expected_status=73
+      ;;
+    docker)
+      expected_status=74
+      ;;
   esac
   [[ $failure_status -eq $expected_status && $failure_output != *'host setup packages ready'* ]] ||
     fail "Docker $failed_command failure was hidden"
@@ -526,8 +541,12 @@ fi
 for target_release in "$debian_release" "$amazon_release"; do
   : >"$TEST_DOCKER_LOG"
   case $target_release in
-    "$debian_release") failed_operation=apt-get:install ;;
-    *) failed_operation=dnf:install ;;
+    "$debian_release")
+      failed_operation=apt-get:install
+      ;;
+    *)
+      failed_operation=dnf:install
+      ;;
   esac
   warning_output=$(PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
     TEST_PACKAGE_NETWORK_FAIL="$failed_operation" SETUP_SYSTEM_OS_RELEASE_FILE="$target_release" \

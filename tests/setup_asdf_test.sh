@@ -204,7 +204,9 @@ ln -s "asdf-$ASDF_VERSION" "$unmanaged_home/bin/asdf"
 cp "$install_home/bin/curl" "$unmanaged_home/bin/curl"
 unmanaged_digest=$(sha256sum "$unmanaged_home/bin/asdf-$ASDF_VERSION")
 for selection in linked unlinked; do
-  if [[ $selection == unlinked ]]; then unlink "$unmanaged_home/bin/asdf"; fi
+  if [[ $selection == unlinked ]]; then
+    unlink "$unmanaged_home/bin/asdf"
+  fi
   set +e
   unmanaged_output=$(HOME="$unmanaged_home" PATH="$unmanaged_home/bin:/usr/bin:/bin" \
     TEST_ASDF_ARCHIVE="$asdf_archive" TEST_ASDF_LOG="$test_root/unmanaged.log" \
@@ -231,8 +233,7 @@ HOME="$install_home" PATH="$install_home/bin:/usr/bin:/bin" \
   "$install_repo/setup-asdf" terraform
 [[ $(readlink -- "$install_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
   fail 'fresh asdf installation was not selected'
-[[ $(sha256sum "$install_home/bin/asdf-$ASDF_VERSION" | awk '{print $1}') == \
-  $(<"$install_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") ]] ||
+[[ $(sha256sum "$install_home/bin/asdf-$ASDF_VERSION" | awk '{print $1}') == $(<"$install_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") ]] ||
   fail 'fresh asdf installation digest was not recorded'
 install_state_digest=$(sha256sum \
   "$install_home/bin/asdf-$ASDF_VERSION" \
@@ -242,8 +243,7 @@ HOME="$install_home" PATH="$install_home/bin:/usr/bin:/bin" \
   "$install_repo/setup-asdf" terraform
 [[ $(sha256sum \
   "$install_home/bin/asdf-$ASDF_VERSION" \
-  "$install_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") == \
-  "$install_state_digest" ]] || fail 'fresh asdf installation retry changed ownership state'
+  "$install_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") == "$install_state_digest" ]] || fail 'fresh asdf installation retry changed ownership state'
 
 reconcile_repo=$test_root/reconcile-repository
 reconcile_home=$test_root/reconcile-home
@@ -325,7 +325,7 @@ printf 'TOOL_RELEASES[terraform]=%q\n' \
   >>"$order_repo/tools.env"
 HOME="$order_home" TEST_ASDF_LOG="$order_log" "$order_repo/setup-asdf" terraform
 [[ $(grep '^install' "$order_log") == $'install\tterraform\t9.1.0\ninstall\tterraform\t9.2.0' &&
-  $(tail -n 1 "$order_log") == $'set\tterraform\t9.1.0' ]] ||
+$(tail -n 1 "$order_log") == $'set\tterraform\t9.1.0' ]] ||
   fail 'record order did not control installation order and home default'
 
 default_repo=$test_root/default-repository
@@ -403,7 +403,7 @@ set -e
 HOME="$failure_home" TEST_ASDF_LOG="$failure_log" \
   "$failure_repo/setup-asdf" terraform >/dev/null
 [[ $(grep -c '^install' "$failure_log") -eq 3 &&
-  $(tail -n 1 "$failure_log") == $'set\tterraform\t9.2.0' ]] ||
+$(tail -n 1 "$failure_log") == $'set\tterraform\t9.2.0' ]] ||
   fail 'runtime retry did not reuse success and finish the failed version'
 
 # Interrupt each publication boundary, then retry with downloads disabled once
@@ -452,24 +452,30 @@ for point in digest binary after-binary selection after-selection; do
     "$recovery_repo/setup-asdf" terraform >"$test_root/failure-$point.log" 2>&1
   publication_status=$?
   set -e
-  if [[ $point == after-* ]]; then expected_status=137; else expected_status=74; fi
+  if [[ $point == after-* ]]; then
+    expected_status=137
+  else
+    expected_status=74
+  fi
   [[ $publication_status -eq $expected_status ]] || fail "$point publication failure was hidden"
-  if [[ $point == after-selection ]]; then expected_target=asdf-$ASDF_VERSION
-  else expected_target=asdf-0.0.1
+  if [[ $point == after-selection ]]; then
+    expected_target=asdf-$ASDF_VERSION
+  else
+    expected_target=asdf-0.0.1
   fi
   [[ $(readlink -- "$recovery_home/bin/asdf") == "$expected_target" ]] ||
     fail "$point interruption changed selection unexpectedly"
   if [[ $point == after-binary || $point == selection || $point == after-selection ]]; then
     recovery_archive=$test_root/absent-archive
-  else recovery_archive=$asdf_archive
+  else
+    recovery_archive=$asdf_archive
   fi
   HOME="$recovery_home" PATH="$recovery_home/bin:/usr/bin:/bin" \
     TEST_ASDF_ARCHIVE="$recovery_archive" TEST_ASDF_LOG="$recovery_log" \
     "$recovery_repo/setup-asdf" terraform >/dev/null
   [[ $(readlink -- "$recovery_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
     fail "$point retry did not select the verified binary"
-  [[ $(sha256sum "$recovery_home/bin/asdf-$ASDF_VERSION" | awk '{print $1}') == \
-    $(<"$recovery_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") ]] ||
+  [[ $(sha256sum "$recovery_home/bin/asdf-$ASDF_VERSION" | awk '{print $1}') == $(<"$recovery_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") ]] ||
     fail "$point retry lost verified binary ownership"
   [[ -x $recovery_home/bin/asdf-0.0.1 ]] || fail "$point retry removed the old binary"
   [[ ! -e $recovery_home/.local/state/dotfiles/setup-asdf/asdf-target &&

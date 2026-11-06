@@ -2,7 +2,10 @@
 
 set -euo pipefail
 
-die() { printf 'dev-vm: %s\n' "$*" >&2; exit 1; }
+die() {
+  printf 'dev-vm: %s\n' "$*" >&2
+  exit 1
+}
 
 [[ $# == 0 ]] || die 'use task dev -- PLATFORM'
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || die 'a Linux x86-64 LXD host is required'
@@ -28,7 +31,9 @@ for setting in DEV_PROJECT DEV_NETWORK DEV_STORAGE; do
   [[ -n ${!setting:-} ]] || die "$setting is required"
 done
 
-lxc_command() { timeout --kill-after=5s 600s lxc --project "$DEV_PROJECT" "$@"; }
+lxc_command() {
+  timeout --kill-after=5s 600s lxc --project "$DEV_PROJECT" "$@"
+}
 
 # Only creation/preparation is serialized; independent interactive shells must coexist.
 exec 9>"$repo_dir/.git/dotfiles-dev-$alias.lock"
@@ -106,9 +111,13 @@ fi
 
 state=$(lxc_command list "$vm" --fast --format=json | jq -er '.[0].status')
 case $state in
-  Stopped) lxc_command start "$vm" ;;
+  Stopped)
+    lxc_command start "$vm"
+    ;;
   Running) ;;
-  *) die "VM $vm is $state; inspect it before continuing" ;;
+  *)
+    die "VM $vm is $state; inspect it before continuing"
+    ;;
 esac
 printf 'Waiting for the LXD agent in %s (up to 10 minutes).\n' "$vm"
 deadline=$((SECONDS + 600))

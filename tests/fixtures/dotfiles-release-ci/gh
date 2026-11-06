@@ -6,7 +6,10 @@ case ${1:-} in
   api)
     case $2 in
       */releases/tags/*)
-        if [[ -n ${TEST_RELEASE_ERROR:-} ]]; then printf 'HTTP %s\n' "$TEST_RELEASE_ERROR" >&2; exit 1; fi
+        if [[ -n ${TEST_RELEASE_ERROR:-} ]]; then
+          printf 'HTTP %s\n' "$TEST_RELEASE_ERROR" >&2
+          exit 1
+        fi
         find "$TEST_RELEASE_ASSETS" -maxdepth 1 -type f -printf '%f\n' |
           jq -Rsc '{assets: (split("\n") | map(select(length > 0) | {name: .}))}'
         ;;
@@ -16,7 +19,9 @@ case ${1:-} in
       */git/tags/*)
         jq -n --arg sha "$TEST_COMMIT" '{object: {type: "commit", sha: $sha}}'
         ;;
-      *) exit 2 ;;
+      *)
+        exit 2
+        ;;
     esac
     ;;
   release)
@@ -26,11 +31,23 @@ case ${1:-} in
     destination=
     while (($#)); do
       case $1 in
-        --repo) shift 2 ;;
-        --pattern) asset=$2; shift 2 ;;
-        --dir) destination=$2; shift 2 ;;
-        --*) exit 2 ;;
-        *) break ;;
+        --repo)
+          shift 2
+          ;;
+        --pattern)
+          asset=$2
+          shift 2
+          ;;
+        --dir)
+          destination=$2
+          shift 2
+          ;;
+        --*)
+          exit 2
+          ;;
+        *)
+          break
+          ;;
       esac
     done
     case $operation in
@@ -47,11 +64,17 @@ case ${1:-} in
           [[ ! -e $TEST_RELEASE_ASSETS/$name ]] || exit 3
           cp -- "$file" "$TEST_RELEASE_ASSETS/$name"
           printf '%s\n' "$name" >>"$TEST_UPLOAD_LOG"
-          if [[ ${TEST_UPLOAD_FAIL_AFTER_ARCHIVE:-0} == 1 && $name == *.tar.gz ]]; then exit 77; fi
+          if [[ ${TEST_UPLOAD_FAIL_AFTER_ARCHIVE:-0} == 1 && $name == *.tar.gz ]]; then
+            exit 77
+          fi
         done
         ;;
-      *) exit 2 ;;
+      *)
+        exit 2
+        ;;
     esac
     ;;
-  *) exit 2 ;;
+  *)
+    exit 2
+    ;;
 esac

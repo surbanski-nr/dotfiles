@@ -14,7 +14,10 @@ cleanup() {
   find "$test_root" -depth -delete
 }
 trap cleanup EXIT
-fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+fail() {
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
 
 checkout=$test_root/'checkout with spaces'
 mkdir -p "$checkout/.git" "$checkout/scripts" "$test_root/bin" "$test_root/state"
@@ -25,7 +28,9 @@ ln -s "$repo_dir/tests/fixtures/dev-vm/curl" "$test_root/bin/curl"
 export TEST_DEV_STATE=$test_root/state TEST_DEV_LOG=$test_root/lxc.log TEST_DEV_PROJECT=fixture
 export PATH="$test_root/bin:$PATH"
 
-run_dev() { "$task_executable" --dir "$checkout" dev DEV_PROJECT=fixture "$@"; }
+run_dev() {
+  "$task_executable" --dir "$checkout" dev DEV_PROJECT=fixture "$@"
+}
 COLORTERM=truecolor run_dev >"$test_root/default.log" 2>&1
 [[ $(<"$TEST_DEV_STATE/shell-colorterm") == truecolor ]] || fail 'guest shell lost host truecolor support'
 vm=$(jq -r .name "$TEST_DEV_STATE"/vm-*.json)
@@ -85,17 +90,23 @@ done
 
 for invalid in 'unknown' 'debian13 ubuntu2404' 'debian13; touch unsafe'; do
   : >"$TEST_DEV_LOG"
-  if run_dev -- "$invalid" >"$test_root/invalid.log" 2>&1; then fail 'invalid platform was accepted'; fi
+  if run_dev -- "$invalid" >"$test_root/invalid.log" 2>&1; then
+    fail 'invalid platform was accepted'
+  fi
   [[ ! -s $TEST_DEV_LOG ]] || fail 'invalid platform touched LXD'
 done
 : >"$TEST_DEV_LOG"
-if run_dev DEV_CPUS=0 >"$test_root/resources.log" 2>&1; then fail 'invalid resources were accepted'; fi
+if run_dev DEV_CPUS=0 >"$test_root/resources.log" 2>&1; then
+  fail 'invalid resources were accepted'
+fi
 [[ ! -s $TEST_DEV_LOG ]] || fail 'invalid resources touched LXD'
 
 state=$TEST_DEV_STATE/vm-$vm.json
 jq '.devices.checkout.source = "/unexpected"' "$state" >"$state.next"
 mv "$state.next" "$state"
-if run_dev >"$test_root/unexpected.log" 2>&1; then fail 'an unexpected checkout mount was reused'; fi
+if run_dev >"$test_root/unexpected.log" 2>&1; then
+  fail 'an unexpected checkout mount was reused'
+fi
 grep -F 'unexpected type or checkout mount' "$test_root/unexpected.log" >/dev/null || fail 'unsafe reuse lacked an explanation'
 
 export TEST_DEV_STATE=$test_root/cold-state TEST_DEV_COLD_IMAGE=1
@@ -113,8 +124,12 @@ export TEST_DEV_STATE=$test_root/bad-checksum-state
 mkdir -p "$TEST_DEV_STATE"
 PLATFORMS_JSON=$(printf '%s\n' "$PLATFORMS_JSON" | jq '.amazonlinux2023.sha256 = ("a" * 64)')
 : >"$TEST_DEV_LOG"
-if TMPDIR="$test_root/downloads" bash "$checkout/scripts/dev-vm" >"$test_root/checksum.log" 2>&1; then fail 'corrupt QCOW2 image was accepted'; fi
-if grep -qE '^(init|image import) ' "$TEST_DEV_LOG"; then fail 'corrupt image was imported or started'; fi
+if TMPDIR="$test_root/downloads" bash "$checkout/scripts/dev-vm" >"$test_root/checksum.log" 2>&1; then
+  fail 'corrupt QCOW2 image was accepted'
+fi
+if grep -qE '^(init|image import) ' "$TEST_DEV_LOG"; then
+  fail 'corrupt image was imported or started'
+fi
 [[ -z $(find "$test_root/downloads" -mindepth 1 -print -quit) ]] || fail 'failed import leaked temporary downloads'
 
 TEST_DEV_STATE="$test_root/cold-state" TEST_DEV_AGENT_HANG=1 timeout --kill-after=5s 25s \

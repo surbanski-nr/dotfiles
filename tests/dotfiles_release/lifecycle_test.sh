@@ -48,11 +48,11 @@ assert_link "$test_home/bin/rg" rg-0.9
 [[ $(PATH="$test_home/bin:$release_bin:/usr/bin:/bin" command -v rg) == "$test_home/bin/rg" ]] ||
   fail 'user executable did not override the release'
 [[ $(<"$test_home/.bashrc.before-dotfiles-release") == 'original bashrc' &&
-  $(stat -c %a "$test_home/.bashrc.before-dotfiles-release") == 640 ]] ||
+$(stat -c %a "$test_home/.bashrc.before-dotfiles-release") == 640 ]] ||
   fail 'install did not preserve baseline bytes and mode'
 [[ $(<"$test_home/.local/state/nvim2/telescope_history.sqlite3") == 'newer telescope' &&
-  $(<"$test_home/.local/state/nvim2/telescope_history") == 'legacy prompts' &&
-  $(<"$legacy_data/telescope_history") == 'legacy prompts' ]] ||
+$(<"$test_home/.local/state/nvim2/telescope_history") == 'legacy prompts' &&
+$(<"$legacy_data/telescope_history") == 'legacy prompts' ]] ||
   fail 'legacy state migration did not preserve old and new user data'
 [[ ! -e $release_bin/python && ! -L $release_bin/python &&
   ! -e $release_bin/python3 && ! -L $release_bin/python3 &&
@@ -72,7 +72,7 @@ assert_link "$test_home/.config/systemd/user/dotfiles-ssh-agent.service" \
 
 for client in kubectl helm; do
   [[ $(env -u KUBECTL_VERSION -u HELM_VERSION "$release_bin/$client") == *'fixture 1.0'* &&
-    $(env "${client^^}_VERSION=0.9" "$release_bin/$client") == *'fixture 0.9'* ]] ||
+  $(env "${client^^}_VERSION=0.9" "$release_bin/$client") == *'fixture 0.9'* ]] ||
     fail "$client did not select the default and requested versions"
   [[ $(env "${client^^}_VERSION=0.9" "$release_bin/$client" fixture-args \
     'argument with spaces' '*' '--flag=value') == *$'<argument with spaces>\n<*>\n<--flag=value>' ]] ||
@@ -152,7 +152,7 @@ assert_link "$test_home/.local/share/nvim2" "$legacy_data"
   ! -L $test_home/.ssh/config && ! -L $test_home/bin/kubectl ]] ||
   fail 'uninstall did not restore prior trees and remove release links'
 [[ $(<"$test_home/kube-backup-contexts.txt") == 'private contexts' &&
-  $(<"$test_home/kube-log-prefixes.txt") == 'private prefixes' ]] ||
+$(<"$test_home/kube-log-prefixes.txt") == 'private prefixes' ]] ||
   fail 'release operations modified private Kubernetes inputs'
 
 run_manager set "$id_three" >/dev/null

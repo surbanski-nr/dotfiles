@@ -140,7 +140,7 @@ printf '#!/usr/bin/env bash\ntrap "exit 130" INT\nkill -INT "$$"\nexit 0\n' \
 signal_status=0
 PATH="$test_bin" /bin/bash "$syntax_repo/scripts/validate" bash \
   >"$test_root/test-signal.log" 2>&1 || signal_status=$?
-[[ $signal_status == 130 ]] || \
+[[ $signal_status == 130 ]] ||
   fail "background test inherited ignored SIGINT: $(<"$test_root/test-signal.log")"
 unlink "$test_bin/timeout"
 mv "$test_bin/timeout.saved" "$test_bin/timeout"

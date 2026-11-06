@@ -72,8 +72,12 @@ fi
 if [[ ${1:-} == get && ${2:-} == pods ]]; then
   [[ $scenario != pod-list-fail ]] || exit 49
   case "$scenario" in
-    no-pod-match) printf 'worker-1\n' ;;
-    *) printf 'api-good-1\napi-bad-2\nworker-1\n' ;;
+    no-pod-match)
+      printf 'worker-1\n'
+      ;;
+    *)
+      printf 'api-good-1\napi-bad-2\nworker-1\n'
+      ;;
   esac
   exit 0
 fi

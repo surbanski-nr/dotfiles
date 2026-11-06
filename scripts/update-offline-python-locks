@@ -10,7 +10,9 @@ die() {
 cleanup() {
   local status=$?
   trap - EXIT
-  if [[ -n ${work:-} && -d $work ]]; then find "$work" -depth -delete; fi
+  if [[ -n ${work:-} && -d $work ]]; then
+    find "$work" -depth -delete
+  fi
   exit "$status"
 }
 trap cleanup EXIT

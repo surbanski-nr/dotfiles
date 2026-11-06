@@ -16,7 +16,9 @@ test_home=$test_root/regular-current-home
 mkdir -p "$test_home/dotfiles-releases"
 printf 'private selection\n' >"$test_home/dotfiles-releases/current"
 selection_digest=$(sha256sum "$test_home/dotfiles-releases/current")
-if run_manager install "$artifact_one" >/dev/null 2>&1; then fail 'regular current was overwritten'; fi
+if run_manager install "$artifact_one" >/dev/null 2>&1; then
+  fail 'regular current was overwritten'
+fi
 [[ $(sha256sum "$test_home/dotfiles-releases/current") == "$selection_digest" ]] ||
   fail 'invalid current data was modified'
 
@@ -25,9 +27,11 @@ outside_root=$test_root/outside-root
 mkdir -p "$test_home" "$outside_root"
 printf 'outside marker\n' >"$outside_root/marker"
 ln -s "$outside_root" "$test_home/dotfiles-releases"
-if run_manager install "$artifact_one" >/dev/null 2>&1; then fail 'symlink release root was accepted'; fi
+if run_manager install "$artifact_one" >/dev/null 2>&1; then
+  fail 'symlink release root was accepted'
+fi
 [[ $(<"$outside_root/marker") == 'outside marker' &&
-  $(find "$outside_root" -mindepth 1 -maxdepth 1 | wc -l) == 1 ]] ||
+$(find "$outside_root" -mindepth 1 -maxdepth 1 | wc -l) == 1 ]] ||
   fail 'symlink root modified outside data'
 
 test_home=$test_root/parent-link-home
@@ -39,8 +43,8 @@ if run_manager install "$artifact_one" >"$test_root/parent-link.log" 2>&1; then
   fail 'symlink parent was accepted'
 fi
 [[ $(<"$test_root/parent-link.log") == *'symlink parent'* &&
-  $(<"$outside_config/marker") == 'outside config marker' &&
-  ! -e $test_home/dotfiles-releases/$id_one ]] ||
+$(<"$outside_config/marker") == 'outside config marker' &&
+! -e $test_home/dotfiles-releases/$id_one ]] ||
   fail 'symlink parent rejection changed outside data or retained a candidate'
 
 test_home=$test_root/user-bin-link-home
@@ -53,7 +57,7 @@ run_manager health >/dev/null
 run_manager uninstall >/dev/null
 assert_link "$test_home/bin" "$outside_bin"
 [[ $(<"$outside_bin/marker") == 'outside bin marker' &&
-  $(find "$outside_bin" -mindepth 1 -maxdepth 1 | wc -l) == 1 ]] ||
+$(find "$outside_bin" -mindepth 1 -maxdepth 1 | wc -l) == 1 ]] ||
   fail 'release lifecycle changed the user-owned bin directory'
 
 test_home=$test_root/saved-conflict-home
@@ -64,8 +68,8 @@ if run_manager install "$artifact_one" >"$test_root/saved-conflict.log" 2>&1; th
   fail 'existing backup was overwritten'
 fi
 [[ $(<"$test_home/.bashrc") == 'current private file' &&
-  $(<"$test_home/.bashrc.before-dotfiles-release") == 'older saved original' &&
-  ! -e $test_home/dotfiles-releases/$id_one ]] ||
+$(<"$test_home/.bashrc.before-dotfiles-release") == 'older saved original' &&
+! -e $test_home/dotfiles-releases/$id_one ]] ||
   fail 'backup conflict modified user data'
 
 test_home=$test_root/foreign-link-home

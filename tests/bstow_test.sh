@@ -10,60 +10,60 @@ stow_dir=$test_root/home/repo
 target_dir=$test_root/home
 
 cleanup() {
-    find "$test_root" -depth -delete
+  find "$test_root" -depth -delete
 }
 trap cleanup EXIT
 
 fail() {
-    printf 'FAIL: %s\n' "$*" >&2
-    exit 1
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
 }
 
 assert_contains() {
-    local value=$1
-    local expected=$2
-    [[ $value == *"$expected"* ]] || fail "expected output to contain: $expected"
+  local value=$1
+  local expected=$2
+  [[ $value == *"$expected"* ]] || fail "expected output to contain: $expected"
 }
 
 assert_link_target() {
-    local link=$1
-    local expected=$2
-    [[ -L $link ]] || fail "expected symlink: $link"
-    [[ $(readlink "$link") == "$expected" ]] || fail "unexpected target for $link"
+  local link=$1
+  local expected=$2
+  [[ -L $link ]] || fail "expected symlink: $link"
+  [[ $(readlink "$link") == "$expected" ]] || fail "unexpected target for $link"
 }
 
 run_bstow() {
-    local output
-    local status
-    if output=$(BSTOW_STATE_DIR="$test_root/state" timeout 10s "$bstow" "$@" 2>&1); then
-        status=0
-    else
-        status=$?
-    fi
-    BSTOW_OUTPUT=$output
-    BSTOW_STATUS=$status
+  local output
+  local status
+  if output=$(BSTOW_STATE_DIR="$test_root/state" timeout 10s "$bstow" "$@" 2>&1); then
+    status=0
+  else
+    status=$?
+  fi
+  BSTOW_OUTPUT=$output
+  BSTOW_STATUS=$status
 }
 
 run_bstow_with_failure() {
-    local command=$1
-    shift
-    local shim_dir=$test_root/shims/$command
+  local command=$1
+  shift
+  local shim_dir=$test_root/shims/$command
 
-    mkdir -p "$shim_dir"
-    ln -sf "$failure_fixture" "$shim_dir/$command"
-    PATH="$shim_dir:$PATH" BSTOW_FAIL_STATUS=73 run_bstow "$@"
+  mkdir -p "$shim_dir"
+  ln -sf "$failure_fixture" "$shim_dir/$command"
+  PATH="$shim_dir:$PATH" BSTOW_FAIL_STATUS=73 run_bstow "$@"
 }
 
 package_state_file() {
-    local package=$1
-    find "$test_root/state" -maxdepth 1 -type f -name "$package-*.links" -print -quit
+  local package=$1
+  find "$test_root/state" -maxdepth 1 -type f -name "$package-*.links" -print -quit
 }
 
 reset_target() {
-    local path=$1
-    if [[ -L $path || -f $path ]]; then
-        unlink "$path"
-    fi
+  local path=$1
+  if [[ -L $path || -f $path ]]; then
+    unlink "$path"
+  fi
 }
 
 mkdir -p "$stow_dir/bash"
@@ -209,10 +209,10 @@ run_bstow --force --dir "$alternate_stow_dir" --target "$target_dir" restow bran
 assert_link_target "$target_dir/.config/one/current" "$alternate_stow_dir/branch/.config/one/current"
 
 mkdir -p "$stow_dir/folded/.config/folded/skins" "$alternate_stow_dir/folded/.config/folded/skins" "$target_dir/.config/folded"
-printf 'old\n' > "$stow_dir/folded/.config/folded/skins/theme.yaml"
-printf 'old only\n' > "$stow_dir/folded/.config/folded/skins/old-only.yaml"
-printf 'new\n' > "$alternate_stow_dir/folded/.config/folded/skins/theme.yaml"
-printf 'added\n' > "$alternate_stow_dir/folded/.config/folded/skins/added.yaml"
+printf 'old\n' >"$stow_dir/folded/.config/folded/skins/theme.yaml"
+printf 'old only\n' >"$stow_dir/folded/.config/folded/skins/old-only.yaml"
+printf 'new\n' >"$alternate_stow_dir/folded/.config/folded/skins/theme.yaml"
+printf 'added\n' >"$alternate_stow_dir/folded/.config/folded/skins/added.yaml"
 folded_dir=$target_dir/.config/folded/skins
 ln -s "$stow_dir/folded/.config/folded/skins" "$folded_dir"
 
@@ -223,7 +223,7 @@ assert_link_target "$folded_dir" "$stow_dir/folded/.config/folded/skins"
 run_bstow --dry-run --force --dir "$alternate_stow_dir" --target "$target_dir" restow folded
 [[ $BSTOW_STATUS -eq 0 ]] || fail 'forced dry-run rejected a foreign parent-directory symlink'
 assert_contains "$BSTOW_OUTPUT" "Would replace directory symlink: $folded_dir"
-replacement_count=$(grep -Fc "Would replace directory symlink: $folded_dir" <<< "$BSTOW_OUTPUT")
+replacement_count=$(grep -Fc "Would replace directory symlink: $folded_dir" <<<"$BSTOW_OUTPUT")
 [[ $replacement_count -eq 1 ]] || fail "forced dry-run reported the same directory replacement $replacement_count times"
 assert_link_target "$folded_dir" "$stow_dir/folded/.config/folded/skins"
 
@@ -237,7 +237,7 @@ assert_link_target "$folded_dir/added.yaml" "$alternate_stow_dir/folded/.config/
 [[ $(<"$stow_dir/folded/.config/folded/skins/old-only.yaml") == 'old only' ]] || fail 'forced restow modified an old-only source file'
 
 mkdir -p "$alternate_stow_dir/same/.config/same/skins" "$target_dir/.config/same"
-printf 'current\n' > "$alternate_stow_dir/same/.config/same/skins/theme.yaml"
+printf 'current\n' >"$alternate_stow_dir/same/.config/same/skins/theme.yaml"
 same_dir=$target_dir/.config/same/skins
 ln -s "$alternate_stow_dir/same/.config/same/skins" "$same_dir"
 run_bstow --dir "$alternate_stow_dir" --target "$target_dir" stow same
@@ -379,11 +379,11 @@ assert_link_target "$target_dir/missing-source-file" "$stow_dir/missing-source/m
 [[ -f $missing_source_state ]] || fail 'missing source package removed ownership state'
 
 for corrupt_case in invalid-header unsafe-record truncated-record; do
-    mkdir -p "$stow_dir/$corrupt_case/$corrupt_case"
-    printf 'one\n' >"$stow_dir/$corrupt_case/$corrupt_case/one"
-    printf 'two\n' >"$stow_dir/$corrupt_case/$corrupt_case/two"
-    run_bstow --dir "$stow_dir" --target "$target_dir" stow "$corrupt_case"
-    [[ $BSTOW_STATUS -eq 0 ]] || fail "$corrupt_case setup failed"
+  mkdir -p "$stow_dir/$corrupt_case/$corrupt_case"
+  printf 'one\n' >"$stow_dir/$corrupt_case/$corrupt_case/one"
+  printf 'two\n' >"$stow_dir/$corrupt_case/$corrupt_case/two"
+  run_bstow --dir "$stow_dir" --target "$target_dir" stow "$corrupt_case"
+  [[ $BSTOW_STATUS -eq 0 ]] || fail "$corrupt_case setup failed"
 done
 
 invalid_header_state=$(package_state_file invalid-header)

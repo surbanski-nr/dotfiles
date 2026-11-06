@@ -16,8 +16,7 @@ prerequisite_output=$(run_setup "$prerequisite_home" "$prerequisite_repository" 
   "$archive_root" k9s 2>&1)
 prerequisite_status=$?
 set -e
-[[ $prerequisite_status -ne 0 && $prerequisite_output == \
-  *'setup-tools: required command is missing: dotfiles-fixture-missing-command'* ]] ||
+[[ $prerequisite_status -ne 0 && $prerequisite_output == *'setup-tools: required command is missing: dotfiles-fixture-missing-command'* ]] ||
   fail 'setup-tools ignored its configured prerequisites'
 [[ ! -e $prerequisite_home/bin && ! -e $prerequisite_home/.local ]] ||
   fail 'a missing prerequisite changed the target home'

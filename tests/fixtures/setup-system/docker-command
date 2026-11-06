@@ -26,7 +26,9 @@ case $command_name in
           printf 'fixture Docker signing key\n' >"$2"
           exit 0
           ;;
-        *) shift ;;
+        *)
+          shift
+          ;;
       esac
     done
     exit 1
@@ -52,5 +54,7 @@ case $command_name in
     [[ ${TEST_DOCKER_FAIL:-} != docker ]] || exit 74
     ;;
   groupadd | usermod) ;;
-  *) exit 1 ;;
+  *)
+    exit 1
+    ;;
 esac

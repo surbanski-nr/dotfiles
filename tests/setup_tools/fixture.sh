@@ -103,18 +103,30 @@ load_test_versions() {
   source "$repository/tools.env"
   # shellcheck disable=SC1090
   source "$repository/scripts/setup-lib"
-  select_default_release TOOL_RELEASES gh; GH_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES htop; HTOP_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES k9s; K9S_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES kind; KIND_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES yq; YQ_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES oh-my-posh; OMP_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES uv; UV_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES nvim; NVIM_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES tmux; TMUX_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES fd; FD_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES go; GO_VERSION=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES python; PYTHON_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES gh
+  GH_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES htop
+  HTOP_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES k9s
+  K9S_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES kind
+  KIND_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES yq
+  YQ_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES oh-my-posh
+  OMP_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES uv
+  UV_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES nvim
+  NVIM_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES tmux
+  TMUX_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES fd
+  FD_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES go
+  GO_VERSION=$RELEASE_VERSION
+  select_default_release TOOL_RELEASES python
+  PYTHON_VERSION=$RELEASE_VERSION
 }
 
 make_test_repo() {

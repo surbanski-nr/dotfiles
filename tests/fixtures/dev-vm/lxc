@@ -26,7 +26,9 @@ case $command in
   image)
     case $1 in
       info)
-        if [[ ${TEST_DEV_COLD_IMAGE:-0} == 1 && ! -e $TEST_DEV_STATE/image.json ]]; then exit 1; fi
+        if [[ ${TEST_DEV_COLD_IMAGE:-0} == 1 && ! -e $TEST_DEV_STATE/image.json ]]; then
+          exit 1
+        fi
         if [[ -e $TEST_DEV_STATE/image.json ]]; then
           checksum=$(jq -r '.properties["user.dotfiles.dev.sha256"]' "$TEST_DEV_STATE/image.json")
         else
@@ -34,12 +36,19 @@ case $command in
         fi
         printf 'Properties:\n    user.dotfiles.dev.sha256: %s\n' "$checksum"
         ;;
-      import) tar -xOf "$2" metadata.yaml >"$TEST_DEV_STATE/image.json" ;;
-      *) exit 1 ;;
+      import)
+        tar -xOf "$2" metadata.yaml >"$TEST_DEV_STATE/image.json"
+        ;;
+      *)
+        exit 1
+        ;;
     esac
     ;;
   init)
-    [[ ${TEST_DEV_INIT_FAIL:-0} != 1 ]] || { printf 'fixture: VM creation failed\n' >&2; exit 81; }
+    [[ ${TEST_DEV_INIT_FAIL:-0} != 1 ]] || {
+      printf 'fixture: VM creation failed\n' >&2
+      exit 81
+    }
     image=$1 name=$2
     shift 2
     config='{}'
@@ -51,10 +60,19 @@ case $command in
           config=$(printf '%s\n' "$config" | jq -c --arg key "${pair%%=*}" --arg value "${pair#*=}" '.[$key] = $value')
           shift 2
           ;;
-        -d) disk=${2#root,size=}; shift 2 ;;
-        --network | --storage) shift 2 ;;
-        --vm) shift ;;
-        *) exit 1 ;;
+        -d)
+          disk=${2#root,size=}
+          shift 2
+          ;;
+        --network | --storage)
+          shift 2
+          ;;
+        --vm)
+          shift
+          ;;
+        *)
+          exit 1
+          ;;
       esac
     done
     jq -n --arg name "$name" --arg image "$image" --arg disk "$disk" --argjson config "$config" '
@@ -75,8 +93,12 @@ case $command in
         jq --arg name "$device" --argjson properties "$properties" '.devices[$name] = $properties' "$state" >"$state.next"
         mv "$state.next" "$state"
         ;;
-      set) cat >"$TEST_DEV_STATE/cloud-init.yaml" ;;
-      *) exit 1 ;;
+      set)
+        cat >"$TEST_DEV_STATE/cloud-init.yaml"
+        ;;
+      *)
+        exit 1
+        ;;
     esac
     ;;
   start)
@@ -89,7 +111,9 @@ case $command in
     shift
     guest_colorterm=
     while [[ $1 != -- ]]; do
-      if [[ $1 == --env && $2 == COLORTERM=* ]]; then guest_colorterm=${2#COLORTERM=}; fi
+      if [[ $1 == --env && $2 == COLORTERM=* ]]; then
+        guest_colorterm=${2#COLORTERM=}
+      fi
       shift
     done
     shift
@@ -98,7 +122,9 @@ case $command in
         if [[ ${TEST_DEV_AGENT_HANG:-0} == 1 && ! -e $TEST_DEV_STATE/agent-waited ]]; then
           touch "$TEST_DEV_STATE/agent-waited"
           trap '' TERM
-          while true; do sleep 1; done
+          while true; do
+            sleep 1
+          done
         fi
         exit 0
         ;;
@@ -112,18 +138,26 @@ case $command in
         fi
         cat >/dev/null
         ;;
-      getent) printf 'dev:x:%s:%s:Development:/home/dev:/bin/bash\n' "$(id -u)" "$(id -g)" ;;
+      getent)
+        printf 'dev:x:%s:%s:Development:/home/dev:/bin/bash\n' "$(id -u)" "$(id -g)"
+        ;;
       runuser)
         printf '%s' "$guest_colorterm" >"$TEST_DEV_STATE/shell-colorterm"
         printf 'guest-shell %s\n' "$name"
         if [[ -n ${TEST_DEV_SHELL_READY:-} ]]; then
           touch "$TEST_DEV_SHELL_READY"
-          while [[ ! -e $TEST_DEV_SHELL_RELEASE ]]; do sleep 0.1; done
+          while [[ ! -e $TEST_DEV_SHELL_RELEASE ]]; do
+            sleep 0.1
+          done
         fi
         exit "${TEST_DEV_SHELL_STATUS:-0}"
         ;;
-      *) exit 1 ;;
+      *)
+        exit 1
+        ;;
     esac
     ;;
-  *) exit 1 ;;
+  *)
+    exit 1
+    ;;
 esac

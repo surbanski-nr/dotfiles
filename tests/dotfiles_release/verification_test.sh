@@ -62,7 +62,9 @@ for defect in missing-layout missing-executable missing-plugin missing-wheelhous
   make_artifact "$commit_three" "$marker" "$archive" 3.0 true true true
   release=$test_root/stage-$marker/$id_three
   case $defect in
-    missing-layout) find "$release/config" -depth -delete ;;
+    missing-layout)
+      find "$release/config" -depth -delete
+      ;;
     missing-history-library | missing-history-archiver)
       cp "$repo_dir/bash/.bashrc" "$release/dotfiles/bash/.bashrc"
       if [[ $defect == missing-history-library ]]; then
@@ -71,30 +73,58 @@ for defect in missing-layout missing-executable missing-plugin missing-wheelhous
         unlink "$release/dotfiles/scripts/bash-history-archive"
       fi
       ;;
-    missing-executable) unlink "$release/bin/uvx" ;;
-    missing-plugin) find "$release/share/tmux/plugins/tmux-sensible" -depth -delete ;;
-    missing-wheelhouse) find "$release/python-wheelhouse" -depth -delete ;;
-    missing-private-nvim) unlink "$release/tools/nvim/bin/nvim" ;;
-    missing-private-tmux) unlink "$release/tools/tmux/bin/tmux" ;;
-    missing-private-python-link) unlink "$release/tools/python" ;;
-    public-python) ln -s ../tools/python/bin/python3 "$release/bin/python" ;;
-    public-python3) ln -s ../tools/python/bin/python3 "$release/bin/python3" ;;
-    missing-nvim-runtime) find "$release/tools/nvim/share/nvim/runtime" -depth -delete ;;
-    incomplete-ssh) unlink "$release/dotfiles/ssh/.ssh/config" ;;
-    dangling-link) ln -s missing "$release/tools/dangling" ;;
+    missing-executable)
+      unlink "$release/bin/uvx"
+      ;;
+    missing-plugin)
+      find "$release/share/tmux/plugins/tmux-sensible" -depth -delete
+      ;;
+    missing-wheelhouse)
+      find "$release/python-wheelhouse" -depth -delete
+      ;;
+    missing-private-nvim)
+      unlink "$release/tools/nvim/bin/nvim"
+      ;;
+    missing-private-tmux)
+      unlink "$release/tools/tmux/bin/tmux"
+      ;;
+    missing-private-python-link)
+      unlink "$release/tools/python"
+      ;;
+    public-python)
+      ln -s ../tools/python/bin/python3 "$release/bin/python"
+      ;;
+    public-python3)
+      ln -s ../tools/python/bin/python3 "$release/bin/python3"
+      ;;
+    missing-nvim-runtime)
+      find "$release/tools/nvim/share/nvim/runtime" -depth -delete
+      ;;
+    incomplete-ssh)
+      unlink "$release/dotfiles/ssh/.ssh/config"
+      ;;
+    dangling-link)
+      ln -s missing "$release/tools/dangling"
+      ;;
     dangling-plugin-runtime)
       unlink "$release/share/tmux/plugins/tmux-resurrect/resurrect.tmux"
       ln -s missing "$release/share/tmux/plugins/tmux-resurrect/resurrect.tmux"
       ;;
-    installed-state) printf 'fake\n' >"$release/installed.sha256" ;;
+    installed-state)
+      printf 'fake\n' >"$release/installed.sha256"
+      ;;
     inventory-mismatch)
       printf 'ansible-lint\t99.0.0\nyamllint\t1.38.0\n' >"$release/python-locks/inventory.tsv"
       ;;
     duplicate-inventory)
       printf 'ansible-lint\t26.1.1\nansible-lint\t26.1.1\n' >"$release/python-locks/inventory.tsv"
       ;;
-    extra-lock) cp "$release/python-locks/yamllint.lock" "$release/python-locks/extra.lock" ;;
-    control-character) printf 'unsafe\n' >"$release/tools/"$'control\001' ;;
+    extra-lock)
+      cp "$release/python-locks/yamllint.lock" "$release/python-locks/extra.lock"
+      ;;
+    control-character)
+      printf 'unsafe\n' >"$release/tools/"$'control\001'
+      ;;
     control-link)
       printf 'unsafe\n' >"$release/tools/"$'control\001'
       ln -s $'control\001' "$release/tools/control-link"
@@ -102,9 +132,15 @@ for defect in missing-layout missing-executable missing-plugin missing-wheelhous
   esac
   repack_artifact "$marker" "$id_three" "$archive"
   case $defect in
-    checksum) printf 'modified\n' >>"$release/config/nvim2/init.lua" ;;
-    missing-checksum) sed -i '\|./config/nvim2/init.lua$|d' "$release/SHA256SUMS" ;;
-    extra-file) printf 'unlisted\n' >"$release/unlisted" ;;
+    checksum)
+      printf 'modified\n' >>"$release/config/nvim2/init.lua"
+      ;;
+    missing-checksum)
+      sed -i '\|./config/nvim2/init.lua$|d' "$release/SHA256SUMS"
+      ;;
+    extra-file)
+      printf 'unlisted\n' >"$release/unlisted"
+      ;;
     extra-root)
       mkdir -p "$test_root/stage-$marker/another-root"
       tar -C "$test_root/stage-$marker" -czf "$archive" "$id_three" another-root
@@ -122,7 +158,9 @@ for defect in missing-layout missing-executable missing-plugin missing-wheelhous
 done
 
 for command in inspect rollback; do
-  if run_manager "$command" >/dev/null 2>&1; then fail "obsolete command $command still exists"; fi
+  if run_manager "$command" >/dev/null 2>&1; then
+    fail "obsolete command $command still exists"
+  fi
 done
 if run_manager verify debian-13-x86_64 "$artifact_one" >/dev/null 2>&1; then
   fail 'verify still accepts a required platform argument'

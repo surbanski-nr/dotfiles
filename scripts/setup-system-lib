@@ -32,7 +32,9 @@ system_validate_host() {
     debian:13 | ubuntu:24.04 | ubuntu:26.04 | amzn:2023)
       PLATFORM="$ID:$VERSION_ID"
       ;;
-    *) system_error "unsupported distribution: ${ID:-unknown} ${VERSION_ID:-unknown}" ;;
+    *)
+      system_error "unsupported distribution: ${ID:-unknown} ${VERSION_ID:-unknown}"
+      ;;
   esac
   ROOT_COMMAND=()
   if ((EUID != 0)); then
@@ -63,8 +65,9 @@ system_setup_command() {
   fi
   if [[ $status == 124 || $status == 137 ]] ||
     [[ $1 == curl && $status =~ ^(5|6|7|18|22|28|35|47|52|55|56|60|97)$ ]] ||
-    grep -Eiq 'Temporary failure resolving|Could(n.t| not) (resolve|connect)|Failed to connect|Connection (timed out|refused|reset)|Network is unreachable|Cannot initiate the connection|timed? *out|timeout|Curl error \((5|6|7|28|52|55|56)\)|All mirrors were tried|[45][0-9][0-9] (Forbidden|Unauthorized|Not Found|Bad Gateway|Service Unavailable|Gateway Timeout)' "$SETUP_TEMP_DIR/command.log" ||
-    { ((SETUP_WARNINGS > 0)) && grep -Eiq 'Unable to locate package|has no installation candidate|No match for argument|Unable to find a match' "$SETUP_TEMP_DIR/command.log"; }; then
+    grep -Eiq 'Temporary failure resolving|Could(n.t| not) (resolve|connect)|Failed to connect|Connection (timed out|refused|reset)|Network is unreachable|Cannot initiate the connection|timed? *out|timeout|Curl error \((5|6|7|28|52|55|56)\)|All mirrors were tried|[45][0-9][0-9] (Forbidden|Unauthorized|Not Found|Bad Gateway|Service Unavailable|Gateway Timeout)' "$SETUP_TEMP_DIR/command.log" || {
+    ((SETUP_WARNINGS > 0)) && grep -Eiq 'Unable to locate package|has no installation candidate|No match for argument|Unable to find a match' "$SETUP_TEMP_DIR/command.log"
+  }; then
     system_warning "$description failed (exit $status); continuing"
     return 1
   fi
@@ -111,9 +114,18 @@ system_install_docker_repository() {
   local source_file=$etc_dir/apt/sources.list.d/docker.sources
 
   case $PLATFORM in
-    debian:13) distribution=debian; suite=trixie ;;
-    ubuntu:24.04) distribution=ubuntu; suite=noble ;;
-    ubuntu:26.04) distribution=ubuntu; suite=resolute ;;
+    debian:13)
+      distribution=debian
+      suite=trixie
+      ;;
+    ubuntu:24.04)
+      distribution=ubuntu
+      suite=noble
+      ;;
+    ubuntu:26.04)
+      distribution=ubuntu
+      suite=resolute
+      ;;
   esac
   if [[ -e $etc_dir/apt/sources.list.d/docker.list || -L $etc_dir/apt/sources.list.d/docker.list ]]; then
     system_error 'legacy Docker repository docker.list exists; review and migrate it before rerunning' || exit 1
@@ -234,9 +246,16 @@ system_package_list() {
   local -a role_common=() role_platform=()
 
   case $platform in
-    debian:* | ubuntu:* | debian-*-x86_64 | ubuntu-*-x86_64) family=DEBIAN ;;
-    amzn:2023 | amzn-2023-x86_64) family=AMZN ;;
-    *) system_error "unsupported system package platform: $platform"; return ;;
+    debian:* | ubuntu:* | debian-*-x86_64 | ubuntu-*-x86_64)
+      family=DEBIAN
+      ;;
+    amzn:2023 | amzn-2023-x86_64)
+      family=AMZN
+      ;;
+    *)
+      system_error "unsupported system package platform: $platform"
+      return
+      ;;
   esac
   local -n runtime_platform=SYSTEM_${family}_RUNTIME_PACKAGES
   case $role in
@@ -247,7 +266,10 @@ system_package_list() {
       role_common=("${common[@]}")
       role_platform=("${specific[@]}")
       ;;
-    *) system_error "unknown system package role: $role"; return ;;
+    *)
+      system_error "unknown system package role: $role"
+      return
+      ;;
   esac
   # Shared by host setup and disposable release builders.
   # shellcheck disable=SC2034
@@ -285,6 +307,8 @@ install_system_packages() {
       "${command_prefix[@]}" dnf install -y --allowerasing \
         "${SETUP_SYSTEM_PACKAGES[@]}"
       ;;
-    *) system_error "unsupported system package platform: $platform" ;;
+    *)
+      system_error "unsupported system package platform: $platform"
+      ;;
   esac
 }

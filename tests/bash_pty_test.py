@@ -27,9 +27,13 @@ class Shell:
         self.buffer = bytearray()
         self.transcript = bytearray()
         environment = {
-            'HOME': str(home), 'PATH': '/usr/bin:/bin', 'TERM': 'xterm-256color',
-            'LANG': 'C.UTF-8', 'TEST_COMMAND_MODE': 'terminal',
-            'TEST_SHELL_NAME': name, 'TEST_PROMPT_LOG': str(self.log),
+            'HOME': str(home),
+            'PATH': '/usr/bin:/bin',
+            'TERM': 'xterm-256color',
+            'LANG': 'C.UTF-8',
+            'TEST_COMMAND_MODE': 'terminal',
+            'TEST_SHELL_NAME': name,
+            'TEST_PROMPT_LOG': str(self.log),
             'TEST_EXIT_LOG': str(home / f'exit-{name}.log'),
             'TEST_FZF_SELECTION': 'printf "fzf-selection-works\\n"',
         }
@@ -37,14 +41,20 @@ class Shell:
         if self.pid == 0:
             try:
                 os.chdir(home)
-                os.execve('/bin/bash', ['bash', '--noprofile', '--rcfile',
-                                       str(home / '.bashrc'), '-i'], environment)
+                os.execve(
+                    '/bin/bash',
+                    ['bash', '--noprofile', '--rcfile', str(home / '.bashrc'), '-i'],
+                    environment,
+                )
             except BaseException as error:
                 os.write(2, f'cannot start Bash: {error}\n'.encode())
                 os._exit(127)
         try:
-            fcntl.ioctl(self.terminal, termios.TIOCSWINSZ,
-                        struct.pack('HHHH', 24, 160, 0, 0))
+            fcntl.ioctl(
+                self.terminal,
+                termios.TIOCSWINSZ,
+                struct.pack('HHHH', 24, 160, 0, 0),
+            )
         except BaseException:
             self.close()
             raise
@@ -82,8 +92,10 @@ class Shell:
         deadline = time.monotonic() + 10
         while marker not in self.buffer:
             if time.monotonic() >= deadline or not self.read(.05):
-                raise AssertionError(f'missing {marker!r}:\n' +
-                                     self.transcript.decode(errors='replace')[-4000:])
+                raise AssertionError(
+                    f'missing {marker!r}:\n'
+                    + self.transcript.decode(errors='replace')[-4000:]
+                )
         end = self.buffer.index(marker) + len(marker)
         output = bytes(self.buffer[:end])
         del self.buffer[:end]
@@ -97,8 +109,12 @@ class Shell:
         return self.expect(self.prompt)
 
     def check_warnings(self):
-        for message in (b'line editing not enabled', b'cannot set terminal process group',
-                        b'no job control', b'dotfiles:'):
+        for message in (
+            b'line editing not enabled',
+            b'cannot set terminal process group',
+            b'no job control',
+            b'dotfiles:',
+        ):
             assert message not in self.transcript, self.transcript.decode(errors='replace')
 
     def finish(self, expected=0):
@@ -115,12 +131,17 @@ class Shell:
         raise AssertionError('interactive Bash did not exit')
 
     def close(self):
-        handlers = {sig: signal.signal(sig, signal.SIG_IGN)
-                    for sig in (signal.SIGINT, signal.SIGTERM)}
+        handlers = {
+            sig: signal.signal(sig, signal.SIG_IGN)
+            for sig in (signal.SIGINT, signal.SIGTERM)
+        }
         try:
             if self.pid is not None:
-                subprocess.run(['pkill', '-HUP', '--session', str(self.pid)],
-                               check=False, timeout=2)
+                subprocess.run(
+                    ['pkill', '-HUP', '--session', str(self.pid)],
+                    check=False,
+                    timeout=2,
+                )
                 deadline = time.monotonic() + 1
                 finished = False
                 while time.monotonic() < deadline:
@@ -129,8 +150,11 @@ class Shell:
                         break
                     time.sleep(.02)
                 # Bash can exit while a child ignores HUP and keeps running.
-                subprocess.run(['pkill', '-KILL', '--session', str(self.pid)],
-                               check=False, timeout=2)
+                subprocess.run(
+                    ['pkill', '-KILL', '--session', str(self.pid)],
+                    check=False,
+                    timeout=2,
+                )
                 if not finished:
                     os.waitpid(self.pid, 0)
                 self.pid = None
@@ -170,7 +194,8 @@ def check_keyboard(home):
     with Shell(home, 'keyboard') as shell:
         output = shell.command(
             '[[ -t 0 && -t 1 && -t 2 && -o monitor && -o emacs ]] && '
-            'printf "terminal-ready\\n"')
+            'printf "terminal-ready\\n"'
+        )
         assert b'\nterminal-ready\n' in output, output
         for reload in (False, True):
             if reload:
@@ -238,8 +263,10 @@ def check_live_archiving(home):
         assert entries.count(command) == 1, command
     archives = list((home / '.histfile.d').glob('history-*.hist'))
     assert len(archives) == 1, archives
-    assert sum(line.startswith(': archived-seed-')
-               for line in archives[0].read_text().splitlines()) == 80000
+    assert sum(
+        line.startswith(': archived-seed-')
+        for line in archives[0].read_text().splitlines()
+    ) == 80000
     print('Bash PTY: automatic archiving with another open shell passed')
 
 

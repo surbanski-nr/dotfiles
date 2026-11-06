@@ -79,7 +79,9 @@ setup_host() (
 
 cleanup_path() {
   local path=$1
-  if [[ -e $path || -L $path ]]; then find "$path" -depth -delete; fi
+  if [[ -e $path || -L $path ]]; then
+    find "$path" -depth -delete
+  fi
 }
 
 cleanup() {
@@ -89,14 +91,20 @@ cleanup() {
   set +e
   if [[ $TRANSACTION_ACTIVE == true ]] && ! undo_transaction; then
     die 'could not restore all paths; saved originals and temporary files were preserved'
-    if [[ -n $CANDIDATE_DIR ]]; then die "preserved candidate: $CANDIDATE_DIR"; fi
+    if [[ -n $CANDIDATE_DIR ]]; then
+      die "preserved candidate: $CANDIDATE_DIR"
+    fi
     for path in "${TEMP_PATHS[@]}"; do
       [[ ! -e $path && ! -L $path ]] || die "preserved temporary path: $path"
     done
     exit 1
   fi
-  if [[ -n $CANDIDATE_DIR ]]; then cleanup_path "$CANDIDATE_DIR"; fi
-  for path in "${TEMP_PATHS[@]}"; do cleanup_path "$path"; done
+  if [[ -n $CANDIDATE_DIR ]]; then
+    cleanup_path "$CANDIDATE_DIR"
+  fi
+  for path in "${TEMP_PATHS[@]}"; do
+    cleanup_path "$path"
+  done
   exit "$status"
 }
 trap cleanup EXIT
@@ -125,7 +133,9 @@ operation_prerequisites() {
 validate_platform_name() {
   case $1 in
     debian-13-x86_64 | ubuntu-24.04-x86_64 | ubuntu-26.04-x86_64 | amzn-2023-x86_64) ;;
-    *) die "unsupported platform: $1" ;;
+    *)
+      die "unsupported platform: $1"
+      ;;
   esac
 }
 
@@ -136,20 +146,42 @@ validate_platform() {
 
   validate_platform_name "$platform" || return
   case $platform in
-    debian-13-x86_64) expected_id=debian; expected_version=13 ;;
-    ubuntu-24.04-x86_64) expected_id=ubuntu; expected_version=24.04 ;;
-    ubuntu-26.04-x86_64) expected_id=ubuntu; expected_version=26.04 ;;
-    amzn-2023-x86_64) expected_id=amzn; expected_version=2023 ;;
+    debian-13-x86_64)
+      expected_id=debian
+      expected_version=13
+      ;;
+    ubuntu-24.04-x86_64)
+      expected_id=ubuntu
+      expected_version=24.04
+      ;;
+    ubuntu-26.04-x86_64)
+      expected_id=ubuntu
+      expected_version=26.04
+      ;;
+    amzn-2023-x86_64)
+      expected_id=amzn
+      expected_version=2023
+      ;;
   esac
-  [[ -r $os_release_file ]] || { die "cannot read OS identity: $os_release_file"; return 1; }
+  [[ -r $os_release_file ]] || {
+    die "cannot read OS identity: $os_release_file"
+    return 1
+  }
   unset ID VERSION_ID
   # shellcheck disable=SC1090
   source "$os_release_file" || return
-  [[ ${ID:-} == "$expected_id" ]] ||
-    { die "$platform requires OS ID $expected_id, found ${ID:-unknown}"; return 1; }
-  [[ ${VERSION_ID:-} == "$expected_version" ]] ||
-    { die "$platform requires OS version $expected_version, found ${VERSION_ID:-unknown}"; return 1; }
-  [[ $(uname -m) == x86_64 ]] || { die 'only Linux x86-64 is supported'; return 1; }
+  [[ ${ID:-} == "$expected_id" ]] || {
+    die "$platform requires OS ID $expected_id, found ${ID:-unknown}"
+    return 1
+  }
+  [[ ${VERSION_ID:-} == "$expected_version" ]] || {
+    die "$platform requires OS version $expected_version, found ${VERSION_ID:-unknown}"
+    return 1
+  }
+  [[ $(uname -m) == x86_64 ]] || {
+    die 'only Linux x86-64 is supported'
+    return 1
+  }
 }
 
 metadata_value() {
@@ -157,9 +189,15 @@ metadata_value() {
   local count value
 
   count=$(awk -F= -v key="$key" '$1 == key { count++ } END { print count + 0 }' "$file") || return
-  [[ $count -eq 1 ]] || { die "metadata key $key occurs $count times in $file"; return 1; }
+  [[ $count -eq 1 ]] || {
+    die "metadata key $key occurs $count times in $file"
+    return 1
+  }
   value=$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print }' "$file") || return
-  [[ $value != *$'\n'* && $value != *$'\r'* ]] || { die "invalid metadata value for $key"; return 1; }
+  [[ $value != *$'\n'* && $value != *$'\r'* ]] || {
+    die "invalid metadata value for $key"
+    return 1
+  }
   printf '%s\n' "$value"
 }
 
@@ -168,7 +206,10 @@ read_release_metadata() {
   local -a versions=()
   local -n parsed=$map_name
 
-  [[ -f $file && ! -L $file ]] || { die "invalid release metadata file: $file"; return 1; }
+  [[ -f $file && ! -L $file ]] || {
+    die "invalid release metadata file: $file"
+    return 1
+  }
   parsed=()
   while IFS= read -r line || [[ -n $line ]]; do
     [[ $line =~ ^([A-Z0-9_]+)=([[:print:]]+)$ ]] || {
@@ -179,11 +220,23 @@ read_release_metadata() {
     value=${BASH_REMATCH[2]}
     allowed=false
     for required in "${RELEASE_METADATA_FIELDS[@]}"; do
-      if [[ $key == "$required" ]]; then allowed=true; break; fi
+      if [[ $key == "$required" ]]; then
+        allowed=true
+        break
+      fi
     done
-    [[ $allowed == true ]] || { die "unknown release metadata key: $key"; return 1; }
-    [[ ! -v parsed[$key] ]] || { die "duplicate release metadata key: $key"; return 1; }
-    ((${#value} <= 512)) || { die "release metadata value is too long: $key"; return 1; }
+    [[ $allowed == true ]] || {
+      die "unknown release metadata key: $key"
+      return 1
+    }
+    [[ ! -v parsed[$key] ]] || {
+      die "duplicate release metadata key: $key"
+      return 1
+    }
+    ((${#value} <= 512)) || {
+      die "release metadata value is too long: $key"
+      return 1
+    }
     parsed["$key"]=$value
   done <"$file"
   for required in "${RELEASE_METADATA_FIELDS[@]}"; do
@@ -194,18 +247,29 @@ read_release_metadata() {
         continue
         ;;
     esac
-    [[ -v parsed[$required] ]] || { die "missing release metadata key: $required"; return 1; }
+    [[ -v parsed[$required] ]] || {
+      die "missing release metadata key: $required"
+      return 1
+    }
   done
 
   validate_platform_name "${parsed[PLATFORM_ID]}" || return
-  [[ ${parsed[RELEASE_ID]} =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die 'invalid release metadata ID'; return 1; }
-  [[ ${parsed[SOURCE_COMMIT]} =~ ^[0-9a-f]{40}$ ]] ||
-    { die 'invalid release source commit'; return 1; }
-  [[ ${parsed[SOURCE_TREE]} =~ ^[0-9a-f]{40}$ ]] ||
-    { die 'invalid release source tree'; return 1; }
-  [[ ${parsed[BUILDER_IMAGE]} =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]] ||
-    { die 'invalid builder image identity'; return 1; }
+  [[ ${parsed[RELEASE_ID]} =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
+    die 'invalid release metadata ID'
+    return 1
+  }
+  [[ ${parsed[SOURCE_COMMIT]} =~ ^[0-9a-f]{40}$ ]] || {
+    die 'invalid release source commit'
+    return 1
+  }
+  [[ ${parsed[SOURCE_TREE]} =~ ^[0-9a-f]{40}$ ]] || {
+    die 'invalid release source tree'
+    return 1
+  }
+  [[ ${parsed[BUILDER_IMAGE]} =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]] || {
+    die 'invalid builder image identity'
+    return 1
+  }
   for key in NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION \
     PYTHON_VERSION TMUX_VERSION RG_VERSION \
     FZF_VERSION ZOXIDE_VERSION K9S_VERSION KUBECTX_VERSION OMP_VERSION TASK_VERSION \
@@ -213,30 +277,47 @@ read_release_metadata() {
     ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION \
     KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION; do
     [[ -v parsed[$key] ]] || continue
-    [[ ${parsed[$key]} =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] ||
-      { die "invalid release tool version: $key"; return 1; }
+    [[ ${parsed[$key]} =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] || {
+      die "invalid release tool version: $key"
+      return 1
+    }
   done
   for key in KUBECTL_VERSIONS HELM_VERSIONS; do
     value=${parsed[$key]}
-    [[ $value != *, ]] || { die "invalid release version list: $key"; return 1; }
+    [[ $value != *, ]] || {
+      die "invalid release version list: $key"
+      return 1
+    }
     IFS=, read -r -a versions <<<"$value"
     seen=' '
     for version in "${versions[@]}"; do
       [[ $version =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ &&
-        $seen != *" $version "* ]] ||
-        { die "invalid release version list: $key"; return 1; }
+        $seen != *" $version "* ]] || {
+        die "invalid release version list: $key"
+        return 1
+      }
       seen+="$version "
     done
   done
-  [[ ${parsed[PYTHON_BUILD]} =~ ^[0-9]{8}$ ]] ||
-    { die 'invalid standalone Python build'; return 1; }
+  [[ ${parsed[PYTHON_BUILD]} =~ ^[0-9]{8}$ ]] || {
+    die 'invalid standalone Python build'
+    return 1
+  }
   # Retained releases have only the optional tools declared by their profile.
   value=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm
   case ${parsed[OFFLINE_TOOLS]} in
-    "$value") optional='' ;;
-    "$value,fd") optional=FD_VERSION ;;
-    "$value,fd,go") optional='FD_VERSION GO_VERSION' ;;
-    "$value,fd,go,kind,uv") optional='FD_VERSION GO_VERSION KIND_VERSION UV_VERSION' ;;
+    "$value")
+      optional=''
+      ;;
+    "$value,fd")
+      optional=FD_VERSION
+      ;;
+    "$value,fd,go")
+      optional='FD_VERSION GO_VERSION'
+      ;;
+    "$value,fd,go,kind,uv")
+      optional='FD_VERSION GO_VERSION KIND_VERSION UV_VERSION'
+      ;;
     "$value,fd,go,kind,uv,actionlint,shellcheck,yamllint")
       optional='FD_VERSION GO_VERSION KIND_VERSION UV_VERSION ACTIONLINT_VERSION SHELLCHECK_VERSION'
       ;;
@@ -246,21 +327,28 @@ read_release_metadata() {
     "$value,fd,go,kind,uv,actionlint,shellcheck,yamllint,gh,htop,kubeconform,kyverno,trivy,yq")
       optional='FD_VERSION GO_VERSION KIND_VERSION UV_VERSION ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION'
       ;;
-    *) die 'release metadata has an invalid offline tool profile'; return 1 ;;
+    *)
+      die 'release metadata has an invalid offline tool profile'
+      return 1
+      ;;
   esac
   for required in FD_VERSION GO_VERSION KIND_VERSION UV_VERSION \
     ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION \
     KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION; do
     if [[ " $optional " == *" $required "* ]]; then
-      [[ -v parsed[$required] ]] || { die "missing release metadata key: $required"; return 1; }
+      [[ -v parsed[$required] ]] || {
+        die "missing release metadata key: $required"
+        return 1
+      }
     elif [[ -v parsed[$required] ]]; then
       die 'release metadata has an invalid offline tool profile'
       return 1
     fi
   done
-  [[ ${parsed[PAYLOAD_PATHS]} == \
-    bin,config,dotfiles,python-locks,python-wheelhouse,share,tools ]] ||
-    { die 'release metadata has an invalid payload layout'; return 1; }
+  [[ ${parsed[PAYLOAD_PATHS]} == bin,config,dotfiles,python-locks,python-wheelhouse,share,tools ]] || {
+    die 'release metadata has an invalid payload layout'
+    return 1
+  }
 }
 
 python_inventory_packages() {
@@ -269,16 +357,20 @@ python_inventory_packages() {
   local package version extra requirement seen=' '
   local -a packages=()
 
-  [[ -f $inventory && ! -L $inventory ]] ||
-    { die 'Python package inventory is missing'; return 1; }
+  [[ -f $inventory && ! -L $inventory ]] || {
+    die 'Python package inventory is missing'
+    return 1
+  }
   while IFS=$'\t' read -r package version extra; do
     [[ -z $extra && $package =~ ^[a-z0-9][a-z0-9-]*$ &&
       $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] || {
       die 'Python package inventory contains invalid data'
       return 1
     }
-    [[ $seen != *" $package "* ]] ||
-      { die "duplicate Python package in inventory: $package"; return 1; }
+    [[ $seen != *" $package "* ]] || {
+      die "duplicate Python package in inventory: $package"
+      return 1
+    }
     seen+="$package "
     requirement=$(awk '!/^#/ && NF { print; exit }' "$release/python-locks/$package.in") || return
     [[ $requirement == "$package==$version" ]] || {
@@ -293,7 +385,10 @@ python_inventory_packages() {
     }
     packages+=("$package")
   done <"$inventory"
-  ((${#packages[@]} > 0)) || { die 'Python package inventory is empty'; return 1; }
+  ((${#packages[@]} > 0)) || {
+    die 'Python package inventory is empty'
+    return 1
+  }
   input_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.in' -printf '.\n' |
     wc -l) || return
   lock_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.lock' -printf '.\n' |
@@ -318,15 +413,29 @@ validate_archive_members() (
   LC_ALL=C tar --quoting-style=literal -tzf "$archive" >"$members" || return
   first=$(sed -n '1p' "$members") || return
   root=${first%%/*}
-  [[ $root =~ ^dotfiles-[0-9a-f]{12}$ ]] || { die 'archive has an invalid top-level directory'; return 1; }
+  [[ $root =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
+    die 'archive has an invalid top-level directory'
+    return 1
+  }
   while IFS= read -r member; do
     member=${member%/}
-    [[ $member == "$root" || $member == "$root/"* ]] || { die "archive has multiple roots: $member"; return 1; }
+    [[ $member == "$root" || $member == "$root/"* ]] || {
+      die "archive has multiple roots: $member"
+      return 1
+    }
     [[ $member != /* && /$member/ != *'/../'* && /$member/ != *'/./'* &&
-      $member != *'//'* ]] || { die "unsafe archive member: $member"; return 1; }
-    [[ $member != *[[:cntrl:]]* ]] ||
-      { die "archive member has unsupported characters: $member"; return 1; }
-    [[ ! -v seen[$member] ]] || { die "duplicate archive member: $member"; return 1; }
+      $member != *'//'* ]] || {
+      die "unsafe archive member: $member"
+      return 1
+    }
+    [[ $member != *[[:cntrl:]]* ]] || {
+      die "archive member has unsupported characters: $member"
+      return 1
+    }
+    [[ ! -v seen[$member] ]] || {
+      die "duplicate archive member: $member"
+      return 1
+    }
     seen["$member"]=1
   done <"$members"
   LC_ALL=C tar --quoting-style=literal -tvzf "$archive" >"$verbose" || return
@@ -336,16 +445,30 @@ validate_archive_members() (
       - | d) ;;
       l)
         read -r _ _ _ _ _ remainder <<<"$line"
-        [[ $remainder == *' -> '* ]] || { die "cannot parse archive link: $line"; return 1; }
+        [[ $remainder == *' -> '* ]] || {
+          die "cannot parse archive link: $line"
+          return 1
+        }
         name=${remainder% -> *}
         target=${remainder##* -> }
-        [[ $name == "$root/"* && $target != /* && $target != *[[:cntrl:]]* ]] ||
-          { die "unsafe archive link: $name -> $target"; return 1; }
+        [[ $name == "$root/"* && $target != /* && $target != *[[:cntrl:]]* ]] || {
+          die "unsafe archive link: $name -> $target"
+          return 1
+        }
         resolved=$(readlink -m -- "/$(dirname -- "$name")/$target") || return
-        [[ $resolved == "/$root/"* ]] || { die "archive link escapes its root: $name -> $target"; return 1; }
+        [[ $resolved == "/$root/"* ]] || {
+          die "archive link escapes its root: $name -> $target"
+          return 1
+        }
         ;;
-      h) die "archive hard links are not supported: $line"; return 1 ;;
-      *) die "archive contains an unsupported member type: $line"; return 1 ;;
+      h)
+        die "archive hard links are not supported: $line"
+        return 1
+        ;;
+      *)
+        die "archive contains an unsupported member type: $line"
+        return 1
+        ;;
     esac
   done <"$verbose"
   printf '%s\n' "$root"
@@ -361,11 +484,19 @@ release_commands() {
   printf '%s\n' dotfiles-release
   for tool in "${tools[@]}"; do
     case $tool in
-      nodejs) printf '%s\n' node npm npx corepack ;;
-      go) printf '%s\n' go gofmt ;;
-      uv) printf '%s\n' uv uvx ;;
+      nodejs)
+        printf '%s\n' node npm npx corepack
+        ;;
+      go)
+        printf '%s\n' go gofmt
+        ;;
+      uv)
+        printf '%s\n' uv uvx
+        ;;
       python) ;;
-      *) printf '%s\n' "$tool" ;;
+      *)
+        printf '%s\n' "$tool"
+        ;;
     esac
   done
 }
@@ -380,12 +511,16 @@ verify_release_symlinks() {
     target=$(readlink -- "$link") || return
     resolved=$(readlink -m -- "$(dirname -- "$link")/$target") || return
     if [[ $target == /* ]]; then
-      [[ $mode == installed ]] ||
-        { die "absolute archive symlink: $link"; return 1; }
+      [[ $mode == installed ]] || {
+        die "absolute archive symlink: $link"
+        return 1
+      }
       resolved=$(readlink -m -- "$target") || return
     fi
-    [[ $resolved == "$release/"* ]] ||
-      { die "release symlink escapes its root: $link -> $target"; return 1; }
+    [[ $resolved == "$release/"* ]] || {
+      die "release symlink escapes its root: $link -> $target"
+      return 1
+    }
     [[ ! -e $link ]] || continue
     # Upstream test links point into a test-only submodule that is not bundled.
     if [[ $resolved == "$release/share/tmux/plugins/tmux-resurrect/lib/tmux-test/"* &&
@@ -409,14 +544,21 @@ validate_release_directory() {
   local release=$1 mode=${2:-installed} path package_output command_output command_name version tool
   local -A release_metadata=()
 
-  [[ -d $release && ! -L $release ]] || { die "invalid release directory: $release"; return 1; }
+  [[ -d $release && ! -L $release ]] || {
+    die "invalid release directory: $release"
+    return 1
+  }
   read_release_metadata "$release/release.env" release_metadata || return
   [[ ${release_metadata[RELEASE_ID]} == "${release##*/}" &&
-    ${release_metadata[RELEASE_ID]} == "dotfiles-${release_metadata[SOURCE_COMMIT]:0:12}" ]] ||
-    { die 'release ID does not match its directory and source commit'; return 1; }
+    ${release_metadata[RELEASE_ID]} == "dotfiles-${release_metadata[SOURCE_COMMIT]:0:12}" ]] || {
+    die 'release ID does not match its directory and source commit'
+    return 1
+  }
   for path in bin config dotfiles python-locks share tools; do
-    [[ -d $release/$path && ! -L $release/$path ]] ||
-      { die "release payload directory is missing: $path"; return 1; }
+    [[ -d $release/$path && ! -L $release/$path ]] || {
+      die "release payload directory is missing: $path"
+      return 1
+    }
   done
   for path in SHA256SUMS build-manifest.txt config/nvim2/init.lua \
     dotfiles/bash/.bashrc dotfiles/bash/.bash_profile dotfiles/bash/.bash_aliases \
@@ -424,14 +566,18 @@ validate_release_directory() {
     dotfiles/oh-my-posh/.oh-my-posh.omp.json \
     dotfiles/k9s/.config/k9s/config.yaml dotfiles/k9s/.config/k9s/aliases.yaml \
     dotfiles/k9s/.config/k9s/plugins.yaml; do
-    [[ -f $release/$path && ! -L $release/$path ]] ||
-      { die "release payload file is missing: $path"; return 1; }
+    [[ -f $release/$path && ! -L $release/$path ]] || {
+      die "release payload file is missing: $path"
+      return 1
+    }
   done
   # Older releases keep history directly in .bashrc and need no extra files.
   if [[ $(<"$release/dotfiles/bash/.bashrc") == *'/bash/.bash_history_lib'* ]]; then
     for path in dotfiles/bash/.bash_history_lib dotfiles/scripts/bash-history-archive; do
-      [[ -f $release/$path && ! -L $release/$path ]] ||
-        { die "release payload file is missing: $path"; return 1; }
+      [[ -f $release/$path && ! -L $release/$path ]] || {
+        die "release payload file is missing: $path"
+        return 1
+      }
     done
   fi
   [[ -s $release/build-manifest.txt && -x $release/dotfiles-release &&
@@ -441,60 +587,84 @@ validate_release_directory() {
     -x $release/tools/tmux/bin/tmux &&
     -x $release/tools/python-${release_metadata[PYTHON_VERSION]}/bin/python3 &&
     -d $release/share/nvim2/mason/bin &&
-    -d $release/dotfiles/k9s/.config/k9s/skins ]] ||
-    { die 'release runtime layout is incomplete'; return 1; }
+    -d $release/dotfiles/k9s/.config/k9s/skins ]] || {
+    die 'release runtime layout is incomplete'
+    return 1
+  }
   [[ -L $release/tools/python &&
-    $(readlink -- "$release/tools/python") == "python-${release_metadata[PYTHON_VERSION]}" ]] ||
-    { die 'private Python SDK link is missing or incorrect'; return 1; }
+    $(readlink -- "$release/tools/python") == "python-${release_metadata[PYTHON_VERSION]}" ]] || {
+    die 'private Python SDK link is missing or incorrect'
+    return 1
+  }
   for path in bin/python bin/python3; do
-    [[ ! -e $release/$path && ! -L $release/$path ]] ||
-      { die "private Python must not be exposed in $path; rebuild the release"; return 1; }
+    [[ ! -e $release/$path && ! -L $release/$path ]] || {
+      die "private Python must not be exposed in $path; rebuild the release"
+      return 1
+    }
   done
   if [[ -e $release/dotfiles/ssh || -L $release/dotfiles/ssh ]]; then
     for path in dotfiles/ssh/.ssh/config dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service; do
-      [[ -f $release/$path && ! -L $release/$path ]] ||
-        { die "release SSH configuration is missing: $path"; return 1; }
+      [[ -f $release/$path && ! -L $release/$path ]] || {
+        die "release SSH configuration is missing: $path"
+        return 1
+      }
     done
   fi
   for tool in tmux-sensible tmux-resurrect tmux-continuum; do
     [[ -d $release/share/tmux/plugins/$tool/.git &&
-      -f $release/share/tmux/plugins/$tool/${tool#tmux-}.tmux ]] ||
-      { die "release tmux plugin is missing: $tool"; return 1; }
+      -f $release/share/tmux/plugins/$tool/${tool#tmux-}.tmux ]] || {
+      die "release tmux plugin is missing: $tool"
+      return 1
+    }
   done
   package_output=$(python_inventory_packages "$release") || return
   verify_release_symlinks "$release" "$mode" "$package_output" || return
   command_output=$(release_commands "$release") || return
   while IFS= read -r command_name; do
     if [[ $mode == archive && $command_name == yamllint ]]; then
-      [[ -L $release/bin/yamllint ]] ||
-        { die 'release executable is missing: yamllint'; return 1; }
+      [[ -L $release/bin/yamllint ]] || {
+        die 'release executable is missing: yamllint'
+        return 1
+      }
     else
-      [[ -x $release/bin/$command_name ]] ||
-        { die "release executable is missing: $command_name"; return 1; }
+      [[ -x $release/bin/$command_name ]] || {
+        die "release executable is missing: $command_name"
+        return 1
+      }
     fi
   done <<<"$command_output"
   for tool in kubectl helm; do
     for version in ${release_metadata[${tool^^}_VERSIONS]//,/ }; do
-      [[ -x $release/bin/$tool-$version ]] ||
-        { die "release executable is missing: $tool-$version"; return 1; }
+      [[ -x $release/bin/$tool-$version ]] || {
+        die "release executable is missing: $tool-$version"
+        return 1
+      }
     done
   done
   if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
     path=$release/share/helm/plugins/helm-values-schema-json
-    [[ -f $path/plugin.yaml && ! -L $path/plugin.yaml && -x $path/schema && -s $path/LICENSE ]] ||
-      { die 'release Helm schema plugin is incomplete'; return 1; }
+    [[ -f $path/plugin.yaml && ! -L $path/plugin.yaml && -x $path/schema && -s $path/LICENSE ]] || {
+      die 'release Helm schema plugin is incomplete'
+      return 1
+    }
     awk -v expected="${release_metadata[HELM_SCHEMA_PLUGIN_VERSION]#v}" \
       '$1 == "name:" { name = $2 } $1 == "version:" { gsub(/"/, "", $2); version = $2 }
-       END { exit !(name == "schema" && version == expected) }' "$path/plugin.yaml" ||
-      { die 'release Helm schema plugin metadata does not match its version'; return 1; }
+       END { exit !(name == "schema" && version == expected) }' "$path/plugin.yaml" || {
+      die 'release Helm schema plugin metadata does not match its version'
+      return 1
+    }
   fi
   if [[ $mode == archive ]]; then
     [[ -d $release/python-wheelhouse && ! -L $release/python-wheelhouse &&
-      -n $(find "$release/python-wheelhouse" -type f -name '*.whl' -print -quit) ]] ||
-      { die 'release Python wheelhouse is missing'; return 1; }
+      -n $(find "$release/python-wheelhouse" -type f -name '*.whl' -print -quit) ]] || {
+      die 'release Python wheelhouse is missing'
+      return 1
+    }
     for path in installed.sha256 installed.modes installed.symlinks .complete .incomplete .artifact.sha256; do
-      [[ ! -e $release/$path && ! -L $release/$path ]] ||
-        { die 'archive contains installed-state metadata'; return 1; }
+      [[ ! -e $release/$path && ! -L $release/$path ]] || {
+        die 'archive contains installed-state metadata'
+        return 1
+      }
     done
     verify_archive_checksums "$release" || return
   fi
@@ -509,14 +679,18 @@ verify_archive_checksums() {
     find . -type f ! -path './SHA256SUMS' -print0 | LC_ALL=C sort -z |
       xargs -0 -r sha256sum >"$expected" || exit
   ) || return
-  cmp -s "$release/SHA256SUMS" "$expected" ||
-    { die 'archive checksums do not match the complete file inventory'; return 1; }
+  cmp -s "$release/SHA256SUMS" "$expected" || {
+    die 'archive checksums do not match the complete file inventory'
+    return 1
+  }
 }
 
 extract_archive() {
   local archive=$1 parent=$2 top
-  [[ -f $archive && ! -L $archive ]] ||
-    { die "artifact is not a regular file: $archive"; return 1; }
+  [[ -f $archive && ! -L $archive ]] || {
+    die "artifact is not a regular file: $archive"
+    return 1
+  }
   top=$(validate_archive_members "$archive") || return
   tar -xzf "$archive" -C "$parent" --keep-old-files --no-same-owner --no-same-permissions || return
   validate_release_directory "$parent/$top" archive || return
@@ -550,7 +724,9 @@ manifest_content() {
           ! -path './installed.symlinks' ! -path './.complete' ! -path './.incomplete' -print0 |
           LC_ALL=C sort -z | xargs -0 -r stat -c '%a %n'
         ;;
-      links) find . -type l -printf '%p\t%l\n' | LC_ALL=C sort ;;
+      links)
+        find . -type l -printf '%p\t%l\n' | LC_ALL=C sort
+        ;;
     esac
   )
 }
@@ -559,9 +735,15 @@ write_installed_manifest() {
   local release=$1 kind name temporary
   for kind in hashes modes links; do
     case $kind in
-      hashes) name=installed.sha256 ;;
-      modes) name=installed.modes ;;
-      links) name=installed.symlinks ;;
+      hashes)
+        name=installed.sha256
+        ;;
+      modes)
+        name=installed.modes
+        ;;
+      links)
+        name=installed.symlinks
+        ;;
     esac
     temporary=$(mktemp) || return
     TEMP_PATHS+=("$temporary")
@@ -574,35 +756,53 @@ verify_installed_manifest() {
   local release=$1 kind name expected
   for kind in hashes modes links; do
     case $kind in
-      hashes) name=installed.sha256 ;;
-      modes) name=installed.modes ;;
-      links) name=installed.symlinks ;;
+      hashes)
+        name=installed.sha256
+        ;;
+      modes)
+        name=installed.modes
+        ;;
+      links)
+        name=installed.symlinks
+        ;;
     esac
-    [[ -f $release/$name && ! -L $release/$name ]] ||
-      { die "installed manifest is missing in $release; uninstall and reinstall this ID"; return 1; }
+    [[ -f $release/$name && ! -L $release/$name ]] || {
+      die "installed manifest is missing in $release; uninstall and reinstall this ID"
+      return 1
+    }
     expected=$(mktemp) || return
     TEMP_PATHS+=("$expected")
     manifest_content "$release" "$kind" >"$expected" || return
-    cmp -s "$release/$name" "$expected" ||
-      { die "installed $kind changed in $release"; return 1; }
+    cmp -s "$release/$name" "$expected" || {
+      die "installed $kind changed in $release"
+      return 1
+    }
   done
 }
 
 validate_home() {
-  [[ $HOME == /* && $HOME != / && $HOME != *$'\n'* && $HOME != *$'\t'* ]] ||
-    { die "unsafe HOME: $HOME"; return 1; }
-  [[ -d $HOME && ! -L $HOME && -w $HOME ]] ||
-    { die "HOME must be a writable real directory: $HOME"; return 1; }
+  [[ $HOME == /* && $HOME != / && $HOME != *$'\n'* && $HOME != *$'\t'* ]] || {
+    die "unsafe HOME: $HOME"
+    return 1
+  }
+  [[ -d $HOME && ! -L $HOME && -w $HOME ]] || {
+    die "HOME must be a writable real directory: $HOME"
+    return 1
+  }
 }
 
 validate_release_root() {
   [[ $RELEASE_ROOT == /* && $RELEASE_ROOT != / && $RELEASE_ROOT != "$HOME" &&
     $RELEASE_ROOT != *$'\n'* && $RELEASE_ROOT != *$'\t'* &&
-    /$RELEASE_ROOT/ != *'/../'* && /$RELEASE_ROOT/ != *'/./'* ]] ||
-    { die "unsafe release root: $RELEASE_ROOT"; return 1; }
+    /$RELEASE_ROOT/ != *'/../'* && /$RELEASE_ROOT/ != *'/./'* ]] || {
+    die "unsafe release root: $RELEASE_ROOT"
+    return 1
+  }
   if [[ -e $RELEASE_ROOT || -L $RELEASE_ROOT ]]; then
-    [[ -d $RELEASE_ROOT && ! -L $RELEASE_ROOT ]] ||
-      { die "invalid release root: $RELEASE_ROOT"; return 1; }
+    [[ -d $RELEASE_ROOT && ! -L $RELEASE_ROOT ]] || {
+      die "invalid release root: $RELEASE_ROOT"
+      return 1
+    }
   fi
 }
 
@@ -612,19 +812,29 @@ acquire_lock() {
   mkdir -p -- "$RELEASE_ROOT" || return
   # Lock the directory inode; no persistent lock marker or state directory.
   exec {LOCK_FD}<"$RELEASE_ROOT" || return
-  flock -x -n "$LOCK_FD" || { die 'another release operation is running'; return 1; }
+  flock -x -n "$LOCK_FD" || {
+    die 'another release operation is running'
+    return 1
+  }
   current_id >/dev/null
 }
 
 current_id() {
   local path=$RELEASE_ROOT/current target
   [[ -e $path || -L $path ]] || return 0
-  [[ -L $path ]] || { die "reserved current path is not a symlink: $path"; return 1; }
+  [[ -L $path ]] || {
+    die "reserved current path is not a symlink: $path"
+    return 1
+  }
   target=$(readlink -- "$path") || return
-  [[ $target =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die "invalid current link: $target"; return 1; }
-  [[ -d $RELEASE_ROOT/$target && ! -L $RELEASE_ROOT/$target ]] ||
-    { die "current selects a missing release: $target"; return 1; }
+  [[ $target =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
+    die "invalid current link: $target"
+    return 1
+  }
+  [[ -d $RELEASE_ROOT/$target && ! -L $RELEASE_ROOT/$target ]] || {
+    die "current selects a missing release: $target"
+    return 1
+  }
   printf '%s\n' "$target"
 }
 
@@ -653,8 +863,10 @@ commit_transaction() {
 
 move_in_transaction() {
   local source=$1 destination=$2
-  [[ ! -e $destination && ! -L $destination ]] ||
-    { die "refusing to overwrite saved path: $destination"; return 1; }
+  [[ ! -e $destination && ! -L $destination ]] || {
+    die "refusing to overwrite saved path: $destination"
+    return 1
+  }
   UNDO_KINDS+=(move)
   UNDO_PATHS+=("$source")
   UNDO_VALUES+=("$destination")
@@ -721,15 +933,23 @@ undo_transaction() {
 validate_link_parent() {
   local path=$1 parent relative component
   local -a components=()
-  [[ $path == "$HOME/"* ]] || { die "unsafe managed path: $path"; return 1; }
+  [[ $path == "$HOME/"* ]] || {
+    die "unsafe managed path: $path"
+    return 1
+  }
   relative=${path#"$HOME/"}
   IFS=/ read -r -a components <<<"$relative"
   parent=$HOME
   for component in "${components[@]:0:${#components[@]}-1}"; do
     parent=$parent/$component
-    [[ ! -L $parent ]] || { die "managed path has a symlink parent: $parent"; return 1; }
-    [[ ! -e $parent || -d $parent ]] ||
-      { die "managed path has a non-directory parent: $parent"; return 1; }
+    [[ ! -L $parent ]] || {
+      die "managed path has a symlink parent: $parent"
+      return 1
+    }
+    [[ ! -e $parent || -d $parent ]] || {
+      die "managed path has a non-directory parent: $parent"
+      return 1
+    }
   done
 }
 
@@ -781,10 +1001,14 @@ preflight_projection() {
     [[ ! -L $path || $(readlink -- "$path") != "$target" ]] || continue
     [[ -e $path || -L $path ]] || continue
     backup=$path.before-dotfiles-release
-    [[ ! -e $backup && ! -L $backup ]] ||
-      { die "saved original already exists: $backup; preserve it before replacing $path"; return 1; }
-    [[ ! -e $path || -f $path || -d $path || -L $path ]] ||
-      { die "unsupported managed path: $path"; return 1; }
+    [[ ! -e $backup && ! -L $backup ]] || {
+      die "saved original already exists: $backup; preserve it before replacing $path"
+      return 1
+    }
+    [[ ! -e $path || -f $path || -d $path || -L $path ]] || {
+      die "unsupported managed path: $path"
+      return 1
+    }
   done
 }
 
@@ -810,8 +1034,10 @@ verify_projection() {
   for index in "${!LINK_PATHS[@]}"; do
     path=${LINK_PATHS[$index]}
     validate_link_parent "$path" || return
-    [[ -L $path && -e $path && $(readlink -- "$path") == "${LINK_TARGETS[$index]}" ]] ||
-      { die "active release link is missing or incorrect: $path"; return 1; }
+    [[ -L $path && -e $path && $(readlink -- "$path") == "${LINK_TARGETS[$index]}" ]] || {
+      die "active release link is missing or incorrect: $path"
+      return 1
+    }
   done
 }
 
@@ -826,8 +1052,10 @@ check_installed_release() {
 
 activate_release() {
   local release_id=$1 release=$RELEASE_ROOT/$1 skip_health=${2:-false}
-  [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die "invalid release ID: $release_id"; return 1; }
+  [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
+    die "invalid release ID: $release_id"
+    return 1
+  }
   check_installed_release "$release" || return
   release_projection "$release" || return
   preflight_projection || return
@@ -841,7 +1069,10 @@ activate_release() {
   begin_transaction
   apply_projection || return
   select_in_transaction "$release_id" || return
-  [[ $(current_id) == "$release_id" ]] || { die 'activation did not select the release'; return 1; }
+  [[ $(current_id) == "$release_id" ]] || {
+    die 'activation did not select the release'
+    return 1
+  }
   verify_projection || return
   commit_transaction
 }
@@ -853,14 +1084,19 @@ create_python_tools() {
   read_release_metadata "$release/release.env" release_metadata || return
   python_version=${release_metadata[PYTHON_VERSION]}
   python=$release/tools/python-$python_version/bin/python3
-  [[ -x $python ]] || { die "bundled Python is missing: $python"; return 1; }
+  [[ -x $python ]] || {
+    die "bundled Python is missing: $python"
+    return 1
+  }
   package_output=$(python_inventory_packages "$release") || return
   mason_bin=$release/share/nvim2/mason/bin
   mkdir -p "$mason_bin" || return
   while IFS= read -r package; do
     venv=$release/share/nvim2/mason/packages/$package/venv
-    [[ ! -e $venv && ! -L $venv ]] ||
-      { die "Python environment already exists: $venv"; return 1; }
+    [[ ! -e $venv && ! -L $venv ]] || {
+      die "Python environment already exists: $venv"
+      return 1
+    }
     timeout 120s "$python" -I -m venv "$venv" || return
     env -u PYTHONHOME -u PYTHONPATH -u PIP_TARGET -u PIP_PREFIX \
       -u PIP_REQUIRE_VIRTUALENV -u PIP_USER -u PIP_CONFIG_FILE \
@@ -869,14 +1105,18 @@ create_python_tools() {
       --no-index --require-hashes --only-binary=:all: \
       --find-links "$release/python-wheelhouse" \
       -r "$release/python-locks/$package.lock" || return
-    [[ -x $venv/bin/$package ]] ||
-      { die "Python entry point is missing: $package"; return 1; }
+    [[ -x $venv/bin/$package ]] || {
+      die "Python entry point is missing: $package"
+      return 1
+    }
     env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
       timeout 120s "$venv/bin/python" -I -m pip check || return
   done <<<"$package_output"
   for command_name in ansible ansible-config ansible-playbook; do
-    [[ -x $release/share/nvim2/mason/packages/ansible-lint/venv/bin/$command_name ]] ||
-      { die "Ansible entry point is missing: $command_name"; return 1; }
+    [[ -x $release/share/nvim2/mason/packages/ansible-lint/venv/bin/$command_name ]] || {
+      die "Ansible entry point is missing: $command_name"
+      return 1
+    }
     if [[ ! -e $mason_bin/$command_name && ! -L $mason_bin/$command_name ]]; then
       ln -s "../packages/ansible-lint/venv/bin/$command_name" "$mason_bin/$command_name" || return
     fi
@@ -891,7 +1131,9 @@ migrate_nvim_state() {
   for file in telescope_history telescope_history.sqlite3; do
     source=$HOME/.local/share/nvim2/$file
     [[ -f $source && ! -L $source ]] || continue
-    if [[ -e $destination/$file || -L $destination/$file ]]; then continue; fi
+    if [[ -e $destination/$file || -L $destination/$file ]]; then
+      continue
+    fi
     mkdir -p "$destination" || return
     cp -p -- "$source" "$destination/$file" || return
     printf '%s: copied legacy Nvim state to %s\n' "${0##*/}" "$destination/$file"
@@ -929,8 +1171,10 @@ PY
   package_output=$(python_inventory_packages "$release") || return
   while IFS= read -r package; do
     venv=$release/share/nvim2/mason/packages/$package/venv
-    [[ -f $venv/pyvenv.cfg && -x $venv/bin/python && -x $venv/bin/$package ]] ||
-      { die "incomplete Python environment: $venv"; return 1; }
+    [[ -f $venv/pyvenv.cfg && -x $venv/bin/python && -x $venv/bin/$package ]] || {
+      die "incomplete Python environment: $venv"
+      return 1
+    }
     env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
       timeout --kill-after=5s 30s "$venv/bin/python" -I -B - "$release" "$package" <<'PY' || return
 import pathlib
@@ -976,8 +1220,10 @@ check_runtime() {
   export PATH DOTFILES_OFFLINE_RELEASE_ROOT DOTFILES_IGNORE_USER_BIN VIRTUAL_ENV
   command_output=$(release_commands "$release") || return
   while IFS= read -r command_name; do
-    [[ $(type -P -- "$command_name") == "$release/bin/$command_name" ]] ||
-      { die "release command does not resolve in its PATH: $command_name"; return 1; }
+    [[ $(type -P -- "$command_name") == "$release/bin/$command_name" ]] || {
+      die "release command does not resolve in its PATH: $command_name"
+      return 1
+    }
   done <<<"$command_output"
   if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
     HELM_PLUGINS=$release/share/helm/plugins
@@ -996,8 +1242,10 @@ check_runtime() {
       XDG_DATA_HOME="$runtime_home/.local/share" XDG_CACHE_HOME="$runtime_home/.cache" \
       XDG_STATE_HOME="$runtime_home/.local/state" \
       timeout 30s "$release/bin/$command_name" "${probe_args[@]}") || return
-    [[ $output == *"${expected#v}"* ]] ||
-      { die "$command_name reported an unexpected version: $output"; return 1; }
+    [[ $output == *"${expected#v}"* ]] || {
+      die "$command_name reported an unexpected version: $output"
+      return 1
+    }
   done
   for tool in kubectl helm; do
     IFS=, read -r -a versions <<<"${release_metadata[${tool^^}_VERSIONS]}"
@@ -1010,13 +1258,17 @@ check_runtime() {
         XDG_STATE_HOME="$runtime_home/.local/state" \
         timeout 30s env "${tool^^}_VERSION=$version" \
         "$release/bin/$tool" "${probe_args[@]}") || return
-      [[ $output == *"${expected#v}"* ]] ||
-        { die "$tool reported an unexpected version: $output"; return 1; }
+      [[ $output == *"${expected#v}"* ]] || {
+        die "$tool reported an unexpected version: $output"
+        return 1
+      }
       if [[ $tool == helm && -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
         output=$(HOME="$runtime_home" timeout 30s env HELM_VERSION="$version" \
           "$release/bin/helm" schema version) || return
-        [[ $output == "helm schema version v${release_metadata[HELM_SCHEMA_PLUGIN_VERSION]#v}" ]] ||
-          { die "Helm $expected schema plugin reported an unexpected version: $output"; return 1; }
+        [[ $output == "helm schema version v${release_metadata[HELM_SCHEMA_PLUGIN_VERSION]#v}" ]] || {
+          die "Helm $expected schema plugin reported an unexpected version: $output"
+          return 1
+        }
       fi
     done
   done
@@ -1025,14 +1277,24 @@ check_runtime() {
 health_release() {
   local release_id=${1:-} release
   operation_prerequisites || return
-  [[ -z $release_id || $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die "invalid release ID: $release_id"; return 1; }
+  [[ -z $release_id || $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
+    die "invalid release ID: $release_id"
+    return 1
+  }
   validate_home || return
   validate_release_root || return
-  [[ -d $RELEASE_ROOT ]] || { die 'no installed releases'; return 1; }
+  [[ -d $RELEASE_ROOT ]] || {
+    die 'no installed releases'
+    return 1
+  }
   acquire_lock || return
-  if [[ -z $release_id ]]; then release_id=$(current_id) || return; fi
-  [[ -n $release_id ]] || { die 'no current release is selected; specify an installed ID'; return 1; }
+  if [[ -z $release_id ]]; then
+    release_id=$(current_id) || return
+  fi
+  [[ -n $release_id ]] || {
+    die 'no current release is selected; specify an installed ID'
+    return 1
+  }
   release=$RELEASE_ROOT/$release_id
   check_installed_release "$release" || return
   if [[ $(current_id) == "$release_id" ]]; then
@@ -1057,10 +1319,14 @@ install_archive() {
   read_release_metadata "$release/release.env" release_metadata || return
   validate_platform "${release_metadata[PLATFORM_ID]}" || return
   if [[ -e $RELEASE_ROOT/$release_id || -L $RELEASE_ROOT/$release_id ]]; then
-    [[ -d $RELEASE_ROOT/$release_id && ! -L $RELEASE_ROOT/$release_id ]] ||
-      { die "release path already exists: $release_id"; return 1; }
-    cmp -s "$release/SHA256SUMS" "$RELEASE_ROOT/$release_id/SHA256SUMS" ||
-      { die "release ID collision: $release_id"; return 1; }
+    [[ -d $RELEASE_ROOT/$release_id && ! -L $RELEASE_ROOT/$release_id ]] || {
+      die "release path already exists: $release_id"
+      return 1
+    }
+    cmp -s "$release/SHA256SUMS" "$RELEASE_ROOT/$release_id/SHA256SUMS" || {
+      die "release ID collision: $release_id"
+      return 1
+    }
     activate_release "$release_id" "$skip_health" || return
     printf '%s: selected installed %s; reload Bash with: source ~/.bashrc && hash -r\n' \
       "${0##*/}" "$release_id"
@@ -1084,8 +1350,10 @@ install_archive() {
 set_release() {
   local release_id=$1 skip_health=${2:-false}
   operation_prerequisites || return
-  [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die "invalid release ID: $release_id"; return 1; }
+  [[ $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
+    die "invalid release ID: $release_id"
+    return 1
+  }
   acquire_lock || return
   activate_release "$release_id" "$skip_health" || return
   printf '%s: selected %s; reload Bash with: source ~/.bashrc && hash -r\n' \
@@ -1128,7 +1396,9 @@ managed_home_links() {
     file=$(mktemp) || return
     TEMP_PATHS+=("$file")
     find "$HOME/.config/k9s/skins" -type l -print0 >"$file" || return
-    while IFS= read -r -d '' path; do paths+=("$path"); done <"$file"
+    while IFS= read -r -d '' path; do
+      paths+=("$path")
+    done <"$file"
   fi
   for path in "${paths[@]}"; do
     [[ -L $path ]] || continue
@@ -1143,19 +1413,28 @@ managed_home_links() {
 uninstall_release() {
   local release_id=${1:-} current removed links path saved backup
   operation_prerequisites || return
-  [[ -z $release_id || $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] ||
-    { die "invalid release ID: $release_id"; return 1; }
+  [[ -z $release_id || $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
+    die "invalid release ID: $release_id"
+    return 1
+  }
   acquire_lock || return
   current=$(current_id) || return
   release_id=${release_id:-$current}
-  [[ -n $release_id ]] || { die 'no current release; specify an installed ID'; return 1; }
-  [[ -d $RELEASE_ROOT/$release_id && ! -L $RELEASE_ROOT/$release_id ]] ||
-    { die "release is not installed: $release_id"; return 1; }
+  [[ -n $release_id ]] || {
+    die 'no current release; specify an installed ID'
+    return 1
+  }
+  [[ -d $RELEASE_ROOT/$release_id && ! -L $RELEASE_ROOT/$release_id ]] || {
+    die "release is not installed: $release_id"
+    return 1
+  }
   removed=$(mktemp -d "$RELEASE_ROOT/.remove.XXXXXX") || return
   TEMP_PATHS+=("$removed")
   links=$(mktemp) || return
   TEMP_PATHS+=("$links")
-  if [[ $release_id == "$current" ]]; then managed_home_links >"$links" || return; fi
+  if [[ $release_id == "$current" ]]; then
+    managed_home_links >"$links" || return
+  fi
   begin_transaction
   while IFS= read -r -d '' path; do
     saved=$(mktemp "$(dirname -- "$path")/.dotfiles-release-link.XXXXXX") || return
@@ -1167,7 +1446,9 @@ uninstall_release() {
       move_in_transaction "$backup" "$path" || return
     fi
   done <"$links"
-  if [[ $release_id == "$current" ]]; then select_in_transaction || return; fi
+  if [[ $release_id == "$current" ]]; then
+    select_in_transaction || return
+  fi
   move_in_transaction "$RELEASE_ROOT/$release_id" "$removed/$release_id" || return
   commit_transaction
   cleanup_path "$removed" || return
@@ -1182,16 +1463,65 @@ main() {
     shift
   fi
   case $command in
-    setup) (($# == 0)) || { usage; return 2; }; setup_host ;;
-    verify) (($# == 1)) || { usage; return 2; }; verify_archive "$1" ;;
-    list) (($# == 0)) || { usage; return 2; }; list_releases ;;
-    health) (($# <= 1)) || { usage; return 2; }; health_release "${1:-}" ;;
-    install) (($# == 1)) || { usage; return 2; }; install_archive "$1" "$skip_health" ;;
-    uninstall) (($# <= 1)) || { usage; return 2; }; uninstall_release "${1:-}" ;;
-    set) (($# == 1)) || { usage; return 2; }; set_release "$1" "$skip_health" ;;
-    -h | --help) usage ;;
-    *) usage; return 2 ;;
+    setup)
+      (($# == 0)) || {
+        usage
+        return 2
+      }
+      setup_host
+      ;;
+    verify)
+      (($# == 1)) || {
+        usage
+        return 2
+      }
+      verify_archive "$1"
+      ;;
+    list)
+      (($# == 0)) || {
+        usage
+        return 2
+      }
+      list_releases
+      ;;
+    health)
+      (($# <= 1)) || {
+        usage
+        return 2
+      }
+      health_release "${1:-}"
+      ;;
+    install)
+      (($# == 1)) || {
+        usage
+        return 2
+      }
+      install_archive "$1" "$skip_health"
+      ;;
+    uninstall)
+      (($# <= 1)) || {
+        usage
+        return 2
+      }
+      uninstall_release "${1:-}"
+      ;;
+    set)
+      (($# == 1)) || {
+        usage
+        return 2
+      }
+      set_release "$1" "$skip_health"
+      ;;
+    -h | --help)
+      usage
+      ;;
+    *)
+      usage
+      return 2
+      ;;
   esac
 }
 
-if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi

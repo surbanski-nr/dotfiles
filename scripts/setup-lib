@@ -34,7 +34,9 @@ cleanup_setup() {
   trap - EXIT
   set +e
   for path in "${TEMP_PATHS[@]:-}"; do
-    if [[ -e $path || -L $path ]]; then find "$path" -depth -delete; fi
+    if [[ -e $path || -L $path ]]; then
+      find "$path" -depth -delete
+    fi
   done
   exit "$status"
 }
@@ -198,7 +200,9 @@ artifact_layout() {
       SPEC_DESTS=("htop-$version")
       SPEC_LINKS=("htop:htop-$version/bin/htop")
       ;;
-    *) report_error "missing artifact mapping for $name" ;;
+    *)
+      report_error "missing artifact mapping for $name"
+      ;;
   esac
 }
 
@@ -215,10 +219,16 @@ compile_tool_source() {
       )
       ;;
     tmux) ;;
-    *) report_error "unsupported source build: $name"; return 1 ;;
+    *)
+      report_error "unsupported source build: $name"
+      return 1
+      ;;
   esac
   jobs=$(getconf _NPROCESSORS_ONLN) || return
-  [[ $jobs =~ ^[1-9][0-9]*$ ]] || { report_error "invalid processor count: $jobs"; return 1; }
+  [[ $jobs =~ ^[1-9][0-9]*$ ]] || {
+    report_error "invalid processor count: $jobs"
+    return 1
+  }
   (
     cd "$source" || exit
     ./configure "${configure_args[@]}" || exit
@@ -233,17 +243,30 @@ validate_tar_archive() {
   local -a list_args=(-tf) verbose_args=(-tvf)
 
   case $compression in
-    gz) list_args=(-tzf); verbose_args=(-tvzf) ;;
-    xz) list_args=(-tJf); verbose_args=(-tvJf) ;;
-    *) report_error "unsupported tar compression: $compression"; return ;;
+    gz)
+      list_args=(-tzf)
+      verbose_args=(-tvzf)
+      ;;
+    xz)
+      list_args=(-tJf)
+      verbose_args=(-tvJf)
+      ;;
+    *)
+      report_error "unsupported tar compression: $compression"
+      return
+      ;;
   esac
   listing=$(tar "${list_args[@]}" "$archive") || return
   while IFS= read -r member || [[ -n $member ]]; do
-    [[ -n $member && $member != /* && $member != ../* && /$member/ != *'/../'* ]] ||
-      { report_error "unsafe archive member: $member"; return 1; }
+    [[ -n $member && $member != /* && $member != ../* && /$member/ != *'/../'* ]] || {
+      report_error "unsafe archive member: $member"
+      return 1
+    }
     if [[ -n $subtree ]]; then
-      [[ $member == "$subtree" || $member == "$subtree/"* ]] ||
-        { report_error "unexpected archive member: $member"; return 1; }
+      [[ $member == "$subtree" || $member == "$subtree/"* ]] || {
+        report_error "unexpected archive member: $member"
+        return 1
+      }
     fi
   done <<<"$listing"
   verbose=$(LC_ALL=C tar --numeric-owner --quoting-style=literal \
@@ -254,19 +277,36 @@ validate_tar_archive() {
       - | d) ;;
       l)
         read -r _ _ _ _ _ remainder <<<"$line"
-        [[ $remainder == *' -> '* ]] || { report_error "cannot parse archive link: $line"; return 1; }
+        [[ $remainder == *' -> '* ]] || {
+          report_error "cannot parse archive link: $line"
+          return 1
+        }
         name=${remainder% -> *}
         target=${remainder##* -> }
-        [[ $target != /* ]] || { report_error "absolute archive link: $name -> $target"; return 1; }
+        [[ $target != /* ]] || {
+          report_error "absolute archive link: $name -> $target"
+          return 1
+        }
         resolved=$(readlink -m -- "/archive/$(dirname -- "$name")/$target")
-        [[ $resolved == /archive/* ]] || { report_error "archive link escapes its root: $name -> $target"; return 1; }
+        [[ $resolved == /archive/* ]] || {
+          report_error "archive link escapes its root: $name -> $target"
+          return 1
+        }
         if [[ -n $subtree ]]; then
-          [[ $resolved == "/archive/$subtree" || $resolved == "/archive/$subtree/"* ]] ||
-            { report_error "archive link escapes expected subtree: $name -> $target"; return 1; }
+          [[ $resolved == "/archive/$subtree" || $resolved == "/archive/$subtree/"* ]] || {
+            report_error "archive link escapes expected subtree: $name -> $target"
+            return 1
+          }
         fi
         ;;
-      h) report_error "archive hard links are not supported: $line"; return 1 ;;
-      *) report_error "archive contains an unsupported member type: $line"; return 1 ;;
+      h)
+        report_error "archive hard links are not supported: $line"
+        return 1
+        ;;
+      *)
+        report_error "archive contains an unsupported member type: $line"
+        return 1
+        ;;
     esac
   done <<<"$verbose"
 }
@@ -275,9 +315,16 @@ archive_member_to_file() {
   local archive=$1 format=$2 member=$3 output=$4
 
   case $format in
-    gz-member | gz-pair) tar -xOzf "$archive" -- "$member" >"$output" || return ;;
-    xz-member) tar -xOJf "$archive" -- "$member" >"$output" || return ;;
-    *) report_error "invalid member format: $format"; return ;;
+    gz-member | gz-pair)
+      tar -xOzf "$archive" -- "$member" >"$output" || return
+      ;;
+    xz-member)
+      tar -xOJf "$archive" -- "$member" >"$output" || return
+      ;;
+    *)
+      report_error "invalid member format: $format"
+      return
+      ;;
   esac
   chmod 0755 "$output"
 }
@@ -314,7 +361,9 @@ extract_artifact() {
       unzip -p "$archive" "$SPEC_MEMBER" >"$destination/${SPEC_DESTS[0]}" || return
       chmod 0755 "$destination/${SPEC_DESTS[0]}"
       ;;
-    *) report_error "invalid artifact format: $SPEC_FORMAT" ;;
+    *)
+      report_error "invalid artifact format: $SPEC_FORMAT"
+      ;;
   esac
 }
 

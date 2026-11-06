@@ -29,9 +29,9 @@ EOF
   expected=143
   [[ $signal != INT ]] || expected=130
   [[ $status == "$expected" && $(<"$test_home/.bashrc") == 'signal baseline' &&
-    ! -e $test_home/.bashrc.before-dotfiles-release &&
-    ! -e $test_home/dotfiles-releases/$id_one &&
-    ! -L $test_home/dotfiles-releases/current ]] ||
+  ! -e $test_home/.bashrc.before-dotfiles-release &&
+  ! -e $test_home/dotfiles-releases/$id_one &&
+  ! -L $test_home/dotfiles-releases/current ]] ||
     fail "$signal did not restore the changed paths and clean the candidate"
   unlink "$failure_bin/mv"
   run_manager install "$artifact_one" >/dev/null
@@ -44,7 +44,9 @@ printf 'unfinished user data\n' >"$test_home/dotfiles-releases/$id_one/unfinishe
 run_manager list >"$test_root/interrupted-list.log"
 [[ $(wc -l <"$test_root/interrupted-list.log") == 1 ]] ||
   fail 'list exposed an unprepared directory as an installed release'
-if run_manager set "$id_one" >/dev/null 2>&1; then fail 'set activated an unprepared directory'; fi
+if run_manager set "$id_one" >/dev/null 2>&1; then
+  fail 'set activated an unprepared directory'
+fi
 if run_manager install "$artifact_one" >/dev/null 2>&1; then
   fail 'install overwrote an unfinished directory'
 fi

@@ -14,7 +14,10 @@ cleanup() {
   find "$test_root" -depth -delete
 }
 trap cleanup EXIT
-fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+fail() {
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
 
 checkout=$test_root/'checkout with spaces'
 mkdir -p "$checkout/scripts" "$checkout/tests" "$test_root/bin" "$test_root/state"
@@ -35,8 +38,12 @@ printf 'normal kubeconfig\n' >"$KUBECONFIG"
 normal_kubeconfig=$(sha256sum "$KUBECONFIG")
 source_hashes=$(find "$checkout/k9s" -type f -exec sha256sum {} + | sort)
 printf 'unrelated cluster\n' >"$TEST_K9S_PREVIEW_STATE/cluster-unrelated"
-run_preview() { "$task_executable" --dir "$checkout" --silent k9s; }
-run_clean() { "$task_executable" --dir "$checkout" --silent k9s:clean; }
+run_preview() {
+  "$task_executable" --dir "$checkout" --silent k9s
+}
+run_clean() {
+  "$task_executable" --dir "$checkout" --silent k9s:clean
+}
 
 TEST_K9S_DOCKER_STATUS=1 run_preview >"$test_root/docker-failed.log" 2>&1 && fail 'unavailable Docker was accepted'
 [[ ! -e $TEST_K9S_PREVIEW_STATE/preview-root ]] || fail 'k9s opened with unavailable Docker'

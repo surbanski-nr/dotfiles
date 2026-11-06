@@ -26,8 +26,13 @@ main() {
         usage
         return 0
         ;;
-      --*) report_error "unknown option: $1" ;;
-      *) requested+=("$1"); shift ;;
+      --*)
+        report_error "unknown option: $1"
+        ;;
+      *)
+        requested+=("$1")
+        shift
+        ;;
     esac
   done
   load_config
@@ -141,7 +146,9 @@ preflight_plugin() {
   local remote
 
   plugin_spec "$name"
-  if [[ ! -e $directory && ! -L $directory ]]; then return 0; fi
+  if [[ ! -e $directory && ! -L $directory ]]; then
+    return 0
+  fi
   if [[ ! -d $directory/.git || -L $directory ]]; then
     report_error "asdf plugin is not a Git checkout: $directory"
     return 1
@@ -167,7 +174,9 @@ preflight_project_command() {
   local path
 
   case $name in
-    nodejs) command_name=node ;;
+    nodejs)
+      command_name=node
+      ;;
   esac
   path="$BIN_DIR/$command_name"
   if [[ -e $path || -L $path ]]; then
@@ -255,7 +264,9 @@ select_asdf() {
   local temporary="$BIN_DIR/.asdf.link.$$"
 
   preflight_asdf_link
-  if [[ -L $link && $(readlink -- "$link") == "$target" ]]; then return 0; fi
+  if [[ -L $link && $(readlink -- "$link") == "$target" ]]; then
+    return 0
+  fi
   [[ ! -e $temporary && ! -L $temporary ]] ||
     report_error "temporary link exists: $temporary"
   ln -s -- "$target" "$temporary"
@@ -315,8 +326,12 @@ select_tool() {
 
 reconcile_tools() {
   local name
-  for name in "$@"; do reconcile_tool "$name"; done
-  for name in "$@"; do select_tool "$name"; done
+  for name in "$@"; do
+    reconcile_tool "$name"
+  done
+  for name in "$@"; do
+    select_tool "$name"
+  done
 }
 
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)

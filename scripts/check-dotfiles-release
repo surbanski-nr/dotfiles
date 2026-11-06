@@ -20,15 +20,24 @@ health_cli_operations() {
   printf 'alpha\noffline needle\nomega\n' >"$work/input.txt" || return
   output=$("$release/bin/rg" --fixed-strings 'offline needle' "$work/input.txt") || return
   printf '%s\n' "$output"
-  [[ $output == *'offline needle'* ]] || { die 'ripgrep functional check failed'; return 1; }
+  [[ $output == *'offline needle'* ]] || {
+    die 'ripgrep functional check failed'
+    return 1
+  }
   output=$(printf 'alpha\noffline needle\nomega\n' | "$release/bin/fzf" --filter='offline needle') || return
   printf '%s\n' "$output"
-  [[ $output == 'offline needle' ]] || { die 'fzf functional check failed'; return 1; }
+  [[ $output == 'offline needle' ]] || {
+    die 'fzf functional check failed'
+    return 1
+  }
 
   _ZO_DATA_DIR="$work/zoxide" "$release/bin/zoxide" add "$work/project" || return
   output=$(_ZO_DATA_DIR="$work/zoxide" "$release/bin/zoxide" query project) || return
   printf 'zoxide-query=%s\n' "$output"
-  [[ $output == "$work/project" ]] || { die 'zoxide database check failed'; return 1; }
+  [[ $output == "$work/project" ]] || {
+    die 'zoxide database check failed'
+    return 1
+  }
   "$release/bin/zoxide" init bash | "$release/bin/rg" --fixed-strings '__zoxide_hook' || return
 
   printf '%s\n' \
@@ -36,7 +45,7 @@ health_cli_operations() {
     'tasks:' \
     '  health:' \
     '    cmds:' \
-      '      - test -f marker' \
+    '      - test -f marker' \
     '    silent: true' >"$work/Taskfile.yml" || return
   : >"$work/marker" || return
   "$release/bin/task" --dir "$work" --taskfile "$work/Taskfile.yml" health || return
@@ -61,8 +70,10 @@ health_cli_operations() {
       HELM_CACHE_HOME="$health_home/helm/cache" HELM_DATA_HOME="$health_home/helm/data" \
       "$release/bin/helm" template offline-health "$work/chart") || return
     printf '%s\n' "$output"
-    [[ $output == *'name: offline-health'* ]] ||
-      { die "Helm $version did not render the local chart"; return 1; }
+    [[ $output == *'name: offline-health'* ]] || {
+      die "Helm $version did not render the local chart"
+      return 1
+    }
   done
 }
 
@@ -94,21 +105,32 @@ health_kubernetes_tools() {
   for version in ${versions//,/ }; do
     output=$(KUBECTL_VERSION="$version" KUBECONFIG="$kubeconfig" \
       "$release/bin/kubectl" config current-context) || return
-    [[ $output == offline-a ]] ||
-      { die "kubectl $version did not read the isolated kubeconfig"; return 1; }
+    [[ $output == offline-a ]] || {
+      die "kubectl $version did not read the isolated kubeconfig"
+      return 1
+    }
   done
 
   output=$(KUBECONFIG="$kubeconfig" "$release/bin/kubectx" --current) || return
   printf 'kubectx-current=%s\n' "$output"
-  [[ $output == offline-a ]] || { die 'kubectx did not read the isolated kubeconfig'; return 1; }
+  [[ $output == offline-a ]] || {
+    die 'kubectx did not read the isolated kubeconfig'
+    return 1
+  }
   KUBECONFIG="$kubeconfig" "$release/bin/kubectx" offline-b || return
-  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubectx" --current) == offline-b ]] ||
-    { die 'kubectx did not switch the isolated context'; return 1; }
-  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubens" --current) == default ]] ||
-    { die 'kubens did not read the isolated namespace'; return 1; }
+  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubectx" --current) == offline-b ]] || {
+    die 'kubectx did not switch the isolated context'
+    return 1
+  }
+  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubens" --current) == default ]] || {
+    die 'kubens did not read the isolated namespace'
+    return 1
+  }
   KUBECONFIG="$kubeconfig" "$release/bin/kubens" --force offline-namespace || return
-  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubens" --current) == offline-namespace ]] ||
-    { die 'kubens did not update the isolated namespace'; return 1; }
+  [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubens" --current) == offline-namespace ]] || {
+    die 'kubens did not update the isolated namespace'
+    return 1
+  }
 
   "$release/share/nvim2/mason/packages/yamllint/venv/bin/yamllint" \
     -d relaxed "$health_home/.config/k9s"/*.yaml || return
@@ -138,10 +160,15 @@ health_tmux() {
     trap cleanup_health_tmux EXIT
     "$tmux" -S "$socket" new-session -d -s health || exit
     option=$("$tmux" -S "$socket" show-options -gv prefix)
-    [[ $option == C-a ]] || { die "tmux prefix is $option, expected C-a"; exit 1; }
+    [[ $option == C-a ]] || {
+      die "tmux prefix is $option, expected C-a"
+      exit 1
+    }
     option=$("$tmux" -S "$socket" show-options -gv @dotfiles-config)
-    [[ $option == "$release/dotfiles/tmux/.tmux.conf" ]] ||
-      { die 'tmux did not retain its physical config'; exit 1; }
+    [[ $option == "$release/dotfiles/tmux/.tmux.conf" ]] || {
+      die 'tmux did not retain its physical config'
+      exit 1
+    }
     "$tmux" -S "$socket" set-option -g status-position bottom || exit
     client_input=$health_home/tmux-client-input
     client_stderr=$health_home/tmux-client-stderr
@@ -157,7 +184,10 @@ health_tmux() {
       [[ -n $client ]] && break
       sleep 0.02
     done
-    [[ -n $client ]] || { die 'tmux health client did not attach'; exit 1; }
+    [[ -n $client ]] || {
+      die 'tmux health client did not attach'
+      exit 1
+    }
     "$tmux" -S "$socket" send-keys -K -c "$client" C-a R || exit
     reload_value=
     for _ in {1..50}; do
@@ -165,15 +195,24 @@ health_tmux() {
       [[ $reload_value == top ]] && break
       sleep 0.02
     done
-    [[ $reload_value == top ]] || { die 'tmux Shift-R did not reload the physical offline config'; exit 1; }
-    [[ ! -s $client_stderr ]] || { die 'tmux offline reload client wrote to stderr'; exit 1; }
+    [[ $reload_value == top ]] || {
+      die 'tmux Shift-R did not reload the physical offline config'
+      exit 1
+    }
+    [[ ! -s $client_stderr ]] || {
+      die 'tmux offline reload client wrote to stderr'
+      exit 1
+    }
     "$tmux" -S "$socket" detach-client -t "$client" || exit
     exec {client_input_fd}>&-
     wait "$client_pid" || exit
     for plugin in tmux-sensible tmux-resurrect tmux-continuum; do
       entry=$release/share/tmux/plugins/$plugin/${plugin#tmux-}.tmux
       [[ $plugin != tmux-sensible ]] || entry=$release/share/tmux/plugins/$plugin/sensible.tmux
-      [[ -x $entry || -f $entry ]] || { die "tmux plugin entry point is missing: $entry"; exit 1; }
+      [[ -x $entry || -f $entry ]] || {
+        die "tmux plugin entry point is missing: $entry"
+        exit 1
+      }
       printf -v command 'exec %q' "$entry"
       "$tmux" -S "$socket" run-shell "$command" || exit
       printf 'tmux-plugin=%s exit=0\n' "$plugin"
@@ -250,15 +289,23 @@ health_validation_tools() {
 
   [[ -f $HELM_PLUGINS/helm-values-schema-json/plugin.yaml &&
     -x $HELM_PLUGINS/helm-values-schema-json/schema &&
-    -s $HELM_PLUGINS/helm-values-schema-json/LICENSE ]] || { die 'validation tool payload is incomplete'; return 1; }
+    -s $HELM_PLUGINS/helm-values-schema-json/LICENSE ]] || {
+    die 'validation tool payload is incomplete'
+    return 1
+  }
   need jq || return
   mkdir -p "$work" || return
   output=$("$release/bin/yq" --version) || return
-  [[ $output == "yq (https://github.com/mikefarah/yq/) version v${yq_version#v}" ]] ||
-    { die 'yq is not the pinned Mike Farah implementation'; return 1; }
+  [[ $output == "yq (https://github.com/mikefarah/yq/) version v${yq_version#v}" ]] || {
+    die 'yq is not the pinned Mike Farah implementation'
+    return 1
+  }
   printf 'name: first\n---\nname: second\n' >"$work/documents.yaml" || return
   output=$("$release/bin/yq" eval -r '.name' "$work/documents.yaml") || return
-  [[ $output == $'first\n---\nsecond' ]] || { die 'yq YAML document check failed'; return 1; }
+  [[ $output == $'first\n---\nsecond' ]] || {
+    die 'yq YAML document check failed'
+    return 1
+  }
   cat >"$work/values.yaml" <<'EOF'
 replicas: 2
 tls: {} # @schema $ref: tls.schema.json
@@ -270,10 +317,15 @@ EOF
     output=$(HELM_VERSION="$version" "$release/bin/helm" plugin list) || return
     awk -v expected="${plugin_version#v}" \
       '$1 == "schema" { count++; valid = ($2 == expected) } END { exit !(count == 1 && valid) }' \
-      <<<"$output" || { die "Helm $version schema plugin manifest has an unexpected version"; return 1; }
+      <<<"$output" || {
+      die "Helm $version schema plugin manifest has an unexpected version"
+      return 1
+    }
     output=$(HELM_VERSION="$version" "$release/bin/helm" schema version) || return
-    [[ $output == "helm schema version v${plugin_version#v}" ]] ||
-      { die "Helm $version schema plugin reported an unexpected version: $output"; return 1; }
+    [[ $output == "helm schema version v${plugin_version#v}" ]] || {
+      die "Helm $version schema plugin reported an unexpected version: $output"
+      return 1
+    }
     (cd "$work" && HELM_VERSION="v${version#v}" "$release/bin/helm" schema \
       -f values.yaml -o schema.json --bundle --bundle-without-id --bundle-root "$work") || return
     jq -e '
@@ -281,12 +333,18 @@ EOF
       .properties.tls."$ref" == "#/$defs/tls.schema.json" and
       (."$defs"."tls.schema.json" |
         .properties.enabled.type == "boolean" and .required == ["enabled"] and (has("$id") | not))
-    ' "$work/schema.json" >/dev/null || { die "Helm $version schema generation failed"; return 1; }
+    ' "$work/schema.json" >/dev/null || {
+      die "Helm $version schema generation failed"
+      return 1
+    }
   done
   printf '%s\n' '{"properties":{"tls":{"description":"overlay"}}}' >"$work/overlay.json" || return
   jq -s '.[0] * .[1]' "$work/schema.json" "$work/overlay.json" >"$work/merged.json" || return
   jq -e '.properties.tls.description == "overlay" and .properties.tls."$ref" == "#/$defs/tls.schema.json"' \
-    "$work/merged.json" >/dev/null || { die 'jq schema overlay merge failed'; return 1; }
+    "$work/merged.json" >/dev/null || {
+    die 'jq schema overlay merge failed'
+    return 1
+  }
   printf 'validation-tools=healthy\n'
 }
 
@@ -295,7 +353,9 @@ health_nvim() {
 
   need setsid || return
   (
-    if [[ -n ${LOCK_FD:-} ]]; then exec {LOCK_FD}>&-; fi
+    if [[ -n ${LOCK_FD:-} ]]; then
+      exec {LOCK_FD}>&-
+    fi
     # Interactive Bash fixtures open /dev/tty even with redirected stdin.
     # Detach from the terminal so timeout's background group cannot get SIGTTIN.
     HOME="$health_home" XDG_CACHE_HOME="$health_home/.cache" \
@@ -303,7 +363,7 @@ health_nvim() {
       DOTFILES_OFFLINE_RELEASE_ROOT="$release" \
       PYTHONDONTWRITEBYTECODE=1 NVIM_APPNAME=nvim2 NVIM2_CHECK_TOOLS=1 \
       NVIM2_BENCHMARK_RUNS=3 setsid --wait timeout 1200s \
-        bash "$release/config/nvim2/tests/check.sh" </dev/null
+      bash "$release/config/nvim2/tests/check.sh" </dev/null
   )
 }
 
@@ -313,7 +373,10 @@ main() {
   local PYTHONDONTWRITEBYTECODE=1
   local LC_ALL=C.UTF-8 LANG=C.UTF-8
   local -A release_metadata=()
-  (($# == 1)) || { die 'usage: check-dotfiles-release RELEASE_DIRECTORY'; return 2; }
+  (($# == 1)) || {
+    die 'usage: check-dotfiles-release RELEASE_DIRECTORY'
+    return 2
+  }
   release=$(readlink -f -- "$release") || return
   validate_release_directory "$release" || return
   verify_installed_manifest "$release" || return
@@ -338,4 +401,6 @@ main() {
   printf '%s: %s passed offline functional checks\n' "${0##*/}" "${release##*/}"
 }
 
-if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi

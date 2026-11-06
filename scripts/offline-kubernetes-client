@@ -6,9 +6,16 @@ self=$(readlink -f -- "$0")
 tool=${self##*/}
 release=${self%/bin/*}
 case $tool in
-  kubectl) version=${KUBECTL_VERSION:-} ;;
-  helm) version=${HELM_VERSION:-} ;;
-  *) printf 'offline client: unsupported command: %s\n' "$tool" >&2; exit 2 ;;
+  kubectl)
+    version=${KUBECTL_VERSION:-}
+    ;;
+  helm)
+    version=${HELM_VERSION:-}
+    ;;
+  *)
+    printf 'offline client: unsupported command: %s\n' "$tool" >&2
+    exit 2
+    ;;
 esac
 
 binary=$release/tools/bin/$tool

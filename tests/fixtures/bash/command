@@ -13,8 +13,13 @@ case "$command_name:$mode" in
       directory=$PWD
       while (($#)); do
         case $1 in
-          --directory) directory=$2; shift 2 ;;
-          *) shift ;;
+          --directory)
+            directory=$2
+            shift 2
+            ;;
+          *)
+            shift
+            ;;
         esac
       done
       printf '%s\n' "$(<"$directory/.python-version")"
@@ -103,9 +108,15 @@ case "$command_name:$mode" in
     ;;
   kubectl:logs)
     case ${1:-} in
-      get) printf '%s\n' api-1 worker-1 ;;
-      logs) printf 'logs for %s\n' "$2" ;;
-      *) exit 2 ;;
+      get)
+        printf '%s\n' api-1 worker-1
+        ;;
+      logs)
+        printf 'logs for %s\n' "$2"
+        ;;
+      *)
+        exit 2
+        ;;
     esac
     ;;
   oh-my-posh:kube-prompt)
@@ -130,11 +141,15 @@ case "$command_name:$mode" in
           : >"$TEST_POSH_STATE"
         fi
         ;;
-      *) exit 2 ;;
+      *)
+        exit 2
+        ;;
     esac
     ;;
   bat:*)
-    while IFS= read -r _; do :; done
+    while IFS= read -r _; do
+      :
+    done
     ;;
   ssh-agent:agent)
     printf 'ssh-agent %s\n' "$*" >>"$TEST_AGENT_LOG"

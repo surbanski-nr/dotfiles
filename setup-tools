@@ -24,8 +24,13 @@ main() {
         usage
         return 0
         ;;
-      --*) report_error "unknown option: $1" ;;
-      *) requested+=("$1"); shift ;;
+      --*)
+        report_error "unknown option: $1"
+        ;;
+      *)
+        requested+=("$1")
+        shift
+        ;;
     esac
   done
 
@@ -66,7 +71,10 @@ select_requested_tools() {
   for name in "$@"; do
     supported=0
     for allowed in "${TOOLS[@]}"; do
-      if [[ $name == "$allowed" ]]; then supported=1; break; fi
+      if [[ $name == "$allowed" ]]; then
+        supported=1
+        break
+      fi
     done
     if ((supported == 0)); then
       report_error "unknown tool: $name"
@@ -217,7 +225,9 @@ state_owns_link_target() {
     "$command_name:$command_name-"*)
       version=${target#"$command_name-"}
       ;;
-    *) return 1 ;;
+    *)
+      return 1
+      ;;
   esac
   [[ -n $version && $version != */* ]] || return 1
   state=$(state_path "$name" "$version")
@@ -255,7 +265,9 @@ preflight_link() {
     report_error "refusing unmanaged path: $link"
     return 1
   fi
-  if ! provider=$(command -v "$command_name" 2>/dev/null); then return 0; fi
+  if ! provider=$(command -v "$command_name" 2>/dev/null); then
+    return 0
+  fi
   case $provider in
     "$HOME/.asdf/shims/"* | "$HOME/.krew/bin/"* | "$HOME/.local/share/nvim2/mason/bin/"*)
       report_error "$command_name is already provided by $provider"
@@ -294,7 +306,9 @@ preflight() {
   if ((${#plugins[@]})); then
     preflight_tmux_plugins "$TMUX_PLUGIN_DIR" "${plugins[@]}" || return
   fi
-  if ((${#binary_tools[@]})); then mkdir -p "$BIN_DIR" "$STATE_DIR"; fi
+  if ((${#binary_tools[@]})); then
+    mkdir -p "$BIN_DIR" "$STATE_DIR"
+  fi
   for name in "${binary_tools[@]}"; do
     if [[ $name == htop || $name == tmux ]]; then
       for build_command in cc getconf make pkg-config; do
@@ -308,7 +322,9 @@ preflight() {
       classify_installation "$name" "$version" "$RELEASE_SHA256"
     done
     load_tool_release "$name" "${TOOL_VERSIONS[0]}"
-    for entry in "${SPEC_LINKS[@]}"; do preflight_link "$name" "$entry"; done
+    for entry in "${SPEC_LINKS[@]}"; do
+      preflight_link "$name" "$entry"
+    done
   done
 }
 
@@ -376,8 +392,12 @@ verify_staged() {
   local executable
 
   case $name in
-    nvim | go | htop | tmux) executable="$STAGE_DIR/${SPEC_DESTS[0]}/bin/$name" ;;
-    *) executable="$STAGE_DIR/${SPEC_DESTS[0]}" ;;
+    nvim | go | htop | tmux)
+      executable="$STAGE_DIR/${SPEC_DESTS[0]}/bin/$name"
+      ;;
+    *)
+      executable="$STAGE_DIR/${SPEC_DESTS[0]}"
+      ;;
   esac
   verify_executable "$name" "$executable" "$version"
   if [[ $name == uv ]]; then
@@ -408,7 +428,9 @@ install_version() {
       printf 'setup-tools: recovered %s %s\n' "$name" "$version"
       return
       ;;
-    pending-incomplete) remove_incomplete_payload ;;
+    pending-incomplete)
+      remove_incomplete_payload
+      ;;
     missing) ;;
   esac
 

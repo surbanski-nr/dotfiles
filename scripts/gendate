@@ -7,16 +7,16 @@ header=""
 date=$(date +"%Y-%m-%d")
 
 if [[ $# -eq 0 ]]; then
-	echo "$date"
-	exit 0
+  echo "$date"
+  exit 0
 fi
 
 if [[ $# -ne 2 || $1 != "h" || ! $2 =~ ^[1-6]$ ]]; then
-	echo "Usage: gendate h 2 to generate with markdown heading ##" >&2
-	exit 1
+  echo "Usage: gendate h 2 to generate with markdown heading ##" >&2
+  exit 1
 fi
 
 for ((i = 0; i < 10#$2; i++)); do
-	header+="#"
+  header+="#"
 done
 echo "$header $date"

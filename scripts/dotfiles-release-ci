@@ -23,9 +23,15 @@ cleanup() {
     kill "${workers[@]}" 2>/dev/null
     wait "${workers[@]}" 2>/dev/null
   fi
-  if ((${#containers[@]})); then docker rm --force "${containers[@]}" >/dev/null 2>&1; fi
-  if [[ -n $runtime_image ]]; then docker image rm "$runtime_image" >/dev/null 2>&1; fi
-  if [[ -n $work ]]; then find "$work" -depth -delete; fi
+  if ((${#containers[@]})); then
+    docker rm --force "${containers[@]}" >/dev/null 2>&1
+  fi
+  if [[ -n $runtime_image ]]; then
+    docker image rm "$runtime_image" >/dev/null 2>&1
+  fi
+  if [[ -n $work ]]; then
+    find "$work" -depth -delete
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -72,7 +78,11 @@ preflight() {
   local release_found=false manager_complete=false
   local -a selected=()
 
-  if [[ $EVENT_NAME == workflow_dispatch ]]; then RELEASE_TAG=$INPUT_RELEASE_TAG; else RELEASE_TAG=$TAG_NAME; fi
+  if [[ $EVENT_NAME == workflow_dispatch ]]; then
+    RELEASE_TAG=$INPUT_RELEASE_TAG
+  else
+    RELEASE_TAG=$TAG_NAME
+  fi
   [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{7,40}$ ]] || die "invalid release tag: $RELEASE_TAG"
   printf 'Resolving release %s.\n' "$RELEASE_TAG"
   [[ $EVENT_NAME != push ]] || attempts=6
@@ -82,7 +92,10 @@ preflight() {
       release_found=true
       break
     fi
-    if ! grep -q 'HTTP 404' "$error_file"; then cat "$error_file" >&2; return 1; fi
+    if ! grep -q 'HTTP 404' "$error_file"; then
+      cat "$error_file" >&2
+      return 1
+    fi
     ((attempt == attempts)) || sleep 10
   done
   if [[ $release_found != true ]]; then
@@ -104,7 +117,9 @@ preflight() {
   printf 'Release %s resolves to commit %s.\n' "$RELEASE_TAG" "$COMMIT_SHA"
 
   if asset_exists dotfiles-release "$release_file" &&
-    asset_exists dotfiles-release.sha256 "$release_file"; then manager_complete=true; fi
+    asset_exists dotfiles-release.sha256 "$release_file"; then
+    manager_complete=true
+  fi
   for platform in "${platforms[@]}"; do
     asset=dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz
     build_archive=true
@@ -133,11 +148,29 @@ select_platform() {
   # shellcheck source=../release.env
   source "$source_dir/release.env"
   case $PLATFORM in
-    debian-13-x86_64) builder_image=$DEBIAN_13_IMAGE; test_uid=23131; test_home='/srv/debian offline' ;;
-    ubuntu-24.04-x86_64) builder_image=$UBUNTU_2404_IMAGE; test_uid=24141; test_home=/opt/ubuntu2404 ;;
-    ubuntu-26.04-x86_64) builder_image=$UBUNTU_2604_IMAGE; test_uid=26161; test_home=/srv/ubuntu2604 ;;
-    amzn-2023-x86_64) builder_image=$AMZN_2023_IMAGE; test_uid=23171; test_home=/opt/amazon2023 ;;
-    *) die "unsupported platform: $PLATFORM" ;;
+    debian-13-x86_64)
+      builder_image=$DEBIAN_13_IMAGE
+      test_uid=23131
+      test_home='/srv/debian offline'
+      ;;
+    ubuntu-24.04-x86_64)
+      builder_image=$UBUNTU_2404_IMAGE
+      test_uid=24141
+      test_home=/opt/ubuntu2404
+      ;;
+    ubuntu-26.04-x86_64)
+      builder_image=$UBUNTU_2604_IMAGE
+      test_uid=26161
+      test_home=/srv/ubuntu2604
+      ;;
+    amzn-2023-x86_64)
+      builder_image=$AMZN_2023_IMAGE
+      test_uid=23171
+      test_home=/opt/amazon2023
+      ;;
+    *)
+      die "unsupported platform: $PLATFORM"
+      ;;
   esac
 }
 
@@ -226,7 +259,10 @@ test_all_platforms() {
       selected+=("$platform")
     fi
   done
-  ((${#selected[@]})) || { die "unsupported platform: $requested_platform"; return 2; }
+  ((${#selected[@]})) || {
+    die "unsupported platform: $requested_platform"
+    return 2
+  }
   source_dir=$(CDPATH='' cd -- "$1" && pwd)
   COMMIT_SHA=$(git -C "$source_dir" rev-parse HEAD)
   source_status=$(git -C "$source_dir" status --porcelain --untracked-files=normal)
@@ -234,7 +270,9 @@ test_all_platforms() {
     die 'offline qualification requires a clean committed checkout'
   parallelism=$(nproc)
   [[ $parallelism =~ ^[1-9][0-9]*$ ]] || die 'nproc did not report a positive CPU count'
-  if ((parallelism > ${#selected[@]})); then parallelism=${#selected[@]}; fi
+  if ((parallelism > ${#selected[@]})); then
+    parallelism=${#selected[@]}
+  fi
   timeout 10s docker info >/dev/null || die 'Docker must be available to the current user'
 
   RELEASE_TAG=dotfiles-${COMMIT_SHA:0:7}
@@ -251,7 +289,9 @@ test_all_platforms() {
       batch=("${selected[@]:batch_start:parallelism}")
       workers=()
       for platform in "${batch[@]}"; do
-        if [[ $phase == verify && ${build_status[$platform]} != 0 ]]; then continue; fi
+        if [[ $phase == verify && ${build_status[$platform]} != 0 ]]; then
+          continue
+        fi
         evidence=$RUNNER_TEMP/dotfiles-evidence/$platform
         mkdir -p "$evidence"
         printf 'Offline %s: %s (log: %s/%s.log)\n' "$phase" "$platform" "$evidence" "$phase"
@@ -275,7 +315,9 @@ test_all_platforms() {
         if ((status)); then
           printf 'dotfiles-release-ci: offline %s failed for %s (exit %s); see %s/%s/%s.log\n' \
             "$phase" "$platform" "$status" "$RUNNER_TEMP/dotfiles-evidence" "$platform" "$phase" >&2
-          if ((result == 0)); then result=$status; fi
+          if ((result == 0)); then
+            result=$status
+          fi
         else
           printf 'Offline %s passed: %s\n' "$phase" "$platform"
           if [[ $phase == verify ]]; then
@@ -348,13 +390,19 @@ publish() {
 
 main() {
   if [[ ${1:-} == test ]]; then
-    (($# == 2 || $# == 3)) || { die 'usage: dotfiles-release-ci test SOURCE_DIR [PLATFORM]'; return 2; }
+    (($# == 2 || $# == 3)) || {
+      die 'usage: dotfiles-release-ci test SOURCE_DIR [PLATFORM]'
+      return 2
+    }
     test_all_platforms "$2" "${3:-}"
     return
   fi
   work=$(mktemp -d "$RUNNER_TEMP/dotfiles-ci.XXXXXX")
   case ${1:-} in
-    preflight) (($# == 1)) || return 2; preflight ;;
+    preflight)
+      (($# == 1)) || return 2
+      preflight
+      ;;
     build | build-only | verify | publish)
       PLATFORM=${PLATFORM:?PLATFORM is required}
       COMMIT_SHA=${COMMIT_SHA:?COMMIT_SHA is required}
@@ -367,7 +415,10 @@ main() {
         publish "$2"
       fi
       ;;
-    *) die 'usage: dotfiles-release-ci test SOURCE_DIR [PLATFORM] | preflight | {build|build-only|verify} SOURCE_DIR OUTPUT_DIR | publish OUTPUT_DIR'; return 2 ;;
+    *)
+      die 'usage: dotfiles-release-ci test SOURCE_DIR [PLATFORM] | preflight | {build|build-only|verify} SOURCE_DIR OUTPUT_DIR | publish OUTPUT_DIR'
+      return 2
+      ;;
   esac
 }
 
