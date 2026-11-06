@@ -40,7 +40,7 @@ label() {
     off | done) printf '' ;;
     *)
       [[ $state != paused ]] || printf '|| '
-      printf '%02d:%02d' "$((remaining / 60))" "$((remaining % 60))"
+      printf '◷ %02d:%02d' "$((remaining / 60))" "$((remaining % 60))"
       ;;
   esac
 }
@@ -107,9 +107,14 @@ case $action in
       minutes=$((10#$value))
     fi
     state=ready
-    [[ $action != off ]] || state=off
     remaining=$((minutes * 60))
     deadline=0
+    if [[ $action == off ]]; then
+      state=off
+    elif [[ $action == set-minutes ]]; then
+      state=running
+      deadline=$((now + remaining))
+    fi
     save
     ;;
   status)

@@ -185,7 +185,7 @@ try:
     assert option('minutes') == '60' and started + 3600 <= deadline <= int(time.time()) + 3600, (
         'default timer is not 60 minutes'
     )
-    pattern = rb'(\d{2}:[0-5]\d) \| 192\.0\.2\.1 \| ' + clock
+    pattern = '◷ '.encode() + rb'(\d{2}:[0-5]\d) \| 192\.0\.2\.1 \| ' + clock
 
     # #() produces the countdown asynchronously; read its output without
     # forcing redraws that can restart a still-running format job.
@@ -201,14 +201,20 @@ try:
     run('start')
     assert int(option('deadline')) == deadline, 'Start restarted a running timer'
 
+    set_started = int(time.time())
     choose(master, b'm')
     os.write(master, b'12\r')
     wait_until(lambda: option('minutes') == '12', 'menu did not set the minutes')
-    assert run('status') == '12:00', 'setting minutes did not leave the timer ready'
+    wait_until(lambda: option('state') == 'running', 'setting minutes did not start the timer')
+    assert option('remaining') == '720', 'setting minutes did not reset the full duration'
+    assert set_started + 720 <= int(option('deadline')) <= int(time.time()) + 720, (
+        'setting minutes did not start a new countdown'
+    )
     assert tmux('capture-pane', '-p') == '', 'confirming minutes sent Enter to the pane'
     tmux('detach-client', '-t', client)
     os.kill(suspended.pid, signal.SIGCONT)
     suspended.wait(timeout=3)
+    running_deadline = option('deadline')
     for invalid in ('0', '1441', 'abc'):
         result = subprocess.run(
             ['bash', str(timer), socket, 'set-minutes', invalid],
@@ -217,6 +223,9 @@ try:
             timeout=5,
         )
         assert result.returncode == 2 and option('minutes') == '12', 'invalid minutes were accepted'
+        assert option('state') == 'running' and option('deadline') == running_deadline, (
+            'invalid minutes changed the running timer'
+        )
     choose(master, b'm')
     os.write(master, ('1; touch "' + str(root / 'injected') + '"\r').encode())
     read_terminal(master)
@@ -243,7 +252,7 @@ try:
     assert pause_deadline - pause_finished <= remaining <= pause_deadline - pause_started, (
         'pause did not retain the remaining time'
     )
-    assert paused == f'|| {remaining // 60:02d}:{remaining % 60:02d}', 'paused timer label is incorrect'
+    assert paused == f'|| ◷ {remaining // 60:02d}:{remaining % 60:02d}', 'paused timer label is incorrect'
     time.sleep(1.1)
     assert run('status') == paused, 'paused timer kept counting down'
     resume_started = int(time.time())
@@ -272,12 +281,12 @@ try:
 
     choose(master, b'r')
     wait_until(lambda: option('state') == 'ready', 'Reset did not reset the timer')
-    assert run('status') == '12:00', 'Reset did not restore the configured duration'
+    assert run('status') == '◷ 12:00', 'Reset did not restore the configured duration'
     assert tmux('display-message', '-p', '#{E:status-style}') == 'bg=#008080,fg=#ffffff'
     narrow = attach(30)
     tmux('refresh-client')
     output = read_terminal(narrow)
-    assert b'12:00' in output, 'narrow terminal hid the timer'
+    assert '◷ 12:00'.encode() in output, 'narrow terminal hid the timer'
     narrow_client = tmux('list-clients', '-F', '#{client_name}').splitlines()[-1]
     fields = tmux(
         'display-message', '-c', narrow_client, '-p',
@@ -288,6 +297,27 @@ try:
     choose(master, b'o')
     wait_until(lambda: option('state') == 'off', 'Off did not stop the timer')
     assert run('status') == '', 'Off did not hide the timer'
+    for previous in ('off', 'ready', 'running', 'paused', 'done'):
+        if previous == 'ready':
+            run('reset')
+        elif previous == 'running':
+            run('start')
+        elif previous == 'paused':
+            run('pause')
+        elif previous == 'done':
+            tmux('set-option', '-g', '@eye-timer-deadline', str(int(time.time()) - 1))
+            run('status')
+        assert option('state') == previous, f'timer did not enter {previous} before setting minutes'
+        set_started = int(time.time())
+        run('set-minutes', '0012')
+        assert option('state') == 'running' and option('minutes') == '12' and option('remaining') == '720', (
+            f'setting minutes from {previous} did not start the full countdown'
+        )
+        assert set_started + 720 <= int(option('deadline')) <= int(time.time()) + 720, (
+            f'setting minutes from {previous} did not replace the deadline'
+        )
+    run('off')
+    assert run('status') == '', 'Off retained the clock icon after setting minutes'
     assert tmux('show-options', '-gv', 'status-interval') == '5', 'timer changed the status refresh interval'
     print('Tmux eye timer tests passed')
 finally:

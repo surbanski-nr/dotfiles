@@ -1116,13 +1116,14 @@ menu. This replaces tmux's built-in clock mode; the status bar still shows
 the time. The timer starts disabled and uses 60 minutes by default:
 
 - `s`: start, resume a paused timer, or start a new countdown after completion.
-- `p`: pause and show `|| MM:SS`.
+- `p`: pause and show `|| ◷ MM:SS`.
 - `r`: reset to the configured duration and wait for Start.
-- `m`: enter whole minutes from 1 to 1440, then wait for Start.
+- `m`: enter whole minutes from 1 to 1440 and immediately start a new countdown.
 - `o`: hide and disable the timer.
 
-The countdown appears before the IP. While the timer is visible, clock/date
-disappear below 90 columns and the IP disappears below 60; the hostname still
+The countdown appears as `◷ MM:SS` before the IP. The clock is a Unicode
+character and does not require a patched font. While the timer is visible,
+clock/date disappear below 90 columns and the IP disappears below 60; the hostname still
 requires 160 columns. At the end, the countdown disappears and the entire
 status bar becomes red with white text. This colour is the only completion
 signal; there is no extra label or notification. It remains until you start
