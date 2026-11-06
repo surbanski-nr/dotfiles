@@ -266,6 +266,12 @@ while (($#)); do
   esac
 done
 [[ -n $destination && -n $url ]] || exit 99
+if [[ -n ${TEST_EXPECTED_INSTALL_PROGRESS:-} ]]; then
+  if ! grep -Fx -- "$TEST_EXPECTED_INSTALL_PROGRESS" "$TEST_INSTALL_PROGRESS_LOG" >/dev/null; then
+    printf 'installation progress missing before download\n' >&2
+    exit 88
+  fi
+fi
 source_file=$TEST_TOOL_ARCHIVES/${url#https://example.invalid/}
 [[ -f $source_file ]] || { printf 'download failed: %s\n' "$url" >&2; exit 22; }
 cp -- "$source_file" "$destination"

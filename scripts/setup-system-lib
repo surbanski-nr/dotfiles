@@ -9,6 +9,7 @@ setup_system() {
   local package_profile=$1
   SETUP_NAME=${SETUP_NAME:-${0##*/}}
   system_validate_host
+  printf '%s: preparing %s packages on %s\n' "$SETUP_NAME" "$package_profile" "$PLATFORM"
   SETUP_WARNINGS=0
   SETUP_TEMP_DIR=$(mktemp -d)
   trap 'find "$SETUP_TEMP_DIR" -depth -delete' EXIT
@@ -50,15 +51,16 @@ system_warning() {
 
 system_setup_command() {
   local description=$1 status
+  local -a command_status=()
   shift
   printf '%s: %s\n' "$SETUP_NAME" "$description"
-  if "$@" >"$SETUP_TEMP_DIR/command.log" 2>&1; then
-    cat "$SETUP_TEMP_DIR/command.log"
+  if "$@" 2>&1 | tee "$SETUP_TEMP_DIR/command.log"; then
     return 0
   else
-    status=$?
+    command_status=("${PIPESTATUS[@]}")
   fi
-  cat "$SETUP_TEMP_DIR/command.log"
+  status=${command_status[0]}
+  ((command_status[1] == 0)) || exit "${command_status[1]}"
   # Do not misclassify an integrity failure when another repository timed out.
   if grep -Eiq 'NO_PUBKEY|EXPKEYSIG|BADSIG|not signed|invalid signature|signatures.*couldn.t be verified|Hash Sum mismatch|checksum mismatch' "$SETUP_TEMP_DIR/command.log"; then
     exit "$status"
@@ -75,8 +77,12 @@ system_setup_command() {
 }
 
 system_setup_package_command() {
+  local -a package_command=("$@")
+  if [[ ${package_command[0]} == env && ${package_command[1]} == DEBIAN_FRONTEND=noninteractive ]]; then
+    package_command=("${package_command[@]:2}")
+  fi
   # sudo's pseudo-terminal stops background process groups that read it.
-  system_setup_command 'OS package installation' "${ROOT_COMMAND[@]}" \
+  system_setup_command "${package_command[0]} ${package_command[1]}" "${ROOT_COMMAND[@]}" \
     timeout --foreground --kill-after=5s 600s env LC_ALL=C "$@" || true
 }
 

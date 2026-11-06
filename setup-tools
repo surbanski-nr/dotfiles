@@ -40,6 +40,7 @@ main() {
   fi
   validate_host
   select_requested_tools "${requested[@]}"
+  printf 'setup-tools: checking requested tools\n'
   preflight "${SELECTED_TOOLS[@]}"
   install_selected_tools "${SELECTED_TOOLS[@]}"
 }
@@ -434,6 +435,7 @@ install_version() {
     missing) ;;
   esac
 
+  printf 'setup-tools: installing %s %s\n' "$name" "$version"
   STAGE_DIR=$(mktemp -d "$BIN_DIR/.setup-tools.XXXXXX")
   TEMP_PATHS+=("$STAGE_DIR")
   input="$STAGE_DIR/$SPEC_ASSET"
@@ -519,12 +521,14 @@ install_selected_tools() {
 
   for name in "$@"; do
     if [[ -v TMUX_PLUGINS[$name] ]]; then
+      printf 'setup-tools: installing %s\n' "$name"
       install_tmux_plugin "$name" "$TMUX_PLUGIN_DIR" || return
       continue
     fi
     load_tool_versions "$name"
     selected=${TOOL_VERSIONS[0]}
     if [[ $name == python ]]; then
+      printf 'setup-tools: installing Python %s through uv\n' "${TOOL_VERSIONS[*]}"
       "$BIN_DIR/uv" python install --no-config --no-bin "${TOOL_VERSIONS[@]}"
       "$BIN_DIR/uv" python pin --no-config --no-project --global "$selected"
       printf 'setup-tools: selected Python %s through uv\n' "$selected"

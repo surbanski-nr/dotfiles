@@ -54,7 +54,7 @@ package_log=$test_root/packages.log
 debian_release=$test_root/debian-os-release
 amazon_release=$test_root/amazon-os-release
 mkdir -p "$fixture_bin"
-for command_name in awk bash cat chmod cmp dirname env find grep id install ln mkdir mktemp mv readlink sed timeout uname; do
+for command_name in awk bash cat chmod cmp dirname env find grep id install ln mkdir mktemp mv readlink sed sleep tee timeout uname; do
   ln -s "$(command -v "$command_name")" "$fixture_bin/$command_name"
 done
 export TEST_DOCKER_COMMAND="$repo_dir/tests/fixtures/setup-system/docker-command"
@@ -70,6 +70,18 @@ EOF
 cat >"$fixture_bin/apt-get" <<'EOF'
 #!/usr/bin/env bash
 [[ ${TEST_PACKAGE_FAIL:-} != "apt-get:${1:-}" ]] || exit 71
+if [[ -n ${TEST_PACKAGE_PROGRESS_LOG:-} ]]; then
+  grep -Fx "setup-system: apt-get ${1:-}" "$TEST_PACKAGE_PROGRESS_LOG" >/dev/null || exit 80
+  progress="fixture: apt-get ${1:-} is running"
+  printf '%s\n' "$progress"
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    if grep -Fx "$progress" "$TEST_PACKAGE_PROGRESS_LOG" >/dev/null; then
+      break
+    fi
+    sleep 0.02
+  done
+  grep -Fx "$progress" "$TEST_PACKAGE_PROGRESS_LOG" >/dev/null || exit 81
+fi
 if [[ ${TEST_PACKAGE_TTY_PROBE:-0} == 1 ]]; then
   [[ -t 0 ]] || exit 77
   IFS= read -r reply || exit 78
@@ -178,9 +190,12 @@ grep -F $'\tdocker-compose-plugin' "$package_log" >/dev/null ||
 
 : >"$package_log"
 for _ in 1 2; do
+  # The package fixture reads the growing log before its command finishes.
+  # shellcheck disable=SC2094
   PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
+    TEST_PACKAGE_PROGRESS_LOG="$test_root/package-progress.log" \
     SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
-    "$online_setup_script" >/dev/null
+    "$online_setup_script" >"$test_root/package-progress.log"
 done
 [[ $(grep -c $'^apt-get\tupdate\t--error-on=any$' "$package_log") -eq 2 ]] ||
   fail 'connected setup did not refresh OS indexes twice'
@@ -383,6 +398,25 @@ set -e
 [[ $apt_failure -eq 71 ]] || fail 'apt failure was hidden'
 [[ $dnf_failure -eq 72 ]] || fail 'dnf failure was hidden'
 
+real_tee=$(command -v tee)
+unlink "$fixture_bin/tee"
+cat >"$fixture_bin/tee" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'fixture command log failure\n' >&2
+exit 82
+EOF
+chmod 0755 "$fixture_bin/tee"
+set +e
+log_failure_output=$(PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
+  SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" "$online_setup_script" 2>&1)
+log_failure_status=$?
+set -e
+unlink "$fixture_bin/tee"
+ln -s "$real_tee" "$fixture_bin/tee"
+[[ $log_failure_status -eq 82 && $log_failure_output == *'fixture command log failure'* &&
+  $log_failure_output != *'host setup packages ready'* ]] || fail 'command log failure was hidden'
+
 for failed_operation in apt-get:update apt-get:install dnf:install; do
   : >"$package_log"
   case $failed_operation in
@@ -396,7 +430,7 @@ for failed_operation in apt-get:update apt-get:install dnf:install; do
   warning_output=$(PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
     TEST_PACKAGE_NETWORK_FAIL="$failed_operation" SETUP_SYSTEM_OS_RELEASE_FILE="$target_release" \
     /bin/bash "$release_manager" setup 2>&1) || fail 'network failure stopped setup'
-  [[ $warning_output == *'dotfiles-release setup: warning: OS package installation failed'* &&
+  [[ $warning_output == *"dotfiles-release setup: warning: ${failed_operation/:/ } failed"* &&
     $warning_output == *'completed with '* && $warning_output != *'prerequisites ready'* &&
     $warning_output == *'skipping Docker setup'* ]] || fail 'network failure was hidden or prevented continuation'
   if [[ $failed_operation == apt-get:update ]]; then
@@ -407,13 +441,14 @@ done
 warning_output=$(PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
   TEST_PACKAGE_EMPTY_CACHE=1 SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
   /bin/bash "$release_manager" setup 2>&1) || fail 'unavailable repository with an empty package cache stopped setup'
-[[ $warning_output == *'warning: OS package installation failed'* &&
+[[ $warning_output == *'warning: apt-get update failed'* &&
+  $warning_output == *'warning: apt-get install failed'* &&
   $warning_output == *'Unable to locate package jq'* && $warning_output == *'completed with '* &&
   $warning_output == *'skipping Docker setup'* ]] || fail 'an empty package cache after network failure was hidden'
 warning_output=$(PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
   TEST_PACKAGE_TIMEOUT=apt-get:install SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
   /bin/bash "$release_manager" setup 2>&1) || fail 'package installation timeout stopped setup'
-[[ $warning_output == *'warning: OS package installation failed (exit 124)'* &&
+[[ $warning_output == *'warning: apt-get install failed (exit 124)'* &&
   $warning_output == *'completed with '* && $warning_output != *'prerequisites ready'* ]] ||
   fail 'package installation timeout was hidden'
 

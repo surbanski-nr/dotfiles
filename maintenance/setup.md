@@ -135,6 +135,8 @@ official release records. Python runtime management delegates to uv as described
 below. It supports only connected installation; offline
 deployment uses the complete release described below. Without names, it
 installs all of `TOOLS`, including kubectl, Helm and the three tmux plugins.
+It announces each tool and version before installation, along with Python and
+tmux plugin operations, so long-running steps are visible.
 A named `./setup-tools tmux` request installs only the binary; plugin names are
 selected independently. Optional online
 `setup-asdf` reads runtime versions from the same catalog, but plugin repository
@@ -292,6 +294,9 @@ operation and skip Docker once it is present. OS package operations have a
 600-second deadline, signing
 key downloads 120 seconds, Docker service startup 180 seconds and the local
 daemon check 30 seconds. Timed-out commands are killed after another five seconds.
+Host setup announces the package profile and platform, names each apt/dnf
+operation before starting it and streams command output as it runs. APT setup
+runs `apt-get update` followed by `apt-get install` for the configured packages.
 Network/DNS/connection failures and timeouts are warnings, not fatal errors.
 The script continues independent steps, tries package installation even if
 an index refresh failed, and reports missing prerequisites after a network

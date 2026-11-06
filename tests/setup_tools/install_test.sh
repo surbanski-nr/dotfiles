@@ -14,8 +14,12 @@ cp "$test_home/kube-log-prefixes.txt" "$test_root/kube-prefix-before"
 test_xdg=$test_root/'xdg elsewhere'
 
 before=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
-XDG_CONFIG_HOME="$test_xdg" run_setup "$test_home" "$test_repository" "$archive_root" \
-  k9s gh htop oh-my-posh uv nvim fd go kind tmux yq
+# The downloader reads the growing log to check progress before starting.
+# shellcheck disable=SC2094
+TEST_EXPECTED_INSTALL_PROGRESS="setup-tools: installing k9s $K9S_VERSION" \
+  TEST_INSTALL_PROGRESS_LOG="$test_root/install-progress.log" XDG_CONFIG_HOME="$test_xdg" \
+  run_setup "$test_home" "$test_repository" "$archive_root" \
+  k9s gh htop oh-my-posh uv nvim fd go kind tmux yq >"$test_root/install-progress.log"
 after=$(find "$archive_root" -type f -print0 | sort -z | xargs -0 sha256sum)
 [[ $before == "$after" ]] || fail 'setup-tools changed a download fixture'
 cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
