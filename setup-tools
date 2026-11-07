@@ -48,7 +48,7 @@ main() {
 load_setup_config() {
   # shellcheck source=system.env
   source "$REPO_DIR/system.env"
-  validate_tool_config
+  validate_tool_config online
 
   BIN_DIR=${SETUP_TOOLS_BIN_DIR:-$HOME/bin}
   STATE_DIR=${SETUP_TOOLS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup-tools}

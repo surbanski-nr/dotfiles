@@ -4,6 +4,10 @@
 # shellcheck disable=SC2034
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+# shellcheck source=../../tools.env
+source "$repo_dir/tools.env"
+# shellcheck source=../../scripts/setup-profile-lib
+source "$repo_dir/scripts/setup-profile-lib"
 
 cleanup() {
   local status=$? pid
@@ -349,6 +353,70 @@ repack_artifact() {
     mv "$test_root/$marker-SHA256SUMS" SHA256SUMS
   )
   tar -C "$test_root/stage-$marker" -czf "$destination" "$id"
+}
+
+make_selected_artifact() {
+  local commit=$1 marker=$2 destination=$3
+  shift 3
+  local -a chosen_tools=("$@")
+  local release=$test_root/stage-$marker/dotfiles-${commit:0:12}
+  local tool field value fields paths pattern path commands command_name
+  local -A metadata=() emitted=()
+
+  make_artifact "$commit" "$marker" "$destination" 3.0 true true true true
+  while IFS='=' read -r field value; do
+    metadata[$field]=$value
+  done <"$release/release.env"
+  printf 'RELEASE_FORMAT=2\n' >"$release/release.env"
+  for field in RELEASE_ID PLATFORM_ID SOURCE_COMMIT SOURCE_TREE BUILDER_IMAGE PAYLOAD_PATHS; do
+    printf '%s=%s\n' "$field" "${metadata[$field]}" >>"$release/release.env"
+  done
+  printf 'OFFLINE_TOOLS=%s\n' "$(IFS=,; printf '%s' "${chosen_tools[*]}")" >>"$release/release.env"
+  for tool in "${chosen_tools[@]}"; do
+    fields=$(tool_metadata_fields "$tool")
+    [[ -n $fields ]] || continue
+    while IFS= read -r field; do
+      [[ ! -v emitted[$field] ]] || continue
+      if [[ $field == *_COMMIT ]]; then
+        path=$release/share/tmux/plugins/$tool
+        git -C "$path" checkout --detach -q
+        value=$(git -C "$path" rev-parse HEAD)
+      else
+        value=${metadata[$field]}
+      fi
+      printf '%s=%s\n' "$field" "$value" >>"$release/release.env"
+      emitted[$field]=1
+    done <<<"$fields"
+  done
+  while IFS= read -r tool; do
+    profile_has chosen_tools "$tool" && continue
+    paths=$(tool_payload_paths "$tool")
+    if [[ -n $paths ]]; then
+      while IFS= read -r pattern; do
+        while IFS= read -r path; do
+          [[ -n $path ]] || continue
+          find "$path" -depth -delete
+        done < <(compgen -G "$release/$pattern" || true)
+      done <<<"$paths"
+    fi
+    commands=$(tool_commands "$tool")
+    if [[ -n $commands ]]; then
+      while IFS= read -r command_name; do
+        [[ ! -e $release/bin/$command_name && ! -L $release/bin/$command_name ]] || unlink "$release/bin/$command_name"
+      done <<<"$commands"
+    fi
+    case $tool in
+      kubectl | helm)
+        for path in "$release/bin/$tool-"*; do
+          [[ ! -e $path && ! -L $path ]] || unlink "$path"
+        done
+        ;;
+    esac
+  done < <(profile_tool_names)
+  if ! profile_has chosen_tools nvim; then
+    find "$release/python-locks" "$release/python-wheelhouse" -mindepth 1 -depth -delete
+  fi
+  repack_artifact "$marker" "${release##*/}" "$destination"
 }
 
 run_manager() {

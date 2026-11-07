@@ -107,9 +107,11 @@ for defect in wrong-plugin broken-yaml broken-generation; do
   else
     run_manager install "$archive" >/dev/null
     status=0
-    bash -c 'source "$1"; health_stage "validation tools" health_validation_tools "$2" "$3" 3.0 3.0 3.0' \
+    tool=yq
+    [[ $defect != broken-generation ]] || tool=helm-schema
+    bash -c 'source "$1"; source "$4"; health_stage "validation tools" "$5" "$2" "$3"' \
       checker-test "$repo_dir/scripts/check-dotfiles-release" \
-      "$test_home/dotfiles-releases/$id_three" "$test_root/checker-$defect" \
+      "$test_home/dotfiles-releases/$id_three" "$test_root/checker-$defect" "$repo_dir/tests/tools/$tool.sh" "health_${tool//-/_}" \
       >"$test_root/checker-$defect.log" 2>&1 || status=$?
     [[ $status != 0 && $(<"$test_root/checker-$defect.log") == *'validation tools health check failed'* ]] ||
       fail "CI runtime check accepted $defect"

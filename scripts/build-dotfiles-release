@@ -7,6 +7,7 @@ unset VIRTUAL_ENV
 
 TEMP_PATHS=()
 NODE_UPSTREAM_NPM_VERSION=
+PYTHON_BUILD=
 declare -A BUILD_VERSIONS=()
 
 die() {
@@ -141,17 +142,17 @@ load_build_config() {
   source "$source_dir/system.env" || return
   # shellcheck source=../tools.env
   source "$source_dir/tools.env" || return
-  validate_tool_config || return
+  validate_tool_config offline || return
   local tool
+  BUILD_VERSIONS=()
   SIMPLE_RELEASE_TOOLS=()
-  BUILD_TOOL_PROFILE=()
+  BUILD_TOOL_PROFILE=("${OFFLINE_RELEASE_TOOLS[@]}")
   BUILD_TMUX_PLUGINS=()
   for tool in "${OFFLINE_RELEASE_TOOLS[@]}"; do
     if [[ -v TMUX_PLUGINS[$tool] ]]; then
       BUILD_TMUX_PLUGINS+=("$tool")
       continue
     fi
-    BUILD_TOOL_PROFILE+=("$tool")
     [[ $tool == yamllint ]] && continue
     select_default_release TOOL_RELEASES "$tool" || return
     [[ $RELEASE_URL != - ]] || {
@@ -159,37 +160,30 @@ load_build_config() {
       return 1
     }
     BUILD_VERSIONS[$tool]=$RELEASE_VERSION
+    if [[ $tool == python ]]; then
+      [[ $RELEASE_URL =~ /releases/download/([0-9]{8})/ ]] || {
+        die 'Python release URL must include its YYYYMMDD build date'
+        return 1
+      }
+      PYTHON_BUILD=${BASH_REMATCH[1]}
+    fi
     # These need compilation, a runtime tree, or multiple versions. Other
     # direct binaries are derived from the configured release tool list.
     case $tool in
-      nvim | nodejs | python | go | htop | tmux | kubectl | helm) ;;
+      nvim | nodejs | python | go | htop | tmux | kubectl | helm | helm-schema) ;;
       *)
         SIMPLE_RELEASE_TOOLS+=("$tool")
         ;;
     esac
   done
-  select_default_release TOOL_RELEASES npm || return
-  BUILD_VERSIONS[npm]=$RELEASE_VERSION
-  select_default_release TOOL_RELEASES helm-schema || return
-  [[ $RELEASE_URL != - ]] || {
-    die 'Helm schema plugin requires an artifact'
-    return 1
-  }
-  BUILD_VERSIONS[helm-schema]=$RELEASE_VERSION
+  if profile_has OFFLINE_RELEASE_TOOLS nodejs; then
+    select_default_release TOOL_RELEASES npm || return
+    BUILD_VERSIONS[npm]=$RELEASE_VERSION
+  fi
   # shellcheck source=../release.env
   source "$source_dir/release.env" || return
 }
 
-release_version_field() {
-  local tool=$1 check field
-  check=${TOOL_CHECKS[$tool]:-}
-  field=${check%%|*}
-  [[ -n $field ]] || {
-    die "missing release version field for $tool"
-    return 1
-  }
-  printf '%s\n' "$field"
-}
 
 install_build_packages() {
   local platform=$1 role=$2
@@ -240,9 +234,11 @@ write_launchers() {
   local release=$1 tool
 
   for tool in nvim tmux go; do
+    profile_has OFFLINE_RELEASE_TOOLS "$tool" || continue
     install -m 0755 "$release/dotfiles/scripts/offline-$tool" "$release/bin/$tool" || return
   done
   for tool in kubectl helm; do
+    profile_has OFFLINE_RELEASE_TOOLS "$tool" || continue
     install -m 0755 "$release/dotfiles/scripts/offline-kubernetes-client" \
       "$release/bin/$tool" || return
   done
@@ -250,33 +246,41 @@ write_launchers() {
 
 install_release_tools() {
   local release=$1 inputs=$2
-  local node_version=${BUILD_VERSIONS[nodejs]}
-  local python_version=${BUILD_VERSIONS[python]}
+  local node_version=${BUILD_VERSIONS[nodejs]:-}
+  local python_version=${BUILD_VERSIONS[python]:-}
   local command_name catalog tool version npm_archive
 
   mkdir -p "$release/bin" "$release/tools/bin" "$inputs" || return
 
-  prepare_release_artifact TOOL_RELEASES nvim "${BUILD_VERSIONS[nvim]}" "$inputs" || return
-  mv -- "$PREPARED_ARTIFACT" "$release/tools/nvim" || return
+  if profile_has OFFLINE_RELEASE_TOOLS nvim; then
+    prepare_release_artifact TOOL_RELEASES nvim "${BUILD_VERSIONS[nvim]}" "$inputs" || return
+    mv -- "$PREPARED_ARTIFACT" "$release/tools/nvim" || return
+  fi
 
-  prepare_release_artifact TOOL_RELEASES nodejs "$node_version" "$inputs" || return
-  mv -- "$PREPARED_ARTIFACT" "$release/tools/node" || return
-  NODE_UPSTREAM_NPM_VERSION=$(PATH="$release/tools/node/bin:$PATH" \
-    "$release/tools/node/bin/npm" --version) || return
-  select_release TOOL_RELEASES npm "${BUILD_VERSIONS[npm]}" || return
-  npm_archive=$inputs/$RELEASE_ASSET
-  download_file "$RELEASE_URL" "$npm_archive" || return
-  verify_sha256 "$npm_archive" "$RELEASE_SHA256" || return
-  PATH="$release/tools/node/bin:$PATH" NPM_CONFIG_AUDIT=false \
-    npm install --global "$npm_archive" >/dev/null || return
+  if profile_has OFFLINE_RELEASE_TOOLS nodejs; then
+    prepare_release_artifact TOOL_RELEASES nodejs "$node_version" "$inputs" || return
+    mv -- "$PREPARED_ARTIFACT" "$release/tools/node" || return
+    NODE_UPSTREAM_NPM_VERSION=$(PATH="$release/tools/node/bin:$PATH" \
+      "$release/tools/node/bin/npm" --version) || return
+    select_release TOOL_RELEASES npm "${BUILD_VERSIONS[npm]}" || return
+    npm_archive=$inputs/$RELEASE_ASSET
+    download_file "$RELEASE_URL" "$npm_archive" || return
+    verify_sha256 "$npm_archive" "$RELEASE_SHA256" || return
+    PATH="$release/tools/node/bin:$PATH" NPM_CONFIG_AUDIT=false \
+      npm install --global "$npm_archive" >/dev/null || return
+  fi
 
-  prepare_release_artifact TOOL_RELEASES python "$python_version" "$inputs" || return
-  mv -- "$PREPARED_ARTIFACT" "$release/tools/python-$python_version" || return
-  ln -s "python-$python_version" "$release/tools/python" || return
+  if profile_has OFFLINE_RELEASE_TOOLS python; then
+    prepare_release_artifact TOOL_RELEASES python "$python_version" "$inputs" || return
+    mv -- "$PREPARED_ARTIFACT" "$release/tools/python-$python_version" || return
+    ln -s "python-$python_version" "$release/tools/python" || return
+  fi
 
-  prepare_release_artifact TOOL_RELEASES go "${BUILD_VERSIONS[go]}" "$inputs" || return
-  mv -- "$PREPARED_ARTIFACT" "$release/tools/go" || return
-  ln -s ../tools/go/bin/gofmt "$release/bin/gofmt" || return
+  if profile_has OFFLINE_RELEASE_TOOLS go; then
+    prepare_release_artifact TOOL_RELEASES go "${BUILD_VERSIONS[go]}" "$inputs" || return
+    mv -- "$PREPARED_ARTIFACT" "$release/tools/go" || return
+    ln -s ../tools/go/bin/gofmt "$release/bin/gofmt" || return
+  fi
 
   for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do
     version=${BUILD_VERSIONS[$tool]}
@@ -289,6 +293,7 @@ install_release_tools() {
   done
 
   for tool in kubectl helm; do
+    profile_has OFFLINE_RELEASE_TOOLS "$tool" || continue
     release_versions TOOL_RELEASES "$tool" || return
     for version in "${RELEASE_VERSIONS[@]}"; do
       prepare_release_artifact TOOL_RELEASES "$tool" "$version" "$inputs" || return
@@ -299,14 +304,20 @@ install_release_tools() {
   done
 
   for tool in htop tmux; do
+    profile_has OFFLINE_RELEASE_TOOLS "$tool" || continue
     prepare_release_artifact TOOL_RELEASES "$tool" "${BUILD_VERSIONS[$tool]}" "$inputs" || return
     compile_tool_source "$tool" "$PREPARED_ARTIFACT" "$release/tools/$tool" || return
   done
-  ln -s ../tools/htop/bin/htop "$release/bin/htop" || return
+  if profile_has OFFLINE_RELEASE_TOOLS htop; then
+    ln -s ../tools/htop/bin/htop "$release/bin/htop" || return
+  fi
 
-  for command_name in node npm npx corepack; do
-    ln -s "../tools/node/bin/$command_name" "$release/bin/$command_name" || return
-  done
+  if profile_has OFFLINE_RELEASE_TOOLS nodejs; then
+    for command_name in node npm npx corepack; do
+      ln -s "../tools/node/bin/$command_name" "$release/bin/$command_name" || return
+    done
+  fi
+
   for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do
     ln -s "../tools/bin/$tool" "$release/bin/$tool" || return
   done
@@ -521,8 +532,10 @@ BASH
       --only-binary=:all: --dest "$release/python-wheelhouse" \
       -r "$release/python-locks/$package.lock" || return
   done <<<"$package_output"
-  ln -s ../share/nvim2/mason/packages/yamllint/venv/bin/yamllint \
-    "$release/bin/yamllint" || return
+  if profile_has OFFLINE_RELEASE_TOOLS yamllint; then
+    ln -s ../share/nvim2/mason/packages/yamllint/venv/bin/yamllint \
+      "$release/bin/yamllint" || return
+  fi
 }
 
 verify_release_symlinks() {
@@ -548,50 +561,44 @@ verify_release_symlinks() {
 write_release_metadata() {
   local release=$1 platform=$2 source_commit=$3 source_tree=$4 image=$5 inputs=$6
   local release_id=${release##*/} field tool
-  local manifest package origin plugin_commit value
+  local manifest package origin plugin_commit value command_name check
+  local -a arguments=()
 
+  local -A emitted=()
   printf '%s\n' \
+    'RELEASE_FORMAT=2' \
     "RELEASE_ID=$release_id" \
     "PLATFORM_ID=$platform" \
     "SOURCE_COMMIT=$source_commit" \
     "SOURCE_TREE=$source_tree" \
     "BUILDER_IMAGE=$image" \
-    "NVIM_VERSION=${BUILD_VERSIONS[nvim]}" \
-    "NODE_VERSION=${BUILD_VERSIONS[nodejs]}" \
-    "NPM_VERSION=${BUILD_VERSIONS[npm]}" \
-    "NODE_UPSTREAM_NPM_VERSION=$NODE_UPSTREAM_NPM_VERSION" \
-    "PYTHON_VERSION=${BUILD_VERSIONS[python]}" \
-    "PYTHON_BUILD=$PYTHON_STANDALONE_BUILD" \
-    "GO_VERSION=${BUILD_VERSIONS[go]}" \
-    "HTOP_VERSION=${BUILD_VERSIONS[htop]}" \
-    "TMUX_VERSION=${BUILD_VERSIONS[tmux]}" \
-    "HELM_SCHEMA_PLUGIN_VERSION=${BUILD_VERSIONS[helm-schema]}" \
-    >"$release/release.env" || return
-  for tool in "${SIMPLE_RELEASE_TOOLS[@]}"; do
-    # kubens shares the KUBECTX_VERSION field emitted for kubectx.
-    if [[ $tool == kubens ]]; then
-      continue
-    fi
-    field=$(release_version_field "$tool") || return
-    printf '%s=%s\n' "$field" "${BUILD_VERSIONS[$tool]}" \
-      >>"$release/release.env" || return
-  done
-  for tool in kubectl helm; do
-    release_versions TOOL_RELEASES "$tool" || return
-    printf '%s_VERSIONS=%s\n' "${tool^^}" \
-      "$(
-        IFS=,
-        printf '%s' "${RELEASE_VERSIONS[*]}"
-      )" \
-      >>"$release/release.env" || return
-  done
-  printf '%s\n' \
-    "OFFLINE_TOOLS=$(
-      IFS=,
-      printf '%s' "${BUILD_TOOL_PROFILE[*]}"
-    )" \
+    "OFFLINE_TOOLS=$(IFS=,; printf '%s' "${BUILD_TOOL_PROFILE[*]}")" \
     'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
-    >>"$release/release.env" || return
+    >"$release/release.env" || return
+  local fields
+  for tool in "${BUILD_TOOL_PROFILE[@]}"; do
+    fields=$(tool_metadata_fields "$tool") || return
+    [[ -n $fields ]] || continue
+    while IFS= read -r field; do
+      [[ ! -v emitted[$field] ]] || continue
+      case $field in
+        *_COMMIT)
+          select_git_plugin TMUX_PLUGINS "$tool" || return
+          value=$PLUGIN_COMMIT
+          ;;
+        *_VERSIONS)
+          release_versions TOOL_RELEASES "$tool" || return
+          value=$(IFS=,; printf '%s' "${RELEASE_VERSIONS[*]}")
+          ;;
+        PYTHON_BUILD) value=$PYTHON_BUILD ;;
+        NODE_UPSTREAM_NPM_VERSION) value=$NODE_UPSTREAM_NPM_VERSION ;;
+        NPM_VERSION) value=${BUILD_VERSIONS[npm]} ;;
+        *) value=${BUILD_VERSIONS[$tool]} ;;
+      esac
+      printf '%s=%s\n' "$field" "$value" >>"$release/release.env" || return
+      emitted[$field]=1
+    done <<<"$fields"
+  done
 
   {
     printf 'source_commit=%s\nsource_tree=%s\nplatform=%s\nbuilder_image=%s\n' \
@@ -600,28 +607,37 @@ write_release_metadata() {
     printf 'built_at_utc=%s\n' "$value" || return
     value=$(getconf GNU_LIBC_VERSION) || return
     printf 'glibc=%s\n' "$value" || return
-    "$release/bin/nvim" --version | head -n 3 || return
-    "$release/bin/node" --version || return
-    value=$("$release/bin/npm" --version) || return
-    printf 'npm_runtime=%s\n' "$value" || return
-    printf 'npm_upstream=%s\n' "$NODE_UPSTREAM_NPM_VERSION"
-    "$release/tools/python-${BUILD_VERSIONS[python]}/bin/python3" --version || return
-    "$release/bin/go" version || return
-    "$release/bin/tmux" -V || return
-    printf 'tmux_configure=--prefix=tools/tmux\n'
-    ldd "$release/tools/tmux/bin/tmux" || return
-    "$release/bin/rg" --version | head -n 1 || return
+    for tool in "${BUILD_TOOL_PROFILE[@]}"; do
+      if [[ $tool == python ]]; then
+        "$release/tools/python/bin/python3" --version || return
+        continue
+      fi
+      value=$(tool_commands "$tool") || return
+      [[ -n $value ]] || continue
+      command_name=${value%%$'\n'*}
+      check=${TOOL_CHECKS[$command_name]:-}
+      [[ -n $check ]] || continue
+      read -r -a arguments <<<"${check#*|}"
+      (("${#arguments[@]}" > 0)) || arguments=(--version)
+      "$release/bin/$command_name" "${arguments[@]}" || return
+    done
+    if profile_has BUILD_TOOL_PROFILE tmux; then
+      printf 'tmux_configure=--prefix=tools/tmux\n'
+      ldd "$release/tools/tmux/bin/tmux" || return
+    fi
     printf 'builder_packages:\n'
     printf '  %s\n' "${SETUP_SYSTEM_PACKAGES[@]}"
     printf 'input_archives_sha256:\n'
     (cd "$inputs" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) || return
-    printf 'python_locks_sha256:\n'
-    (cd "$release/python-locks" && sha256sum ./*.lock) || return
-    printf 'python_wheels_sha256:\n'
-    (cd "$release/python-wheelhouse" &&
-      find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) || return
-    value=$(sha256sum "$release/config/nvim2/nvim-pack-lock.json" | cut -d ' ' -f1) || return
-    printf 'nvim_pack_lock_sha256=%s\n' "$value" || return
+    if profile_has BUILD_TOOL_PROFILE nvim; then
+      printf 'python_locks_sha256:\n'
+      (cd "$release/python-locks" && sha256sum ./*.lock) || return
+      printf 'python_wheels_sha256:\n'
+      (cd "$release/python-wheelhouse" &&
+        find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) || return
+      value=$(sha256sum "$release/config/nvim2/nvim-pack-lock.json" | cut -d ' ' -f1) || return
+      printf 'nvim_pack_lock_sha256=%s\n' "$value" || return
+    fi
     for package in "${BUILD_TMUX_PLUGINS[@]}"; do
       origin=$(git -C "$release/share/tmux/plugins/$package" config --get remote.origin.url) || return
       plugin_commit=$(git -C "$release/share/tmux/plugins/$package" rev-parse HEAD) || return
@@ -638,6 +654,18 @@ write_release_metadata() {
     mv "$manifest" SHA256SUMS || exit
     sha256sum --check --strict SHA256SUMS >/dev/null || exit
   ) || return
+}
+
+pack_dotfiles_source() {
+  local source_dir=$1 release=$2 tool package
+  local -a paths=(bash git ssh vim scripts tools.env)
+
+  for tool in "${BUILD_TOOL_PROFILE[@]}"; do
+    package=$(tool_config_package "$tool") || return
+    [[ -z $package ]] || paths+=("$package")
+  done
+  git -c safe.directory="$source_dir" -C "$source_dir" archive HEAD -- "${paths[@]}" |
+    tar -x -C "$release/dotfiles" || return
 }
 
 build_release() {
@@ -675,20 +703,27 @@ build_release() {
   release=$work/$release_id
   inputs=$work/inputs
   build_home=$work/build-home
-  mkdir -p "$release/config" "$release/dotfiles" "$release/share" "$build_home" || return
-  git -c safe.directory="$source_dir" -C "$source_dir" archive HEAD |
-    tar -x -C "$release/dotfiles" || return
-  cp -a "$release/dotfiles/nvim2/.config/nvim2" "$release/config/nvim2" || return
-  mkdir -p "$release/python-locks" || return
-  cp "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.in \
-    "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.lock \
-    "$release/python-locks/" || return
+  mkdir -p "$release/bin" "$release/config" "$release/dotfiles" "$release/share" \
+    "$release/tools" "$release/python-locks" "$release/python-wheelhouse" "$build_home" || return
+  pack_dotfiles_source "$source_dir" "$release" || return
+  if profile_has OFFLINE_RELEASE_TOOLS nvim; then
+    cp -a "$release/dotfiles/nvim2/.config/nvim2" "$release/config/nvim2" || return
+    cp "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.in \
+      "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.lock \
+      "$release/python-locks/" || return
+  fi
   bash "$source_dir/scripts/build-standalone-script" "$source_dir" "$release/dotfiles-release" || return
   install_release_tools "$release" "$inputs" || return
-  install_helm_schema_plugin "$release" "$inputs" || return
+  if profile_has OFFLINE_RELEASE_TOOLS helm-schema; then
+    install_helm_schema_plugin "$release" "$inputs" || return
+  fi
   ln -s ../dotfiles-release "$release/bin/dotfiles-release" || return
-  install_tmux_plugins "$release/share/tmux/plugins" "${BUILD_TMUX_PLUGINS[@]}" || return
-  prepare_nvim_payload "$release" "$build_home" "$platform" || return
+  if (("${#BUILD_TMUX_PLUGINS[@]}" > 0)); then
+    install_tmux_plugins "$release/share/tmux/plugins" "${BUILD_TMUX_PLUGINS[@]}" || return
+  fi
+  if profile_has OFFLINE_RELEASE_TOOLS nvim; then
+    prepare_nvim_payload "$release" "$build_home" "$platform" || return
+  fi
   verify_release_symlinks "$release" || return
   write_release_metadata "$release" "$platform" "$source_commit" "$source_tree" \
     "$image" "$inputs" || return
@@ -765,4 +800,6 @@ main() {
   esac
 }
 
-main "$@"
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi

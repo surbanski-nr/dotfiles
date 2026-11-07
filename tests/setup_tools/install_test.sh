@@ -6,6 +6,17 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/fixture.sh"
 create_fixture
 
+single_repository=$test_root/single-repository
+single_home=$test_root/single-home
+make_test_repo "$single_repository"
+cp "$test_repository/tools.env" "$single_repository/tools.env"
+printf 'TOOLS=(fd)\n' >>"$single_repository/tools.env"
+run_setup "$single_home" "$single_repository" "$archive_root"
+"$single_home/bin/fd" --version | grep -F "$FD_VERSION" >/dev/null
+[[ $(find "$single_home/bin" -mindepth 1 -maxdepth 1 | wc -l) -eq 2 ]] ||
+  fail 'single-tool default installation installed unselected tools'
+[[ ! -e $single_home/.tmux ]] || fail 'single-tool default installation installed tmux plugins'
+
 mkdir -p "$test_home"
 printf 'private context bytes' >"$test_home/kube-backup-contexts.txt"
 printf 'private prefix bytes' >"$test_home/kube-log-prefixes.txt"

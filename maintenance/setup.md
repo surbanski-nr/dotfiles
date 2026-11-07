@@ -122,6 +122,10 @@ separate source-archive tool. Both include `fd`, installed from its verified off
 Linux musl archive rather than an OS package. GNU `find` remains a system
 prerequisite for scripts that depend on its semantics.
 
+Both lists must contain at least one tool. An empty list is a configuration
+error and stops setup before installation. A single tool is supported, subject
+to the explicit offline dependencies below.
+
 Both profiles include Mike Farah's yq `4.52.4` as the verified upstream Go
 binary, independently of the Python package also named yq.
 
@@ -182,8 +186,9 @@ and release runtime checks. Arguments are whitespace-separated; empty arguments 
 `--version`. The metadata field is empty for kubectl and Helm, whose retained
 versions are checked through separate lists. Commands such as `node` and `uvx`
 have their own entries even when their releases share a tool record. The
-builder embeds only this map from the tool catalog in the standalone manager,
-alongside the runtime OS configuration and shared setup library, so it works
+builder embeds this map and the shared rules from `scripts/setup-profile-lib`
+in the standalone manager, alongside the runtime OS configuration and shared
+setup library, so it works
 outside the checkout. Edit the repository sources and rebuild; do not edit
 generated managers.
 
@@ -233,6 +238,9 @@ release-frozen download catalog and verifies its prebuilt standalone Python
 downloads; the Python archive URL and SHA-256 in `tools.env` continue to supply
 the immutable offline build. No Python compilation or asdf plugin is needed.
 Normal `./setup-tools` includes this step.
+
+Offline metadata records the standalone build date as `PYTHON_BUILD`, derived
+from the default Python archive URL. It has no separate pin in `tools.env`.
 
 Setup never edits project `.tool-versions`, `.python-version` or dependency
 files. uv does not read asdf's Python entries. Existing uv project pins and
@@ -386,7 +394,8 @@ releases provide the clients. Cluster creation and image downloads remain opt-in
 
 For a restricted host, use the complete platform artifact. This is the only
 supported offline installation route; `setup-tools` and `setup-asdf` are not
-used. The artifact contains one immutable dotfiles snapshot together
+used. The default artifact contains an immutable snapshot of shared and selected
+configuration together
 with Neovim and its complete profile, Node.js, private standalone Python, the
 complete Go SDK,
 ripgrep, fd, tmux and plugins, htop, Oh My Posh, gh, k9s, kind, uv/uvx, zoxide,
@@ -398,15 +407,38 @@ Each release owns its complete tool payload, even when another retained release
 contains the same versions. Asdf, its plugins and its shims are not part of the
 offline package. Optional online `setup-asdf` remains available independently.
 
-The current manager supports the original, fd-only, fd/Go and expanded
-operations-tool profiles when packaged with the current layout. Selecting a
-smaller profile removes its absent commands from `current/bin`, without stale
-links in `~/bin`. Keep a downloaded copy of the newer manager when selecting
-older profiles: older managers do not understand newer metadata. Profiles
-without the SSH package remain supported; their optional SSH links do not
-resolve until a release containing that package is selected.
-The new yq profile requires `YQ_VERSION` and `HELM_SCHEMA_PLUGIN_VERSION`;
-retained profiles keep their original requirements and plugin discovery.
+Edit `OFFLINE_RELEASE_TOOLS` to remove tools from the next package. The list
+selects binaries, launchers, plugins and tool configuration. The archive contains
+the shared Bash/Git/SSH/Vim files and selected tool packages, rather than the whole
+repository. For example, removing k9s removes its binary, configuration and skins;
+unselected MC configuration and local-share files are not bundled.
+
+Nvim stays in the default list but can be removed as a whole, including its
+configuration, plugins, Mason payload and editor tests. Its full profile requires
+Node.js, Python, Go, ripgrep and Terraform. Terraform is required by the editor's
+Terraform formatter and language server. These are separate tools: removing
+Nvim does not automatically remove them. Missing dependencies are reported
+before downloads.
+`yamllint` currently uses Nvim's Mason environment, so remove it too when omitting
+Nvim. Tmux plugins require tmux, and `helm-schema` requires Helm. npm belongs to
+Node.js. Private Mason dependencies remain owned by the editor: removing the
+standalone actionlint tool leaves the editor's independently pinned copy.
+
+Ansible is another editor dependency. Mason's `ansible-lint` environment contains
+the locked `ansible-core`; offline builds expose `ansible`, `ansible-config` and
+`ansible-playbook` through `share/nvim2/mason/bin`. Bash adds that directory to
+PATH. These commands disappear with the Nvim payload. `setup-system` does not
+install Ansible, and connected `dotfiles-check` reports it only as an optional
+integration, so its absence does not fail that check.
+
+New archives record `RELEASE_FORMAT=2` and the complete selection, including tmux
+plugins, in `OFFLINE_TOOLS`. Required version fields, payload checks and public
+links follow that selection. The manager also accepts earlier archives, whose
+tmux plugins and Helm schema plugin were implicit. Selecting a smaller profile
+removes obsolete managed HOME links and restores saved originals in the same
+transaction as switching `current`; it preserves user state and caches.
+Keep a downloaded copy of the newer manager when selecting older profiles:
+older managers do not understand newer metadata.
 
 Adding `current/bin` directly to PATH requires a newly built archive: private
 Python now lives only under `tools`, not in public `bin`. The new manager
@@ -525,13 +557,14 @@ manager or checksum does not rebuild the archive. It always extracts the
 manager from the matching archive, never from a newer workflow checkout.
 A published script or checksum that differs is rejected, not overwritten.
 
-The artifact contains a Git archive of the matching dotfiles commit, not the
-main repository history. It also contains the full Neovim runtime tree, pinned
-plugin Git metadata, parsers, queries, Mason receipts, tmux plugins, Python
-locks and the temporary wheelhouse. `release.env`, `build-manifest.txt` and
-`SHA256SUMS` record source identity, layout, versions, inputs and content.
-The generated payload-root `release.env` is distinct from the checked-in
-`dotfiles/release.env`, which contains builder image pins.
+The artifact contains selected paths from a Git archive of the matching commit,
+without the repository history. The default profile also contains the full
+Neovim runtime tree, pinned plugin Git metadata, parsers, queries, Mason receipts,
+tmux plugins, Python locks and the temporary wheelhouse.
+`release.env`, `build-manifest.txt` and `SHA256SUMS` record source identity,
+layout, versions, inputs and content.
+The generated payload-root `release.env` is distinct from the source repository's
+`release.env`, which contains builder image pins and is not bundled.
 After venv creation the retained installation removes the wheelhouse and
 records a new local manifest covering file contents, modes and symlink targets.
 
@@ -547,10 +580,11 @@ or platform argument and never installs or activates a release. The connected
 `setup-system` entry point uses the same `scripts/setup-system-lib` with its
 broader normal-host package profile; there is no copied offline implementation.
 Neither selects a tool list: `setup-tools` selects `TOOLS`, and the builder selects
-`OFFLINE_RELEASE_TOOLS`. The archive retains the old metadata key
-`OFFLINE_TOOLS` for compatibility with retained releases. That field still lists
-only runtime/command tools, not Git plugin targets. Plugin repository and commit
-identities remain in `build-manifest.txt`, and their files in `SHA256SUMS`.
+`OFFLINE_RELEASE_TOOLS`. The archive retains the metadata key `OFFLINE_TOOLS`.
+With `RELEASE_FORMAT=2` it lists the complete selection, including Git plugins;
+earlier archives listed only runtime tools and selected plugins implicitly.
+Selected plugin commits are recorded in `release.env`; repository and commit
+identities also remain in `build-manifest.txt`, with files in `SHA256SUMS`.
 No published archive, tag or release needs to be rewritten.
 
 On a connected machine, download these release assets into one directory with
@@ -617,10 +651,41 @@ dependencies, bundled tool versions and the Helm schema plugin. Install then act
 release through the same code used by `set ID`. Reinstalling an unchanged
 retained ID reuses it after integrity and runtime checks.
 
-Extended CLI, Kubernetes, tmux, Bash and Nvim2 functional checks belong to
-`scripts/check-dotfiles-release` in connected build/CI tooling. They still run
+Extended functional cases are grouped by tool in `tests/tools/` and run by
+`scripts/check-dotfiles-release` according to the package's declared selection.
+Bash integration checks follow that selection too; full Nvim tests stay in the
+editor's test directory. A missing selected program is a failure, not a skipped
+test. Installer tests remain grouped by verification, installation, switching,
+recovery, integrity and locking. The functional checks still run
 with networking disabled before publication, but are not part of target
 installation or archive verification. There is no `--skip-tests` switch.
+
+The fast installer tests cover empty-list rejection, single-tool selections,
+smaller profiles and switching back to the full selection. `task test` qualifies
+the current `OFFLINE_RELEASE_TOOLS` on the requested platforms; it does not run
+a matrix of every tool combination. For occasional checks of smaller real
+archives, use four cumulative selections:
+
+```bash
+tmux_profile=(tmux tmux-sensible tmux-resurrect tmux-continuum)
+search_profile=("${tmux_profile[@]}" fzf zoxide rg fd)
+editor_profile=(
+  "${search_profile[@]}"
+  nvim nodejs python go terraform
+)
+kubernetes_profile=(
+  "${editor_profile[@]}"
+  k9s kind kubectl kubens kubectx helm
+)
+```
+
+Put one of these selections in `OFFLINE_RELEASE_TOOLS` in a clean committed
+test checkout and run `bin/task test -- debian13` there. Bash/Git/SSH/Vim are
+shared configuration and do not need entries in the list. The editor selection
+retains its private Mason tools even though standalone development tools and
+`yamllint` are omitted. Helm's optional `helm-schema` plugin is also omitted in
+these examples. The four checks build archives, verify them, install them on a
+minimal runtime and run the selected functional tests without network access.
 
 `health [ID]` checks the installed structure, content, modes, symlinks and those
 same light runtime probes, defaulting to `current`. For the selected release it
@@ -906,8 +971,13 @@ In an existing Bash session, export that variable and reload `.bashrc` to
 rebuild PATH. Prefixing an arbitrary command with the variable does not rebuild
 its inherited PATH. Release runtime checks, builds and repository checks enforce this
 setting so local replacements cannot hide a broken payload. In release mode,
-`dotfiles-check` delegates to the same isolated `health`; connected checks can
-report a version mismatch for an intentional override. Use `type -a TOOL` or
+`dotfiles-check` delegates to the same isolated `health`. Connected diagnostics
+require the tools selected in `TOOLS`, including their tmux plugins. System
+utilities and optional integrations are reported separately; asdf runtime checks
+use `ASDF_PLUGINS` when asdf is installed. Removing a tool from `TOOLS` changes
+future default installations and diagnostics, but does not remove existing tools
+or configuration linked by `bstow`. Connected checks can report a version mismatch
+for an intentional override. Use `type -a TOOL` or
 `type -P TOOL` to inspect your interactive selection.
 
 Aliases, absolute executable paths and project-local tools such as
@@ -1154,6 +1224,8 @@ They also run as part of `task validate:tmux` and `task validate`.
 Connected setup and offline builds use the same pinned Git-checkout installer.
 `TMUX_PLUGINS` in `tools.env` owns the repository and commit of each plugin;
 `TOOLS` and `OFFLINE_RELEASE_TOOLS` select them and define startup order.
+New offline releases freeze that selection and order in `OFFLINE_TOOLS` in
+`release.env`, which the loader reads when starting tmux.
 There is no TPM install/update step or first-session plugin download.
 
 The normal `./setup-tools` installs the binary and all three plugins. Select
@@ -1166,8 +1238,8 @@ the complete tmux setup or an individual plugin explicitly with:
 
 Connected checkouts live under `~/.tmux/plugins/PLUGIN`. For a custom root,
 export `DOTFILES_TMUX_PLUGIN_DIR` before setup and before starting the tmux
-server. Plugin roots must be absolute paths without whitespace because the
-upstream plugins embed them in tmux shell commands. Configuration paths may
+server. Connected plugin roots must be absolute paths without whitespace because
+the upstream plugins embed them in tmux shell commands. Configuration paths may
 contain spaces. This replaces the TPM-specific `TMUX_PLUGIN_MANAGER_PATH` setting.
 
 The installer verifies the repository, selected commit and executable entry
@@ -1180,8 +1252,8 @@ The existing common `setup.lock` still serializes connected installers.
 Session data under `~/.tmux/resurrect` or the plugin's XDG data path is untouched.
 
 Offline builds place the same checkouts under `release/share/tmux/plugins`.
-The shared `tmux/.tmux/load-plugins.sh` reads the catalog/profile beside the
-loaded configuration and runs sensible, resurrect and continuum directly.
+The shared `tmux/.tmux/load-plugins.sh` reads the catalog beside the loaded
+configuration and runs selected plugin entries directly.
 For offline sessions it uses the launcher's physical release path, ignoring the
 online plugin-root override. Startup and reload never fetch or update plugins.
 An explicit `tmux -f FILE` is authoritative in both flows.

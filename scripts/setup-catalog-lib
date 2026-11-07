@@ -246,8 +246,61 @@ validate_git_plugin_catalog() {
   done
 }
 
+validate_tool_delivery() {
+  local profile_name=$1 tool version
+  local -n delivery_profile=$profile_name
+
+  if [[ $profile_name == OFFLINE_RELEASE_TOOLS ]]; then
+    profile_dependencies "$profile_name" || return
+  fi
+  for tool in "${delivery_profile[@]}"; do
+    [[ $tool == yamllint || -v TMUX_PLUGINS[$tool] ]] && continue
+    [[ $profile_name != TOOLS || $tool != python ]] || continue
+    if [[ $profile_name == OFFLINE_RELEASE_TOOLS ]]; then
+      tool_metadata_fields "$tool" >/dev/null || {
+        report_error "unsupported offline tool: $tool"
+        return 1
+      }
+      select_default_release TOOL_RELEASES "$tool" || return
+      RELEASE_VERSIONS=("$RELEASE_VERSION")
+    else
+      release_versions TOOL_RELEASES "$tool" || return
+    fi
+    for version in "${RELEASE_VERSIONS[@]}"; do
+      select_release TOOL_RELEASES "$tool" "$version" || return
+      [[ $RELEASE_URL != - ]] || {
+        report_error "$profile_name release $tool $version requires an artifact"
+        return 1
+      }
+      artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
+      if [[ $profile_name == TOOLS && ${#SPEC_LINKS[@]} == 0 ]]; then
+        report_error "TOOLS tool $tool is not supported by setup-tools"
+        return 1
+      fi
+    done
+  done
+  if profile_has "$profile_name" kubectx && profile_has "$profile_name" kubens; then
+    # These tools share one version field in release metadata.
+    select_default_release TOOL_RELEASES kubectx || return
+    local kubectx_version=$RELEASE_VERSION
+    select_default_release TOOL_RELEASES kubens || return
+    if [[ $RELEASE_VERSION != "$kubectx_version" ]]; then
+      report_error 'kubectx and kubens defaults must use the same version'
+      return 1
+    fi
+  fi
+  if profile_has "$profile_name" nodejs; then
+    select_default_release TOOL_RELEASES npm || return
+    [[ $RELEASE_URL != - ]] || {
+      report_error 'npm default requires an artifact'
+      return 1
+    }
+    artifact_layout npm "$RELEASE_VERSION" "$RELEASE_ASSET" || return
+  fi
+}
+
 validate_tool_config() {
-  local tool version profile
+  local mode=${1:-all} tool profile
 
   validate_release_catalog TOOL_RELEASES || return
   validate_git_plugin_catalog ASDF_PLUGINS || return
@@ -277,53 +330,25 @@ validate_tool_config() {
     done
     unset -n profile_tools
   done
-  for tool in "${OFFLINE_RELEASE_TOOLS[@]}"; do
-    [[ $tool == yamllint || -v TMUX_PLUGINS[$tool] ]] && continue
-    select_default_release TOOL_RELEASES "$tool" || return
-    if [[ $RELEASE_URL == - ]]; then
-      report_error "offline default $tool $RELEASE_VERSION requires an artifact"
+  case $mode in
+    all)
+      validate_tool_delivery OFFLINE_RELEASE_TOOLS || return
+      validate_tool_delivery TOOLS || return
+      ;;
+    offline) validate_tool_delivery OFFLINE_RELEASE_TOOLS || return ;;
+    online) validate_tool_delivery TOOLS || return ;;
+    asdf) ;;
+    *) report_error "unknown tool validation mode: $mode"; return 1 ;;
+  esac
+  if [[ $mode == all || $mode == asdf ]]; then
+    select_default_release TOOL_RELEASES asdf || return
+    [[ $RELEASE_URL != - ]] || {
+      report_error 'asdf default requires an artifact'
       return 1
-    fi
-    artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
-  done
-  for tool in "${TOOLS[@]}"; do
-    # Online Python versions are provider-managed; its archive is for offline builds.
-    [[ $tool == python || -v TMUX_PLUGINS[$tool] ]] && continue
-    release_versions TOOL_RELEASES "$tool" || return
-    for version in "${RELEASE_VERSIONS[@]}"; do
-      select_release TOOL_RELEASES "$tool" "$version" || return
-      if [[ $RELEASE_URL == - ]]; then
-        report_error "TOOLS release $tool $version requires an artifact"
-        return 1
-      fi
-      artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
-      if ((${#SPEC_LINKS[@]} == 0)); then
-        report_error "TOOLS tool $tool is not supported by setup-tools"
-        return 1
-      fi
-    done
-  done
-  for tool in asdf npm; do
-    select_default_release TOOL_RELEASES "$tool" || return
-    if [[ $RELEASE_URL == - ]]; then
-      report_error "$tool default requires an artifact"
-      return 1
-    fi
-    artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
-  done
-  validate_version KUBECTX_VERSION "${KUBECTX_VERSION:-}" || return
-  for tool in kubectx kubens; do
-    select_default_release TOOL_RELEASES "$tool" || return
-    if ! [[ $RELEASE_VERSION == "$KUBECTX_VERSION" ]]; then
-      report_error "$tool default must use KUBECTX_VERSION"
-      return 1
-    fi
-  done
-  validate_version PIP_TOOLS_VERSION "${PIP_TOOLS_VERSION:-}" || return
-  if ! [[ $PYTHON_STANDALONE_BUILD =~ ^[0-9]{8}$ ]]; then
-    report_error 'PYTHON_STANDALONE_BUILD must use YYYYMMDD'
-    return 1
+    }
+    artifact_layout asdf "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   fi
+  validate_version PIP_TOOLS_VERSION "${PIP_TOOLS_VERSION:-}" || return
 
   for tool in "${!ASDF_PLUGINS[@]}"; do
     if ! [[ -v TOOL_RELEASES[$tool] ]]; then

@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+
+profile_has() {
+  local profile_name=$1 requested=$2 tool
+  local -n selected_profile=$profile_name
+
+  for tool in "${selected_profile[@]}"; do
+    [[ $tool != "$requested" ]] || return 0
+  done
+  return 1
+}
+
+tool_commands() {
+  case $1 in
+    nodejs) printf '%s\n' node npm npx corepack ;;
+    go) printf '%s\n' go gofmt ;;
+    uv) printf '%s\n' uv uvx ;;
+    python | helm-schema | tmux-*) ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+tool_metadata_fields() {
+  local tool=$1 field
+
+  case $tool in
+    nodejs) printf '%s\n' NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION ;;
+    python) printf '%s\n' PYTHON_VERSION PYTHON_BUILD ;;
+    kubectl | helm) printf '%s_VERSIONS\n' "${tool^^}" ;;
+    helm-schema) printf '%s\n' HELM_SCHEMA_PLUGIN_VERSION ;;
+    yamllint) ;;
+    tmux-sensible | tmux-resurrect | tmux-continuum)
+      field=${tool^^}
+      printf '%s_COMMIT\n' "${field//-/_}"
+      ;;
+    node | npm | uvx) return 1 ;;
+    *)
+      field=${TOOL_CHECKS[$tool]:-}
+      field=${field%%|*}
+      [[ -n $field ]] || return 1
+      printf '%s\n' "$field"
+      ;;
+  esac
+}
+
+tool_dependencies() {
+  case $1 in
+    nvim) printf '%s\n' nodejs python go rg terraform ;;
+    yamllint) printf '%s\n' nvim ;;
+    helm-schema) printf '%s\n' helm ;;
+    tmux-sensible | tmux-resurrect | tmux-continuum) printf '%s\n' tmux ;;
+  esac
+}
+
+profile_dependencies() {
+  local profile_name=$1 tool dependency dependencies
+  local -n dependency_profile=$profile_name
+
+  for tool in "${dependency_profile[@]}"; do
+    dependencies=$(tool_dependencies "$tool") || return
+    [[ -n $dependencies ]] || continue
+    while IFS= read -r dependency; do
+      if ! profile_has "$profile_name" "$dependency"; then
+        printf '%s requires %s in %s\n' "$tool" "$dependency" "$profile_name" >&2
+        return 1
+      fi
+    done <<<"$dependencies"
+  done
+}
+
+tool_config_package() {
+  case $1 in
+    nvim) printf '%s\n' nvim2 ;;
+    tmux | oh-my-posh | k9s) printf '%s\n' "$1" ;;
+  esac
+}
+
+tool_payload_paths() {
+  local tool=$1 package commands command_name
+
+  package=$(tool_config_package "$tool") || return
+  [[ -z $package ]] || printf 'dotfiles/%s\n' "$package"
+  case $tool in
+    nvim) printf '%s\n' config/nvim2 share/nvim2 tools/nvim ;;
+    nodejs) printf '%s\n' tools/node ;;
+    python) printf '%s\n' tools/python 'tools/python-*' ;;
+    go | htop | tmux) printf 'tools/%s\n' "$tool" ;;
+    helm-schema) printf '%s\n' share/helm/plugins/helm-values-schema-json ;;
+    tmux-sensible | tmux-resurrect | tmux-continuum)
+      printf 'share/tmux/plugins/%s\n' "$tool"
+      ;;
+    kubectl | helm) printf 'tools/bin/%s*\n' "$tool" ;;
+    yamllint) ;;
+    *)
+      commands=$(tool_commands "$tool") || return
+      while IFS= read -r command_name; do
+        printf 'tools/bin/%s\n' "$command_name"
+      done <<<"$commands"
+      ;;
+  esac
+}
+
+profile_tool_names() {
+  local tool
+
+  printf '%s\n' nodejs python yamllint helm-schema tmux-sensible tmux-resurrect tmux-continuum
+  for tool in "${!TOOL_CHECKS[@]}"; do
+    case $tool in
+      node | npm | uvx) continue ;;
+    esac
+    printf '%s\n' "$tool"
+  done
+}

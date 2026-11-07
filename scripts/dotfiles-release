@@ -9,6 +9,11 @@ if ! declare -p TOOL_CHECKS >/dev/null 2>&1; then
   source "$manager_dir/../tools.env"
 fi
 
+if ! declare -F profile_has >/dev/null; then
+  # shellcheck source=setup-profile-lib
+  source "${BASH_SOURCE[0]%/*}/setup-profile-lib"
+fi
+
 RELEASE_ROOT=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}
 RELEASE_ROOT=${RELEASE_ROOT%/}
 TEMP_PATHS=()
@@ -21,8 +26,10 @@ TRANSACTION_ACTIVE=false
 CANDIDATE_DIR=
 EXTRACTED_ID=
 LOCK_FD=
+# Read by profile_has through its array name.
+# shellcheck disable=SC2034
 RELEASE_METADATA_FIELDS=(
-  RELEASE_ID PLATFORM_ID SOURCE_COMMIT SOURCE_TREE BUILDER_IMAGE
+  RELEASE_FORMAT RELEASE_ID PLATFORM_ID SOURCE_COMMIT SOURCE_TREE BUILDER_IMAGE
   NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION
   PYTHON_VERSION PYTHON_BUILD TMUX_VERSION RG_VERSION FZF_VERSION
   ZOXIDE_VERSION K9S_VERSION KUBECTX_VERSION OMP_VERSION TASK_VERSION
@@ -31,6 +38,7 @@ RELEASE_METADATA_FIELDS=(
   ACTIONLINT_VERSION SHELLCHECK_VERSION
   GH_VERSION HTOP_VERSION KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION
   YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION
+  TMUX_SENSIBLE_COMMIT TMUX_RESURRECT_COMMIT TMUX_CONTINUUM_COMMIT
 )
 
 die() {
@@ -201,10 +209,28 @@ metadata_value() {
   printf '%s\n' "$value"
 }
 
+read_release_profile() {
+  local metadata_name=$1 profile_name=$2
+  local -n profile_metadata=$metadata_name target_profile=$profile_name
+
+  [[ ${profile_metadata[OFFLINE_TOOLS]} != *, ]] || {
+    die 'invalid offline tool list'
+    return 1
+  }
+  IFS=, read -r -a target_profile <<<"${profile_metadata[OFFLINE_TOOLS]}"
+  if [[ ${profile_metadata[RELEASE_FORMAT]:-1} == 1 ]]; then
+    target_profile+=(tmux-sensible tmux-resurrect tmux-continuum)
+    if profile_has "$profile_name" yq; then
+      target_profile+=(helm-schema)
+    fi
+  fi
+}
+
 read_release_metadata() {
-  local file=$1 map_name=$2 line key value required allowed version seen optional
-  local -a versions=()
+  local file=$1 map_name=$2 line key value field tool fields seen=' '
   local -n parsed=$map_name
+  local -a profile=() versions=()
+  local -A required_fields=()
 
   [[ -f $file && ! -L $file ]] || {
     die "invalid release metadata file: $file"
@@ -218,14 +244,7 @@ read_release_metadata() {
     }
     key=${BASH_REMATCH[1]}
     value=${BASH_REMATCH[2]}
-    allowed=false
-    for required in "${RELEASE_METADATA_FIELDS[@]}"; do
-      if [[ $key == "$required" ]]; then
-        allowed=true
-        break
-      fi
-    done
-    [[ $allowed == true ]] || {
+    profile_has RELEASE_METADATA_FIELDS "$key" || {
       die "unknown release metadata key: $key"
       return 1
     }
@@ -239,112 +258,99 @@ read_release_metadata() {
     }
     parsed["$key"]=$value
   done <"$file"
-  for required in "${RELEASE_METADATA_FIELDS[@]}"; do
-    case $required in
-      FD_VERSION | GO_VERSION | KIND_VERSION | UV_VERSION | ACTIONLINT_VERSION | SHELLCHECK_VERSION | \
-        GH_VERSION | HTOP_VERSION | KUBECONFORM_VERSION | KYVERNO_VERSION | TRIVY_VERSION | \
-        YQ_VERSION | HELM_SCHEMA_PLUGIN_VERSION)
-        continue
+  for key in RELEASE_ID PLATFORM_ID SOURCE_COMMIT SOURCE_TREE BUILDER_IMAGE OFFLINE_TOOLS PAYLOAD_PATHS; do
+    required_fields[$key]=1
+  done
+  for key in "${!required_fields[@]}"; do
+    [[ -v parsed[$key] ]] || {
+      die "missing release metadata key: $key"
+      return 1
+    }
+  done
+  if [[ -v parsed[RELEASE_FORMAT] ]]; then
+    [[ ${parsed[RELEASE_FORMAT]} == 2 ]] || {
+      die 'unsupported release metadata format'
+      return 1
+    }
+    required_fields[RELEASE_FORMAT]=1
+  fi
+  read_release_profile "$map_name" profile || return
+  for tool in "${profile[@]}"; do
+    [[ $tool =~ ^[a-z0-9-]+$ && $seen != *" $tool "* ]] || {
+      die "invalid or duplicate offline tool: $tool"
+      return 1
+    }
+    seen+="$tool "
+    fields=$(tool_metadata_fields "$tool") || {
+      die "unknown offline tool: $tool"
+      return 1
+    }
+    [[ -n $fields ]] || continue
+    while IFS= read -r field; do
+      # Old packages declare plugin pins only in their build manifest.
+      [[ ${parsed[RELEASE_FORMAT]:-1} != 1 || $field != *_COMMIT ]] || continue
+      required_fields[$field]=1
+    done <<<"$fields"
+  done
+  if [[ ${parsed[RELEASE_FORMAT]:-1} == 2 ]]; then
+    profile_dependencies profile || return
+  fi
+  for key in "${!required_fields[@]}"; do
+    [[ -v parsed[$key] ]] || {
+      die "missing release metadata key: $key"
+      return 1
+    }
+  done
+  for key in "${!parsed[@]}"; do
+    [[ -v required_fields[$key] ]] || {
+      die "release metadata field is not selected by its offline tool profile: $key"
+      return 1
+    }
+    value=${parsed[$key]}
+    case $key in
+      *_VERSION)
+        [[ $value =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] || {
+          die "invalid release tool version: $key"
+          return 1
+        }
+        ;;
+      *_VERSIONS)
+        [[ $value != *, ]] || {
+          die "invalid release version list: $key"
+          return 1
+        }
+        IFS=, read -r -a versions <<<"$value"
+        seen=' '
+        for value in "${versions[@]}"; do
+          [[ $value =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ &&
+            $seen != *" $value "* ]] || {
+            die "invalid release version list: $key"
+            return 1
+          }
+          seen+="$value "
+        done
+        ;;
+      *_COMMIT)
+        [[ $value =~ ^[0-9a-f]{40}$ ]] || {
+          die "invalid release commit: $key"
+          return 1
+        }
         ;;
     esac
-    [[ -v parsed[$required] ]] || {
-      die "missing release metadata key: $required"
-      return 1
-    }
   done
-
   validate_platform_name "${parsed[PLATFORM_ID]}" || return
-  [[ ${parsed[RELEASE_ID]} =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
-    die 'invalid release metadata ID'
+  [[ ${parsed[RELEASE_ID]} =~ ^dotfiles-[0-9a-f]{12}$ &&
+    ${parsed[SOURCE_TREE]} =~ ^[0-9a-f]{40}$ &&
+    ${parsed[BUILDER_IMAGE]} =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]] || {
+    die 'invalid release identity'
     return 1
   }
-  [[ ${parsed[SOURCE_COMMIT]} =~ ^[0-9a-f]{40}$ ]] || {
-    die 'invalid release source commit'
-    return 1
-  }
-  [[ ${parsed[SOURCE_TREE]} =~ ^[0-9a-f]{40}$ ]] || {
-    die 'invalid release source tree'
-    return 1
-  }
-  [[ ${parsed[BUILDER_IMAGE]} =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]] || {
-    die 'invalid builder image identity'
-    return 1
-  }
-  for key in NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION \
-    PYTHON_VERSION TMUX_VERSION RG_VERSION \
-    FZF_VERSION ZOXIDE_VERSION K9S_VERSION KUBECTX_VERSION OMP_VERSION TASK_VERSION \
-    TERRAFORM_VERSION FD_VERSION GO_VERSION KIND_VERSION UV_VERSION \
-    ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION \
-    KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION; do
-    [[ -v parsed[$key] ]] || continue
-    [[ ${parsed[$key]} =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] || {
-      die "invalid release tool version: $key"
+  if [[ -v parsed[PYTHON_BUILD] ]]; then
+    [[ ${parsed[PYTHON_BUILD]} =~ ^[0-9]{8}$ ]] || {
+      die 'invalid standalone Python build'
       return 1
     }
-  done
-  for key in KUBECTL_VERSIONS HELM_VERSIONS; do
-    value=${parsed[$key]}
-    [[ $value != *, ]] || {
-      die "invalid release version list: $key"
-      return 1
-    }
-    IFS=, read -r -a versions <<<"$value"
-    seen=' '
-    for version in "${versions[@]}"; do
-      [[ $version =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ &&
-        $seen != *" $version "* ]] || {
-        die "invalid release version list: $key"
-        return 1
-      }
-      seen+="$version "
-    done
-  done
-  [[ ${parsed[PYTHON_BUILD]} =~ ^[0-9]{8}$ ]] || {
-    die 'invalid standalone Python build'
-    return 1
-  }
-  # Retained releases have only the optional tools declared by their profile.
-  value=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm
-  case ${parsed[OFFLINE_TOOLS]} in
-    "$value")
-      optional=''
-      ;;
-    "$value,fd")
-      optional=FD_VERSION
-      ;;
-    "$value,fd,go")
-      optional='FD_VERSION GO_VERSION'
-      ;;
-    "$value,fd,go,kind,uv")
-      optional='FD_VERSION GO_VERSION KIND_VERSION UV_VERSION'
-      ;;
-    "$value,fd,go,kind,uv,actionlint,shellcheck,yamllint")
-      optional='FD_VERSION GO_VERSION KIND_VERSION UV_VERSION ACTIONLINT_VERSION SHELLCHECK_VERSION'
-      ;;
-    "$value,fd,go,kind,uv,actionlint,shellcheck,yamllint,gh,htop,kubeconform,kyverno,trivy")
-      optional='FD_VERSION GO_VERSION KIND_VERSION UV_VERSION ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION'
-      ;;
-    "$value,fd,go,kind,uv,actionlint,shellcheck,yamllint,gh,htop,kubeconform,kyverno,trivy,yq")
-      optional='FD_VERSION GO_VERSION KIND_VERSION UV_VERSION ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION'
-      ;;
-    *)
-      die 'release metadata has an invalid offline tool profile'
-      return 1
-      ;;
-  esac
-  for required in FD_VERSION GO_VERSION KIND_VERSION UV_VERSION \
-    ACTIONLINT_VERSION SHELLCHECK_VERSION GH_VERSION HTOP_VERSION \
-    KUBECONFORM_VERSION KYVERNO_VERSION TRIVY_VERSION YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION; do
-    if [[ " $optional " == *" $required "* ]]; then
-      [[ -v parsed[$required] ]] || {
-        die "missing release metadata key: $required"
-        return 1
-      }
-    elif [[ -v parsed[$required] ]]; then
-      die 'release metadata has an invalid offline tool profile'
-      return 1
-    fi
-  done
+  fi
   [[ ${parsed[PAYLOAD_PATHS]} == bin,config,dotfiles,python-locks,python-wheelhouse,share,tools ]] || {
     die 'release metadata has an invalid payload layout'
     return 1
@@ -476,28 +482,14 @@ validate_archive_members() (
 
 release_commands() {
   local release=$1 tool
-  local -a tools=()
+  local -a profile=()
   local -A release_metadata=()
 
   read_release_metadata "$release/release.env" release_metadata || return
-  IFS=, read -r -a tools <<<"${release_metadata[OFFLINE_TOOLS]}"
+  read_release_profile release_metadata profile || return
   printf '%s\n' dotfiles-release
-  for tool in "${tools[@]}"; do
-    case $tool in
-      nodejs)
-        printf '%s\n' node npm npx corepack
-        ;;
-      go)
-        printf '%s\n' go gofmt
-        ;;
-      uv)
-        printf '%s\n' uv uvx
-        ;;
-      python) ;;
-      *)
-        printf '%s\n' "$tool"
-        ;;
-    esac
+  for tool in "${profile[@]}"; do
+    tool_commands "$tool" || return
   done
 }
 
@@ -540,6 +532,66 @@ verify_release_symlinks() {
   done <"$links"
 }
 
+verify_profile_payload() {
+  local release=$1 profile_name=$2 tool paths pattern commands command_name version path package
+  local -n payload_profile=$profile_name
+  local -a expected_commands=(dotfiles-release) packages=(bash git ssh vim scripts tools.env)
+  local -A metadata=()
+  local expected actual
+
+  read_release_metadata "$release/release.env" metadata || return
+  [[ ${metadata[RELEASE_FORMAT]:-1} == 2 ]] || return 0
+  while IFS= read -r tool; do
+    profile_has "$profile_name" "$tool" && continue
+    paths=$(tool_payload_paths "$tool") || return
+    [[ -n $paths ]] || continue
+    while IFS= read -r pattern; do
+      if compgen -G "$release/$pattern" >/dev/null; then
+        die "release contains unselected $tool payload: $pattern"
+        return 1
+      fi
+    done <<<"$paths"
+  done < <(profile_tool_names)
+  for tool in "${payload_profile[@]}"; do
+    commands=$(tool_commands "$tool") || return
+    if [[ -n $commands ]]; then
+      while IFS= read -r command_name; do
+        expected_commands+=("$command_name")
+      done <<<"$commands"
+    fi
+    case $tool in
+      kubectl | helm)
+        for version in ${metadata[${tool^^}_VERSIONS]//,/ }; do
+          expected_commands+=("$tool-$version")
+        done
+        ;;
+    esac
+    package=$(tool_config_package "$tool") || return
+    [[ -z $package ]] || packages+=("$package")
+  done
+  expected=$(printf '%s\n' "${expected_commands[@]}" | LC_ALL=C sort) || return
+  actual=$(find "$release/bin" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort) || return
+  [[ $actual == "$expected" ]] || {
+    die 'release public commands differ from its offline tool profile'
+    return 1
+  }
+  for path in "$release/dotfiles/"* "$release/dotfiles/".*; do
+    [[ -e $path || -L $path ]] || continue
+    profile_has packages "${path##*/}" || {
+      die "release contains an unselected dotfiles package: ${path##*/}"
+      return 1
+    }
+  done
+  if ! profile_has "$profile_name" nvim; then
+    for path in python-locks python-wheelhouse; do
+      [[ ! -d $release/$path || -z $(find "$release/$path" -mindepth 1 -print -quit) ]] || {
+        die 'release contains editor Python data without Nvim'
+        return 1
+      }
+    done
+  fi
+}
+
 validate_release_directory() {
   local release=$1 mode=${2:-installed} path package_output command_output command_name version tool
   local -A release_metadata=()
@@ -560,17 +612,53 @@ validate_release_directory() {
       return 1
     }
   done
-  for path in SHA256SUMS build-manifest.txt config/nvim2/init.lua \
-    dotfiles/bash/.bashrc dotfiles/bash/.bash_profile dotfiles/bash/.bash_aliases \
-    dotfiles/git/.gitconfig dotfiles/tmux/.tmux.conf dotfiles/vim/.vimrc \
-    dotfiles/oh-my-posh/.oh-my-posh.omp.json \
-    dotfiles/k9s/.config/k9s/config.yaml dotfiles/k9s/.config/k9s/aliases.yaml \
-    dotfiles/k9s/.config/k9s/plugins.yaml; do
+  for path in SHA256SUMS build-manifest.txt dotfiles/bash/.bashrc \
+    dotfiles/bash/.bash_profile dotfiles/bash/.bash_aliases \
+    dotfiles/git/.gitconfig dotfiles/vim/.vimrc; do
     [[ -f $release/$path && ! -L $release/$path ]] || {
       die "release payload file is missing: $path"
       return 1
     }
   done
+  local -a profile=()
+  read_release_profile release_metadata profile || return
+  if profile_has profile nvim; then
+    [[ -f $release/config/nvim2/init.lua && -x $release/config/nvim2/tests/check.sh &&
+      -x $release/tools/nvim/bin/nvim && -d $release/tools/nvim/share/nvim/runtime &&
+      -d $release/share/nvim2/mason/bin ]] || {
+      die 'release Nvim payload is incomplete'
+      return 1
+    }
+  fi
+  for tool in tmux oh-my-posh; do
+    profile_has profile "$tool" || continue
+    path=dotfiles/$tool/.$tool.conf
+    [[ $tool != oh-my-posh ]] || path=dotfiles/oh-my-posh/.oh-my-posh.omp.json
+    [[ -f $release/$path && ! -L $release/$path ]] || {
+      die "release payload file is missing: $path"
+      return 1
+    }
+  done
+  for tool in go tmux htop; do
+    profile_has profile "$tool" || continue
+    [[ -x $release/tools/$tool/bin/$tool ]] || {
+      die "release private executable is missing: $tool"
+      return 1
+    }
+  done
+  if profile_has profile k9s; then
+    for path in config.yaml aliases.yaml plugins.yaml; do
+      [[ -f $release/dotfiles/k9s/.config/k9s/$path &&
+        ! -L $release/dotfiles/k9s/.config/k9s/$path ]] || {
+        die "release k9s configuration is missing: $path"
+        return 1
+      }
+    done
+    [[ -d $release/dotfiles/k9s/.config/k9s/skins ]] || {
+      die 'release k9s skins are missing'
+      return 1
+    }
+  fi
   # Older releases keep history directly in .bashrc and need no extra files.
   if [[ $(<"$release/dotfiles/bash/.bashrc") == *'/bash/.bash_history_lib'* ]]; then
     for path in dotfiles/bash/.bash_history_lib dotfiles/scripts/bash-history-archive; do
@@ -580,22 +668,18 @@ validate_release_directory() {
       }
     done
   fi
-  [[ -s $release/build-manifest.txt && -x $release/dotfiles-release &&
-    -x $release/config/nvim2/tests/check.sh &&
-    -x $release/tools/nvim/bin/nvim &&
-    -d $release/tools/nvim/share/nvim/runtime &&
-    -x $release/tools/tmux/bin/tmux &&
-    -x $release/tools/python-${release_metadata[PYTHON_VERSION]}/bin/python3 &&
-    -d $release/share/nvim2/mason/bin &&
-    -d $release/dotfiles/k9s/.config/k9s/skins ]] || {
-    die 'release runtime layout is incomplete'
+  [[ -s $release/build-manifest.txt && -x $release/dotfiles-release ]] || {
+    die 'release manager or build manifest is missing'
     return 1
   }
-  [[ -L $release/tools/python &&
-    $(readlink -- "$release/tools/python") == "python-${release_metadata[PYTHON_VERSION]}" ]] || {
-    die 'private Python SDK link is missing or incorrect'
-    return 1
-  }
+  if profile_has profile python; then
+    [[ -x $release/tools/python-${release_metadata[PYTHON_VERSION]}/bin/python3 &&
+      -L $release/tools/python &&
+      $(readlink -- "$release/tools/python") == "python-${release_metadata[PYTHON_VERSION]}" ]] || {
+      die 'private Python SDK is missing or incorrect'
+      return 1
+    }
+  fi
   for path in bin/python bin/python3; do
     [[ ! -e $release/$path && ! -L $release/$path ]] || {
       die "private Python must not be exposed in $path; rebuild the release"
@@ -610,14 +694,26 @@ validate_release_directory() {
       }
     done
   fi
-  for tool in tmux-sensible tmux-resurrect tmux-continuum; do
-    [[ -d $release/share/tmux/plugins/$tool/.git &&
-      -f $release/share/tmux/plugins/$tool/${tool#tmux-}.tmux ]] || {
+  for tool in "${profile[@]}"; do
+    [[ $tool == tmux-* ]] || continue
+    path=$release/share/tmux/plugins/$tool
+    [[ -d $path/.git && -f $path/${tool#tmux-}.tmux ]] || {
       die "release tmux plugin is missing: $tool"
       return 1
     }
+    if [[ ${release_metadata[RELEASE_FORMAT]:-1} == 2 ]]; then
+      local commit_field=${tool^^}
+      commit_field=${commit_field//-/_}_COMMIT
+      [[ $(<"$path/.git/HEAD") == "${release_metadata[$commit_field]}" ]] || {
+        die "release tmux plugin commit does not match: $tool"
+        return 1
+      }
+    fi
   done
-  package_output=$(python_inventory_packages "$release") || return
+  package_output=
+  if profile_has profile nvim; then
+    package_output=$(python_inventory_packages "$release") || return
+  fi
   verify_release_symlinks "$release" "$mode" "$package_output" || return
   command_output=$(release_commands "$release") || return
   while IFS= read -r command_name; do
@@ -634,6 +730,7 @@ validate_release_directory() {
     fi
   done <<<"$command_output"
   for tool in kubectl helm; do
+    profile_has profile "$tool" || continue
     for version in ${release_metadata[${tool^^}_VERSIONS]//,/ }; do
       [[ -x $release/bin/$tool-$version ]] || {
         die "release executable is missing: $tool-$version"
@@ -654,12 +751,15 @@ validate_release_directory() {
       return 1
     }
   fi
+  verify_profile_payload "$release" profile || return
   if [[ $mode == archive ]]; then
-    [[ -d $release/python-wheelhouse && ! -L $release/python-wheelhouse &&
+    if profile_has profile nvim; then
+      [[ -d $release/python-wheelhouse && ! -L $release/python-wheelhouse &&
       -n $(find "$release/python-wheelhouse" -type f -name '*.whl' -print -quit) ]] || {
       die 'release Python wheelhouse is missing'
       return 1
     }
+    fi
     for path in installed.sha256 installed.modes installed.symlinks .complete .incomplete .artifact.sha256; do
       [[ ! -e $release/$path && ! -L $release/$path ]] || {
         die 'archive contains installed-state metadata'
@@ -959,36 +1059,49 @@ add_projection() {
 }
 
 release_projection() {
-  local release=$1 current=$RELEASE_ROOT/current file relative skin_list
+  local release=$1 current=$RELEASE_ROOT/current file relative skin_list tool
+  local -a profile=()
+  local -A release_metadata=()
+
+  read_release_metadata "$release/release.env" release_metadata || return
+  read_release_profile release_metadata profile || return
   LINK_PATHS=()
   LINK_TARGETS=()
-  add_projection "$HOME/.config/nvim2" "$current/config/nvim2"
-  add_projection "$HOME/.local/share/nvim2" "$current/share/nvim2"
   for file in .bashrc .bash_profile .bash_aliases; do
     add_projection "$HOME/$file" "$current/dotfiles/bash/$file"
   done
   add_projection "$HOME/.gitconfig" "$current/dotfiles/git/.gitconfig"
-  add_projection "$HOME/.tmux.conf" "$current/dotfiles/tmux/.tmux.conf"
   add_projection "$HOME/.vimrc" "$current/dotfiles/vim/.vimrc"
-  add_projection "$HOME/.oh-my-posh.omp.json" "$current/dotfiles/oh-my-posh/.oh-my-posh.omp.json"
   if [[ -d $release/dotfiles/ssh ]]; then
     add_projection "$HOME/.ssh/config" "$current/dotfiles/ssh/.ssh/config"
     add_projection "$HOME/.config/systemd/user/dotfiles-ssh-agent.service" \
       "$current/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service"
   fi
-  for file in config.yaml aliases.yaml plugins.yaml; do
-    add_projection "$HOME/.config/k9s/$file" "$current/dotfiles/k9s/.config/k9s/$file"
-  done
-  skin_list=$(mktemp) || return
-  TEMP_PATHS+=("$skin_list")
-  find "$release/dotfiles/k9s/.config/k9s/skins" -type f -print0 >"$skin_list" || return
-  while IFS= read -r -d '' file; do
-    relative=${file#"$release/dotfiles/k9s/.config/k9s/skins/"}
-    add_projection "$HOME/.config/k9s/skins/$relative" \
-      "$current/dotfiles/k9s/.config/k9s/skins/$relative"
-  done <"$skin_list"
-  for file in tmux-sensible tmux-resurrect tmux-continuum; do
-    add_projection "$HOME/.tmux/plugins/$file" "$current/share/tmux/plugins/$file"
+  if profile_has profile nvim; then
+    add_projection "$HOME/.config/nvim2" "$current/config/nvim2"
+    add_projection "$HOME/.local/share/nvim2" "$current/share/nvim2"
+  fi
+  if profile_has profile tmux; then
+    add_projection "$HOME/.tmux.conf" "$current/dotfiles/tmux/.tmux.conf"
+  fi
+  if profile_has profile oh-my-posh; then
+    add_projection "$HOME/.oh-my-posh.omp.json" "$current/dotfiles/oh-my-posh/.oh-my-posh.omp.json"
+  fi
+  if profile_has profile k9s; then
+    for file in config.yaml aliases.yaml plugins.yaml; do
+      add_projection "$HOME/.config/k9s/$file" "$current/dotfiles/k9s/.config/k9s/$file"
+    done
+    skin_list=$(mktemp) || return
+    TEMP_PATHS+=("$skin_list")
+    find "$release/dotfiles/k9s/.config/k9s/skins" -type f -print0 >"$skin_list" || return
+    while IFS= read -r -d '' file; do
+      relative=${file#"$release/dotfiles/k9s/.config/k9s/skins/"}
+      add_projection "$HOME/.config/k9s/skins/$relative" \
+        "$current/dotfiles/k9s/.config/k9s/skins/$relative"
+    done <"$skin_list"
+  fi
+  for tool in "${profile[@]}"; do
+    [[ $tool != tmux-* ]] || add_projection "$HOME/.tmux/plugins/$tool" "$current/share/tmux/plugins/$tool"
   done
 }
 
@@ -1010,6 +1123,25 @@ preflight_projection() {
       return 1
     }
   done
+}
+
+remove_obsolete_projection() {
+  local links path saved backup
+
+  links=$(mktemp) || return
+  TEMP_PATHS+=("$links")
+  managed_home_links >"$links" || return
+  while IFS= read -r -d '' path; do
+    profile_has LINK_PATHS "$path" && continue
+    saved=$(mktemp "$(dirname -- "$path")/.dotfiles-release-link.XXXXXX") || return
+    TEMP_PATHS+=("$saved")
+    unlink "$saved" || return
+    move_in_transaction "$path" "$saved" || return
+    backup=$path.before-dotfiles-release
+    if [[ -e $backup || -L $backup ]]; then
+      move_in_transaction "$backup" "$path" || return
+    fi
+  done <"$links"
 }
 
 apply_projection() {
@@ -1065,8 +1197,11 @@ activate_release() {
     check_runtime "$release" || return
     verify_installed_manifest "$release" || return
   fi
-  migrate_nvim_state || return
+  if [[ -e $release/config/nvim2 ]]; then
+    migrate_nvim_state || return
+  fi
   begin_transaction
+  remove_obsolete_projection || return
   apply_projection || return
   select_in_transaction "$release_id" || return
   [[ $(current_id) == "$release_id" ]] || {
@@ -1082,6 +1217,7 @@ create_python_tools() {
   local -A release_metadata=()
 
   read_release_metadata "$release/release.env" release_metadata || return
+  [[ -v release_metadata[NVIM_VERSION] ]] || return 0
   python_version=${release_metadata[PYTHON_VERSION]}
   python=$release/tools/python-$python_version/bin/python3
   [[ -x $python ]] || {
@@ -1168,6 +1304,7 @@ print('python-openssl=' + ssl.OPENSSL_VERSION)
 print('python-sqlite=' + sqlite3.sqlite_version)
 PY
 
+  [[ -d $release/config/nvim2 ]] || return 0
   package_output=$(python_inventory_packages "$release") || return
   while IFS= read -r package; do
     venv=$release/share/nvim2/mason/packages/$package/venv
@@ -1229,11 +1366,14 @@ check_runtime() {
     HELM_PLUGINS=$release/share/helm/plugins
   fi
   export KUBECTL_VERSION HELM_VERSION PYTHONDONTWRITEBYTECODE HELM_PLUGINS LC_ALL LANG
-  HOME="$runtime_home" XDG_CONFIG_HOME="$runtime_home/.config" \
-    XDG_DATA_HOME="$runtime_home/.local/share" XDG_CACHE_HOME="$runtime_home/.cache" \
-    XDG_STATE_HOME="$runtime_home/.local/state" \
-    health_python "$release" "${release_metadata[PYTHON_VERSION]}" || return
-  for command_name in "${!TOOL_CHECKS[@]}"; do
+  if [[ -v release_metadata[PYTHON_VERSION] ]]; then
+    HOME="$runtime_home" XDG_CONFIG_HOME="$runtime_home/.config" \
+      XDG_DATA_HOME="$runtime_home/.local/share" XDG_CACHE_HOME="$runtime_home/.cache" \
+      XDG_STATE_HOME="$runtime_home/.local/state" \
+      health_python "$release" "${release_metadata[PYTHON_VERSION]}" || return
+  fi
+  while IFS= read -r command_name; do
+    [[ -v TOOL_CHECKS[$command_name] ]] || continue
     IFS='|' read -r field serialized <<<"${TOOL_CHECKS[$command_name]}"
     [[ -n $field && -v release_metadata[$field] ]] || continue
     expected=${release_metadata[$field]}
@@ -1246,8 +1386,9 @@ check_runtime() {
       die "$command_name reported an unexpected version: $output"
       return 1
     }
-  done
+  done <<<"$command_output"
   for tool in kubectl helm; do
+    [[ -v release_metadata[${tool^^}_VERSIONS] ]] || continue
     IFS=, read -r -a versions <<<"${release_metadata[${tool^^}_VERSIONS]}"
     serialized=${TOOL_CHECKS[$tool]#*|}
     read -r -a probe_args <<<"$serialized"
@@ -1376,8 +1517,8 @@ list_releases() {
     [[ $id != "$current" ]] || marker=yes
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" \
       "${release_metadata[PLATFORM_ID]}" "${release_metadata[SOURCE_COMMIT]}" \
-      "${release_metadata[NVIM_VERSION]}" "${release_metadata[NODE_VERSION]}" \
-      "${release_metadata[PYTHON_VERSION]}" "$marker"
+      "${release_metadata[NVIM_VERSION]:--}" "${release_metadata[NODE_VERSION]:--}" \
+      "${release_metadata[PYTHON_VERSION]:--}" "$marker"
   done
 }
 

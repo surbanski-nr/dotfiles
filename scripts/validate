@@ -220,7 +220,7 @@ validate_scripts() {
     tests/validate_test.sh
   )
 
-  for file in scripts/setup*-lib tests/dotfiles_release/fixture.sh tests/setup_tools/fixture.sh; do
+  for file in scripts/setup*-lib tests/dotfiles_release/fixture.sh tests/setup_tools/fixture.sh tests/tools/*.sh; do
     [[ ! -x $file ]] || die "source-only library is executable: $file"
   done
   for file in scripts/* tests/fixtures/*/* \
@@ -251,7 +251,7 @@ validate_scripts() {
   done < <(find scripts -maxdepth 1 -type f -print0 | sort -z)
   while IFS= read -r -d '' file; do
     files+=("$file")
-  done < <(find tests/dotfiles_release tests/setup_tools -type f -name '*.sh' -print0 | sort -z)
+  done < <(find tests/dotfiles_release tests/setup_tools tests/tools -type f -name '*.sh' -print0 | sort -z)
   if [[ -d tests/fixtures ]]; then
     while IFS= read -r -d '' file; do
       case "$file" in

@@ -59,8 +59,8 @@ _dotfiles_check_version() {
   shift 3
 
   if ! path=$(command -v "$command_name" 2>/dev/null); then
-    printf '  ABSENT  %-22s selected=%s\n' "$label" "$expected"
-    return 0
+    printf '  MISSING %-22s selected=%s\n' "$label" "$expected"
+    return 1
   fi
   if [[ $(type -t "$command_name") == alias || $(type -t "$command_name") == function ]]; then
     printf '  SHADOWED %-21s selected=%s provider=%s\n' \
@@ -107,10 +107,25 @@ _dotfiles_check_release_version() {
   _dotfiles_check_version "$label" "$command_name" "$RELEASE_VERSION" "${arguments[@]}"
 }
 
+_dotfiles_check_tmux_plugin() {
+  local name=$1 root=${DOTFILES_TMUX_PLUGIN_DIR:-$HOME/.tmux/plugins} actual
+
+  select_git_plugin TMUX_PLUGINS "$name" || return
+  if [[ ! -x $root/$name/${name#tmux-}.tmux ]]; then
+    printf '  MISSING %s\n' "$name"
+    return 1
+  fi
+  actual=$(git -C "$root/$name" rev-parse HEAD 2>/dev/null) || return
+  if [[ $actual != "$PLUGIN_COMMIT" ]]; then
+    printf '  MISMATCH %s selected=%s actual=%s\n' "$name" "$PLUGIN_COMMIT" "$actual"
+    return 1
+  fi
+  printf '  OK      %s commit=%s\n' "$name" "$actual"
+}
+
 dotfiles-check() (
-  local manifest_dir=${DOTFILES:-}
-  local missing=0
-  local release_root
+  local manifest_dir=${DOTFILES:-} missing=0 release_root tool command_name command_output
+  local -a selected=()
 
   if [[ -z $manifest_dir ]]; then
     manifest_dir=$(CDPATH='' cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
@@ -123,74 +138,61 @@ dotfiles-check() (
   if [[ -r $manifest_dir/tools.env ]]; then
     # shellcheck source=../tools.env
     source "$manifest_dir/tools.env"
-    # Loaded only when dotfiles-check runs, never during normal shell startup.
+    # Loaded only for diagnostics, never during normal shell startup.
     # shellcheck source=../scripts/setup-lib
     source "$manifest_dir/scripts/setup-lib"
-    validate_tool_config || return
+    validate_tool_config online || return
+    selected=("${TOOLS[@]}")
   fi
 
-  printf 'Required:\n'
+  printf 'System utilities:\n'
   _dotfiles_check_tool git git || missing=1
-  _dotfiles_check_tool nvim nvim || missing=1
-  _dotfiles_check_tool tmux tmux || missing=1
   _dotfiles_check_tool less less || missing=1
   _dotfiles_check_backing_command mc mc || missing=1
-  _dotfiles_check_tool node node || missing=1
-  _dotfiles_check_tool Python python python3 || missing=1
-  _dotfiles_check_tool ripgrep rg || missing=1
+
+  if (("${#selected[@]}" > 0)); then
+    printf '\nSelected tools:\n'
+    for tool in "${selected[@]}"; do
+      if [[ -v TMUX_PLUGINS[$tool] ]]; then
+        _dotfiles_check_tmux_plugin "$tool" || missing=1
+        continue
+      fi
+      if [[ $tool == python ]]; then
+        _dotfiles_check_release_version 'uv Python' uv TOOL_RELEASES python \
+          python find --directory "${XDG_CONFIG_HOME:-$HOME/.config}/uv" \
+          --no-project --managed-python --offline --show-version || missing=1
+        continue
+      fi
+      command_output=$(tool_commands "$tool") || return
+      while IFS= read -r command_name; do
+        _dotfiles_check_tool "$command_name" "$command_name" || {
+          missing=1
+          continue
+        }
+        [[ -v TOOL_CHECKS[$command_name] ]] || continue
+        _dotfiles_check_release_version "$command_name" "$command_name" TOOL_RELEASES "$tool" || missing=1
+      done <<<"$command_output"
+    done
+
+    printf '\nOptional asdf runtimes:\n'
+    if command -v asdf >/dev/null 2>&1; then
+      while IFS= read -r tool; do
+        command_name=$tool
+        [[ $tool != nodejs ]] || command_name=node
+        _dotfiles_check_release_version "$tool" "$command_name" TOOL_RELEASES "$tool" || missing=1
+      done < <(printf '%s\n' "${!ASDF_PLUGINS[@]}" | LC_ALL=C sort)
+    else
+      printf '  asdf is not installed\n'
+    fi
+  fi
 
   printf '\nOptional integrations:\n'
-  _dotfiles_check_tool fzf fzf || true
   _dotfiles_check_tool bat bat batcat || true
-  _dotfiles_check_tool fd fd fdfind || true
-  _dotfiles_check_tool zoxide zoxide || true
-  _dotfiles_check_tool kubectl kubectl || true
-  _dotfiles_check_tool kubectx kubectx || true
-  _dotfiles_check_tool kubens kubens || true
-  _dotfiles_check_tool k9s k9s || true
-  _dotfiles_check_tool kind kind || true
-  _dotfiles_check_tool helm helm || true
-  _dotfiles_check_tool terraform terraform || true
   _dotfiles_check_tool ansible ansible || true
   _dotfiles_check_tool 'container runtime' docker podman || true
   _dotfiles_check_tool jq jq || true
-  _dotfiles_check_tool yq yq || true
-  _dotfiles_check_tool 'GitHub CLI' gh || true
-  _dotfiles_check_tool 'Oh My Posh' oh-my-posh || true
   _dotfiles_check_tool ssh-agent ssh-agent || true
   _dotfiles_check_tool ssh-add ssh-add || true
-
-  if declare -p TOOL_RELEASES >/dev/null 2>&1; then
-    printf '\nSelected versions:\n'
-    _dotfiles_check_release_version gh gh TOOL_RELEASES gh || missing=1
-    _dotfiles_check_release_version htop htop TOOL_RELEASES htop || missing=1
-    _dotfiles_check_release_version kyverno kyverno TOOL_RELEASES kyverno || missing=1
-    _dotfiles_check_release_version actionlint actionlint TOOL_RELEASES actionlint || missing=1
-    _dotfiles_check_release_version Task task TOOL_RELEASES task || missing=1
-    _dotfiles_check_release_version Trivy trivy TOOL_RELEASES trivy || missing=1
-    _dotfiles_check_release_version k9s k9s TOOL_RELEASES k9s || missing=1
-    _dotfiles_check_release_version kind kind TOOL_RELEASES kind || missing=1
-    _dotfiles_check_release_version kubeconform kubeconform TOOL_RELEASES kubeconform || missing=1
-    _dotfiles_check_release_version ShellCheck shellcheck TOOL_RELEASES shellcheck || missing=1
-    _dotfiles_check_release_version 'Oh My Posh' oh-my-posh TOOL_RELEASES oh-my-posh || missing=1
-    _dotfiles_check_release_version kubectx kubectx TOOL_RELEASES kubectx || missing=1
-    _dotfiles_check_release_version kubens kubens TOOL_RELEASES kubens || missing=1
-    _dotfiles_check_release_version ripgrep rg TOOL_RELEASES rg || missing=1
-    _dotfiles_check_release_version zoxide zoxide TOOL_RELEASES zoxide || missing=1
-    _dotfiles_check_release_version uv uv TOOL_RELEASES uv || missing=1
-    _dotfiles_check_release_version Neovim nvim TOOL_RELEASES nvim || missing=1
-    _dotfiles_check_release_version tmux tmux TOOL_RELEASES tmux || missing=1
-    _dotfiles_check_release_version Go go TOOL_RELEASES go || missing=1
-    _dotfiles_check_release_version Terraform terraform TOOL_RELEASES terraform || missing=1
-    _dotfiles_check_release_version kubectl kubectl TOOL_RELEASES kubectl || missing=1
-    _dotfiles_check_release_version Helm helm TOOL_RELEASES helm || missing=1
-    _dotfiles_check_release_version Node.js node TOOL_RELEASES nodejs || missing=1
-    _dotfiles_check_release_version 'uv Python' uv TOOL_RELEASES python \
-      python find --directory "${XDG_CONFIG_HOME:-$HOME/.config}/uv" \
-      --no-project --managed-python --offline --show-version || missing=1
-    _dotfiles_check_release_version Terragrunt terragrunt TOOL_RELEASES terragrunt || missing=1
-  fi
-
   return "$missing"
 )
 
@@ -340,7 +342,7 @@ tp() {
 alias ga='git add .'
 alias gf='git fetch'
 alias gp='git pull'
-alias gs='git status'
+alias gs='git status --short'
 alias gd='git diff'
 alias gdc='git diff --cached'
 alias gc='git commit -m'

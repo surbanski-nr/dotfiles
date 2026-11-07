@@ -51,7 +51,7 @@ main() {
 load_config() {
   # shellcheck source=system.env
   source "$REPO_DIR/system.env"
-  validate_tool_config
+  validate_tool_config asdf
   select_default_release TOOL_RELEASES asdf
   ASDF_VERSION=$RELEASE_VERSION
   BIN_DIR=${SETUP_ASDF_BIN_DIR:-$HOME/bin}

@@ -205,4 +205,30 @@ for plugin in "${plugins[@]}"; do
 done
 [[ ! -e $test_root/offline-home ]] || fail 'offline plugin installation changed HOME'
 
+selected_release=$test_root/'selected release with spaces'
+selected_plugin=$selected_release/share/tmux/plugins/tmux-sensible/sensible.tmux
+mkdir -p "$(dirname -- "$selected_plugin")"
+cat >"$selected_plugin" <<'EOF'
+#!/usr/bin/env bash
+printf 'tmux-sensible\n' >>"$TEST_LOADED_PLUGINS"
+EOF
+chmod 0755 "$selected_plugin"
+printf 'RELEASE_FORMAT=2\nOFFLINE_TOOLS=tmux,tmux-sensible\n' >"$selected_release/release.env"
+loaded_plugins=$test_root/loaded-plugins
+TEST_LOADED_PLUGINS="$loaded_plugins" TMUX_OFFLINE_RELEASE_ROOT="$selected_release" \
+  bash "$repo_dir/tmux/.tmux/load-plugins.sh"
+[[ $(<"$loaded_plugins") == tmux-sensible ]] || fail 'loader ignored the release plugin selection'
+printf 'RELEASE_FORMAT=2\nOFFLINE_TOOLS=tmux\n' >"$selected_release/release.env"
+: >"$loaded_plugins"
+TEST_LOADED_PLUGINS="$loaded_plugins" TMUX_OFFLINE_RELEASE_ROOT="$selected_release" \
+  bash "$repo_dir/tmux/.tmux/load-plugins.sh"
+[[ ! -s $loaded_plugins ]] || fail 'loader ran a plugin omitted from the release profile'
+printf 'RELEASE_FORMAT=2\nOFFLINE_TOOLS=tmux,tmux-resurrect\n' >"$selected_release/release.env"
+if TMUX_OFFLINE_RELEASE_ROOT="$selected_release" bash "$repo_dir/tmux/.tmux/load-plugins.sh" \
+  >"$test_root/missing-selected-plugin.log" 2>&1; then
+  fail 'loader accepted a missing selected plugin'
+fi
+[[ $(<"$test_root/missing-selected-plugin.log") == *'missing '*'/tmux-resurrect/resurrect.tmux'* ]] ||
+  fail 'loader did not explain the missing selected plugin'
+
 printf 'Setup tools plugin tests passed\n'

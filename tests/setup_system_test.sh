@@ -363,6 +363,7 @@ fi
 config_repo=$test_root/config-repo
 mkdir -p "$config_repo/scripts"
 cp "$repo_dir/scripts/setup-system-lib" "$config_repo/scripts/setup-system-lib"
+cp "$repo_dir/scripts/setup-profile-lib" "$config_repo/scripts/setup-profile-lib"
 cp "$repo_dir/scripts/dotfiles-release" "$config_repo/scripts/dotfiles-release"
 cp "$repo_dir/tools.env" "$config_repo/tools.env"
 cp "$repo_dir/system.env" "$config_repo/system.env"

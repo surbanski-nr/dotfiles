@@ -6,6 +6,19 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/fixture.sh"
 create_fixture
 
+for profile in TOOLS OFFLINE_RELEASE_TOOLS; do
+  empty_repository=$test_root/empty-$profile-repository
+  empty_home=$test_root/empty-$profile-home
+  make_test_repo "$empty_repository"
+  printf '%s=()\n' "$profile" >>"$empty_repository/tools.env"
+  if empty_output=$(run_setup "$empty_home" "$empty_repository" "$archive_root" 2>&1); then
+    fail "setup-tools accepted empty $profile"
+  fi
+  [[ $empty_output == *"$profile is empty"* ]] ||
+    fail "empty $profile did not report the invalid list"
+  [[ ! -e $empty_home ]] || fail "empty $profile changed the target home"
+done
+
 prerequisite_repository=$test_root/prerequisite-repository
 prerequisite_home=$test_root/prerequisite-home
 make_test_repo "$prerequisite_repository"
@@ -41,6 +54,20 @@ if run_setup "$unsupported_home" "$unsupported_repository" "$archive_root" \
 fi
 [[ ! -e $unsupported_home/bin && ! -e $unsupported_home/.local ]] ||
   fail 'invalid profile changed the target home'
+
+kubens_repository=$test_root/kubens-repository
+kubens_home=$test_root/kubens-home
+make_test_repo "$kubens_repository"
+append_release "$kubens_repository/tools.env" TOOL_RELEASES kubens \
+  99.0.0 https://example.invalid/kubens_v99.0.0_linux_x86_64.tar.gz \
+  0000000000000000000000000000000000000000000000000000000000000000
+if kubens_output=$(run_setup "$kubens_home" "$kubens_repository" "$archive_root" k9s 2>&1); then
+  fail 'setup-tools accepted mismatched kubectx and kubens defaults'
+fi
+[[ $kubens_output == *'kubectx and kubens defaults must use the same version'* ]] ||
+  fail 'mismatched kubectx and kubens defaults were not reported'
+[[ ! -e $kubens_home/bin && ! -e $kubens_home/.local ]] ||
+  fail 'mismatched kubectx and kubens defaults changed the target home'
 
 pin_repository=$test_root/pin-repository
 pin_archives=$test_root/pin-archives
@@ -78,7 +105,7 @@ missing_default_output=$(run_setup "$missing_default_home" \
 missing_default_status=$?
 set -e
 [[ $missing_default_status -ne 0 &&
-  $missing_default_output == *'offline default k9s 99.1.0 requires an artifact'* ]] ||
+  $missing_default_output == *'TOOLS release k9s 99.1.0 requires an artifact'* ]] ||
   fail 'missing default artifact fell back to a later record'
 [[ ! -e $missing_default_home/bin && ! -e $missing_default_home/.local ]] ||
   fail 'missing default artifact changed the target home'

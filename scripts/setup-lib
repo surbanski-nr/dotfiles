@@ -64,6 +64,8 @@ require_setup_commands() {
 
 # shellcheck source=setup-catalog-lib
 source "${BASH_SOURCE[0]%/*}/setup-catalog-lib"
+# shellcheck source=setup-profile-lib
+source "${BASH_SOURCE[0]%/*}/setup-profile-lib"
 
 verify_sha256() {
   local path=$1
@@ -157,6 +159,12 @@ artifact_layout() {
       SPEC_MEMBER=linux-amd64/helm
       SPEC_DESTS=("helm-$version")
       SPEC_LINKS=("helm:helm-$version")
+      ;;
+    helm-schema)
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=schema
+      SPEC_DESTS=("helm-schema-$version")
+      SPEC_LINKS=()
       ;;
     nodejs)
       SPEC_FORMAT=xz-tree

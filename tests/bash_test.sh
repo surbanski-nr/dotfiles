@@ -62,7 +62,7 @@ done
 
 set +e
 check_output=$(
-  env -i HOME="$test_root" PATH="$test_root/bin" \
+  env -i HOME="$test_root" DOTFILES="$repo_dir" PATH="$test_root/bin" \
     TEST_REPO_DIR="$repo_dir" TEST_SCENARIO=check-tools "$scenario_fixture" 2>&1
 )
 check_status=$?
@@ -213,6 +213,8 @@ printf 'TOOL_RELEASES[python]=%q\n' \
   >>"$python_manifest/tools.env"
 ln -s "$repo_dir/scripts/setup-lib" "$python_manifest/scripts/setup-lib"
 ln -s "$repo_dir/scripts/setup-catalog-lib" "$python_manifest/scripts/setup-catalog-lib"
+ln -s "$repo_dir/scripts/setup-profile-lib" "$python_manifest/scripts/setup-profile-lib"
+printf 'TOOLS=(python)\n' >>"$python_manifest/tools.env"
 for command_name in bash grep timeout; do
   ln -s "$(command -v "$command_name")" "$python_home/bin/$command_name"
 done
@@ -235,6 +237,21 @@ if TEST_COMMAND_MODE=versions run_scenario check-tools \
   fail 'version diagnostics accepted the wrong global Python'
 fi
 assert_contains "$(<"$test_root/python-mismatch.log")" 'MISMATCH uv Python'
+
+printf 'TOOLS=(rg)\n' >>"$python_manifest/tools.env"
+for command_name in nvim tmux node python uv; do
+  unlink "$python_home/bin/$command_name"
+done
+TEST_COMMAND_MODE=versions run_scenario check-tools \
+  env HOME="$python_home" DOTFILES="$python_manifest" PATH="$python_home/bin" \
+  >"$test_root/reduced-tools.log"
+unlink "$python_home/bin/rg"
+if TEST_COMMAND_MODE=versions run_scenario check-tools \
+  env HOME="$python_home" DOTFILES="$python_manifest" PATH="$python_home/bin" \
+  >"$test_root/missing-selected-tool.log"; then
+  fail 'reduced-profile diagnostics accepted a missing selected tool'
+fi
+assert_contains "$(<"$test_root/missing-selected-tool.log")" 'MISSING rg'
 
 set +e
 missing_output=$(

@@ -232,7 +232,8 @@ build_and_qualify() {
     --env DOTFILES=/tmp/inherited-dotfiles --env DOTFILES_AUTO_ROOT=/tmp/inherited-auto-root \
     --volume "$archive:/artifact.tar.gz:ro" \
     --volume "$delivered_manager:/usr/local/bin/dotfiles-release:ro" \
-    --volume "$script_dir:/ci:ro" --volume "$script_dir/../tools.env:/tools.env:ro" "$runtime_image" \
+    --volume "$script_dir:/ci:ro" --volume "$script_dir/../tools.env:/tools.env:ro" \
+    --volume "$script_dir/../tests/tools:/tests/tools:ro" "$runtime_image" \
     bash -euo pipefail -c \
     'bash /ci/dotfiles-release verify /artifact.tar.gz
      bash /usr/local/bin/dotfiles-release install /artifact.tar.gz

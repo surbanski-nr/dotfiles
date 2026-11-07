@@ -32,7 +32,7 @@ run_installer() {
 mkdir -p "$test_repo/scripts" "$test_bin" "$tools_dir"
 mkdir -p "$test_repo/nvim2/.config/nvim2/python-locks"
 cp "$repo_dir/scripts/install-validation-tool" "$test_repo/scripts/"
-cp "$repo_dir/scripts/setup-lib" "$repo_dir/scripts/setup-catalog-lib" "$test_repo/scripts/"
+cp "$repo_dir/scripts/setup-lib" "$repo_dir/scripts/setup-catalog-lib" "$repo_dir/scripts/setup-profile-lib" "$test_repo/scripts/"
 cp "$repo_dir/tools.env" "$test_repo/tools.env"
 cp "$repo_dir/validation.env" "$test_repo/validation.env"
 ln -s "$repo_dir/tests/fixtures/scripts/curl-copy" "$test_bin/curl"

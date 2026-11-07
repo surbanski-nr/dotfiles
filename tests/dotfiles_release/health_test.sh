@@ -161,6 +161,9 @@ checker="$repo_dir/scripts/check-dotfiles-release"
 tty_release=$test_root/'Nvim release with spaces'
 tty_home=$test_root/'Nvim health home with spaces'
 mkdir -p "$tty_release/config/nvim2/tests" "$tty_home"
+make_selected_artifact "$commit_three" nvim-health "$test_root/nvim-health.tar.gz" \
+  nvim nodejs python go rg terraform
+cp "$test_root/stage-nvim-health/$id_three/release.env" "$tty_release/release.env"
 cat >"$tty_release/config/nvim2/tests/check.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -195,7 +198,8 @@ for expected in (0, 94):
         os.environ['FIXTURE_NVIM_LOCK'] = lock
         os.environ['FIXTURE_NVIM_CHILD_PID'] = child_pid_file
         os.execl('/bin/bash', 'bash', '-c',
-                 'source "$1"; exec {LOCK_FD}<"$4"; flock -x "$LOCK_FD"; '
+                 'source "$1"; source "$checker_dir/../tests/tools/nvim.sh"; '
+                 'exec {LOCK_FD}<"$4"; flock -x "$LOCK_FD"; '
                  'health_stage Nvim health_nvim "$2" "$3"',
                  'nvim-health-test', checker, release, home, lock)
     output = bytearray()
@@ -243,10 +247,10 @@ mkdir -p "$functional_release/bin"
 printf '#!/usr/bin/env bash\nexit 96\n' >"$functional_release/bin/rg"
 chmod 0755 "$functional_release/bin/rg"
 status=0
-bash -c 'source "$1"; health_stage "CLI operations" health_cli_operations "$2" "$3"' \
-  checker-test "$checker" "$functional_release" "$test_root/functional-home" \
+bash -c 'source "$1"; source "$4"; health_stage ripgrep health_rg "$2" "$3"' \
+  checker-test "$checker" "$functional_release" "$test_root/functional-home" "$repo_dir/tests/tools/rg.sh" \
   >"$test_root/functional-failure.log" 2>&1 || status=$?
-[[ $status == 96 && $(<"$test_root/functional-failure.log") == *'CLI operations health check failed (status 96)'* ]] ||
+[[ $status == 96 && $(<"$test_root/functional-failure.log") == *'ripgrep health check failed (status 96)'* ]] ||
   fail 'CI functional checker omitted a runtime failure'
 
 printf 'dotfiles_release: health passed\n'
