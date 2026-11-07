@@ -417,19 +417,27 @@ Nvim stays in the default list but can be removed as a whole, including its
 configuration, plugins, Mason payload and editor tests. Its full profile requires
 Node.js, Python, Go, ripgrep and Terraform. Terraform is required by the editor's
 Terraform formatter and language server. These are separate tools: removing
-Nvim does not automatically remove them. Missing dependencies are reported
-before downloads.
+Nvim does not automatically remove them. Reduced editor requirements follow
+its selected Mason packages and active features. Tool-list dependencies are
+checked before downloads; editor dependencies are checked after plugin bootstrap,
+before Mason installation.
 `yamllint` currently uses Nvim's Mason environment, so remove it too when omitting
 Nvim. Tmux plugins require tmux, and `helm-schema` requires Helm. npm belongs to
 Node.js. Private Mason dependencies remain owned by the editor: removing the
 standalone actionlint tool leaves the editor's independently pinned copy.
 
-Ansible is another editor dependency. Mason's `ansible-lint` environment contains
+When selected, Mason's `ansible-lint` environment contains
 the locked `ansible-core`; offline builds expose `ansible`, `ansible-config` and
 `ansible-playbook` through `share/nvim2/mason/bin`. Bash adds that directory to
-PATH. These commands disappear with the Nvim payload. `setup-system` does not
+PATH. These commands disappear when that Mason package is omitted. `setup-system` does not
 install Ansible, and connected `dotfiles-check` reports it only as an optional
 integration, so its absence does not fail that check.
+
+To pause editor support or optionally remove Mason packages on a connected
+machine, follow the [language support guide](../nvim2/.config/nvim2/guide.md#temporarily-disabling-language-support).
+The [Nvim offline notes](../nvim2/.config/nvim2/offline-releases.md#language-dependencies-and-reduced-editor-profiles)
+describe how builder, installer and functional tests follow those declarations
+for reduced editor profiles.
 
 New archives record `RELEASE_FORMAT=2` and the complete selection, including tmux
 plugins, in `OFFLINE_TOOLS`. Required version fields, payload checks and public

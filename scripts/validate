@@ -291,8 +291,12 @@ validate_nvim2() {
   )
   local lock_file=nvim2/.config/nvim2/nvim-pack-lock.json
 
-  for file in nvim2/.config/nvim2/python-locks/{ansible-lint,yamllint}.{in,lock}; do
-    [[ -f $file && ! -L $file ]] || die "Nvim2 Python lock source is missing: $file"
+  for file in nvim2/.config/nvim2/python-locks/*.in nvim2/.config/nvim2/python-locks/*.lock; do
+    [[ -e $file || -L $file ]] || continue
+    [[ -f $file && ! -L $file ]] || die "invalid Nvim2 Python lock source: $file"
+    local base=${file%.*}
+    [[ -f $base.in && ! -L $base.in && -f $base.lock && ! -L $base.lock ]] ||
+      die "Nvim2 Python lock pair is incomplete: $base"
   done
   stylua --check \
     --config-path nvim2/.config/nvim2/.stylua.toml \

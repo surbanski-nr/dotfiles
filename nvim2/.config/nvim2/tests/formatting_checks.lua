@@ -1,3 +1,5 @@
+local profile = dofile(vim.fn.stdpath 'config' .. '/tests/profile.lua')
+
 local root = vim.fn.tempname()
 local client_id
 vim.fn.mkdir(root, 'p')
@@ -6,19 +8,14 @@ local function run()
   local policy = require 'custom.conform'
   local conform = require 'conform'
   local log = root .. '/formatter.log'
-  local script = root .. '/formatter.py'
+  local script = root .. '/formatter.sh'
   assert(vim.fn.writefile({}, log) == 0)
   assert(vim.fn.writefile({
-    'import sys',
-    'from pathlib import Path',
-    'with Path(sys.argv[1]).open("a") as log:',
-    '    log.write(Path(sys.argv[2]).name + "\\n")',
-    'start, end = map(int, sys.argv[3:5]) if len(sys.argv) > 3 else (1, 1000)',
-    'for number, line in enumerate(sys.stdin, 1):',
-    '    sys.stdout.write(line.replace("=1", " = 1") if start <= number <= end else line)',
+    'printf "%s\\n" "${2##*/}" >>"$1"',
+    'awk -v start="${3:-1}" -v end="${4:-1000}" \'NR >= start && NR <= end { gsub(/=1/, " = 1") } { print }\'',
   }, script) == 0)
   conform.formatters.formatting_fixture = {
-    command = assert(vim.fn.exepath 'python3' ~= '' and vim.fn.exepath 'python3', 'Python is required for the counting formatter'),
+    command = 'bash',
     args = { script, log, '$FILENAME' },
     range_args = function(_, context) return { script, log, '$FILENAME', tostring(context.range.start[1]), tostring(context.range['end'][1]) } end,
     stdin = true,
@@ -229,20 +226,22 @@ local function run()
     vim.api.nvim_buf_set_lines(0, 0, -1, false, yaml_lines)
     vim.cmd 'silent write'
     assert(vim.deep_equal(vim.fn.readfile(path), yaml_lines), filetype .. ' formatted without opting in')
-    keys '<leader>f'
-    assert(
-      vim.wait(15000, function() return vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), yaml_formatted) end),
-      filetype .. ' manual formatting did not preserve blank lines or literal text: ' .. vim.inspect(vim.api.nvim_buf_get_lines(0, 0, -1, false))
-    )
-    assert(not policy.is_enabled() and vim.deep_equal(vim.fn.readfile(path), yaml_lines), filetype .. ' manual format enabled automatic formatting or saved')
-    keys '<leader>tf'
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, yaml_lines)
-    vim.cmd 'silent write'
-    assert(vim.deep_equal(vim.fn.readfile(path), yaml_formatted), filetype .. ' opted-in save did not preserve blank lines or literal text')
-    keys '<leader>tf'
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, yaml_lines)
-    vim.cmd 'silent write'
-    assert(vim.deep_equal(vim.fn.readfile(path), yaml_lines), filetype .. ' did not disable automatic formatting')
+    if profile.formatter 'yamlfmt' and vim.env.NVIM2_CHECK_TOOLS ~= '0' then
+      keys '<leader>f'
+      assert(
+        vim.wait(15000, function() return vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), yaml_formatted) end),
+        filetype .. ' manual formatting did not preserve blank lines or literal text: ' .. vim.inspect(vim.api.nvim_buf_get_lines(0, 0, -1, false))
+      )
+      assert(not policy.is_enabled() and vim.deep_equal(vim.fn.readfile(path), yaml_lines), filetype .. ' manual format enabled automatic formatting or saved')
+      keys '<leader>tf'
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, yaml_lines)
+      vim.cmd 'silent write'
+      assert(vim.deep_equal(vim.fn.readfile(path), yaml_formatted), filetype .. ' opted-in save did not preserve blank lines or literal text')
+      keys '<leader>tf'
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, yaml_lines)
+      vim.cmd 'silent write'
+      assert(vim.deep_equal(vim.fn.readfile(path), yaml_lines), filetype .. ' did not disable automatic formatting')
+    end
   end
 
   vim.cmd 'FormatEnable'

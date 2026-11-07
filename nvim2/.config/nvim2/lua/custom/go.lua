@@ -19,6 +19,7 @@ function M.with_env(callback, ...)
 end
 
 function M.setup_lsp()
+  if not require('custom.lsp').servers.gopls then return end
   local root = vim.lsp.config.gopls.root_dir
   -- lspconfig starts `go env` while finding the root, before spawning gopls.
   vim.lsp.config('gopls', { root_dir = function(...) return M.with_env(root, ...) end })

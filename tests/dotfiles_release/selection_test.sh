@@ -10,13 +10,21 @@ if bash -c '
   set -euo pipefail
   source "$1/tools.env"
   source "$1/scripts/setup-lib"
-  OFFLINE_RELEASE_TOOLS=(nvim nodejs python go rg)
+  OFFLINE_RELEASE_TOOLS=(nvim)
   validate_tool_config offline
-' bash "$repo_dir" >"$test_root/missing-terraform-config.log" 2>&1; then
-  fail 'offline configuration accepted Nvim without Terraform'
+' bash "$repo_dir" >"$test_root/missing-rg-config.log" 2>&1; then
+  fail 'offline configuration accepted Nvim without ripgrep'
 fi
-[[ $(<"$test_root/missing-terraform-config.log") == *'nvim requires terraform in OFFLINE_RELEASE_TOOLS'* ]] ||
-  fail 'offline configuration did not report the missing Terraform dependency'
+[[ $(<"$test_root/missing-rg-config.log") == *'nvim requires rg in OFFLINE_RELEASE_TOOLS'* ]] ||
+  fail 'offline configuration did not report the missing ripgrep dependency'
+
+bash -c '
+  set -euo pipefail
+  source "$1/tools.env"
+  source "$1/scripts/setup-lib"
+  OFFLINE_RELEASE_TOOLS=(nvim rg)
+  validate_tool_config offline
+' bash "$repo_dir"
 
 full=$test_root/selected-full.tar.gz
 small=$test_root/selected-small.tar.gz

@@ -62,7 +62,12 @@ for _, package in ipairs(require('custom.lsp').python_inventory(vim.env.DOTFILES
 end
 assert(vim.fn.writefile(lines, vim.env.DOTFILES_PYTHON_INVENTORY_OUTPUT) == 0)
 LUA
-[[ -s $inventory ]] || die 'Python-backed Mason inventory is empty'
+locks_dir=$repo_dir/nvim2/.config/nvim2/python-locks
+if [[ ! -s $inventory ]]; then
+  find "$locks_dir" -maxdepth 1 -type f \( -name '*.in' -o -name '*.lock' \) -delete
+  printf 'update-offline-python-locks: no Python-backed Mason packages selected\n'
+  exit 0
+fi
 
 select_default_release TOOL_RELEASES python
 python_version=$RELEASE_VERSION
@@ -94,11 +99,21 @@ while IFS=$'\t' read -r package version extra; do
       --generate-hashes --strip-extras \
       --output-file="$work/$package.lock" "$work/$package.in"
   )
-  mv -T -- "$work/$package.in" \
-    "$repo_dir/nvim2/.config/nvim2/python-locks/$package.in"
-  mv -T -- "$work/$package.lock" \
-    "$repo_dir/nvim2/.config/nvim2/python-locks/$package.lock"
 done <"$inventory"
+
+# Generate the whole set before replacing or removing existing locks.
+while IFS=$'\t' read -r package version extra; do
+  mv -T -- "$work/$package.in" "$locks_dir/$package.in"
+  mv -T -- "$work/$package.lock" "$locks_dir/$package.lock"
+done <"$inventory"
+for input in "$locks_dir"/*.in "$locks_dir"/*.lock; do
+  [[ -f $input ]] || continue
+  package=${input##*/}
+  package=${package%.*}
+  if ! awk -F '\t' -v package="$package" '$1 == package { found = 1 } END { exit !found }' "$inventory"; then
+    rm -- "$input"
+  fi
+done
 
 printf 'update-offline-python-locks: regenerated inputs and locks with pip-tools %s\n' \
   "$PIP_TOOLS_VERSION"

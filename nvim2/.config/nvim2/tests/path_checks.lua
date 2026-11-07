@@ -1,6 +1,5 @@
 local root = vim.fn.tempname() .. ' home with spaces'
-local managed = vim.fn.exepath 'stylua'
-assert(managed ~= '', 'prepared Mason stylua is required')
+local managed = root .. '/managed/bin/path-probe'
 
 local function executable(path, output)
   vim.fn.mkdir(vim.fs.dirname(path), 'p')
@@ -9,27 +8,33 @@ local function executable(path, output)
 end
 
 for directory, output in pairs { bin = 'home-bin', ['project venv/bin'] = 'venv' } do
-  executable(root .. '/' .. directory .. '/stylua', output)
   executable(root .. '/' .. directory .. '/path-probe', output)
 end
 executable(root .. '/bin/unique-user-tool', 'unique')
 executable(root .. '/managed/bin/path-probe', 'managed')
+local init = root .. '/init.lua'
+assert(vim.fn.writefile({
+  'vim.opt.runtimepath:prepend(vim.env.TEST_NVIM_CONFIG)',
+  "require('custom.lsp').mason.install_root = vim.env.HOME .. '/managed'",
+  "require('custom.lsp').mason.registry_cache.refresh = false",
+  "dofile(vim.env.TEST_NVIM_CONFIG .. '/init.lua')",
+}, init) == 0)
 local fixture = root .. '/check.lua'
 assert(vim.fn.writefile(
   vim.split(
     [=[
 local expected = vim.env.TEST_EXPECTED
-assert(vim.fn.exepath('stylua') == expected, 'Mason startup demoted the selected provider')
+assert(vim.fn.exepath('path-probe') == expected, 'Mason startup demoted the selected provider')
 local function output(args)
   local result = vim.system(args, { text = true }):wait(10000)
   assert(result.code == 0, result.stderr)
   return vim.trim(result.stdout)
 end
-local selected = output { 'stylua', '--version' }
+local selected = output { 'path-probe', '--version' }
 require('mason').setup(require('custom.lsp').mason)
 require('custom.lsp').restore_path()
 require('custom.lsp').restore_path()
-assert(vim.fn.exepath('stylua') == expected, 'repeated setup changed selection')
+assert(vim.fn.exepath('path-probe') == expected, 'repeated setup changed selection')
 local count = 0
 for _, path in ipairs(vim.split(vim.env.PATH, ':', { plain = true })) do
   assert(path ~= '', 'PATH permits implicit current-directory lookup')
@@ -37,7 +42,7 @@ for _, path in ipairs(vim.split(vim.env.PATH, ':', { plain = true })) do
 end
 assert(count == tonumber(vim.env.TEST_USER_BIN_COUNT), 'user bin entry was duplicated or retained')
 vim.cmd 'enew'
-vim.cmd 'terminal stylua --version'
+vim.cmd 'terminal path-probe --version'
 assert(vim.fn.jobwait({ vim.b.terminal_job_id }, 10000)[1] == 0, 'terminal command failed')
 local terminal = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
 assert(terminal:find(selected, 1, true), 'terminal selected a different provider')
@@ -74,16 +79,17 @@ for _, mode in ipairs { 'enabled', 'venv', 'ignored', 'nonexecutable' } do
   environment.PATH = root .. '/bin:' .. root .. '/managed/bin:' .. vim.env.PATH .. '::'
   environment.DOTFILES_IGNORE_USER_BIN = mode == 'ignored' and '1' or ''
   environment.VIRTUAL_ENV = mode == 'venv' and (root .. '/project venv') or ''
-  environment.TEST_EXPECTED = mode == 'venv' and (root .. '/project venv/bin/stylua') or mode == 'enabled' and (root .. '/bin/stylua') or managed
+  environment.TEST_EXPECTED = mode == 'venv' and (root .. '/project venv/bin/path-probe') or mode == 'enabled' and (root .. '/bin/path-probe') or managed
   environment.TEST_USER_BIN_COUNT = mode == 'ignored' and '0' or '1'
-  environment.TEST_SHELL_EXPECTED = mode == 'ignored' and 'managed' or mode == 'venv' and 'venv' or 'home-bin'
+  environment.TEST_SHELL_EXPECTED = (mode == 'ignored' or mode == 'nonexecutable') and 'managed' or mode == 'venv' and 'venv' or 'home-bin'
   environment.TEST_BASHRC = bashrc
   environment.TEST_PATH_FIXTURE = fixture
+  environment.TEST_NVIM_CONFIG = vim.fn.stdpath 'config'
   environment.TERM = 'xterm-256color'
-  if mode == 'nonexecutable' then assert(vim.fn.setfperm(root .. '/bin/stylua', 'rw-r--r--') == 1) end
+  if mode == 'nonexecutable' then assert(vim.fn.setfperm(root .. '/bin/path-probe', 'rw-r--r--') == 1) end
   local invocation =
     "+lua local ok, message = xpcall(function() dofile(vim.env.TEST_PATH_FIXTURE) end, debug.traceback); if not ok then vim.api.nvim_err_writeln(message); vim.cmd('cquit 1') end"
-  local result = vim.system({ vim.v.progpath, '--headless', invocation }, { env = environment, text = true }):wait(30000)
+  local result = vim.system({ vim.v.progpath, '--headless', '-u', init, invocation }, { env = environment, text = true }):wait(30000)
   assert(result.code == 0, mode .. ': ' .. (result.stderr or ''))
 end
 vim.fn.delete(root, 'rf')

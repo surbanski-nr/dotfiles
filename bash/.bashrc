@@ -91,7 +91,7 @@ for _dotfiles_path_entry in "${_dotfiles_path_entries[@]}"; do
   case $_dotfiles_path_entry in
     "$HOME/bin" | "$_dotfiles_release_store/current/bin") continue ;;
   esac
-  if [[ $_dotfiles_path_entry =~ /dotfiles-[0-9a-f]{12}/(bin|dotfiles/scripts|share/nvim2/mason/bin|share/nvim2/mason/packages/ansible-lint/venv/bin)$ ]]; then
+  if [[ $_dotfiles_path_entry =~ /dotfiles-[0-9a-f]{12}/(bin|dotfiles/scripts|tools/python/bin|share/nvim2/mason/bin|share/nvim2/mason/packages/ansible-lint/venv/bin)$ ]]; then
     continue
   fi
   if [[ -n $_dotfiles_previous_auto_root &&

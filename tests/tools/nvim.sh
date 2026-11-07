@@ -6,8 +6,12 @@ health_nvim() {
   local -A metadata=()
   read_release_metadata "$release/release.env" metadata || return
   if [[ -v metadata[HELM_VERSIONS] ]]; then
-    health_chart "$health_home/nvim-chart" || return
-    (cd "$health_home/nvim-chart" && "$release/share/nvim2/mason/bin/helm_ls" lint) || return
+    if [[ ! -v metadata[NVIM_TOOLS_FORMAT] ]] ||
+      awk -F '\t' '$1 == "helm-ls" { found = 1 } END { exit !found }' \
+        "$release/share/nvim2/mason/inventory.tsv"; then
+      health_chart "$health_home/nvim-chart" || return
+      (cd "$health_home/nvim-chart" && "$release/share/nvim2/mason/bin/helm_ls" lint) || return
+    fi
   fi
   need setsid || return
   (

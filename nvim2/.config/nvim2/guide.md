@@ -842,10 +842,8 @@ preserving completion and navigation for this configuration and Neovim APIs.
 Treesitter provides syntax highlighting, indentation, injections and folds.
 The `<C-Space>`/`<BS>` selection aliases use native parser/LSP selection.
 Native `an`/`in` work in Visual and operator-pending modes; typing Normal `a`
-enters Insert mode. Mini.ai reserves `aN`/`iN` for next-object prefixes,
-preserving native `an`/`in` and ordinary `aa` arguments. For example, `vaN)`
-previews the next parentheses and `diN)` deletes their contents. Preview
-uncertain textual matches before destructive edits.
+enters Insert mode. Mini.ai is configured to preserve native `an`/`in` and its
+ordinary `aa` argument object.
 
 The complete expansion, fallback text-object and external-clipboard workflow is
 documented under
@@ -1171,11 +1169,13 @@ TypeScript Language Server provides completion, hover, navigation, references,
 rename, symbols and code actions for TypeScript, TSX, JavaScript and JSX. It
 uses the project's TypeScript version when one is installed locally.
 
-Terraform Language Server supplies Terraform navigation and code lenses, but
-`terraform fmt` still requires a host `terraform` executable. Ansible Language
-Server is managed by Mason and attaches to recognized playbooks; its wider
-project features invoke the host `ansible-config` command. Missing host tools
-remain visible in `:ConformInfo`, LSP messages and health output.
+Terraform Language Server supplies Terraform navigation and code lenses.
+Formatting also needs Terraform CLI, which Mason does not install. On a
+connected machine it comes from a separate installation; the offline release
+bundles it. Ansible Language Server attaches to recognized playbooks and uses
+`ansible-config` for project features. Offline releases expose that command
+from the locked `ansible-core` dependency of Mason's `ansible-lint` environment.
+Missing commands remain visible in `:ConformInfo`, LSP messages and health output.
 
 For a new TypeScript repository, install the repository's chosen ESLint and
 Prettier versions locally and commit its configuration and lockfile. For
@@ -1190,6 +1190,149 @@ diagnostics with `]d`, `[d` or `<leader>sd`.
 Use the normal LSP mappings such as `grd`, `grr`, `gri`, `grn` and `gra`.
 `:LspTypescriptSourceAction` offers whole-file actions such as organizing
 imports or removing unused code.
+
+### Temporarily disabling language support
+
+Edit the source files under `nvim2/.config/nvim2/lua/custom/`, then restart
+Neovim. LSP activation, formatting and linting are independent, so disabling
+only the server does not disable the other two. Keep installed Mason packages
+and their `M.tools` declarations for a temporary pause; those declarations
+control installation and dependency checks, not activation. Executable probes
+follow the selected packages automatically.
+There is no background Mason installation or update at startup.
+
+For Terraform, make these three edits:
+
+1. In `lsp.lua`, comment out `terraformls = {}` in `M.servers`.
+2. In `conform.lua`, comment out both `terraform` and `['terraform-vars']`
+   in `enabled_filetypes` and `formatters_by_ft`.
+3. In `plugins/lint.lua`, comment out both `terraform` and
+   `['terraform-vars']` in `lint.linters_by_ft`.
+
+Keep the Treesitter parser declarations in `treesitter.lua` to retain syntax
+highlighting and folds without running Terraform CLI, its server or TFLint.
+Restore the commented entries and restart to resume support.
+
+For Ansible, first decide whether to retain ordinary YAML formatting and
+linting. To disable only Ansible-specific features, comment out
+`ansiblels = {}` in `lsp.lua` and keep the shared YAML tools. `ansible-lint`
+is used by Ansible Language Server; the configured `nvim-lint` linter for
+playbooks is `yamllint`.
+
+To also stop formatting and linting in recognized Ansible files:
+
+1. Comment out `ansiblels = {}` in `lsp.lua`.
+2. In `conform.lua`, comment out `['yaml.ansible'] = true` in
+   `enabled_filetypes`. In `formatters_by_ft`, replace the Ansible entry with:
+
+   ```lua
+   ['yaml.ansible'] = { lsp_format = 'never' },
+   ```
+
+3. In `plugins/lint.lua`, replace the Ansible entry in `lint.linters_by_ft`
+   with:
+
+   ```lua
+   ['yaml.ansible'] = {},
+   ```
+
+Do not just delete the `yaml.ansible` entries: both plugins fall back to
+`yaml`. Conform also ignores an empty formatter table, so its explicit
+`lsp_format` entry blocks both YAML formatter inheritance and LSP formatting.
+Keep Ansible filetype detection in `core.lua`; making a playbook ordinary YAML
+would activate the ordinary YAML tools again. Keep `yaml-language-server`,
+`yamlfmt`, `yamllint` and the YAML parser for other YAML files.
+To resume, restore `ansiblels`, the autoformat allowlist entry, and the original
+`{ 'yamlfmt' }` and `{ 'yamllint' }` entries, then restart.
+
+Python and Go also have debugger activation in `plugins/debug.lua`. Comment
+out `require('custom.debug').setup_python()` to stop Python debugging, or
+`require('custom.debug_go').setup()` to stop Go debugging. Keep the shared
+`require('custom.debug').setup()` for the other debugger and its UI. Restore
+the corresponding call to enable it again. Remove `debugpy` or `delve` from
+`M.tools` only after disabling that debugger. Keep the `python` parser in
+`treesitter.lua` for Python's nearest-test and test-class debug mappings.
+
+Go linting is controlled by the `go = { 'golangcilint' }` entry in the same
+`lint.linters_by_ft` table as other languages. GitHub Actions linting has a
+separate `workflow_linters` list in that file because it matches workflow paths
+rather than every YAML buffer. An empty list disables that workflow linter.
+Treesitter highlighting is independent: edit `M.parsers` in `treesitter.lua`
+only when you also want to stop installing those parsers. An empty parser list
+needs no `tree-sitter-cli` package.
+
+### Optionally uninstalling language tools from Mason
+
+On a connected installation, disable activation as above first. In
+`lsp.lua`, also comment out the relevant packages in `M.tools`:
+
+- Terraform: `terraform-ls` and `tflint`.
+- Ansible: `ansible-language-server` and `ansible-lint`. Keep `yamllint` and
+  `yamlfmt` while ordinary YAML support uses them.
+
+Restart Neovim, then run the command for the language being removed:
+
+```vim
+:MasonUninstall terraform-ls tflint
+```
+
+```vim
+:MasonUninstall ansible-language-server ansible-lint
+```
+
+Wait until `:Mason` confirms removal. Removing declarations alone does not
+uninstall packages, and `:Nvim2ToolsInstallSync` does not remove them either.
+Conversely, uninstalling while retaining `M.tools` means the next explicit
+synchronization reinstalls them. `:Nvim2Check` checks the exact declared set,
+so removing declarations requires removing the corresponding installed packages
+to pass that check. Mason uninstall does not remove a separately installed
+Terraform CLI or host Ansible installation.
+
+To reinstall later, restore the original pinned `M.tools` entries along with
+the activation settings, restart Neovim, then run
+`:Nvim2ToolsInstallSync` on a connected machine.
+
+### Checks and offline releases after disabling a language
+
+In a representative file, use `:checkhealth vim.lsp` to inspect active servers,
+`:ConformInfo` to inspect formatters, and the following to inspect the effective
+linter selection, including filetype fallback:
+
+```vim
+:lua =require('lint')._resolve_linter_by_ft(vim.bo.filetype)
+```
+
+`:Nvim2Check` checks the exact declared Mason and parser sets, pinned versions,
+launchers, executable probes and configured feature dependencies. An enabled
+server, formatter, linter or debugger whose Mason package was removed fails
+with an explanation. The functional suite reads the same feature configuration:
+disabled features lose their positive cases, while enabled features still must
+work even if an executable is missing. Shared tools remain tested by the other
+features that use them. Run `bash nvim2/.config/nvim2/tests/check.sh` on a
+connected machine after changing the profile. `NVIM2_CHECK_TOOLS=0` is not a
+check of a reduced profile.
+
+For an offline release, edit the source checkout and build a new package.
+Keep its installed configuration and Mason data immutable. `M.tools` controls
+which Mason packages enter that package; disabling activation alone keeps
+selected tools installed. For Python-backed packages, run
+`task update:python-locks` after changing `M.tools`. This regenerates the selected
+locks and removes obsolete ones. The builder copies only selected locks and
+wheels, so stale unselected locks do not force installation of their packages.
+
+Node.js, Python and Go requirements follow the selected Mason package providers
+and enabled debuggers. Terraform CLI is required while its LSP or formatter is
+enabled. Remove an unneeded runtime from `OFFLINE_RELEASE_TOOLS` yourself;
+remaining features can still require it, and the builder reports that explicitly.
+Ripgrep remains required for Telescope. If the Python package selection is empty,
+no Python venv or wheelhouse is needed. A completely empty Mason selection is
+also valid when its LSP, formatter, linter, debugger and parser features are
+disabled. Public standalone tools selected in `TOOLS` or `OFFLINE_RELEASE_TOOLS`
+retain their own checks independently of editor activation.
+
+The same editor functional suite runs during building and offline qualification.
+See [Language dependencies and reduced editor profiles](offline-releases.md#language-dependencies-and-reduced-editor-profiles)
+for the generated inventory and installation checks.
 
 ## Git and Gitsigns
 
@@ -1351,40 +1494,51 @@ error. Use Neovim when you want aligned panes, navigation or selective copying.
 
 ### Text objects
 
-Mini.ai extends operator/Visual `a` and `i` text objects. `i` selects inside;
-`a` includes a surrounding region. The next-object prefixes are `iN`/`aN`,
-leaving native `in`/`an` untouched. Previous-object prefixes remain `il`/`al`.
+Mini.ai extends operator and Visual text objects. Move the cursor into the
+object first. Use `i` for its contents or `a` to include its delimiters or
+separator.
 
 | Task | Keys |
 | --- | --- |
-| Copy an argument or its comma-aware around region | `yia`, `yaa` |
+| Copy inside or around the current parentheses | `yi)`, `ya)` |
+| Delete inside or around the current parentheses | `di)`, `da)` |
+| Preview inside or around a bracket pair | `vi]`, `va)`, `vi}` |
+| Copy inside double or single quotes | `yi"`, `yi'` |
+| Copy including double or single quotes | `ya"`, `ya'` |
+| Change the text while keeping its quotes | `ci"`, `ci'` |
+| Delete the text together with its quotes | `da"`, `da'` |
+| Copy inside or around any quote containing the cursor | `yiq`, `yaq` |
+| Copy inside or around any bracket pair containing the cursor | `yib`, `yab` |
+| Copy an argument or its comma-aware region | `yia`, `yaa` |
 | Copy call contents or the whole call | `yif`, `yaf` |
-| Copy inside/around any ordinary quote | `yiq`, `yaq`; specific quote: `yi'` |
-| Copy inside/around any `()`, `[]` or `{}` pair | `yib`, `yab` |
-| Preview a specific bracket region | `vi]`, `va)`, `vi}` |
 | Copy tag contents or contents plus tags | `yit`, `yat` |
-| Copy the next quote or previous argument | `yiNq`, `yila` |
-| Preview around the next/previous bracket object | `vaN)`, `val)` |
-| Go to left/right edge of an around-object | `g[<object>`, `g]<object>` |
+| Go to the left or right edge of an around-object | `g[<object>`, `g]<object>` |
 
-At `image` in `deploy(image, namespace, timeout)`, `yia` copies `image`,
-`yaa` copies `image,`, `yiNa` copies `namespace`, and `yaNa` copies
-`, namespace`. At `namespace`, `yila` copies `image`. Use `gS` to
-[split/join the same call](#splitjoin), and native
+For example, with the cursor anywhere inside `deploy(image, namespace)`,
+`yi)` copies `image, namespace` and `ya)` copies `(image, namespace)`. Replace
+`y` with `d` to delete, `c` to change or `v` to preview the same region. The
+last key identifies the object: use `]` or `}` for other bracket pairs, `q`
+for any quote, `b` for any bracket pair, `a` for an argument, `f` for a
+function call and `t` for a tag.
+For `name = "production"`, `yi"` copies `production`, `ya"` copies
+`"production"` and `ci"` replaces only the contents while keeping the quotes.
+The same commands ending in `'` work with single quotes.
+
+Some Mini.ai objects differ slightly from their native equivalents. In
+`(  inner  )`, `yi(` copies `inner`, while `yi)` keeps the spaces next to the
+parentheses. `aq` includes the quote characters without surrounding
+whitespace. `f` means a function call, not a function definition or body.
+
+Matching is mostly textual and is limited to 500 lines. If no matching object
+contains the cursor, Mini.ai can select a following object. Preview uncertain
+regions with `v` before deleting or changing them. Use `gS` to
+[split or join the same call](#splitjoin), and use native
 [selection expansion](#expand-or-shrink-a-selection-and-copy-it-to-another-application)
 when syntax nodes are a better fit.
 
-These enhancements are not identical to every native delimiter object. On
-`(  inner  )`, Mini `yi(` copies `inner`, while `yi)` keeps the edge spaces.
-Mini `ib` includes square/curly pairs; stock `ib` is parentheses-only. Mini
-`aq` selects the quotes themselves, without stock around-quote whitespace.
-Ordinary native objects such as `iw`/`iW` and `ip` still work.
-
-`f` means a function call, not a function definition/body. Most matching is
-textual/pattern-based, not query-backed syntax understanding; `n_lines=500`
-is a search bound. The default `cover_or_next` search may pick a following
-object when none covers the cursor. Preview uncertain regions with `v` before
-`d`/`c`. See `:help MiniAi-builtin-textobjects` and `:help MiniAi.config`.
+Ordinary native objects such as `iw`, `iW` and `ip` still work. See
+`:help MiniAi-builtin-textobjects` and `:help MiniAi.config` for the complete
+set and behavior.
 
 ### Indentation bodies
 

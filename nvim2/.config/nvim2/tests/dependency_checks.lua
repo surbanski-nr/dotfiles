@@ -162,9 +162,9 @@ assert(
 )
 assert(result_named(rolling_results, 'PackChanged policy'), 'a failed category stopped subsequent reporting')
 
-if vim.env.NVIM2_CHECK_TOOLS ~= '0' then
+if vim.env.NVIM2_CHECK_TOOLS ~= '0' and #lsp.tools > 0 then
   local original_probes = lsp.tool_probes
-  lsp.tool_probes = { { 'nvim2-executable-that-does-not-exist', '--version' } }
+  lsp.tool_probes = { [lsp.tools[1][1]] = { { 'nvim2-executable-that-does-not-exist', '--version' } } }
   local probe_results = checks.run()
   lsp.tool_probes = original_probes
   local probe = result_named(probe_results, 'Mason executable probes')

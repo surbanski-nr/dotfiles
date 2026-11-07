@@ -166,7 +166,7 @@ end
 
 local function check_tool_probes()
   local mason_bin = vim.fs.joinpath(vim.fn.stdpath 'data', 'mason', 'bin')
-  local probes = require('custom.lsp').tool_probes
+  local probes = require('custom.lsp').probes()
   for _, probe in ipairs(probes) do
     local executable = vim.fs.joinpath(mason_bin, probe[1])
     local command = vim.list_extend({ executable }, vim.list_slice(probe, 2))
@@ -206,13 +206,25 @@ function M.run(opts)
   end)
   add_check(results, 'Tool declarations', check_tool_declarations)
   if opts.tools ~= false then
-    add_check(results, 'Go SDK', function()
-      local version = run_command(require('custom.go').command('go', 'version'), 'Go SDK version')
-      local root = run_command(require('custom.go').command('go', 'env', 'GOROOT'), 'Go SDK root')
-      assert(vim.fn.executable(vim.fs.joinpath(root, 'bin', 'gofmt')) == 1, 'Go SDK is missing gofmt')
-      assert(vim.uv.fs_stat(vim.fs.joinpath(root, 'src', 'fmt', 'print.go')), 'Go SDK standard library is missing')
-      return version
+    add_check(results, 'Feature dependencies', require('custom.tools').check_configuration)
+    local requirements = {}
+    add_check(results, 'External tools', function()
+      requirements = require('custom.tools').requirements()
+      for _, tool in ipairs(requirements) do
+        local command = ({ nodejs = 'node', python = 'python3' })[tool] or tool
+        assert(vim.fn.executable(command) == 1, 'Configured Neovim tools require ' .. command)
+      end
+      return 'Configured external tools are executable'
     end)
+    if vim.tbl_contains(requirements, 'go') then
+      add_check(results, 'Go SDK', function()
+        local version = run_command(require('custom.go').command('go', 'version'), 'Go SDK version')
+        local root = run_command(require('custom.go').command('go', 'env', 'GOROOT'), 'Go SDK root')
+        assert(vim.fn.executable(vim.fs.joinpath(root, 'bin', 'gofmt')) == 1, 'Go SDK is missing gofmt')
+        assert(vim.uv.fs_stat(vim.fs.joinpath(root, 'src', 'fmt', 'print.go')), 'Go SDK standard library is missing')
+        return version
+      end)
+    end
     add_check(results, 'Mason tools', check_mason_tools)
     add_check(results, 'Mason executable probes', check_tool_probes)
     add_check(results, 'Treesitter parsers', check_treesitter_parsers)

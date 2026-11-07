@@ -7,4 +7,5 @@ vim.pack.add {
 }
 
 require('custom.debug').setup()
+require('custom.debug').setup_python()
 require('custom.debug_go').setup()

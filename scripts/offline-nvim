@@ -31,6 +31,9 @@ if [[ $NVIM_APPNAME == nvim2 ]]; then
   fi
   ansible_bin="$release/share/nvim2/mason/packages/ansible-lint/venv/bin"
   PATH="$ansible_bin:$release/bin:$release/share/nvim2/mason/bin${PATH:+:$PATH}"
+  if [[ -x $release/tools/python/bin/python3 ]]; then
+    PATH="$release/tools/python/bin:$PATH"
+  fi
   IFS=: read -r -a path_entries <<<"$PATH"
   clean_path=
   for entry in "${path_entries[@]}"; do

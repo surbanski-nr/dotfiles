@@ -184,7 +184,6 @@ load_build_config() {
   source "$source_dir/release.env" || return
 }
 
-
 install_build_packages() {
   local platform=$1 role=$2
 
@@ -326,7 +325,7 @@ install_release_tools() {
 
 install_helm_schema_plugin() {
   local release=$1 inputs=$2 archive plugin
-  local version=${BUILD_VERSIONS[helm-schema]}
+  local version=${BUILD_VERSIONS['helm-schema']}
 
   select_release TOOL_RELEASES helm-schema "$version" || return
   archive=$inputs/$RELEASE_ASSET
@@ -353,82 +352,34 @@ platformCommand:
 EOF
 }
 
-write_python_inventory() {
-  local release=$1 inventory temporary
-  inventory=$release/python-locks/inventory.tsv
+write_nvim_inventory() {
+  local release=$1 package version extra
+  local data=$release/share/nvim2/mason
 
-  temporary=$(mktemp "$release/python-locks/.inventory.XXXXXX") || return
-  TEMP_PATHS+=("$temporary")
   DOTFILES_NVIM_CONFIG="$release/config/nvim2" \
-    DOTFILES_MASON_PACKAGES="$release/share/nvim2/mason/packages" \
-    DOTFILES_PYTHON_INVENTORY_OUTPUT="$temporary" \
+    DOTFILES_MASON_PACKAGES="$data/packages" \
+    DOTFILES_INVENTORY_ROOT="$release" \
     "$release/bin/nvim" --headless -u NONE -l /dev/stdin <<'LUA' || return
 vim.opt.runtimepath:prepend(vim.env.DOTFILES_NVIM_CONFIG)
-local lines = {}
-for _, package in ipairs(require('custom.lsp').python_inventory(vim.env.DOTFILES_MASON_PACKAGES)) do
-  table.insert(lines, package.name .. '\t' .. package.version)
+local mason, python = {}, {}
+for _, package in ipairs(require('custom.tools').inventory(vim.env.DOTFILES_MASON_PACKAGES)) do
+  mason[#mason + 1] = table.concat({ package.name, package.version, package.python or '-', #package.commands > 0 and table.concat(package.commands, ',') or '-' }, '\t')
+  if package.python then python[#python + 1] = package.python .. '\t' .. package.version end
 end
-assert(vim.fn.writefile(lines, vim.env.DOTFILES_PYTHON_INVENTORY_OUTPUT) == 0)
+assert(vim.fn.writefile(mason, vim.env.DOTFILES_INVENTORY_ROOT .. '/share/nvim2/mason/inventory.tsv') == 0)
+assert(vim.fn.writefile(python, vim.env.DOTFILES_INVENTORY_ROOT .. '/python-locks/inventory.tsv') == 0)
 LUA
-  [[ -s $temporary ]] || {
-    die 'Python-backed Mason inventory is empty'
-    return 1
-  }
-  mv -T -- "$temporary" "$inventory" || return
-}
-
-python_inventory_packages() {
-  local release=$1 inventory input_count lock_count
-  inventory=$release/python-locks/inventory.tsv
-  local package version extra requirement seen=' '
-  local -a packages=()
-
-  [[ -f $inventory && ! -L $inventory ]] || {
-    die 'Python package inventory is missing'
-    return 1
-  }
   while IFS=$'\t' read -r package version extra; do
-    [[ -z $extra && $package =~ ^[a-z0-9][a-z0-9-]*$ &&
-      $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] || {
-      die 'Python package inventory contains invalid data'
-      return 1
-    }
-    [[ $seen != *" $package "* ]] || {
-      die "duplicate Python package in inventory: $package"
-      return 1
-    }
-    seen+="$package "
-    requirement=$(awk '!/^#/ && NF { print; exit }' "$release/python-locks/$package.in") || return
-    [[ $requirement == "$package==$version" ]] || {
-      die "Python input does not match Mason inventory: $package==$version"
-      return 1
-    }
-    awk -v requirement="$package==$version" \
-      '$1 == requirement { found = 1 } END { exit !found }' \
-      "$release/python-locks/$package.lock" || {
-      die "Python lock does not match Mason inventory: $package==$version"
-      return 1
-    }
-    packages+=("$package")
-  done <"$inventory"
-  ((${#packages[@]} > 0)) || {
-    die 'Python package inventory is empty'
-    return 1
-  }
-  input_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.in' -printf '.\n' |
-    wc -l) || return
-  lock_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.lock' -printf '.\n' |
-    wc -l) || return
-  [[ $input_count -eq ${#packages[@]} && $lock_count -eq ${#packages[@]} ]] || {
-    die 'Python lock set differs from the Mason inventory'
-    return 1
-  }
-  printf '%s\n' "${packages[@]}"
+    cp "$release/config/nvim2/python-locks/$package.in" \
+      "$release/config/nvim2/python-locks/$package.lock" "$release/python-locks/" || return
+  done <"$release/python-locks/inventory.tsv"
 }
 
 write_debug_launchers() {
   local release=$1 command_name
   local source=$release/dotfiles/scripts/offline-debug-adapter
+
+  [[ -d $release/share/nvim2/mason/packages/debugpy ]] || return 0
 
   for command_name in debugpy debugpy-adapter; do
     [[ -x $release/share/nvim2/mason/packages/debugpy/$command_name ]] || {
@@ -442,45 +393,80 @@ write_debug_launchers() {
 
 prepare_nvim_payload() {
   local release=$1 build_home=$2 platform=$3
-  local python="$release/tools/python-${BUILD_VERSIONS[python]}/bin/python3"
+  local python="$release/tools/python-${BUILD_VERSIONS[python]:-}/bin/python3"
   local data=$release/share/nvim2
-  local package receipt link target relative lua_launcher command_name package_output link_list
-  local tree_sitter_version tree_sitter_root tree_sitter_binary
+  local package receipt link target relative lua_launcher command_name package_output mason_package link_list
+  local tree_sitter_version tree_sitter_root tree_sitter_binary dependency
 
   mkdir -p "$build_home/.cache" "$release/share" || return
   export HOME=$build_home
-  export PATH="$release/bin:$release/tools/python-${BUILD_VERSIONS[python]}/bin:$release/tools/node/bin:$release/tools/bin:/usr/local/bin:/usr/bin:/bin"
+  export PATH="$release/bin:$release/tools/python-${BUILD_VERSIONS[python]:-}/bin:$release/tools/node/bin:$release/tools/bin:/usr/local/bin:/usr/bin:/bin"
   export NVIM_APPNAME=nvim2
   export XDG_CACHE_HOME=$build_home/.cache
   export GOTOOLCHAIN=local
   export CGO_ENABLED=0
+  mkdir -p "$data/mason/bin" "$data/mason/packages" || return
+  DOTFILES_NVIM_REQUIREMENTS="$data/mason/requirements.txt" \
+    timeout 300s "$release/bin/nvim" --headless '+lua dofile("/dev/stdin")' '+qa!' <<'LUA' || return
+local ok, message = xpcall(function()
+  require('custom.tools').check_configuration()
+  assert(vim.fn.writefile(require('custom.tools').requirements(), vim.env.DOTFILES_NVIM_REQUIREMENTS) == 0)
+end, debug.traceback)
+if not ok then
+  io.stderr:write(message .. '\n')
+  vim.cmd 'cquit 1'
+end
+LUA
+  while IFS= read -r dependency; do
+    profile_has OFFLINE_RELEASE_TOOLS "$dependency" || {
+      die "configured Neovim tools require $dependency in OFFLINE_RELEASE_TOOLS"
+      return 1
+    }
+  done <"$data/mason/requirements.txt"
   if [[ $platform == amzn-2023-x86_64 ]]; then
-    timeout 2400s "$release/bin/nvim" --headless '+MasonToolsInstallSync' '+qa!' || return
+    timeout 2400s "$release/bin/nvim" --headless '+lua dofile("/dev/stdin")' '+qa!' <<'LUA' || return
+local ok, message = xpcall(function()
+  if #require('custom.lsp').tools > 0 then vim.cmd 'MasonToolsInstallSync' end
+end, debug.traceback)
+if not ok then
+  io.stderr:write(message .. '\n')
+  vim.cmd 'cquit 1'
+end
+LUA
     tree_sitter_version=$("$release/bin/nvim" --headless \
       "+lua for _, tool in ipairs(require('custom.lsp').tools) do if tool[1] == 'tree-sitter-cli' then io.write(tool.version) end end" \
       '+qa!') || return
     tree_sitter_version=${tree_sitter_version#v}
-    [[ -n $tree_sitter_version ]] || {
-      die 'tree-sitter-cli version is empty'
-      return 1
-    }
-    tree_sitter_root=$build_home/.local/opt/tree-sitter-cli-$tree_sitter_version
-    tree_sitter_binary=$(readlink -f -- "$data/mason/bin/tree-sitter") || return
-    timeout 2400s cargo install tree-sitter-cli \
-      --version "$tree_sitter_version" --locked --root "$tree_sitter_root" || return
-    install -m 0755 "$tree_sitter_root/bin/tree-sitter" "$tree_sitter_binary" || return
+    if [[ -n $tree_sitter_version ]]; then
+      tree_sitter_root=$build_home/.local/opt/tree-sitter-cli-$tree_sitter_version
+      tree_sitter_binary=$(readlink -f -- "$data/mason/bin/tree-sitter") || return
+      timeout 2400s cargo install tree-sitter-cli \
+        --version "$tree_sitter_version" --locked --root "$tree_sitter_root" || return
+      install -m 0755 "$tree_sitter_root/bin/tree-sitter" "$tree_sitter_binary" || return
+    fi
   fi
-  timeout 2400s nvim --headless '+Nvim2ToolsInstallSync' '+qa!' || return
+  timeout 2400s nvim --headless '+lua dofile("/dev/stdin")' '+qa!' <<'LUA' || return
+local ok, message = xpcall(function() vim.cmd 'Nvim2ToolsInstallSync' end, debug.traceback)
+if not ok then
+  io.stderr:write(message .. '\n')
+  vim.cmd 'cquit 1'
+end
+LUA
   write_debug_launchers "$release" || return
-  write_python_inventory "$release" || return
+  write_nvim_inventory "$release" || return
   package_output=$(python_inventory_packages "$release") || return
-  for command_name in ansible ansible-config ansible-playbook; do
-    ln -s "../packages/ansible-lint/venv/bin/$command_name" \
-      "$data/mason/bin/$command_name" || return
-  done
-  install -m 0755 "$release/dotfiles/scripts/offline-eslint-d" "$data/mason/packages/eslint_d/eslint_d" || return
-  unlink "$data/mason/bin/eslint_d" || return
-  ln -s ../packages/eslint_d/eslint_d "$data/mason/bin/eslint_d" || return
+  if [[ -d $data/mason/packages/ansible-lint ]]; then
+    for command_name in ansible ansible-config ansible-playbook; do
+      ln -s "../packages/ansible-lint/venv/bin/$command_name" \
+        "$data/mason/bin/$command_name" || return
+    done
+  fi
+  if [[ -d $data/mason/packages/eslint_d ]]; then
+    install -m 0755 "$release/dotfiles/scripts/offline-eslint-d" "$data/mason/packages/eslint_d/eslint_d" || return
+    unlink "$data/mason/bin/eslint_d" || return
+    ln -s ../packages/eslint_d/eslint_d "$data/mason/bin/eslint_d" || return
+  fi
+  verify_nvim_inventory "$release" installed OFFLINE_RELEASE_TOOLS || return
   TEST_BASHRC="$release/dotfiles/bash/.bashrc" NVIM2_BENCHMARK_RUNS=3 timeout 1200s \
     bash "$release/config/nvim2/tests/check.sh" || return
   link_list=$(mktemp) || return
@@ -502,12 +488,13 @@ prepare_nvim_payload() {
   done <"$link_list"
 
   lua_launcher=$release/share/nvim2/mason/packages/lua-language-server/lua-language-server
-  [[ -x $lua_launcher &&
-    -x $release/share/nvim2/mason/packages/lua-language-server/libexec/bin/lua-language-server ]] || {
-    die 'lua-language-server payload is incomplete'
-    return 1
-  }
-  cat >"$lua_launcher" <<'BASH' || return
+  if [[ -d $data/mason/packages/lua-language-server ]]; then
+    [[ -x $lua_launcher &&
+      -x $release/share/nvim2/mason/packages/lua-language-server/libexec/bin/lua-language-server ]] || {
+      die 'lua-language-server payload is incomplete'
+      return 1
+    }
+    cat >"$lua_launcher" <<'BASH' || return
 #!/usr/bin/env bash
 set -euo pipefail
 self=$(readlink -f -- "${BASH_SOURCE[0]}")
@@ -517,21 +504,25 @@ log_dir=$state_home/nvim2/lua-language-server
 mkdir -p "$log_dir"
 exec "$package_dir/libexec/bin/lua-language-server" --logpath="$log_dir" "$@"
 BASH
-  chmod 0755 "$lua_launcher" || return
-  cleanup_path "$release/share/nvim2/mason/packages/lua-language-server/libexec/log" || return
+    chmod 0755 "$lua_launcher" || return
+    cleanup_path "$release/share/nvim2/mason/packages/lua-language-server/libexec/log" || return
 
+  fi
   mkdir -p "$release/python-wheelhouse" || return
-  while IFS= read -r package; do
-    receipt="$release/share/nvim2/mason/packages/$package/mason-receipt.json"
-    [[ -f $receipt ]] || {
-      die "Mason receipt is missing for $package"
-      return 1
-    }
-    cleanup_path "$release/share/nvim2/mason/packages/$package/venv" || return
-    "$python" -I -m pip download --disable-pip-version-check --require-hashes \
-      --only-binary=:all: --dest "$release/python-wheelhouse" \
-      -r "$release/python-locks/$package.lock" || return
-  done <<<"$package_output"
+  if [[ -n $package_output ]]; then
+    while IFS= read -r package; do
+      mason_package=$(python_mason_package "$release" "$package") || return
+      receipt="$release/share/nvim2/mason/packages/$mason_package/mason-receipt.json"
+      [[ -f $receipt ]] || {
+        die "Mason receipt is missing for $package"
+        return 1
+      }
+      cleanup_path "$release/share/nvim2/mason/packages/$mason_package/venv" || return
+      "$python" -I -m pip download --disable-pip-version-check --require-hashes \
+        --only-binary=:all: --dest "$release/python-wheelhouse" \
+        -r "$release/python-locks/$package.lock" || return
+    done <<<"$package_output"
+  fi
   if profile_has OFFLINE_RELEASE_TOOLS yamllint; then
     ln -s ../share/nvim2/mason/packages/yamllint/venv/bin/yamllint \
       "$release/bin/yamllint" || return
@@ -572,9 +563,15 @@ write_release_metadata() {
     "SOURCE_COMMIT=$source_commit" \
     "SOURCE_TREE=$source_tree" \
     "BUILDER_IMAGE=$image" \
-    "OFFLINE_TOOLS=$(IFS=,; printf '%s' "${BUILD_TOOL_PROFILE[*]}")" \
+    "OFFLINE_TOOLS=$(
+      IFS=,
+      printf '%s' "${BUILD_TOOL_PROFILE[*]}"
+    )" \
     'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
     >"$release/release.env" || return
+  if profile_has BUILD_TOOL_PROFILE nvim; then
+    printf '%s\n' 'NVIM_TOOLS_FORMAT=1' >>"$release/release.env" || return
+  fi
   local fields
   for tool in "${BUILD_TOOL_PROFILE[@]}"; do
     fields=$(tool_metadata_fields "$tool") || return
@@ -588,7 +585,10 @@ write_release_metadata() {
           ;;
         *_VERSIONS)
           release_versions TOOL_RELEASES "$tool" || return
-          value=$(IFS=,; printf '%s' "${RELEASE_VERSIONS[*]}")
+          value=$(
+            IFS=,
+            printf '%s' "${RELEASE_VERSIONS[*]}"
+          )
           ;;
         PYTHON_BUILD) value=$PYTHON_BUILD ;;
         NODE_UPSTREAM_NPM_VERSION) value=$NODE_UPSTREAM_NPM_VERSION ;;
@@ -628,13 +628,14 @@ write_release_metadata() {
     printf 'builder_packages:\n'
     printf '  %s\n' "${SETUP_SYSTEM_PACKAGES[@]}"
     printf 'input_archives_sha256:\n'
-    (cd "$inputs" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) || return
+    (cd "$inputs" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum) || return
     if profile_has BUILD_TOOL_PROFILE nvim; then
       printf 'python_locks_sha256:\n'
-      (cd "$release/python-locks" && sha256sum ./*.lock) || return
+      (cd "$release/python-locks" &&
+        find . -maxdepth 1 -type f -name '*.lock' -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum) || return
       printf 'python_wheels_sha256:\n'
       (cd "$release/python-wheelhouse" &&
-        find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) || return
+        find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum) || return
       value=$(sha256sum "$release/config/nvim2/nvim-pack-lock.json" | cut -d ' ' -f1) || return
       printf 'nvim_pack_lock_sha256=%s\n' "$value" || return
     fi
@@ -708,9 +709,6 @@ build_release() {
   pack_dotfiles_source "$source_dir" "$release" || return
   if profile_has OFFLINE_RELEASE_TOOLS nvim; then
     cp -a "$release/dotfiles/nvim2/.config/nvim2" "$release/config/nvim2" || return
-    cp "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.in \
-      "$release/dotfiles"/nvim2/.config/nvim2/python-locks/*.lock \
-      "$release/python-locks/" || return
   fi
   bash "$source_dir/scripts/build-standalone-script" "$source_dir" "$release/dotfiles-release" || return
   install_release_tools "$release" "$inputs" || return

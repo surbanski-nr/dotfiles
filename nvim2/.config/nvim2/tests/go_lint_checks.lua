@@ -1,3 +1,5 @@
+local profile = dofile(vim.fn.stdpath 'config' .. '/tests/profile.lua')
+
 local temporary = vim.fn.tempname()
 local original_path = vim.env.PATH
 local original_linter = vim.env.NVIM2_REAL_GOLANGCI_LINT
@@ -11,7 +13,7 @@ local function write(path, lines)
 end
 
 local function run()
-  if vim.env.NVIM2_CHECK_TOOLS == '0' then return end
+  if vim.env.NVIM2_CHECK_TOOLS == '0' or not profile.linter('golangcilint', 'go') then return end
   vim.env.GOPROXY = 'off'
   vim.env.GOTOOLCHAIN = 'local'
   vim.env.NVIM2_REAL_GOLANGCI_LINT = vim.fn.exepath 'golangci-lint'

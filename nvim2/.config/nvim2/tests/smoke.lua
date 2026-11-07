@@ -1,3 +1,5 @@
+local profile = dofile(vim.fn.stdpath 'config' .. '/tests/profile.lua')
+
 local function run()
   require('custom.checks').assert_all { tools = vim.env.NVIM2_CHECK_TOOLS ~= '0' }
   assert(require('mason.settings').current.max_concurrent_installers == 1, 'Mason installers are not serialized')
@@ -11,98 +13,108 @@ local function run()
   vim.cmd.tabnew()
   vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'init.lua'))
   assert(vim.bo.filetype == 'lua', 'init.lua did not receive the Lua filetype')
-  assert(vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()], 'Treesitter highlighting did not attach to init.lua')
-  assert(vim.wo.foldmethod == 'expr', 'native Treesitter folds did not attach to init.lua')
-  assert(vim.wo.foldexpr == 'v:lua.vim.treesitter.foldexpr()', 'unexpected fold expression')
+  if profile.parser 'lua' then
+    assert(vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()], 'Treesitter highlighting did not attach to init.lua')
+    assert(vim.wo.foldmethod == 'expr', 'native Treesitter folds did not attach to init.lua')
+    assert(vim.wo.foldexpr == 'v:lua.vim.treesitter.foldexpr()', 'unexpected fold expression')
+  end
 
-  local lua_client = { server_capabilities = {}, config = { settings = { Lua = {} } } }
-  require('custom.lsp').servers.lua_ls.on_init(lua_client)
-  local lua_library = lua_client.config.settings.Lua.workspace.library
-  assert(
-    vim.deep_equal(lua_library, { vim.env.VIMRUNTIME, '${3rd}/luv/library', '${3rd}/busted/library' }),
-    'LuaLS library expanded beyond the reviewed low-memory scope'
-  )
+  if profile.server 'lua_ls' and vim.env.NVIM2_CHECK_TOOLS ~= '0' then
+    local lua_client = { server_capabilities = {}, config = { settings = { Lua = {} } } }
+    require('custom.lsp').servers.lua_ls.on_init(lua_client)
+    local lua_library = lua_client.config.settings.Lua.workspace.library
+    assert(
+      vim.deep_equal(lua_library, { vim.env.VIMRUNTIME, '${3rd}/luv/library', '${3rd}/busted/library' }),
+      'LuaLS library expanded beyond the reviewed low-memory scope'
+    )
 
-  assert(
-    vim.wait(10000, function()
-      return vim.iter(vim.lsp.get_clients { bufnr = 0 }):any(function(client) return client.name == 'lua_ls' end)
-    end),
-    'Lua Language Server did not attach to init.lua'
-  )
-  local symbol_client = vim.iter(vim.lsp.get_clients { bufnr = 0 }):find(function(client) return client.name == 'lua_ls' end)
-  local symbol_response
-  assert(
-    vim.wait(60000, function()
-      symbol_response = symbol_client:request_sync(
-        'textDocument/documentSymbol',
-        { textDocument = vim.lsp.util.make_text_document_params(0) },
-        5000,
-        vim.api.nvim_get_current_buf()
-      )
-      return symbol_response and symbol_response.result and #symbol_response.result > 0
-    end, 100),
-    'Lua Language Server returned no document symbols'
-  )
-  local symbol_source = vim.api.nvim_get_current_buf()
-  local symbol_map = vim.fn.maparg('<leader>so', 'n', false, true)
-  assert(type(symbol_map.callback) == 'function', 'document-symbol Telescope mapping is unavailable')
-  symbol_map.callback()
-  assert(
-    vim.wait(5000, function()
-      if vim.bo.filetype ~= 'TelescopePrompt' then return false end
-      local picker = require('telescope.actions.state').get_current_picker(vim.api.nvim_get_current_buf())
-      return picker and picker.manager and picker.manager:num_results() > 0
-    end),
-    'document-symbol Telescope picker returned no LSP symbols'
-  )
-  local symbol_picker = require('telescope.actions.state').get_current_picker(vim.api.nvim_get_current_buf())
-  symbol_picker:set_prompt ':function: run'
-  vim.api.nvim_exec_autocmds('TextChangedI', { buffer = symbol_picker.prompt_bufnr })
-  assert(
-    vim.wait(3000, function()
-      if symbol_picker.manager:num_results() == 0 then return false end
-      for entry in symbol_picker.manager:iter() do
-        if entry.symbol_type:lower() ~= 'function' then return false end
-      end
-      return true
-    end),
-    'document-symbol prefilter did not restrict results to functions'
-  )
-  local run_results = symbol_picker.manager:num_results()
-  symbol_picker:set_prompt ':function: run | gh'
-  vim.api.nvim_exec_autocmds('TextChangedI', { buffer = symbol_picker.prompt_bufnr })
-  assert(
-    vim.wait(3000, function()
-      if symbol_picker.manager:num_results() <= run_results then return false end
-      for entry in symbol_picker.manager:iter() do
-        if entry.symbol_type:lower() ~= 'function' then return false end
-      end
-      return true
-    end),
-    'document-symbol OR query did not restore functions through the real prefilter'
-  )
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'xt', false)
-  assert(vim.wait(2000, function() return vim.api.nvim_get_current_buf() == symbol_source end), 'selecting a document symbol did not return to its source file')
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'xt', false)
-  local cursor_before_cancel = vim.api.nvim_win_get_cursor(0)
-  symbol_map.callback()
-  assert(vim.wait(5000, function() return vim.bo.filetype == 'TelescopePrompt' end), 'document-symbol Telescope picker did not reopen')
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-c>', true, false, true), 'xt', false)
-  assert(vim.wait(2000, function() return vim.api.nvim_get_current_buf() == symbol_source end), 'cancelling document symbols did not close the picker')
-  assert(
-    vim.api.nvim_get_current_buf() == symbol_source and vim.deep_equal(vim.api.nvim_win_get_cursor(0), cursor_before_cancel),
-    'cancelling document symbols changed the source position'
-  )
+    assert(
+      vim.wait(10000, function()
+        return vim.iter(vim.lsp.get_clients { bufnr = 0 }):any(function(client) return client.name == 'lua_ls' end)
+      end),
+      'Lua Language Server did not attach to init.lua'
+    )
+    local symbol_client = vim.iter(vim.lsp.get_clients { bufnr = 0 }):find(function(client) return client.name == 'lua_ls' end)
+    local symbol_response
+    assert(
+      vim.wait(60000, function()
+        symbol_response = symbol_client:request_sync(
+          'textDocument/documentSymbol',
+          { textDocument = vim.lsp.util.make_text_document_params(0) },
+          5000,
+          vim.api.nvim_get_current_buf()
+        )
+        return symbol_response and symbol_response.result and #symbol_response.result > 0
+      end, 100),
+      'Lua Language Server returned no document symbols'
+    )
+    local symbol_source = vim.api.nvim_get_current_buf()
+    local symbol_map = vim.fn.maparg('<leader>so', 'n', false, true)
+    assert(type(symbol_map.callback) == 'function', 'document-symbol Telescope mapping is unavailable')
+    symbol_map.callback()
+    assert(
+      vim.wait(5000, function()
+        if vim.bo.filetype ~= 'TelescopePrompt' then return false end
+        local picker = require('telescope.actions.state').get_current_picker(vim.api.nvim_get_current_buf())
+        return picker and picker.manager and picker.manager:num_results() > 0
+      end),
+      'document-symbol Telescope picker returned no LSP symbols'
+    )
+    local symbol_picker = require('telescope.actions.state').get_current_picker(vim.api.nvim_get_current_buf())
+    symbol_picker:set_prompt ':function: run'
+    vim.api.nvim_exec_autocmds('TextChangedI', { buffer = symbol_picker.prompt_bufnr })
+    assert(
+      vim.wait(3000, function()
+        if symbol_picker.manager:num_results() == 0 then return false end
+        for entry in symbol_picker.manager:iter() do
+          if entry.symbol_type:lower() ~= 'function' then return false end
+        end
+        return true
+      end),
+      'document-symbol prefilter did not restrict results to functions'
+    )
+    local run_results = symbol_picker.manager:num_results()
+    symbol_picker:set_prompt ':function: run | gh'
+    vim.api.nvim_exec_autocmds('TextChangedI', { buffer = symbol_picker.prompt_bufnr })
+    assert(
+      vim.wait(3000, function()
+        if symbol_picker.manager:num_results() <= run_results then return false end
+        for entry in symbol_picker.manager:iter() do
+          if entry.symbol_type:lower() ~= 'function' then return false end
+        end
+        return true
+      end),
+      'document-symbol OR query did not restore functions through the real prefilter'
+    )
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'xt', false)
+    assert(
+      vim.wait(2000, function() return vim.api.nvim_get_current_buf() == symbol_source end),
+      'selecting a document symbol did not return to its source file'
+    )
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'xt', false)
+    local cursor_before_cancel = vim.api.nvim_win_get_cursor(0)
+    symbol_map.callback()
+    assert(vim.wait(5000, function() return vim.bo.filetype == 'TelescopePrompt' end), 'document-symbol Telescope picker did not reopen')
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-c>', true, false, true), 'xt', false)
+    assert(vim.wait(2000, function() return vim.api.nvim_get_current_buf() == symbol_source end), 'cancelling document symbols did not close the picker')
+    assert(
+      vim.api.nvim_get_current_buf() == symbol_source and vim.deep_equal(vim.api.nvim_win_get_cursor(0), cursor_before_cancel),
+      'cancelling document symbols changed the source position'
+    )
+  end
 
-  vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'tests', 'nvim2-check.html'))
-  assert(
-    vim.wait(5000, function()
-      return vim.iter(vim.lsp.get_clients { bufnr = 0 }):any(function(client) return client.name == 'html' end)
-    end),
-    'HTML Language Server did not attach to an HTML buffer'
-  )
+  if profile.server 'html' and vim.env.NVIM2_CHECK_TOOLS ~= '0' then
+    vim.cmd.edit(vim.fs.joinpath(vim.fn.stdpath 'config', 'tests', 'nvim2-check.html'))
+    assert(
+      vim.wait(5000, function()
+        return vim.iter(vim.lsp.get_clients { bufnr = 0 }):any(function(client) return client.name == 'html' end)
+      end),
+      'HTML Language Server did not attach to an HTML buffer'
+    )
+  end
 
   local function assert_delete_preserves_yank(keys, text, column, expected)
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'xt', false)
     vim.cmd.enew()
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { text })
     vim.api.nvim_win_set_cursor(0, { 1, column })
@@ -339,6 +351,7 @@ local function run()
   assert(vim.fn.strdisplaywidth(indent_config.scope.char) == 1, 'current-scope guide character is wider than one cell')
   assert(not indent_config.scope.show_start and not indent_config.scope.show_end, 'current scope draws unwanted boundary underlines')
   local function assert_indent_scope(language, lines, cursor, expected_node, expected_column)
+    if not profile.parser(language) then return end
     vim.cmd.enew { bang = true }
     local buffer = vim.api.nvim_get_current_buf()
     vim.bo.buftype = 'nofile'
@@ -462,41 +475,43 @@ local function run()
 
   vim.cmd.enew()
   vim.bo.filetype = 'lua'
-  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'local expected = {', '  {', '    value = true,', '  },', '}' })
-  vim.api.nvim_win_set_cursor(0, { 3, 4 })
-  vim.cmd.redraw()
-  assert(
-    vim.wait(2000, function()
-      local namespace = vim.api.nvim_get_namespaces().indent_blankline
-      if not namespace then return false end
-      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(0, namespace, 0, -1, { details = true })) do
-        for _, chunk in ipairs(mark[4].virt_text or {}) do
-          local highlights = type(chunk[2]) == 'table' and chunk[2] or { chunk[2] }
-          if chunk[1] == '▏' and vim.tbl_contains(highlights, '@ibl.scope.char.1') then return true end
+  if profile.parser 'lua' then
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'local expected = {', '  {', '    value = true,', '  },', '}' })
+    vim.api.nvim_win_set_cursor(0, { 3, 4 })
+    vim.cmd.redraw()
+    assert(
+      vim.wait(2000, function()
+        local namespace = vim.api.nvim_get_namespaces().indent_blankline
+        if not namespace then return false end
+        for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(0, namespace, 0, -1, { details = true })) do
+          for _, chunk in ipairs(mark[4].virt_text or {}) do
+            local highlights = type(chunk[2]) == 'table' and chunk[2] or { chunk[2] }
+            if chunk[1] == '▏' and vim.tbl_contains(highlights, '@ibl.scope.char.1') then return true end
+          end
         end
-      end
-      return false
-    end),
-    'current Lua table scope guide was not rendered'
-  )
-  local enclosing_pairs = require 'custom.plugins.highlight_enclosing_pairs'
-  local nested_pair = enclosing_pairs.find(0, { 2, 4 })
-  assert(nested_pair, 'enclosing bracket pair was not found from inside a Lua table')
-  assert(nested_pair.open == '{' and nested_pair.close == '}', 'unexpected enclosing bracket pair')
-  assert(nested_pair.start[1] == 1 and nested_pair.finish[1] == 3, 'the nearest Lua table pair was not selected')
-  enclosing_pairs.update()
-  local enclosing_match = vim.iter(vim.fn.getmatches()):find(
-    function(match) return match.group == 'MatchParen' and match.pos1 and match.pos1[1] == 2 and match.pos2 and match.pos2[1] == 4 end
-  )
-  assert(enclosing_match, 'enclosing Lua table brackets were not highlighted away from the delimiters')
-  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'local value = {', '', '}' })
-  vim.treesitter.get_parser(0, 'lua'):parse()
-  local blank_line_pair = enclosing_pairs.find(0, { 1, 0 })
-  assert(blank_line_pair and blank_line_pair.start[1] == 0 and blank_line_pair.finish[1] == 2, 'enclosing brackets were not found from a blank line')
-  vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'local value = {}' })
-  vim.api.nvim_win_set_cursor(0, { 1, 14 })
-  vim.api.nvim_exec_autocmds('CursorMoved', { buffer = 0 })
-  assert(vim.iter(vim.fn.getmatches()):any(function(match) return match.group == 'MatchParen' end), 'built-in matching-pair highlight was not applied')
+        return false
+      end),
+      'current Lua table scope guide was not rendered'
+    )
+    local enclosing_pairs = require 'custom.plugins.highlight_enclosing_pairs'
+    local nested_pair = enclosing_pairs.find(0, { 2, 4 })
+    assert(nested_pair, 'enclosing bracket pair was not found from inside a Lua table')
+    assert(nested_pair.open == '{' and nested_pair.close == '}', 'unexpected enclosing bracket pair')
+    assert(nested_pair.start[1] == 1 and nested_pair.finish[1] == 3, 'the nearest Lua table pair was not selected')
+    enclosing_pairs.update()
+    local enclosing_match = vim.iter(vim.fn.getmatches()):find(
+      function(match) return match.group == 'MatchParen' and match.pos1 and match.pos1[1] == 2 and match.pos2 and match.pos2[1] == 4 end
+    )
+    assert(enclosing_match, 'enclosing Lua table brackets were not highlighted away from the delimiters')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'local value = {', '', '}' })
+    vim.treesitter.get_parser(0, 'lua'):parse()
+    local blank_line_pair = enclosing_pairs.find(0, { 1, 0 })
+    assert(blank_line_pair and blank_line_pair.start[1] == 0 and blank_line_pair.finish[1] == 2, 'enclosing brackets were not found from a blank line')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'local value = {}' })
+    vim.api.nvim_win_set_cursor(0, { 1, 14 })
+    vim.api.nvim_exec_autocmds('CursorMoved', { buffer = 0 })
+    assert(vim.iter(vim.fn.getmatches()):any(function(match) return match.group == 'MatchParen' end), 'built-in matching-pair highlight was not applied')
+  end
   vim.cmd.IBLToggle()
   assert(not require('ibl.config').get_config(-1).enabled, 'IBLToggle did not disable indent guides')
   vim.cmd.IBLToggle()
@@ -553,10 +568,15 @@ local function run()
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'name: Test', 'on: [push]', 'jobs:', '  test:', '    steps: []' })
   vim.api.nvim_exec_autocmds('BufWritePost', { buffer = 0 })
   local actionlint_namespace = require('lint').get_namespace 'actionlint'
-  assert(
-    vim.wait(5000, function() return #vim.diagnostic.get(0, { namespace = actionlint_namespace }) > 0 end),
-    'Actionlint did not diagnose a GitHub Actions workflow'
-  )
+  if vim.tbl_contains(require('custom.plugins.lint').workflow_linters, 'actionlint') and vim.env.NVIM2_CHECK_TOOLS ~= '0' then
+    assert(
+      vim.wait(5000, function() return #vim.diagnostic.get(0, { namespace = actionlint_namespace }) > 0 end),
+      'Actionlint did not diagnose a GitHub Actions workflow'
+    )
+  else
+    vim.wait(300)
+    assert(#vim.diagnostic.get(0, { namespace = actionlint_namespace }) == 0, 'Disabled Actionlint produced diagnostics')
+  end
   vim.cmd.bwipeout { bang = true }
 
   vim.cmd.enew()
@@ -577,31 +597,39 @@ local function run()
   vim.api.nvim_buf_set_name(0, vim.fs.joinpath(eslint_root, 'sample.ts'))
   vim.bo.filetype = 'typescript'
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'const unused={answer:42};' })
-  -- Cold server and linter startup can exceed five seconds on a small VM.
-  assert(
-    vim.wait(15000, function()
-      return vim.iter(vim.lsp.get_clients { bufnr = 0 }):any(function(client) return client.name == 'ts_ls' end)
-    end),
-    'TypeScript Language Server did not attach to a TypeScript project'
-  )
-  assert(vim.api.nvim_buf_get_commands(0, {}).LspTypescriptSourceAction, 'TypeScript source-action command is unavailable')
-  vim.cmd 'FormatEnable!'
-  require('conform').format { bufnr = 0, async = false, timeout_ms = 15000 }
-  assert(vim.api.nvim_get_current_line() == 'const unused = { answer: 42 };', 'Prettier did not format TypeScript')
+  if profile.server 'ts_ls' and vim.env.NVIM2_CHECK_TOOLS ~= '0' then
+    -- Cold server and linter startup can exceed five seconds on a small VM.
+    assert(
+      vim.wait(15000, function()
+        return vim.iter(vim.lsp.get_clients { bufnr = 0 }):any(function(client) return client.name == 'ts_ls' end)
+      end),
+      'TypeScript Language Server did not attach to a TypeScript project'
+    )
+    assert(vim.api.nvim_buf_get_commands(0, {}).LspTypescriptSourceAction, 'TypeScript source-action command is unavailable')
+  end
+  if profile.formatter 'prettier' and vim.env.NVIM2_CHECK_TOOLS ~= '0' then
+    vim.cmd 'FormatEnable!'
+    require('conform').format { bufnr = 0, async = false, timeout_ms = 15000 }
+    assert(vim.api.nvim_get_current_line() == 'const unused = { answer: 42 };', 'Prettier did not format TypeScript')
+  end
   vim.api.nvim_exec_autocmds('BufWritePost', { buffer = 0 })
   local eslint_namespace = require('lint').get_namespace 'eslint_d'
-  assert(
-    vim.wait(30000, function()
-      return vim.iter(vim.diagnostic.get(0, { namespace = eslint_namespace })):any(function(diagnostic) return diagnostic.code == 'no-unused-vars' end)
-    end),
-    'eslint_d did not diagnose an unused TypeScript variable in a configured project'
-  )
-  if vim.env.DOTFILES_OFFLINE_RELEASE_ROOT then
-    local daemon_state =
-      vim.fs.joinpath(vim.fn.stdpath 'data', 'mason', 'packages', 'eslint_d', 'node_modules', 'eslint_d', 'node_modules', 'eslint', '.eslint_d')
-    assert(not vim.uv.fs_stat(daemon_state), 'offline ESLint wrote daemon state into the immutable payload')
+  if profile.linter 'eslint_d' and vim.env.NVIM2_CHECK_TOOLS ~= '0' then
+    assert(
+      vim.wait(30000, function()
+        return vim.iter(vim.diagnostic.get(0, { namespace = eslint_namespace })):any(function(diagnostic) return diagnostic.code == 'no-unused-vars' end)
+      end),
+      'eslint_d did not diagnose an unused TypeScript variable in a configured project'
+    )
+    if vim.env.DOTFILES_OFFLINE_RELEASE_ROOT then
+      local daemon_state =
+        vim.fs.joinpath(vim.fn.stdpath 'data', 'mason', 'packages', 'eslint_d', 'node_modules', 'eslint_d', 'node_modules', 'eslint', '.eslint_d')
+      assert(not vim.uv.fs_stat(daemon_state), 'offline ESLint wrote daemon state into the immutable payload')
+    end
   end
-  assert(vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()], 'Treesitter highlighting did not attach to TypeScript')
+  if profile.parser 'typescript' then
+    assert(vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()], 'Treesitter highlighting did not attach to TypeScript')
+  end
   vim.cmd.bwipeout { bang = true }
   vim.fn.delete(eslint_root, 'rf')
 

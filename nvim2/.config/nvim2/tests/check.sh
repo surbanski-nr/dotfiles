@@ -42,6 +42,7 @@ fi
 
 test_files=(
   dependency_checks.lua
+  tool_selection_checks.lua
   path_checks.lua
   feature_checks.lua
   formatting_checks.lua

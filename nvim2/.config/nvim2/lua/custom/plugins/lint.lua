@@ -1,5 +1,6 @@
 vim.pack.add { 'https://github.com/mfussenegger/nvim-lint' }
 
+local M = { workflow_linters = { 'actionlint' } }
 local lint = require 'lint'
 local go_lint_runs = {}
 
@@ -92,6 +93,7 @@ local function has_eslint_config(bufnr)
 end
 
 lint.linters_by_ft = {
+  go = { 'golangcilint' },
   dockerfile = { 'hadolint' },
   javascript = { 'eslint_d' },
   javascriptreact = { 'eslint_d' },
@@ -110,14 +112,16 @@ vim.api.nvim_create_autocmd('BufWritePost', {
   callback = function(event)
     if not vim.bo[event.buf].modifiable then return end
     vim.api.nvim_buf_call(event.buf, function()
-      if vim.bo[event.buf].filetype == 'go' then
+      if vim.bo[event.buf].filetype == 'go' and vim.tbl_contains(lint.linters_by_ft.go or {}, 'golangcilint') then
         lint_go(event.buf)
         return
       end
       lint.try_lint(nil, {
         filter = function(linter) return linter.name ~= 'eslint_d' or has_eslint_config(event.buf) end,
       })
-      if is_github_workflow(event.buf) then lint.try_lint 'actionlint' end
+      if is_github_workflow(event.buf) then lint.try_lint(M.workflow_linters) end
     end)
   end,
 })
+
+return M

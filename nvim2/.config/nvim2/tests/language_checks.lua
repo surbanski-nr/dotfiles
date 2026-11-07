@@ -1,3 +1,5 @@
+local profile = dofile(vim.fn.stdpath 'config' .. '/tests/profile.lua')
+
 local function run()
   if vim.env.NVIM2_CHECK_TOOLS == '0' then
     io.stdout:write 'Nvim2 language checks skipped because tools are disabled\n'
@@ -122,18 +124,29 @@ local function run()
     local buffer = vim.api.nvim_get_current_buf()
     assert(vim.bo[buffer].filetype == fixture.filetype, ('%s detected as %s instead of %s'):format(fixture.path, vim.bo[buffer].filetype, fixture.filetype))
     for _, name in ipairs(fixture.clients) do
-      assert(vim.wait(15000, function() return client_named(buffer, name) ~= nil end), ('%s did not attach to %s'):format(name, fixture.path))
+      if profile.server(name) then
+        assert(vim.wait(15000, function() return client_named(buffer, name) ~= nil end), ('%s did not attach to %s'):format(name, fixture.path))
+      else
+        assert(not vim.lsp.is_enabled(name), 'Disabled LSP is enabled: ' .. name)
+        assert(client_named(buffer, name) == nil, 'Disabled LSP attached: ' .. name)
+      end
     end
-    assert(vim.wait(3000, function() return vim.treesitter.highlighter.active[buffer] ~= nil end), 'Treesitter did not highlight ' .. fixture.path)
-    assert(vim.wo.foldmethod == 'expr' and vim.wo.foldexpr == 'v:lua.vim.treesitter.foldexpr()', 'Treesitter folds did not attach to ' .. fixture.path)
+    if profile.parser(fixture.parser) then
+      assert(vim.wait(3000, function() return vim.treesitter.highlighter.active[buffer] ~= nil end), 'Treesitter did not highlight ' .. fixture.path)
+      assert(vim.wo.foldmethod == 'expr' and vim.wo.foldexpr == 'v:lua.vim.treesitter.foldexpr()', 'Treesitter folds did not attach to ' .. fixture.path)
+    else
+      assert(not vim.b[buffer].nvim2_treesitter_folds, 'Unselected Treesitter parser enabled custom folds for ' .. fixture.path)
+    end
 
-    if fixture.filetype == 'python' then
+    if fixture.filetype == 'python' and (profile.server 'pyright' or profile.server 'ruff') then
       vim.cmd 'write'
       assert(vim.deep_equal(vim.fn.readfile(path), fixture.lines), 'Ruff changed imports/content before opt-in')
       assert(vim.wait(15000, function() return #vim.diagnostic.get(buffer) > 0 end), 'Python diagnostics stopped while formatting was disabled')
     end
-    if fixture.formatted or fixture.formatter then vim.cmd 'FormatEnable!' end
-    if fixture.formatted then
+    local formatters = require('conform').list_formatters_for_buffer(buffer)
+    local configured_formatter = #formatters > 0
+    if (fixture.formatted or fixture.formatter) and configured_formatter then vim.cmd 'FormatEnable!' end
+    if fixture.formatted and configured_formatter then
       require('conform').format { bufnr = buffer, async = false, timeout_ms = 10000 }
       local formatted_line = fixture.formatted_line or 1
       assert(
@@ -143,7 +156,7 @@ local function run()
       if fixture.filetype == 'python' then
         assert(vim.deep_equal(vim.api.nvim_buf_get_lines(buffer, 0, 2, false), { 'import os', 'import sys' }), 'Ruff did not sort imports after opt-in')
       end
-    elseif fixture.formatter then
+    elseif fixture.formatter and configured_formatter then
       local available = vim.iter(require('conform').list_formatters(buffer)):any(function(formatter) return formatter.available end)
       assert(available, 'no configured formatter is available for ' .. fixture.path)
       require('conform').format { bufnr = buffer, async = false, timeout_ms = 10000 }
@@ -155,12 +168,22 @@ local function run()
       end
     end
 
+    if (fixture.formatted or fixture.formatter) and not configured_formatter then
+      local lsp_formatter = vim
+        .iter(vim.lsp.get_clients { bufnr = buffer })
+        :any(function(client) return client:supports_method('textDocument/formatting', buffer) end)
+      if not lsp_formatter then
+        require('conform').format { bufnr = buffer, async = false, timeout_ms = 10000 }
+        assert(vim.deep_equal(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), fixture.lines), 'Disabled formatting changed ' .. fixture.path)
+      end
+    end
+
     -- Cold tsserver can attach before its project analysis is ready.
-    if fixture.diagnostic then
+    if fixture.diagnostic and vim.iter(fixture.clients):any(profile.server) then
       assert(vim.wait(15000, function() return #vim.diagnostic.get(buffer) > 0 end), 'LSP produced no expected diagnostic for ' .. fixture.path)
     end
 
-    if fixture.completion then
+    if fixture.completion and profile.server 'ts_ls' then
       vim.api.nvim_win_set_cursor(0, { 3, 8 })
       local client = client_named(buffer, 'ts_ls')
       local response = client:request_sync('textDocument/completion', vim.lsp.util.make_position_params(0, client.offset_encoding), 10000, buffer)
@@ -169,7 +192,7 @@ local function run()
       assert(type(items) == 'table' and #items > 0, 'TypeScript LSP returned no completion items')
     end
 
-    if fixture.codelens then
+    if fixture.codelens and profile.server 'terraformls' then
       local client = client_named(buffer, 'terraformls')
       assert(client:supports_method('textDocument/codeLens', buffer), 'Terraform LSP no longer advertises codelens support')
       assert(vim.lsp.codelens.is_enabled { bufnr = buffer }, 'nvim-lspconfig did not enable Terraform codelens on Neovim 0.12.5')

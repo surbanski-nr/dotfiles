@@ -1,3 +1,5 @@
+local profile = dofile(vim.fn.stdpath 'config' .. '/tests/profile.lua')
+
 local dap = require 'dap'
 local python = require 'dap-python'
 local debugger = require 'custom.debug'
@@ -228,7 +230,21 @@ local function check_tests(fixture)
   local client_id = assert(
     vim.lsp.start {
       name = 'nvim2-debug-check-pyright',
-      cmd = { vim.fn.exepath 'pyright-langserver', '--stdio' },
+      cmd = function(dispatchers)
+        local closed = false
+        return {
+          request = function(method, _, callback)
+            vim.schedule(function() callback(nil, method == 'initialize' and { capabilities = {} } or nil) end)
+            return true, 1
+          end,
+          notify = function() end,
+          is_closing = function() return closed end,
+          terminate = function()
+            closed = true
+            dispatchers.on_exit(0, 0)
+          end,
+        }
+      end,
       root_dir = other_project,
     },
     'could not start the unrelated project LSP'
@@ -361,8 +377,8 @@ local function check_attach(fixture)
 end
 
 local function run()
-  if vim.env.NVIM2_CHECK_TOOLS == '0' then
-    io.stdout:write 'Nvim2 debugger checks skipped because tools are disabled\n'
+  if vim.env.NVIM2_CHECK_TOOLS == '0' or not profile.debugger 'python' then
+    io.stdout:write 'Nvim2 Python debugger checks skipped: debugger or tool checks disabled\n'
     return
   end
 

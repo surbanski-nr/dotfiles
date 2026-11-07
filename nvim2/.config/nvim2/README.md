@@ -62,6 +62,11 @@ bash ~/.config/nvim2/tests/check.sh
 Plugins are restored from `nvim-pack-lock.json` when Neovim starts. External
 tools and Treesitter parsers are deliberately not installed in the background.
 
+For temporarily disabling a language through the LSP, formatter and linter
+configuration, and optionally uninstalling its Mason tools, follow
+[Temporarily disabling language support](guide.md#temporarily-disabling-language-support).
+That section also explains the current functional-test and offline-release limits.
+
 On a connected machine, first install the full Go SDK with
 `./setup-tools go` from the repository root. gopls and the Go tools require it
 both during Mason installation and when working on projects. Then run:
@@ -140,8 +145,8 @@ Do not use this procedure for an offline platform release, where
 
 ## Transfer to a machine without internet access
 
-Nvim2 is deployed as a versioned platform release containing Neovim, Node.js,
-standalone Python, the full Go SDK, ripgrep, the exact dotfiles commit, locked plugins, pinned Mason tools,
+The default Nvim2 platform release contains Neovim, Node.js, standalone Python,
+the full Go SDK, ripgrep, the exact dotfiles commit, locked plugins, pinned Mason tools,
 compiled Treesitter parsers, parser revision metadata and queries. Build a
 separate release for each exact target platform and architecture. The
 authoritative supported-platform and pinned-builder-image matrix is maintained

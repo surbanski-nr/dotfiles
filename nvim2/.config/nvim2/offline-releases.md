@@ -15,9 +15,9 @@ come from the same source commit recorded in `release.env`.
 
 The connected builder starts from empty Neovim data and runs
 `Nvim2ToolsInstallSync` and the tool-enabled test suite. It removes the Mason
-venvs for ansible-lint, yamllint and debugpy before packaging. Their exact generated
+venvs for selected Python-backed packages before packaging. Their exact generated
 inputs and locks are maintained in the source profile at
-`nvim2/.config/nvim2/python-locks/`; the builder copies them into the unchanged
+`nvim2/.config/nvim2/python-locks/`; the builder copies the selected pairs into the
 payload path `python-locks/`, alongside the downloaded wheels. The target
 installer uses the bundled standalone Python to recreate ordinary isolated
 venvs at their final retained paths with `--no-index`, `--require-hashes` and
@@ -50,8 +50,10 @@ The release `nvim` launcher resolves its physical release root once. For the
 `nvim2` app it sets physical `XDG_CONFIG_HOME` and `XDG_DATA_HOME` plus a
 private tool path, while leaving `XDG_STATE_HOME` under user control. An
 explicit different `NVIM_APPNAME` is passed through without those overrides.
+When Python is bundled, child commands use its private standalone interpreter.
 The launcher saves the caller's XDG, zoxide and Go SDK settings before the overrides;
-terminal Bash restores them so user data stays outside the immutable release.
+terminal Bash restores them and drops the private Python path so user data and
+ordinary Python commands stay outside the immutable release.
 Therefore a Nvim process started from release A keeps configuration, plugins
 and tools from A after `current` changes to B. A new process uses B.
 
@@ -107,6 +109,60 @@ An explicit `tmux -f FILE` remains authoritative.
 Both flows use the loader beside that physical config, with plugin pins and
 order from its matching `tools.env`. No TPM or first-session download is needed;
 see [Tmux plugins](../../../maintenance/setup.md#tmux-plugins).
+
+## Language dependencies and reduced editor profiles
+
+`OFFLINE_RELEASE_TOOLS` selects standalone tools and the Nvim profile.
+`M.tools` in `lua/custom/lsp.lua` selects pinned Mason packages. Existing
+`M.servers`, Conform formatter declarations, `lint.linters_by_ft`, workflow
+linters and debugger setup calls select active editor features. No extra
+language toggle table or hand-maintained release package list is needed.
+
+`custom.tools` reads Mason registry providers to derive the Node.js, Python
+and Go requirements. Enabled Python/Go debuggers also require their runtimes.
+Terraform CLI is required while its language server or Conform formatter is
+active; ripgrep remains required by Telescope. The builder checks those
+requirements after bootstrapping the locked editor plugins, before installing
+Mason packages. Missing entries in `OFFLINE_RELEASE_TOOLS` fail instead of being
+silently added. Independently selected standalone tools retain their checks
+even when their editor features are disabled.
+
+After installation, the builder generates `share/nvim2/mason/inventory.tsv`
+from every selected package and its receipt. Each row records the Mason name,
+pinned version, Python distribution name (or `-`) and launcher names.
+`requirements.txt` in the same directory records standalone dependencies.
+`release.env` marks this inventory with `NVIM_TOOLS_FORMAT=1`. The manager reads
+and validates these files without executing Neovim or Lua from the archive.
+Missing declared packages, receipts, launchers, runtimes, or extra packages are
+errors. Earlier archives without that marker retain their original full-profile
+requirements; rebuild them to use reduced editor profiles.
+
+Ansible comes from the locked `ansible-core` dependency of Mason's
+`ansible-lint`, not from an OS package or a separate release tool. Ansible LSP
+requires that package. The builder and installer create the Ansible command
+aliases and run Ansible health checks only when `ansible-lint` is declared.
+Debugpy, ESLint and LuaLS launcher adjustments likewise apply only to their
+selected packages. The Amazon Linux rebuild of `tree-sitter-cli` runs only
+when that package is selected.
+
+The Python inventory is derived from those same receipts. The builder copies
+only its selected `.in`/`.lock` pairs and downloads only their locked wheels.
+`task update:python-locks` regenerates the selected lock set and removes obsolete
+pairs. A missing declared receipt fails generation before existing locks are
+replaced. Empty Python inventories are valid and require no wheelhouse, venvs
+or bundled Python. Python distribution names and command names do not need to
+match their Mason package names.
+
+`M.parsers` controls parsers installed by nvim-treesitter and this profile's
+native fold setup. Neovim's own bundled parsers can still provide highlighting
+when that list is empty.
+
+Both connected and offline functional tests read the active feature declarations.
+Removing a declared package while retaining its feature fails dependency checks;
+missing executables never disable positive test cases. Shared formatters and
+linters stay checked for the remaining filetypes. Disable features first, then
+optionally remove their packages and unused runtimes, as described in the
+[language support guide](guide.md#temporarily-disabling-language-support).
 
 ## Offline verification and qualification
 

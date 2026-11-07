@@ -30,7 +30,7 @@ LOCK_FD=
 # shellcheck disable=SC2034
 RELEASE_METADATA_FIELDS=(
   RELEASE_FORMAT RELEASE_ID PLATFORM_ID SOURCE_COMMIT SOURCE_TREE BUILDER_IMAGE
-  NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION
+  NVIM_TOOLS_FORMAT NVIM_VERSION NODE_VERSION NPM_VERSION NODE_UPSTREAM_NPM_VERSION
   PYTHON_VERSION PYTHON_BUILD TMUX_VERSION RG_VERSION FZF_VERSION
   ZOXIDE_VERSION K9S_VERSION KUBECTX_VERSION OMP_VERSION TASK_VERSION
   TERRAFORM_VERSION KUBECTL_VERSIONS HELM_VERSIONS OFFLINE_TOOLS PAYLOAD_PATHS
@@ -227,7 +227,7 @@ read_release_profile() {
 }
 
 read_release_metadata() {
-  local file=$1 map_name=$2 line key value field tool fields seen=' '
+  local file=$1 map_name=$2 line key value field tool fields dependency seen=' '
   local -n parsed=$map_name
   local -a profile=() versions=()
   local -A required_fields=()
@@ -294,6 +294,22 @@ read_release_metadata() {
   done
   if [[ ${parsed[RELEASE_FORMAT]:-1} == 2 ]]; then
     profile_dependencies profile || return
+    # Older archives contain the full Nvim profile and no dependency inventory.
+    if profile_has profile nvim && [[ ! -v parsed[NVIM_TOOLS_FORMAT] ]]; then
+      for dependency in nodejs python go terraform; do
+        profile_has profile "$dependency" || {
+          die "nvim requires $dependency in this legacy offline profile"
+          return 1
+        }
+      done
+    fi
+  fi
+  if [[ -v parsed[NVIM_TOOLS_FORMAT] ]]; then
+    if [[ ${parsed[NVIM_TOOLS_FORMAT]} != 1 ]] || ! profile_has profile nvim; then
+      die 'invalid Neovim tool inventory format'
+      return 1
+    fi
+    required_fields[NVIM_TOOLS_FORMAT]=1
   fi
   for key in "${!required_fields[@]}"; do
     [[ -v parsed[$key] ]] || {
@@ -355,55 +371,6 @@ read_release_metadata() {
     die 'release metadata has an invalid payload layout'
     return 1
   }
-}
-
-python_inventory_packages() {
-  local release=$1 inventory input_count lock_count
-  inventory=$release/python-locks/inventory.tsv
-  local package version extra requirement seen=' '
-  local -a packages=()
-
-  [[ -f $inventory && ! -L $inventory ]] || {
-    die 'Python package inventory is missing'
-    return 1
-  }
-  while IFS=$'\t' read -r package version extra; do
-    [[ -z $extra && $package =~ ^[a-z0-9][a-z0-9-]*$ &&
-      $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] || {
-      die 'Python package inventory contains invalid data'
-      return 1
-    }
-    [[ $seen != *" $package "* ]] || {
-      die "duplicate Python package in inventory: $package"
-      return 1
-    }
-    seen+="$package "
-    requirement=$(awk '!/^#/ && NF { print; exit }' "$release/python-locks/$package.in") || return
-    [[ $requirement == "$package==$version" ]] || {
-      die "Python input does not match Mason inventory: $package==$version"
-      return 1
-    }
-    awk -v requirement="$package==$version" \
-      '$1 == requirement { found = 1 } END { exit !found }' \
-      "$release/python-locks/$package.lock" || {
-      die "Python lock does not match Mason inventory: $package==$version"
-      return 1
-    }
-    packages+=("$package")
-  done <"$inventory"
-  ((${#packages[@]} > 0)) || {
-    die 'Python package inventory is empty'
-    return 1
-  }
-  input_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.in' -printf '.\n' |
-    wc -l) || return
-  lock_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.lock' -printf '.\n' |
-    wc -l) || return
-  [[ $input_count -eq ${#packages[@]} && $lock_count -eq ${#packages[@]} ]] || {
-    die 'Python lock set differs from the Mason inventory'
-    return 1
-  }
-  printf '%s\n' "${packages[@]}"
 }
 
 validate_archive_members() (
@@ -495,6 +462,15 @@ release_commands() {
 
 verify_release_symlinks() {
   local release=$1 mode=$2 package_list=$3 link target resolved package relative links
+  local python_package mason_packages=''
+
+  if [[ -n $package_list ]]; then
+    while IFS= read -r python_package; do
+      package=$(python_mason_package "$release" "$python_package") || return
+      mason_packages+="$package"$'\n'
+    done <<<"$package_list"
+  fi
+  package_list=${mason_packages%$'\n'}
 
   links=$(mktemp) || return
   TEMP_PATHS+=("$links")
@@ -516,8 +492,8 @@ verify_release_symlinks() {
     [[ ! -e $link ]] || continue
     # Upstream test links point into a test-only submodule that is not bundled.
     if [[ $resolved == "$release/share/tmux/plugins/tmux-resurrect/lib/tmux-test/"* &&
-      ( $link == "$release/share/tmux/plugins/tmux-resurrect/run_tests" ||
-        $link == "$release/share/tmux/plugins/tmux-resurrect/tests/"* ) ]]; then
+      ($link == "$release/share/tmux/plugins/tmux-resurrect/run_tests" ||
+      $link == "$release/share/tmux/plugins/tmux-resurrect/tests/"*) ]]; then
       continue
     fi
     if [[ $mode == archive && $resolved == "$release/share/nvim2/mason/packages/"* ]]; then
@@ -713,6 +689,9 @@ validate_release_directory() {
   package_output=
   if profile_has profile nvim; then
     package_output=$(python_inventory_packages "$release") || return
+    if [[ -v release_metadata[NVIM_TOOLS_FORMAT] ]]; then
+      verify_nvim_inventory "$release" "$mode" profile || return
+    fi
   fi
   verify_release_symlinks "$release" "$mode" "$package_output" || return
   command_output=$(release_commands "$release") || return
@@ -753,12 +732,12 @@ validate_release_directory() {
   fi
   verify_profile_payload "$release" profile || return
   if [[ $mode == archive ]]; then
-    if profile_has profile nvim; then
+    if profile_has profile nvim && [[ -n $package_output ]]; then
       [[ -d $release/python-wheelhouse && ! -L $release/python-wheelhouse &&
-      -n $(find "$release/python-wheelhouse" -type f -name '*.whl' -print -quit) ]] || {
-      die 'release Python wheelhouse is missing'
-      return 1
-    }
+        -n $(find "$release/python-wheelhouse" -type f -name '*.whl' -print -quit) ]] || {
+        die 'release Python wheelhouse is missing'
+        return 1
+      }
     fi
     for path in installed.sha256 installed.modes installed.symlinks .complete .incomplete .artifact.sha256; do
       [[ ! -e $release/$path && ! -L $release/$path ]] || {
@@ -1213,11 +1192,13 @@ activate_release() {
 }
 
 create_python_tools() {
-  local release=$1 python_version python venv mason_bin package command_name package_output
+  local release=$1 python_version python venv mason_bin package mason_package command_name package_output
   local -A release_metadata=()
 
   read_release_metadata "$release/release.env" release_metadata || return
   [[ -v release_metadata[NVIM_VERSION] ]] || return 0
+  package_output=$(python_inventory_packages "$release") || return
+  [[ -n $package_output ]] || return 0
   python_version=${release_metadata[PYTHON_VERSION]}
   python=$release/tools/python-$python_version/bin/python3
   [[ -x $python ]] || {
@@ -1228,7 +1209,8 @@ create_python_tools() {
   mason_bin=$release/share/nvim2/mason/bin
   mkdir -p "$mason_bin" || return
   while IFS= read -r package; do
-    venv=$release/share/nvim2/mason/packages/$package/venv
+    mason_package=$(python_mason_package "$release" "$package") || return
+    venv=$release/share/nvim2/mason/packages/$mason_package/venv
     [[ ! -e $venv && ! -L $venv ]] || {
       die "Python environment already exists: $venv"
       return 1
@@ -1241,22 +1223,20 @@ create_python_tools() {
       --no-index --require-hashes --only-binary=:all: \
       --find-links "$release/python-wheelhouse" \
       -r "$release/python-locks/$package.lock" || return
-    [[ -x $venv/bin/$package ]] || {
-      die "Python entry point is missing: $package"
-      return 1
-    }
     env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
       timeout 120s "$venv/bin/python" -I -m pip check || return
   done <<<"$package_output"
-  for command_name in ansible ansible-config ansible-playbook; do
-    [[ -x $release/share/nvim2/mason/packages/ansible-lint/venv/bin/$command_name ]] || {
-      die "Ansible entry point is missing: $command_name"
-      return 1
-    }
-    if [[ ! -e $mason_bin/$command_name && ! -L $mason_bin/$command_name ]]; then
-      ln -s "../packages/ansible-lint/venv/bin/$command_name" "$mason_bin/$command_name" || return
-    fi
-  done
+  if [[ -d $release/share/nvim2/mason/packages/ansible-lint ]]; then
+    for command_name in ansible ansible-config ansible-playbook; do
+      [[ -x $release/share/nvim2/mason/packages/ansible-lint/venv/bin/$command_name ]] || {
+        die "Ansible entry point is missing: $command_name"
+        return 1
+      }
+      if [[ ! -e $mason_bin/$command_name && ! -L $mason_bin/$command_name ]]; then
+        ln -s "../packages/ansible-lint/venv/bin/$command_name" "$mason_bin/$command_name" || return
+      fi
+    done
+  fi
 }
 
 migrate_nvim_state() {
@@ -1277,7 +1257,7 @@ migrate_nvim_state() {
 }
 
 health_python() {
-  local release=$1 python_version=$2 python package venv package_output
+  local release=$1 python_version=$2 python package mason_package venv package_output
 
   python=$release/tools/python-$python_version/bin/python3
   env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
@@ -1306,38 +1286,46 @@ PY
 
   [[ -d $release/config/nvim2 ]] || return 0
   package_output=$(python_inventory_packages "$release") || return
+  [[ -n $package_output ]] || return 0
   while IFS= read -r package; do
-    venv=$release/share/nvim2/mason/packages/$package/venv
-    [[ -f $venv/pyvenv.cfg && -x $venv/bin/python && -x $venv/bin/$package ]] || {
+    mason_package=$(python_mason_package "$release" "$package") || return
+    venv=$release/share/nvim2/mason/packages/$mason_package/venv
+    [[ -f $venv/pyvenv.cfg && -x $venv/bin/python ]] || {
       die "incomplete Python environment: $venv"
       return 1
     }
     env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
       timeout --kill-after=5s 30s "$venv/bin/python" -I -B - "$release" "$package" <<'PY' || return
+import importlib.metadata
 import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1]).resolve()
-package = sys.argv[2].replace('-', '')
+package = sys.argv[2]
 assert pathlib.Path(sys.executable).resolve().is_relative_to(root)
 assert pathlib.Path(sys.prefix).resolve().is_relative_to(root)
 assert pathlib.Path(sys.base_prefix).resolve().is_relative_to(root)
 for value in sys.path:
     if value:
         assert pathlib.Path(value).resolve().is_relative_to(root), value
-__import__(package)
+versions = dict(line.split('\t') for line in (root / 'python-locks/inventory.tsv').read_text().splitlines())
+assert importlib.metadata.version(package) == versions[package]
 print('python-venv=' + sys.argv[2] + ':' + sys.prefix)
 PY
     env -u PYTHONHOME -u PYTHONPATH PIP_CONFIG_FILE=/dev/null PYTHONDONTWRITEBYTECODE=1 \
       timeout --kill-after=5s 120s "$venv/bin/python" -I -B -m pip check || return
   done <<<"$package_output"
 
-  PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
-    timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/ansible-config" --version || return
-  PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
-    timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/ansible-lint" --offline --version || return
-  PATH="$release/share/nvim2/mason/packages/yamllint/venv/bin:$release/bin:/usr/bin:/bin" \
-    timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/yamllint" --version || return
+  if [[ -d $release/share/nvim2/mason/packages/ansible-lint ]]; then
+    PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
+      timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/ansible-config" --version || return
+    PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
+      timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/ansible-lint" --offline --version || return
+  fi
+  if [[ -d $release/share/nvim2/mason/packages/yamllint ]]; then
+    PATH="$release/share/nvim2/mason/packages/yamllint/venv/bin:$release/bin:/usr/bin:/bin" \
+      timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/yamllint" --version || return
+  fi
 }
 
 check_runtime() {

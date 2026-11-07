@@ -75,10 +75,9 @@ function M.test(subject)
   if not ok then error(message, 0) end
 end
 
-function M.setup()
+function M.setup_python()
   local dap = require 'dap'
   local python = require 'dap-python'
-  local ui = require 'dapui'
   local adapter_python = vim.fs.joinpath(packages, 'debugpy', 'venv', 'bin', 'python')
   python.setup(adapter_python, { include_configs = false })
   python.resolve_python = M.python
@@ -125,6 +124,13 @@ function M.setup()
     },
   }
 
+  vim.keymap.set('n', '<leader>dt', function() M.test 'method' end, { desc = '[D]ebug: Python test method' })
+  vim.keymap.set('n', '<leader>dT', function() M.test 'class' end, { desc = '[D]ebug: Python test class' })
+end
+
+function M.setup()
+  local dap = require 'dap'
+  local ui = require 'dapui'
   ui.setup {
     icons = { expanded = '-', collapsed = '+', current_frame = '>' },
     controls = {
@@ -167,8 +173,6 @@ function M.setup()
     { '<leader>dd', function() dap.disconnect { terminateDebuggee = false } end, 'Disconnect' },
     { '<leader>dr', dap.repl.toggle, 'Toggle REPL' },
     { '<leader>du', ui.toggle, 'Toggle panels' },
-    { '<leader>dt', function() M.test 'method' end, 'Python test method' },
-    { '<leader>dT', function() M.test 'class' end, 'Python test class' },
   }
   for _, mapping in ipairs(mappings) do
     vim.keymap.set('n', mapping[1], mapping[2], { desc = '[D]ebug: ' .. mapping[3] })

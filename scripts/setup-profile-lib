@@ -45,7 +45,7 @@ tool_metadata_fields() {
 
 tool_dependencies() {
   case $1 in
-    nvim) printf '%s\n' nodejs python go rg terraform ;;
+    nvim) printf '%s\n' rg ;;
     yamllint) printf '%s\n' nvim ;;
     helm-schema) printf '%s\n' helm ;;
     tmux-sensible | tmux-resurrect | tmux-continuum) printf '%s\n' tmux ;;
@@ -110,4 +110,165 @@ profile_tool_names() {
     esac
     printf '%s\n' "$tool"
   done
+}
+
+verify_nvim_inventory() {
+  local release=$1 mode=$2 profile_name=$3
+  local inventory=$release/share/nvim2/mason/inventory.tsv
+  local requirements=$release/share/nvim2/mason/requirements.txt
+  local package version python commands extra command_name path dependency
+  local seen=' ' python_rows='' expected_python actual_python
+  local -a launchers=()
+
+  [[ -f $inventory && ! -L $inventory && -f $requirements && ! -L $requirements ]] || {
+    die 'Neovim tool inventory or requirements are missing'
+    return 1
+  }
+  while IFS=$'\t' read -r package version python commands extra; do
+    [[ -z $extra && $package =~ ^[a-z0-9][a-z0-9_-]*$ &&
+      $version =~ ^v?[0-9]+[.][0-9]+[.][0-9]+([+-][A-Za-z0-9.+-]+)?$ &&
+      $python =~ ^(-|[a-z0-9][a-z0-9-]*)$ &&
+      $commands =~ ^(-|[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+)*)$ && $seen != *" $package "* ]] || {
+      die 'Neovim tool inventory contains invalid or duplicate data'
+      return 1
+    }
+    seen+="$package "
+    path=$release/share/nvim2/mason/packages/$package
+    [[ -d $path && ! -L $path && -f $path/mason-receipt.json && ! -L $path/mason-receipt.json ]] || {
+      die "declared Mason package or receipt is missing: $package"
+      return 1
+    }
+    if [[ $python != - ]]; then
+      python_rows+="$python"$'\t'"$version"$'\n'
+    fi
+    [[ $commands != - ]] || continue
+    IFS=, read -r -a launchers <<<"$commands"
+    for command_name in "${launchers[@]}"; do
+      path=$release/share/nvim2/mason/bin/$command_name
+      if [[ $mode == archive && $python != - ]]; then
+        [[ -L $path ]] || {
+          die "declared Mason launcher is missing: $command_name"
+          return 1
+        }
+      else
+        [[ -x $path ]] || {
+          die "declared Mason launcher is missing or not executable: $command_name"
+          return 1
+        }
+      fi
+    done
+  done <"$inventory"
+  for path in "$release/share/nvim2/mason/packages"/*; do
+    [[ -e $path || -L $path ]] || continue
+    package=${path##*/}
+    [[ $seen == *" $package "* ]] || {
+      die "undeclared Mason package is bundled: $package"
+      return 1
+    }
+  done
+  expected_python=$(printf '%s' "$python_rows" | LC_ALL=C sort) || return
+  actual_python=$(LC_ALL=C sort "$release/python-locks/inventory.tsv") || return
+  [[ $expected_python == "$actual_python" ]] || {
+    die 'Python inventory differs from declared Mason packages'
+    return 1
+  }
+  seen=' '
+  while IFS= read -r dependency; do
+    case $dependency in
+      nodejs | python | go | rg | terraform) ;;
+      *)
+        die "invalid Neovim tool requirement: $dependency"
+        return 1
+        ;;
+    esac
+    [[ $seen != *" $dependency "* ]] || {
+      die "duplicate Neovim tool requirement: $dependency"
+      return 1
+    }
+    seen+="$dependency "
+    profile_has "$profile_name" "$dependency" || {
+      die "configured Neovim tools require $dependency in OFFLINE_RELEASE_TOOLS"
+      return 1
+    }
+  done <"$requirements"
+  if [[ -n $python_rows ]]; then
+    profile_has "$profile_name" python || {
+      die 'Python-backed Mason packages require bundled Python'
+      return 1
+    }
+  fi
+  if profile_has "$profile_name" yamllint; then
+    [[ $expected_python == *yamllint$'\t'* ]] || {
+      die 'the public yamllint command requires yamllint in custom.lsp M.tools'
+      return 1
+    }
+  fi
+}
+
+python_inventory_packages() {
+  local release=$1 inventory input_count lock_count
+  inventory=$release/python-locks/inventory.tsv
+  local package version extra requirement lock seen=' '
+  local -a packages=()
+
+  [[ -f $inventory && ! -L $inventory ]] || {
+    die 'Python package inventory is missing'
+    return 1
+  }
+  while IFS=$'\t' read -r package version extra; do
+    [[ -z $extra && $package =~ ^[a-z0-9][a-z0-9-]*$ &&
+      $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] || {
+      die 'Python package inventory contains invalid data'
+      return 1
+    }
+    [[ $seen != *" $package "* ]] || {
+      die "duplicate Python package in inventory: $package"
+      return 1
+    }
+    seen+="$package "
+    for lock in "$release/python-locks/$package.in" "$release/python-locks/$package.lock"; do
+      [[ -f $lock && ! -L $lock ]] || {
+        die "Python input or lock is missing: $package"
+        return 1
+      }
+    done
+    requirement=$(awk '!/^#/ && NF { print; exit }' "$release/python-locks/$package.in") || return
+    [[ $requirement == "$package==$version" ]] || {
+      die "Python input does not match Mason inventory: $package==$version"
+      return 1
+    }
+    awk -v requirement="$package==$version" \
+      '$1 == requirement { found = 1 } END { exit !found }' \
+      "$release/python-locks/$package.lock" || {
+      die "Python lock does not match Mason inventory: $package==$version"
+      return 1
+    }
+    packages+=("$package")
+  done <"$inventory"
+  input_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.in' -printf '.\n' |
+    wc -l) || return
+  lock_count=$(find "$release/python-locks" -maxdepth 1 -type f -name '*.lock' -printf '.\n' |
+    wc -l) || return
+  [[ $input_count -eq ${#packages[@]} && $lock_count -eq ${#packages[@]} ]] || {
+    die 'Python lock set differs from the Mason inventory'
+    return 1
+  }
+  if ((${#packages[@]} > 0)); then
+    printf '%s\n' "${packages[@]}"
+  fi
+}
+
+python_mason_package() {
+  local release=$1 python_package=$2
+  local inventory=$release/share/nvim2/mason/inventory.tsv
+  if [[ -f $inventory ]]; then
+    awk -F '\t' -v package="$python_package" \
+      '$3 == package { name = $1; count++ } END { if (count != 1) exit 1; print name }' \
+      "$inventory" || {
+      die "Python package has no unique Mason owner: $python_package"
+      return 1
+    }
+  else
+    printf '%s\n' "$python_package"
+  fi
 }

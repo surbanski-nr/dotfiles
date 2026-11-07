@@ -101,58 +101,48 @@ M.tools = {
 }
 
 M.tool_probes = {
-  { 'actionlint', '-version' },
-  { 'ansible-language-server', '--version' },
-  { 'ansible-lint', '--offline', '--version' },
-  { 'bash-language-server', '--version' },
-  { 'debugpy', '--version' },
-  { 'debugpy-adapter', '--help' },
-  { 'dlv', 'version' },
-  { 'docker-language-server', '--version' },
-  { 'eslint_d', '--version' },
-  { 'golangci-lint', 'version' },
-  { 'gopls', 'version' },
-  { 'hadolint', '--version' },
-  { 'helm_ls', 'version' },
-  { 'lua-language-server', '--version' },
-  { 'markdown-oxide', '--version' },
-  { 'prettier', '--version' },
-  { 'pyright', '--version' },
-  { 'ruff', '--version' },
-  { 'shellcheck', '--version' },
-  { 'shfmt', '--version' },
-  { 'stylua', '--version' },
-  { 'taplo', '--version' },
-  { 'terraform-ls', 'version' },
-  { 'tflint', '--version' },
-  { 'tree-sitter', '--version' },
-  { 'typescript-language-server', '--version' },
-  { 'yamlfmt', '-version' },
-  { 'yamllint', '--version' },
+  ['actionlint'] = { { 'actionlint', '-version' } },
+  ['ansible-language-server'] = { { 'ansible-language-server', '--version' } },
+  ['ansible-lint'] = { { 'ansible-lint', '--offline', '--version' } },
+  ['bash-language-server'] = { { 'bash-language-server', '--version' } },
+  ['debugpy'] = { { 'debugpy', '--version' }, { 'debugpy-adapter', '--help' } },
+  ['delve'] = { { 'dlv', 'version' } },
+  ['docker-language-server'] = { { 'docker-language-server', '--version' } },
+  ['eslint_d'] = { { 'eslint_d', '--version' } },
+  ['golangci-lint'] = { { 'golangci-lint', 'version' } },
+  ['gopls'] = { { 'gopls', 'version' } },
+  ['hadolint'] = { { 'hadolint', '--version' } },
+  ['helm-ls'] = { { 'helm_ls', 'version' } },
+  ['lua-language-server'] = { { 'lua-language-server', '--version' } },
+  ['markdown-oxide'] = { { 'markdown-oxide', '--version' } },
+  ['prettier'] = { { 'prettier', '--version' } },
+  ['pyright'] = { { 'pyright', '--version' } },
+  ['ruff'] = { { 'ruff', '--version' } },
+  ['shellcheck'] = { { 'shellcheck', '--version' } },
+  ['shfmt'] = { { 'shfmt', '--version' } },
+  ['stylua'] = { { 'stylua', '--version' } },
+  ['taplo'] = { { 'taplo', '--version' } },
+  ['terraform-ls'] = { { 'terraform-ls', 'version' } },
+  ['tflint'] = { { 'tflint', '--version' } },
+  ['tree-sitter-cli'] = { { 'tree-sitter', '--version' } },
+  ['typescript-language-server'] = { { 'typescript-language-server', '--version' } },
+  ['yamlfmt'] = { { 'yamlfmt', '-version' } },
+  ['yamllint'] = { { 'yamllint', '--version' } },
 }
+
+function M.probes()
+  local probes = {}
+  for _, tool in ipairs(M.tools) do
+    vim.list_extend(probes, M.tool_probes[tool[1]] or {})
+  end
+  return probes
+end
 
 function M.python_inventory(packages_root)
   local inventory = {}
-
-  for _, tool in ipairs(M.tools) do
-    local name = tool[1]
-    local receipt_path = packages_root .. '/' .. name .. '/mason-receipt.json'
-    local receipt_file = io.open(receipt_path, 'rb')
-    if receipt_file then
-      local receipt = vim.json.decode(receipt_file:read '*a')
-      receipt_file:close()
-      local package, version = receipt.source.id:match '^pkg:pypi/([^@]+)@(.+)$'
-      if package then
-        assert(receipt.name == name, 'Mason receipt name mismatch for ' .. name)
-        assert(tool.version == version, 'Mason receipt version mismatch for ' .. name)
-        table.insert(inventory, {
-          name = package,
-          version = version,
-        })
-      end
-    end
+  for _, package in ipairs(require('custom.tools').inventory(packages_root)) do
+    if package.python then inventory[#inventory + 1] = { name = package.python, version = package.version } end
   end
-
   return inventory
 end
 

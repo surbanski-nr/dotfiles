@@ -1,3 +1,5 @@
+local profile = dofile(vim.fn.stdpath 'config' .. '/tests/profile.lua')
+
 local dap = require 'dap'
 local temporary = vim.fn.tempname()
 local adapter_pids = {}
@@ -78,7 +80,7 @@ local function finish()
 end
 
 local function run()
-  if vim.env.NVIM2_CHECK_TOOLS == '0' then return end
+  if vim.env.NVIM2_CHECK_TOOLS == '0' or not profile.debugger 'go' then return end
   vim.env.GOPROXY = 'off'
   vim.env.GOTOOLCHAIN = 'local'
   local root = vim.fs.joinpath(temporary, 'Go project with spaces')
