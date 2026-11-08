@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shell map</title>
+<style>
+  :root { color-scheme: light; font: 14px/1.45 system-ui, sans-serif; color: #203343; background: #f3f6f8; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  header { padding: 16px 22px; background: #fff; border-bottom: 1px solid #d5dfe5; }
+  h1 { font-size: 22px; margin: 0; }
+  p { margin: 6px 0; }
+  .muted { color: #637787; font-size: 12px; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 12px; }
+  label { display: flex; align-items: center; gap: 7px; }
+  input, select, button { font: inherit; }
+  select, input[type=search], button { border: 1px solid #becdd7; border-radius: 5px; background: #fff; padding: 6px 9px; }
+  select { max-width: 300px; }
+  button { cursor: pointer; color: inherit; }
+  button:hover { background: #eaf2f6; }
+  :focus-visible { outline: 3px solid #2284af; outline-offset: 2px; }
+  main { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 65vh; }
+  main.browse-collapsed { grid-template-columns: minmax(0, 1fr); }
+  aside { padding: 16px; background: #fff; overflow: auto; max-height: calc(100vh - 165px); }
+  #browse { border-right: 1px solid #d5dfe5; }
+  #search { width: 100%; margin-bottom: 10px; }
+  .node-link { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #eef2f5; border-radius: 0; padding: 8px 5px; overflow-wrap: anywhere; }
+  .node-link[aria-current=true] { color: #006b8f; background: #e5f3f8; font-weight: 600; }
+  .node-link.function, .node-link.variable { padding-left: 16px; }
+  .node-link small { display: block; font-size: 11px; color: #637787; font-weight: normal; }
+  #drawing { min-width: 0; }
+  .graph-toolbar { padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid #d5dfe5; background: #fff; }
+  #graph-status { flex: 1; font-size: 12px; }
+  #viewport { height: calc(100vh - 215px); min-height: 480px; overflow: auto; background-color: #f8fafb; background-image: radial-gradient(#dae3e8 1px, transparent 1px); background-size: 18px 18px; }
+  #viewport.dragging { cursor: grabbing; }
+  svg { display: block; }
+  svg .node { cursor: pointer; }
+  svg .node rect { fill: #fff; stroke: #91a9b8; stroke-width: 1.5; }
+  svg .function rect { fill: #f3efff; stroke: #8e77bd; }
+  svg .env rect, svg .variable rect { fill: #fff7df; stroke: #bd9734; }
+  svg .test rect { stroke-dasharray: 3 2; }
+  svg .selected rect { stroke: #006b8f; stroke-width: 3; }
+  svg .incoming rect { stroke: #a86119; stroke-width: 2; }
+  svg .outgoing rect { stroke: #16806d; stroke-width: 2; }
+  svg text { fill: #203343; font: 12px system-ui, sans-serif; pointer-events: none; }
+  svg .subtitle { font-size: 10px; fill: #637787; }
+  svg .edge { fill: none; stroke: #8299a8; stroke-width: 1.4; }
+  svg .edge.possible { stroke-dasharray: 5 4; }
+  svg .edge.outgoing { stroke: #16806d; stroke-width: 2; }
+  svg .edge.incoming { stroke: #a86119; stroke-width: 2; }
+  svg .edge-label { fill: #637787; font-size: 9px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 14px; font-size: 11px; }
+  .legend span::before { content: ''; display: inline-block; width: 9px; height: 9px; margin-right: 5px; background: var(--color); border-radius: 2px; }
+  @media (max-width: 1050px) {
+    main { grid-template-columns: 230px minmax(0, 1fr); }
+    #browse { max-height: 650px; }
+    #viewport { height: 550px; }
+  }
+  @media (max-width: 650px) {
+    header { padding: 12px; }
+    main { grid-template-columns: 1fr; }
+    #browse { max-height: 220px; }
+    select { max-width: 220px; }
+  }
+</style>
+<header>
+  <h1>Shell map</h1>
+  <p id="counts" class="muted"></p>
+  <div class="controls">
+    <label>Map <select id="mode"><option value="scripts">Scripts</option><option value="functions">Functions</option></select></label>
+    <label>Direction <select id="direction"><option value="out">Uses</option><option value="in">Used by</option><option value="both">Both</option></select></label>
+    <label><input id="tests" type="checkbox" checked> Include tests</label>
+    <button id="export">Export JSON</button>
+  </div>
+</header>
+<main id="workspace">
+  <aside id="browse">
+    <input id="search" type="search" placeholder="Find a script, function or env field" aria-label="Search nodes">
+    <div id="node-list"></div>
+  </aside>
+  <section id="drawing" aria-label="Dependency diagram">
+    <div class="graph-toolbar">
+      <button id="toggle-browse" aria-controls="browse" aria-expanded="true" aria-label="Collapse navigation" title="Collapse navigation">&lt;</button>
+      <span id="graph-status"></span>
+      <button id="zoom-out" aria-label="Zoom out">-</button>
+      <button id="zoom-in" aria-label="Zoom in">+</button>
+      <button id="fit">Fit</button>
+      <button id="reset" aria-label="Reset view" title="Show the full graph">Reset</button>
+    </div>
+    <div id="viewport"><svg id="diagram" xmlns="http://www.w3.org/2000/svg" aria-label="Shell dependency graph"></svg></div>
+    <div class="legend">
+      <span style="--color:#16806d">Dependencies</span>
+      <span style="--color:#a86119">Callers / readers</span>
+      <span style="--color:#8e77bd">Function</span>
+      <span style="--color:#bd9734">Env / field</span>
+      <span style="--color:#8299a8">Dashed relation = possible</span>
+    </div>
+  </section>
+</main>
+<script id="graph-data" type="application/json">__GRAPH_JSON__</script>
+<script>
+  'use strict';
+  const graph = JSON.parse(document.getElementById('graph-data').textContent);
+  const nodes = new Map(graph.nodes.map(node => [node.id, node]));
+  const $ = id => document.getElementById(id);
+  const controls = ['mode', 'direction', 'tests'].map($);
+  let selected = '';
+  let overview = false;
+  let zoom = 1, width = 800, height = 500;
+  const state = () => ({ mode: $('mode').value, direction: $('direction').value, tests: $('tests').checked });
+  const count = kind => graph.nodes.filter(node => node.kind === kind).length;
+  $('counts').textContent = `${count('script')} scripts · ${count('function')} functions · ${count('env')} env files · ${count('variable')} env fields · ${graph.edges.length} relations`;
+
+  function element(tag, text, parent, className) {
+    const result = document.createElement(tag);
+    if (text !== undefined) result.textContent = text;
+    if (className) result.className = className;
+    if (parent) parent.append(result);
+    return result;
+  }
+  function svgElement(tag, attributes, parent, text) {
+    const result = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [key, value] of Object.entries(attributes)) result.setAttribute(key, value);
+    if (text !== undefined) result.textContent = text;
+    parent.append(result); return result;
+  }
+  function label(node) { return node.kind === 'function' ? `${node.name}()` : node.name; }
+  function subtitle(node) { return ['function', 'variable'].includes(node.kind) ? `${node.file}:${node.line}` : node.role || ''; }
+  function shorten(text, length) { return text.length > length ? text.slice(0, length - 3) + '...' : text; }
+  function rank(node) { return node.tasks?.length || node.workflows?.length ? 0 : node.test ? 3 : node.kind === 'env' ? 2 : 1; }
+  function compareNodes(a, b) { return rank(a) - rank(b) || a.file.localeCompare(b.file) || a.line - b.line || a.name.localeCompare(b.name); }
+
+  function view() {
+    const settings = state();
+    const allowed = graph.nodes.filter(node => (settings.tests || !node.test) &&
+      (settings.mode === 'functions' || ['script', 'env'].includes(node.kind)));
+    const ids = new Set(allowed.map(node => node.id));
+    const merged = new Map();
+    for (const edge of graph.edges) {
+      if (settings.mode === 'scripts' && ['call', 'trap'].includes(edge.kind)) continue;
+      const from = settings.mode === 'scripts' ? 'file:' + nodes.get(edge.from).file : edge.from;
+      const to = settings.mode === 'scripts' ? 'file:' + nodes.get(edge.to).file : edge.to;
+      if (from === to || !ids.has(from) || !ids.has(to)) continue;
+      const key = `${from}\0${to}\0${edge.kind}`;
+      if (merged.has(key)) {
+        const previous = merged.get(key);
+        if (edge.certainty === 'exact') previous.certainty = 'exact';
+      } else merged.set(key, { from, to, kind: edge.kind, certainty: edge.certainty });
+    }
+    return { allowed, ids, edges: [...merged.values()] };
+  }
+
+  function reachable(seeds, edges, reverse = false) {
+    const adjacency = new Map();
+    for (const edge of edges) {
+      const from = reverse ? edge.to : edge.from, to = reverse ? edge.from : edge.to;
+      if (!adjacency.has(from)) adjacency.set(from, []);
+      adjacency.get(from).push(to);
+    }
+    const distances = new Map(seeds.map(id => [id, 0])), pending = [...seeds];
+    for (let index = 0; index < pending.length; index++) {
+      const from = pending[index];
+      for (const to of adjacency.get(from) || []) {
+        if (!distances.has(to)) { distances.set(to, distances.get(from) + 1); pending.push(to); }
+      }
+    }
+    return distances;
+  }
+
+  function selectNode(id) {
+    selected = id;
+    overview = false;
+    if (['env', 'variable'].includes(nodes.get(id).kind) && $('direction').value === 'out') $('direction').value = 'in';
+    render();
+  }
+
+  function renderList(allowed) {
+    $('node-list').replaceChildren();
+    const query = $('search').value.toLowerCase();
+    const entries = allowed.filter(node => `${node.name} ${node.file} ${node.role || ''}`.toLowerCase().includes(query));
+    entries.sort(compareNodes);
+    for (const node of entries) {
+      const button = element('button', label(node), $('node-list'), 'node-link ' + node.kind);
+      button.dataset.nodeId = node.id; button.setAttribute('aria-current', String(node.id === selected));
+      element('small', subtitle(node), button); button.onclick = () => selectNode(node.id);
+    }
+    if (!entries.length) element('p', 'No matching nodes.', $('node-list'), 'muted');
+  }
+
+  function layout(ids, edges, outgoing, incoming) {
+    const levels = new Map([...ids].map(id => [id, 0]));
+    if (selected) {
+      for (const id of ids) levels.set(id, outgoing.has(id) ? outgoing.get(id) : incoming.has(id) ? -incoming.get(id) : 0);
+    } else {
+      const degree = new Map([...ids].map(id => [id, 0])), adjacency = new Map();
+      for (const edge of edges) {
+        degree.set(edge.to, degree.get(edge.to) + 1);
+        if (!adjacency.has(edge.from)) adjacency.set(edge.from, []);
+        adjacency.get(edge.from).push(edge.to);
+      }
+      const pending = [...ids].filter(id => !degree.get(id));
+      for (let index = 0; index < pending.length; index++) {
+        const from = pending[index];
+        for (const to of adjacency.get(from) || []) {
+          levels.set(to, Math.max(levels.get(to), levels.get(from) + 1));
+          degree.set(to, degree.get(to) - 1);
+          if (!degree.get(to)) pending.push(to);
+        }
+      }
+    }
+    const columns = new Map(), positions = new Map();
+    for (const [id, level] of levels) {
+      if (!columns.has(level)) columns.set(level, []);
+      columns.get(level).push(id);
+    }
+    const minimum = Math.min(0, ...columns.keys());
+    for (const [level, column] of columns) {
+      column.sort((a, b) => nodes.get(a).file.localeCompare(nodes.get(b).file) || nodes.get(a).line - nodes.get(b).line);
+      column.forEach((id, index) => positions.set(id, { x: 32 + (level - minimum) * 290, y: 32 + index * 72 }));
+    }
+    width = Math.max(600, 80 + (Math.max(0, ...columns.keys()) - minimum + 1) * 290);
+    height = Math.max(450, 80 + Math.max(0, ...[...columns.values()].map(column => column.length)) * 72);
+    return positions;
+  }
+
+  function applyZoom() {
+    $('diagram').style.width = `${width * zoom}px`; $('diagram').style.height = `${height * zoom}px`;
+  }
+  function fit() {
+    zoom = Math.max(.2, Math.min(1, $('viewport').clientWidth / width)); applyZoom();
+  }
+  function render() {
+    const data = view();
+    if (!overview && !data.ids.has(selected)) selected = [...data.allowed].sort(compareNodes)[0]?.id || '';
+    const settings = state(), seeds = selected ? [selected] : [];
+    const outgoing = settings.direction !== 'in' ? reachable(seeds, data.edges) : new Map();
+    const incoming = settings.direction !== 'out' ? reachable(seeds, data.edges, true) : new Map();
+    const shown = overview ? data.ids : new Set([...seeds, ...outgoing.keys(), ...incoming.keys()]);
+    const edges = data.edges.filter(edge => shown.has(edge.from) && shown.has(edge.to));
+    const positions = layout(shown, edges, outgoing, incoming), svg = $('diagram'); svg.replaceChildren();
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    const defs = svgElement('defs', {}, svg);
+    const marker = svgElement('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, defs);
+    svgElement('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#8299a8' }, marker);
+    const edgeLayer = svgElement('g', {}, svg), nodeLayer = svgElement('g', {}, svg);
+    for (const edge of edges) {
+      const a = positions.get(edge.from), b = positions.get(edge.to);
+      const out = outgoing.has(edge.from) && outgoing.has(edge.to), inc = incoming.has(edge.from) && incoming.has(edge.to);
+      const classes = `edge ${edge.certainty} ${out ? 'outgoing' : inc ? 'incoming' : ''}`;
+      const start = a.x + 246, end = b.x > a.x ? b.x : b.x + 246;
+      const mid = b.x > a.x ? (start + end) / 2 : Math.max(start, end) + 35;
+      const path = svgElement('path', { d: `M ${start} ${a.y + 26} C ${mid} ${a.y + 26}, ${mid} ${b.y + 36}, ${end} ${b.y + 36}`, class: classes, 'marker-end': 'url(#arrow)' }, edgeLayer);
+      svgElement('title', {}, path, `${edge.kind}: ${label(nodes.get(edge.from))} -> ${label(nodes.get(edge.to))}`);
+      if (shown.size < 45) svgElement('text', { x: mid, y: (a.y + b.y) / 2 + 19, class: 'edge-label', 'text-anchor': 'middle' }, edgeLayer, edge.kind);
+    }
+    for (const id of shown) {
+      const node = nodes.get(id), pos = positions.get(id);
+      const classes = `node ${node.kind} ${node.test ? 'test' : ''} ${id === selected ? 'selected' : outgoing.has(id) ? 'outgoing' : incoming.has(id) ? 'incoming' : ''}`;
+      const group = svgElement('g', { transform: `translate(${pos.x},${pos.y})`, class: classes, tabindex: 0, role: 'button', 'data-node-id': id, 'aria-label': label(node) }, nodeLayer);
+      svgElement('title', {}, group, `${label(node)}\n${subtitle(node)}`);
+      svgElement('rect', { width: 246, height: 52, rx: 6 }, group);
+      svgElement('text', { x: 10, y: 22 }, group, shorten(label(node), 35));
+      svgElement('text', { x: 10, y: 40, class: 'subtitle' }, group, shorten(subtitle(node), 43));
+      group.onclick = () => selectNode(id);
+      group.onkeydown = event => { if (['Enter', ' '].includes(event.key)) { event.preventDefault(); selectNode(id); } };
+    }
+    applyZoom(); renderList(data.allowed);
+    $('graph-status').textContent = `${selected ? label(nodes.get(selected)) + ' · ' : ''}${shown.size} nodes · ${edges.length} relations`;
+  }
+
+  for (const control of controls) control.onchange = () => {
+    if (control.id === 'mode') {
+      if (selected && $('mode').value === 'scripts') selected = 'file:' + nodes.get(selected).file;
+    }
+    render();
+  };
+  $('search').oninput = () => renderList(view().allowed);
+  $('toggle-browse').onclick = () => {
+    const hidden = !$('browse').hidden;
+    $('browse').hidden = hidden;
+    $('workspace').classList.toggle('browse-collapsed', hidden);
+    const label = hidden ? 'Expand navigation' : 'Collapse navigation';
+    $('toggle-browse').textContent = hidden ? '>' : '<';
+    $('toggle-browse').setAttribute('aria-label', label);
+    $('toggle-browse').title = label;
+    $('toggle-browse').setAttribute('aria-expanded', String(!hidden));
+  };
+  $('zoom-in').onclick = () => { zoom = Math.min(2.5, zoom * 1.2); applyZoom(); };
+  $('zoom-out').onclick = () => { zoom = Math.max(.2, zoom / 1.2); applyZoom(); };
+  $('fit').onclick = fit;
+  $('reset').onclick = () => {
+    overview = true; selected = ''; $('search').value = '';
+    render(); fit(); $('viewport').scrollTo(0, 0);
+  };
+  $('export').onclick = () => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(graph, null, 2)], { type: 'application/json' }));
+    const link = element('a'); link.href = url; link.download = 'shell-map.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  let drag = null;
+  $('viewport').onpointerdown = event => {
+    if (event.button || event.target.closest('.node')) return;
+    drag = { x: event.clientX, y: event.clientY, left: $('viewport').scrollLeft, top: $('viewport').scrollTop };
+    $('viewport').setPointerCapture(event.pointerId); $('viewport').classList.add('dragging');
+  };
+  $('viewport').onpointermove = event => {
+    if (drag) { $('viewport').scrollLeft = drag.left + drag.x - event.clientX; $('viewport').scrollTop = drag.top + drag.y - event.clientY; }
+  };
+  $('viewport').onpointerup = $('viewport').onpointercancel = () => { drag = null; $('viewport').classList.remove('dragging'); };
+  render();
+</script>
+</html>

@@ -19,6 +19,13 @@ tasks:
     cmds:
       - '"{{.TASK_EXE}}" --list'
 
+  map:
+    desc: Generate an offline interactive map of shell scripts, functions and env readers
+    dir: '{{.ROOT_DIR}}'
+    deps: [tools:python, tools:shfmt]
+    cmds:
+      - '"{{.ROOT_DIR}}/bin/python/bin/python3" maintenance/shell_map.py --shfmt "{{.ROOT_DIR}}/bin/shfmt"'
+
   dev:
     desc: Open a persistent development VM
     summary: |
@@ -147,7 +154,7 @@ tasks:
 
   validate:scripts:
     desc: Check executable bits, lint scripts and test installers, validation and offline releases
-    deps: [tools:actionlint, tools:shellcheck, tools:task, tools:yamllint]
+    deps: [tools:actionlint, tools:python, tools:shellcheck, tools:shfmt, tools:task, tools:yamllint]
     cmds:
       - bash scripts/validate scripts
 
@@ -236,6 +243,12 @@ tasks:
     run: once
     cmds:
       - bash scripts/install-validation-tool shellcheck
+
+  tools:shfmt:
+    internal: true
+    run: once
+    cmds:
+      - bash scripts/install-validation-tool shfmt
 
   tools:stylua:
     internal: true

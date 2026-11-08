@@ -187,6 +187,7 @@ validate_scripts() {
   require_command sha256sum
   require_command sh
   require_command shellcheck
+  require_command shfmt
   require_command tar
   require_command task
   require_command timeout
@@ -316,6 +317,7 @@ validate_scripts() {
   run_test 60s bash tests/setup_asdf_test.sh
   run_test 30s bash tests/setup_system_test.sh
   run_test 120s bash tests/setup_tools_runner.sh
+  run_test 45s python3 tests/shell_map_test.py
 }
 
 validate_nvim2() {

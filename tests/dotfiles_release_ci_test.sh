@@ -135,7 +135,8 @@ run_ci() {
 }
 task_executable=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}/task
 run_offline_task() {
-  "$task_executable" --dir "$source_dir" test:offline "$@"
+  # Task's ANSI reset can prefix the first output line that this test parses.
+  "$task_executable" --color=false --dir "$source_dir" test:offline "$@"
 }
 run_preflight() {
   : >"$GITHUB_OUTPUT"

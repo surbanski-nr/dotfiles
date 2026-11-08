@@ -50,7 +50,7 @@ artifact_layout() {
       SPEC_DESTS=("shellcheck-$version")
       SPEC_LINKS=("shellcheck:shellcheck-$version")
       ;;
-    oh-my-posh | kubectl | kind | yq)
+    oh-my-posh | kubectl | kind | shfmt | yq)
       SPEC_FORMAT=raw
       SPEC_MEMBER=
       SPEC_DESTS=("$name-$version")
