@@ -19,6 +19,7 @@ EOF
 
 main() {
   local -a requested=()
+  local metadata upstream_npm_version=''
 
   while (($#)); do
     case $1 in
@@ -46,15 +47,21 @@ main() {
   select_asdf
   export PATH="$BIN_DIR:$ASDF_DATA_DIR/shims:$PATH"
   reconcile_tools "${SELECTED_TOOLS[@]}"
-  finish_online_setup "$REPO_DIR"
+  metadata=$(mktemp "$ONLINE_ROOT/.release-env.XXXXXX")
+  TEMP_PATHS+=("$metadata")
+  if list_has TOOLS nodejs; then
+    upstream_npm_version=$(<"$PAYLOAD_DIR/node/.upstream-npm-version")
+  fi
+  write_online_tool_metadata "$metadata" "$upstream_npm_version"
+  finish_online_setup "$REPO_DIR" "$metadata"
 }
 
 load_config() {
-  # shellcheck source=system.env
-  source "$REPO_DIR/system.env"
+  load_system_config "$REPO_DIR/system.env"
   validate_tool_config asdf
   select_default_release TOOL_RELEASES asdf
   ASDF_VERSION=$RELEASE_VERSION
+  artifact_layout asdf "$ASDF_VERSION" "$RELEASE_ASSET"
   configure_online_paths
   ASDF_DATA_DIR=${ASDF_DATA_DIR:-$HOME/.asdf}
   export ASDF_DATA_DIR
@@ -241,7 +248,7 @@ install_asdf() {
     archive="$stage/$RELEASE_ASSET"
     executable="$stage/${SPEC_DESTS[0]}"
     download_file "$RELEASE_URL" "$archive"
-    prepare_artifact TOOL_RELEASES asdf "$ASDF_VERSION" "$archive" "$stage"
+    prepare_artifact asdf "$ASDF_VERSION" "$RELEASE_ASSET" "$RELEASE_SHA256" "$archive" "$stage"
     output=$("$executable" version 2>&1)
     [[ $output == *"$ASDF_VERSION"* ]] ||
       report_error "downloaded asdf did not report $ASDF_VERSION"
@@ -351,8 +358,9 @@ source "$REPO_DIR/scripts/setup-lib"
 source "$REPO_DIR/scripts/setup-catalog-lib"
 source "$REPO_DIR/scripts/setup-recipes-lib"
 source "$REPO_DIR/scripts/setup-tools-lib"
-# shellcheck source=tools.env
-source "$REPO_DIR/tools.env"
+source "$REPO_DIR/scripts/setup-online-lib"
+source "$REPO_DIR/scripts/setup-system-lib"
+load_tool_catalog "$REPO_DIR/tools.env"
 # Initialize cleanup paths even when --help exits before setup.
 declare -a TEMP_PATHS=()
 trap cleanup_setup EXIT

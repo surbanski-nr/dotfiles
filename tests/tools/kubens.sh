@@ -8,12 +8,12 @@ health_kubens() {
   local kubeconfig=$work/kubeconfig
   health_kubeconfig "$kubeconfig" || return
   [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubens" --current) == default ]] || {
-    die 'kubens did not read the isolated namespace'
+    report_error 'kubens did not read the isolated namespace'
     return 1
   }
   KUBECONFIG="$kubeconfig" "$release/bin/kubens" --force offline-namespace || return
   [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubens" --current) == offline-namespace ]] || {
-    die 'kubens did not update the isolated namespace'
+    report_error 'kubens did not update the isolated namespace'
     return 1
   }
 }

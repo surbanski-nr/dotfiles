@@ -1,8 +1,25 @@
 #!/usr/bin/env bash
 
-system_error() {
-  printf '%s: %s\n' "${SETUP_NAME:-${0##*/}}" "$*" >&2
-  return 1
+load_system_config() {
+  local file=$1
+
+  if [[ ! -r $file ]]; then
+    report_error "cannot read system configuration: $file"
+    return 1
+  fi
+  # shellcheck disable=SC1090
+  source "$file"
+}
+
+load_platform_config() {
+  local file=$1
+
+  if [[ ! -r $file ]]; then
+    report_error "cannot read platform configuration: $file"
+    return 1
+  fi
+  # shellcheck disable=SC1090
+  source "$file"
 }
 
 system_validate_platform_name() {
@@ -10,7 +27,7 @@ system_validate_platform_name() {
     debian-13-x86_64 | ubuntu-24.04-x86_64 | ubuntu-26.04-x86_64 | amzn-2023-x86_64)
       ;;
     *)
-      system_error "unsupported platform: $1"
+      report_error "unsupported platform: $1"
       return 1
       ;;
   esac
@@ -25,33 +42,29 @@ system_validate_release_host() {
   expected_id=${expected_os%%-*}
   expected_version=${expected_os#*-}
   [[ -r $os_release_file ]] || {
-    system_error "cannot read OS identity: $os_release_file"
+    report_error "cannot read OS identity: $os_release_file"
     return 1
   }
   # shellcheck disable=SC1090
   source "$os_release_file" || return
   [[ $ID == "$expected_id" ]] || {
-    system_error "$platform requires OS ID $expected_id, found ${ID:-unknown}"
+    report_error "$platform requires OS ID $expected_id, found ${ID:-unknown}"
     return 1
   }
   [[ $VERSION_ID == "$expected_version" ]] || {
-    system_error "$platform requires OS version $expected_version, found ${VERSION_ID:-unknown}"
+    report_error "$platform requires OS version $expected_version, found ${VERSION_ID:-unknown}"
     return 1
   }
   [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || {
-    system_error 'only Linux x86-64 is supported'
+    report_error 'only Linux x86-64 is supported'
     return 1
   }
 }
 
 setup_system() {
   local package_role=$1
-  SETUP_NAME=${SETUP_NAME:-${0##*/}}
-  system_validate_host
+
   printf '%s: preparing %s packages on %s\n' "$SETUP_NAME" "$package_role" "$PLATFORM"
-  SETUP_WARNINGS=0
-  SETUP_TEMP_DIR=$(mktemp -d)
-  trap 'find "$SETUP_TEMP_DIR" -depth -delete' EXIT
   install_system_packages "$PLATFORM" "$package_role" false system_setup_package_command
   system_install_docker
   system_verify_packages "$package_role"
@@ -63,16 +76,16 @@ setup_system() {
 system_validate_host() {
   local os_release_file=${SETUP_SYSTEM_OS_RELEASE_FILE:-/etc/os-release}
 
-  [[ $(uname -s) == Linux ]] || system_error 'only Linux is supported'
-  [[ $(uname -m) == x86_64 ]] || system_error 'only Linux x86-64 is supported'
-  [[ -r $os_release_file ]] || system_error "cannot read $os_release_file"
+  [[ $(uname -s) == Linux ]] || report_error 'only Linux is supported'
+  [[ $(uname -m) == x86_64 ]] || report_error 'only Linux x86-64 is supported'
+  [[ -r $os_release_file ]] || report_error "cannot read $os_release_file"
   # shellcheck disable=SC1090
   source "$os_release_file"
   system_validate_platform_name "${ID:-}-${VERSION_ID:-}-x86_64" || return
   PLATFORM="$ID:$VERSION_ID"
   ROOT_COMMAND=()
   if ((EUID != 0)); then
-    command -v sudo >/dev/null 2>&1 || system_error 'required command is missing: sudo'
+    command -v sudo >/dev/null 2>&1 || report_error 'required command is missing: sudo'
     ROOT_COMMAND=(sudo --)
   fi
 }
@@ -167,7 +180,7 @@ system_install_docker_repository() {
       ;;
   esac
   if [[ -e $etc_dir/apt/sources.list.d/docker.list || -L $etc_dir/apt/sources.list.d/docker.list ]]; then
-    system_error 'legacy Docker repository docker.list exists; review and migrate it before rerunning' || exit 1
+    report_error 'legacy Docker repository docker.list exists; review and migrate it before rerunning' || exit 1
   fi
 
   stage=$SETUP_TEMP_DIR/docker
@@ -181,7 +194,7 @@ system_install_docker_repository() {
     "Signed-By: $key_file" >"$stage/docker.sources" || exit
   if [[ -e $source_file || -L $source_file ]]; then
     if [[ -L $source_file ]] || ! cmp -s "$stage/docker.sources" "$source_file"; then
-      system_error "existing Docker repository differs: $source_file; review it before rerunning" || exit 1
+      report_error "existing Docker repository differs: $source_file; review it before rerunning" || exit 1
     fi
   fi
   system_setup_command 'Docker signing key download' \
@@ -202,12 +215,12 @@ system_install_docker() {
   fi
   if ((EUID == 0)); then
     SETUP_USER=${SUDO_USER:-}
-    [[ -n $SETUP_USER ]] || system_error 'run Docker installation as the intended ordinary user, directly or through sudo'
+    [[ -n $SETUP_USER ]] || report_error 'run Docker installation as the intended ordinary user, directly or through sudo'
   else
     SETUP_USER=$(id -un)
   fi
-  user_id=$(id -u -- "$SETUP_USER") || system_error "unknown setup user: $SETUP_USER"
-  [[ $user_id != 0 ]] || system_error 'Docker installation needs an ordinary user for group membership'
+  user_id=$(id -u -- "$SETUP_USER") || report_error "unknown setup user: $SETUP_USER"
+  [[ $user_id != 0 ]] || report_error 'Docker installation needs an ordinary user for group membership'
 
   case $PLATFORM in
     debian:* | ubuntu:*)
@@ -224,7 +237,7 @@ system_install_docker() {
             system_warning "Docker setup needs $prerequisite; skipping Docker installation"
             return 0
           fi
-          system_error "Docker setup needs $prerequisite"
+          report_error "Docker setup needs $prerequisite"
         fi
       done
       system_install_docker_repository || return 0
@@ -269,7 +282,7 @@ system_verify_packages() {
     elif ((SETUP_WARNINGS > 0)); then
       system_warning "package installation did not provide $command_name"
     else
-      system_error "package installation did not provide $command_name"
+      report_error "package installation did not provide $command_name"
     fi
   done
   ((SETUP_WARNINGS == 0)) || return 0
@@ -292,7 +305,7 @@ system_package_list() {
       family=AMZN
       ;;
     *)
-      system_error "unsupported system package platform: $platform"
+      report_error "unsupported system package platform: $platform"
       return
       ;;
   esac
@@ -307,7 +320,7 @@ system_package_list() {
       role_platform=("${specific[@]}")
       ;;
     *)
-      system_error "unknown system package role: $role"
+      report_error "unknown system package role: $role"
       return
       ;;
   esac
@@ -348,7 +361,7 @@ install_system_packages() {
         "${SETUP_SYSTEM_PACKAGES[@]}"
       ;;
     *)
-      system_error "unsupported system package platform: $platform"
+      report_error "unsupported system package platform: $platform"
       ;;
   esac
 }

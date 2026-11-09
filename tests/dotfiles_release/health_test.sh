@@ -258,8 +258,8 @@ bash -c 'source "$1"; source "$4"; health_stage ripgrep health_rg "$2" "$3"' \
 checker_fixture=$test_root/checker-fixture
 mkdir -p "$checker_fixture/scripts" "$checker_fixture/tests/tools"
 cp "$repo_dir/tests/tools_runner.sh" "$checker_fixture/tests/tools_runner.sh"
-cp "$repo_dir/scripts/dotfiles-release" \
-  "$repo_dir/scripts/setup-tools-lib" "$repo_dir/scripts/setup-system-lib" "$checker_fixture/scripts/"
+cp "$repo_dir/scripts/dotfiles-release" "$checker_fixture/scripts/"
+cp "$repo_dir/scripts/"*-lib "$checker_fixture/scripts/"
 cp "$repo_dir/tools.env" "$repo_dir/system.env" "$checker_fixture/"
 printf "TOOL_CHECKS[fixture-cli]='FIXTURE_CLI_VERSION|'\n" >>"$checker_fixture/tools.env"
 cp "$repo_dir/tests/tools/fixture.sh" "$checker_fixture/tests/tools/fixture.sh"

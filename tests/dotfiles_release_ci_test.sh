@@ -46,8 +46,8 @@ cp "$repo_dir/scripts/dotfiles-release-ci" "$workflow_dir/scripts/dotfiles-relea
 ln -s "$repo_dir/tools.env" "$workflow_dir/tools.env"
 ln -s "$repo_dir/tests/tools" "$workflow_dir/tests/tools"
 ln -s "$repo_dir/tests/tools_runner.sh" "$workflow_dir/tests/tools_runner.sh"
-for script in dotfiles-release setup-tools-lib setup-system-lib; do
-  ln -s "$repo_dir/scripts/$script" "$workflow_dir/scripts/$script"
+for script in "$repo_dir/scripts/dotfiles-release" "$repo_dir/scripts/"*-lib; do
+  ln -s "$script" "$workflow_dir/scripts/${script##*/}"
 done
 printf '%s\n' \
   'DOCKER_IMAGES[debian-13-x86_64]=fixture.invalid/debian:13@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
@@ -72,11 +72,7 @@ cp "$repo_dir/scripts/dotfiles-release" "$source_dir/scripts/dotfiles-release"
 printf '\n# Fixture release snapshot differs from workflow tooling.\n' >>"$source_dir/scripts/dotfiles-release"
 printf '#!/bin/sh\nexit 0\n' >"$source_dir/scripts/build-dotfiles-release"
 cp "$repo_dir/scripts/build-standalone-script" "$source_dir/scripts/build-standalone-script"
-cp "$repo_dir/scripts/setup-lib" "$source_dir/scripts/setup-lib"
-cp "$repo_dir/scripts/setup-catalog-lib" "$source_dir/scripts/setup-catalog-lib"
-cp "$repo_dir/scripts/setup-recipes-lib" "$source_dir/scripts/setup-recipes-lib"
-cp "$repo_dir/scripts/setup-tools-lib" "$source_dir/scripts/setup-tools-lib"
-cp "$repo_dir/scripts/setup-system-lib" "$source_dir/scripts/setup-system-lib"
+cp "$repo_dir/scripts/"*-lib "$source_dir/scripts/"
 cp "$repo_dir/system.env" "$source_dir/system.env"
 printf 'SYSTEM_RUNTIME_PACKAGES+=(fixture-release-package)\n' >>"$source_dir/system.env"
 git -C "$source_dir" init -q
@@ -252,7 +248,9 @@ HOME="$test_root/empty-home" bash "$TEST_RELEASE_ASSETS/dotfiles-release" verify
 (cd "$TEST_RELEASE_ASSETS" && sha256sum --check --strict "$archive.sha256" >/dev/null)
 [[ -s $TEST_RELEASE_ASSETS/dotfiles-release.sha256 ]] || fail 'published standalone manager has no checksum'
 (cd "$TEST_RELEASE_ASSETS" && sha256sum --check --strict dotfiles-release.sha256 >/dev/null)
-for source in 'system.env (runtime and Docker)' 'tools.env (TOOL_CHECKS)' scripts/setup-system-lib scripts/dotfiles-release; do
+for source in 'system.env (runtime and Docker)' 'tools.env (TOOL_CHECKS)' \
+  scripts/setup-lib scripts/setup-system-lib scripts/setup-tools-lib \
+  scripts/dotfiles-release-lib scripts/dotfiles-release; do
   if ! grep -Fx "##### BEGIN $source #####" "$TEST_RELEASE_ASSETS/dotfiles-release" >/dev/null ||
     ! grep -Fx "##### END $source #####" "$TEST_RELEASE_ASSETS/dotfiles-release" >/dev/null; then
     fail "published manager does not identify its $source source block"

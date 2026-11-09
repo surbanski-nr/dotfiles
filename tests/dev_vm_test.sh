@@ -26,6 +26,7 @@ cp "$repo_dir/release.env" "$checkout/release.env"
 printf 'DEFAULT_DEV_PLATFORM=debian13\n' >>"$checkout/release.env"
 cp "$checkout/release.env" "$test_root/dev-config.env"
 cp "$repo_dir/scripts/dev-vm" "$repo_dir/scripts/dev-vm-setup" "$checkout/scripts/"
+cp "$repo_dir/scripts/"*-lib "$checkout/scripts/"
 # shellcheck source=../release.env
 source "$checkout/release.env"
 ln -s "$repo_dir/tests/fixtures/dev-vm/lxc" "$test_root/bin/lxc"

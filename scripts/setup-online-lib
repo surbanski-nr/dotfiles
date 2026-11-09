@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+
+configure_online_paths() {
+  local root=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}
+
+  ONLINE_ROOT=${root%/}/online
+  BIN_DIR=$ONLINE_ROOT/bin
+  PAYLOAD_DIR=$ONLINE_ROOT/tools
+  TMUX_PLUGIN_DIR=$ONLINE_ROOT/share/tmux/plugins
+}
+
+acquire_online_setup_lock() {
+  local directory=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases} descriptor
+
+  if [[ $directory != /* || $directory == / || $directory == "$HOME" ||
+    $directory == *$'\n'* || $directory == *$'\t'* ||
+    /$directory/ == *'/../'* || /$directory/ == *'/./'* ||
+    -L $directory || ( -e $directory && ! -d $directory ) ]]; then
+    report_error "invalid release root: $directory"
+    return 1
+  fi
+  mkdir -p -- "$directory" || return
+  # Share the directory lock with dotfiles-release, including offline activation.
+  exec {descriptor}<"$directory" || return
+  if ! flock -x -n "$descriptor"; then
+    report_error 'another installation or release operation is running'
+    return 1
+  fi
+}
+
+prepare_online_directories() {
+  local path target
+
+  for path in "$ONLINE_ROOT" "$BIN_DIR" "$PAYLOAD_DIR" "$PAYLOAD_DIR/bin" \
+    "$ONLINE_ROOT/state" "$ONLINE_ROOT/config" "$ONLINE_ROOT/share" \
+    "$ONLINE_ROOT/share/tmux" "$TMUX_PLUGIN_DIR"; do
+    if [[ -L $path || ( -e $path && ! -d $path ) ]]; then
+      report_error "invalid online directory: $path"
+      return 1
+    fi
+    mkdir -p -- "$path" || return
+  done
+  path=$ONLINE_ROOT/release.env
+  if [[ -e $path || -L $path ]]; then
+    if ! [[ -f $path && ! -L $path &&
+      $(head -n 1 "$path") == RELEASE_ID=online ]]; then
+      report_error "refusing unmanaged online metadata: $path"
+      return 1
+    fi
+  fi
+  path=$ONLINE_ROOT/dotfiles
+  if [[ -e $path || -L $path ]]; then
+    if ! [[ -L $path && ( $(readlink -- "$path") == "$REPO_DIR" ||
+      -f $ONLINE_ROOT/release.env ) ]]; then
+      report_error "refusing unmanaged online checkout: $path"
+      return 1
+    fi
+  fi
+  path=$BIN_DIR/dotfiles-release
+  target=../dotfiles/scripts/dotfiles-release
+  if [[ -e $path || -L $path ]]; then
+    if ! [[ -L $path && $(readlink -- "$path") == "$target" ]]; then
+      report_error "refusing unmanaged manager command: $path"
+      return 1
+    fi
+  fi
+  if list_has TOOLS nvim; then
+    path=$ONLINE_ROOT/config/nvim2
+    target=../dotfiles/nvim2/.config/nvim2
+    if [[ -e $path || -L $path ]]; then
+      if ! [[ -L $path && $(readlink -- "$path") == "$target" ]]; then
+        report_error "refusing unmanaged online configuration: $path"
+        return 1
+      fi
+    fi
+    path=$ONLINE_ROOT/share/nvim2
+    if [[ -L $path || ( -e $path && ! -d $path ) ]]; then
+      report_error "invalid online data directory: $path"
+      return 1
+    fi
+  fi
+}
+
+finish_online_setup() {
+  local repository=$1 metadata=$2 temporary old_source='' config target
+
+  if [[ -L $ONLINE_ROOT/dotfiles ]]; then
+    old_source=$(readlink -- "$ONLINE_ROOT/dotfiles") || return
+  fi
+  temporary=$ONLINE_ROOT/.dotfiles.link.$$
+  TEMP_PATHS+=("$temporary")
+  ln -s -- "$repository" "$temporary" || return
+  mv -T -- "$temporary" "$ONLINE_ROOT/dotfiles" || return
+  if ! mv -T -- "$metadata" "$ONLINE_ROOT/release.env"; then
+    if [[ -n $old_source ]]; then
+      ln -s -- "$old_source" "$temporary" || return
+      mv -T -- "$temporary" "$ONLINE_ROOT/dotfiles" || return
+    else
+      unlink -- "$ONLINE_ROOT/dotfiles" || return
+    fi
+    return 1
+  fi
+  if list_has TOOLS nvim; then
+    config=$ONLINE_ROOT/config/nvim2
+    target=../dotfiles/nvim2/.config/nvim2
+    if [[ ! -L $config ]]; then
+      ln -s -- "$target" "$config" || return
+    fi
+    mkdir -p -- "$ONLINE_ROOT/share/nvim2" || return
+  fi
+  temporary=$BIN_DIR/.dotfiles-release.link.$$
+  TEMP_PATHS+=("$temporary")
+  ln -s ../dotfiles/scripts/dotfiles-release "$temporary" || return
+  mv -T -- "$temporary" "$BIN_DIR/dotfiles-release"
+}

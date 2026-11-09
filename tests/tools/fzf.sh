@@ -8,7 +8,7 @@ health_fzf() {
   output=$(printf 'alpha\noffline needle\nomega\n' | "$release/bin/fzf" --filter='offline needle') || return
   printf '%s\n' "$output"
   [[ $output == 'offline needle' ]] || {
-    die 'fzf functional check failed'
+    report_error 'fzf functional check failed'
     return 1
   }
 }

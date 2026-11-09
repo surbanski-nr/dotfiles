@@ -1,67 +1,5 @@
 #!/usr/bin/env bash
 
-configure_online_paths() {
-  local root=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}
-
-  ONLINE_ROOT=${root%/}/online
-  BIN_DIR=$ONLINE_ROOT/bin
-  PAYLOAD_DIR=$ONLINE_ROOT/tools
-  TMUX_PLUGIN_DIR=$ONLINE_ROOT/share/tmux/plugins
-}
-
-prepare_online_directories() {
-  local path target
-
-  for path in "$ONLINE_ROOT" "$BIN_DIR" "$PAYLOAD_DIR" "$PAYLOAD_DIR/bin" \
-    "$ONLINE_ROOT/state" "$ONLINE_ROOT/config" "$ONLINE_ROOT/share" \
-    "$ONLINE_ROOT/share/tmux" "$TMUX_PLUGIN_DIR"; do
-    if [[ -L $path || ( -e $path && ! -d $path ) ]]; then
-      report_error "invalid online directory: $path"
-      return 1
-    fi
-    mkdir -p -- "$path" || return
-  done
-  path=$ONLINE_ROOT/release.env
-  if [[ -e $path || -L $path ]]; then
-    if ! [[ -f $path && ! -L $path &&
-      $(head -n 1 "$path") == RELEASE_ID=online ]]; then
-      report_error "refusing unmanaged online metadata: $path"
-      return 1
-    fi
-  fi
-  path=$ONLINE_ROOT/dotfiles
-  if [[ -e $path || -L $path ]]; then
-    if ! [[ -L $path && ( $(readlink -- "$path") == "$REPO_DIR" ||
-      -f $ONLINE_ROOT/release.env ) ]]; then
-      report_error "refusing unmanaged online checkout: $path"
-      return 1
-    fi
-  fi
-  path=$BIN_DIR/dotfiles-release
-  target=../dotfiles/scripts/dotfiles-release
-  if [[ -e $path || -L $path ]]; then
-    if ! [[ -L $path && $(readlink -- "$path") == "$target" ]]; then
-      report_error "refusing unmanaged manager command: $path"
-      return 1
-    fi
-  fi
-  if list_has TOOLS nvim; then
-    path=$ONLINE_ROOT/config/nvim2
-    target=../dotfiles/nvim2/.config/nvim2
-    if [[ -e $path || -L $path ]]; then
-      if ! [[ -L $path && $(readlink -- "$path") == "$target" ]]; then
-        report_error "refusing unmanaged online configuration: $path"
-        return 1
-      fi
-    fi
-    path=$ONLINE_ROOT/share/nvim2
-    if [[ -L $path || ( -e $path && ! -d $path ) ]]; then
-      report_error "invalid online data directory: $path"
-      return 1
-    fi
-  fi
-}
-
 tool_content_digest() {
   local root=$1
   shift
@@ -95,117 +33,6 @@ read_tool_state() {
       return 1
     fi
   done
-}
-
-write_tool_metadata() {
-  local tools_name=$1 file=$2 tool fields field value
-  local -n metadata_tools=$tools_name
-  local -A emitted=()
-
-  for tool in "${metadata_tools[@]}"; do
-    fields=$(tool_metadata_fields "$tool") || return
-    if [[ -z $fields ]]; then
-      continue
-    fi
-    while IFS= read -r field; do
-      if [[ -v emitted[$field] ]]; then
-        continue
-      fi
-      case $field in
-        *_COMMIT)
-          select_git_plugin TMUX_PLUGINS "$tool" || return
-          value=$PLUGIN_COMMIT
-          ;;
-        *_VERSIONS)
-          release_versions TOOL_RELEASES "$tool" || return
-          value=$(
-            IFS=,
-            printf '%s' "${RELEASE_VERSIONS[*]}"
-          )
-          ;;
-        PYTHON_BUILD)
-          if [[ $tools_name == TOOLS ]]; then
-            continue
-          fi
-          select_default_release TOOL_RELEASES python || return
-          if ! [[ $RELEASE_URL =~ /releases/download/([0-9]{8})/ ]]; then
-            return 1
-          fi
-          value=${BASH_REMATCH[1]}
-          ;;
-        NODE_UPSTREAM_NPM_VERSION)
-          value=$NODE_UPSTREAM_NPM_VERSION
-          ;;
-        NPM_VERSION)
-          select_default_release TOOL_RELEASES npm || return
-          value=$RELEASE_VERSION
-          ;;
-        *)
-          select_default_release TOOL_RELEASES "$tool" || return
-          value=$RELEASE_VERSION
-          ;;
-      esac
-      printf '%s=%s\n' "$field" "$value" >>"$file" || return
-      emitted[$field]=1
-    done <<<"$fields"
-  done
-}
-
-finish_online_setup() {
-  local repository=$1 metadata temporary old_source='' config target
-
-  if [[ -L $ONLINE_ROOT/dotfiles ]]; then
-    old_source=$(readlink -- "$ONLINE_ROOT/dotfiles") || return
-  fi
-  metadata=$(mktemp "$ONLINE_ROOT/.release-env.XXXXXX") || return
-  TEMP_PATHS+=("$metadata")
-  printf 'RELEASE_ID=online\nTOOLS=%s\n' "$(
-    IFS=,
-    printf '%s' "${TOOLS[*]}"
-  )" >"$metadata" || return
-  NODE_UPSTREAM_NPM_VERSION=${NODE_UPSTREAM_NPM_VERSION:-}
-  if list_has TOOLS nodejs; then
-    NODE_UPSTREAM_NPM_VERSION=$(<"$PAYLOAD_DIR/node/.upstream-npm-version")
-  fi
-  write_tool_metadata TOOLS "$metadata" || return
-
-  temporary=$ONLINE_ROOT/.dotfiles.link.$$
-  TEMP_PATHS+=("$temporary")
-  ln -s -- "$repository" "$temporary" || return
-  mv -T -- "$temporary" "$ONLINE_ROOT/dotfiles" || return
-  if ! mv -T -- "$metadata" "$ONLINE_ROOT/release.env"; then
-    if [[ -n $old_source ]]; then
-      ln -s -- "$old_source" "$temporary" || return
-      mv -T -- "$temporary" "$ONLINE_ROOT/dotfiles" || return
-    else
-      unlink -- "$ONLINE_ROOT/dotfiles" || return
-    fi
-    return 1
-  fi
-  if list_has TOOLS nvim; then
-    config=$ONLINE_ROOT/config/nvim2
-    target=../dotfiles/nvim2/.config/nvim2
-    if [[ ! -L $config ]]; then
-      ln -s -- "$target" "$config" || return
-    fi
-    mkdir -p -- "$ONLINE_ROOT/share/nvim2" || return
-  fi
-  temporary=$BIN_DIR/.dotfiles-release.link.$$
-  TEMP_PATHS+=("$temporary")
-  ln -s ../dotfiles/scripts/dotfiles-release "$temporary" || return
-  mv -T -- "$temporary" "$BIN_DIR/dotfiles-release"
-}
-
-list_has() {
-  local list_name=$1 requested=$2 item
-  local -n items_ref=$list_name
-
-  for item in "${items_ref[@]}"; do
-    if [[ $item == "$requested" ]]; then
-      return 0
-    fi
-  done
-  return 1
 }
 
 tool_commands() {
@@ -298,6 +125,28 @@ validate_tool_dependencies() {
   done
 }
 
+validate_tool_selection() {
+  local tools_name=$1 mode=$2 tool commands
+  local -n selected_tools=$tools_name
+
+  if [[ $mode == offline ]]; then
+    validate_tool_dependencies "$tools_name" || return
+  fi
+  for tool in "${selected_tools[@]}"; do
+    if ! tool_metadata_fields "$tool" >/dev/null; then
+      report_error "unsupported $mode tool: $tool"
+      return 1
+    fi
+    if [[ $mode == online && $tool != python && $tool != tmux-* ]]; then
+      commands=$(tool_commands "$tool") || return
+      if [[ -z $commands ]]; then
+        report_error "TOOLS tool $tool is not supported by setup-tools"
+        return 1
+      fi
+    fi
+  done
+}
+
 tool_config_package() {
   case $1 in
     nvim)
@@ -373,7 +222,7 @@ verify_nvim_inventory() {
 
   if ! [[ -f $inventory && ! -L $inventory &&
     -f $requirements && ! -L $requirements ]]; then
-    die 'Neovim tool inventory or requirements are missing'
+    report_error 'Neovim tool inventory or requirements are missing'
     return 1
   fi
   while IFS=$'\t' read -r package version python commands extra; do
@@ -382,14 +231,14 @@ verify_nvim_inventory() {
       $python =~ ^(-|[a-z0-9][a-z0-9-]*)$ &&
       $commands =~ ^(-|[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+)*)$ &&
       $seen != *" $package "* ]]; then
-      die 'Neovim tool inventory contains invalid or duplicate data'
+      report_error 'Neovim tool inventory contains invalid or duplicate data'
       return 1
     fi
     seen+="$package "
     path=$release/share/nvim2/mason/packages/$package
     if ! [[ -d $path && ! -L $path &&
       -f $path/mason-receipt.json && ! -L $path/mason-receipt.json ]]; then
-      die "declared Mason package or receipt is missing: $package"
+      report_error "declared Mason package or receipt is missing: $package"
       return 1
     fi
     if [[ $python != - ]]; then
@@ -403,12 +252,12 @@ verify_nvim_inventory() {
       path=$release/share/nvim2/mason/bin/$command_name
       if [[ $mode == archive && $python != - ]]; then
         if [[ ! -L $path ]]; then
-          die "declared Mason launcher is missing: $command_name"
+          report_error "declared Mason launcher is missing: $command_name"
           return 1
         fi
       else
         if [[ ! -x $path ]]; then
-          die "declared Mason launcher is missing or not executable: $command_name"
+          report_error "declared Mason launcher is missing or not executable: $command_name"
           return 1
         fi
       fi
@@ -420,14 +269,14 @@ verify_nvim_inventory() {
     fi
     package=${path##*/}
     if [[ $seen != *" $package "* ]]; then
-      die "undeclared Mason package is bundled: $package"
+      report_error "undeclared Mason package is bundled: $package"
       return 1
     fi
   done
   expected_python=$(printf '%s' "$python_rows" | LC_ALL=C sort) || return
   actual_python=$(LC_ALL=C sort "$release/python-locks/inventory.tsv") || return
   if [[ $expected_python != "$actual_python" ]]; then
-    die 'Python inventory differs from declared Mason packages'
+    report_error 'Python inventory differs from declared Mason packages'
     return 1
   fi
   seen=' '
@@ -436,29 +285,29 @@ verify_nvim_inventory() {
       nodejs | python | go | rg | terraform)
         ;;
       *)
-        die "invalid Neovim tool requirement: $dependency"
+        report_error "invalid Neovim tool requirement: $dependency"
         return 1
         ;;
     esac
     if [[ $seen == *" $dependency "* ]]; then
-      die "duplicate Neovim tool requirement: $dependency"
+      report_error "duplicate Neovim tool requirement: $dependency"
       return 1
     fi
     seen+="$dependency "
     if ! list_has "$tools_name" "$dependency"; then
-      die "configured Neovim tools require $dependency in OFFLINE_RELEASE_TOOLS"
+      report_error "configured Neovim tools require $dependency in OFFLINE_RELEASE_TOOLS"
       return 1
     fi
   done <"$requirements"
   if [[ -n $python_rows ]]; then
     if ! list_has "$tools_name" python; then
-      die 'Python-backed Mason packages require bundled Python'
+      report_error 'Python-backed Mason packages require bundled Python'
       return 1
     fi
   fi
   if list_has "$tools_name" yamllint; then
     if [[ $expected_python != *yamllint$'\t'* ]]; then
-      die 'the public yamllint command requires yamllint in custom.lsp M.tools'
+      report_error 'the public yamllint command requires yamllint in custom.lsp M.tools'
       return 1
     fi
   fi
@@ -471,35 +320,35 @@ python_inventory_packages() {
   local -a packages=()
 
   if ! [[ -f $inventory && ! -L $inventory ]]; then
-    die 'Python package inventory is missing'
+    report_error 'Python package inventory is missing'
     return 1
   fi
   while IFS=$'\t' read -r package version extra; do
     if ! [[ -z $extra && $package =~ ^[a-z0-9][a-z0-9-]*$ &&
       $version =~ ^[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]]; then
-      die 'Python package inventory contains invalid data'
+      report_error 'Python package inventory contains invalid data'
       return 1
     fi
     if [[ $seen == *" $package "* ]]; then
-      die "duplicate Python package in inventory: $package"
+      report_error "duplicate Python package in inventory: $package"
       return 1
     fi
     seen+="$package "
     for lock in "$release/python-locks/$package.in" "$release/python-locks/$package.lock"; do
       if ! [[ -f $lock && ! -L $lock ]]; then
-        die "Python input or lock is missing: $package"
+        report_error "Python input or lock is missing: $package"
         return 1
       fi
     done
     requirement=$(awk '!/^#/ && NF { print; exit }' "$release/python-locks/$package.in") || return
     if [[ $requirement != "$package==$version" ]]; then
-      die "Python input does not match Mason inventory: $package==$version"
+      report_error "Python input does not match Mason inventory: $package==$version"
       return 1
     fi
     if ! awk -v requirement="$package==$version" \
       '$1 == requirement { found = 1 } END { exit !found }' \
       "$release/python-locks/$package.lock"; then
-      die "Python lock does not match Mason inventory: $package==$version"
+      report_error "Python lock does not match Mason inventory: $package==$version"
       return 1
     fi
     packages+=("$package")
@@ -510,7 +359,7 @@ python_inventory_packages() {
     wc -l) || return
   if ! [[ $input_count -eq ${#packages[@]} &&
     $lock_count -eq ${#packages[@]} ]]; then
-    die 'Python lock set differs from the Mason inventory'
+    report_error 'Python lock set differs from the Mason inventory'
     return 1
   fi
   if ((${#packages[@]} > 0)); then
@@ -533,7 +382,7 @@ python_mason_package() {
       print name
     }
   ' "$inventory"; then
-    die "Python package has no unique Mason owner: $python_package"
+    report_error "Python package has no unique Mason owner: $python_package"
     return 1
   fi
 }

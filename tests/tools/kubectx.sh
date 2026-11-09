@@ -10,12 +10,12 @@ health_kubectx() {
   output=$(KUBECONFIG="$kubeconfig" "$release/bin/kubectx" --current) || return
   printf 'kubectx-current=%s\n' "$output"
   [[ $output == offline-a ]] || {
-    die 'kubectx did not read the isolated kubeconfig'
+    report_error 'kubectx did not read the isolated kubeconfig'
     return 1
   }
   KUBECONFIG="$kubeconfig" "$release/bin/kubectx" offline-b || return
   [[ $(KUBECONFIG="$kubeconfig" "$release/bin/kubectx" --current) == offline-b ]] || {
-    die 'kubectx did not switch the isolated context'
+    report_error 'kubectx did not switch the isolated context'
     return 1
   }
 }

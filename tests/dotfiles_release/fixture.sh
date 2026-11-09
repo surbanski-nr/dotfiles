@@ -4,8 +4,11 @@
 # shellcheck disable=SC2034
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
-# shellcheck source=../../tools.env
-source "$repo_dir/tools.env"
+# shellcheck source=../../scripts/setup-lib
+source "$repo_dir/scripts/setup-lib"
+# shellcheck source=../../scripts/setup-catalog-lib
+source "$repo_dir/scripts/setup-catalog-lib"
+load_tool_catalog "$repo_dir/tools.env"
 # shellcheck source=../../scripts/setup-tools-lib
 source "$repo_dir/scripts/setup-tools-lib"
 

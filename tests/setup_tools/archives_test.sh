@@ -37,21 +37,17 @@ tar -C "$tmux_work" -czf "$test_root/tmux.tar.gz" "tmux-$TMUX_VERSION"
 TMUX_SHA256=$(sha256sum "$test_root/tmux.tar.gz" | awk '{print $1}')
 # shellcheck source=../../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
-source "$repo_dir/scripts/setup-catalog-lib"
 source "$repo_dir/scripts/setup-recipes-lib"
-source "$repo_dir/scripts/setup-tools-lib"
-# Used through a nameref in prepare_artifact.
-# shellcheck disable=SC2034
-declare -A TEST_RELEASES=([tmux]=$'\n'"$TMUX_VERSION|https://example.invalid/tmux.tar.gz|$TMUX_SHA256"$'\n')
-prepare_artifact TEST_RELEASES tmux "$TMUX_VERSION" "$test_root/tmux.tar.gz" "$tmux_destination"
+(
+  unset -f select_release select_default_release release_versions
+  prepare_artifact tmux "$TMUX_VERSION" tmux.tar.gz "$TMUX_SHA256" \
+    "$test_root/tmux.tar.gz" "$tmux_destination"
+)
 [[ -x $tmux_destination/tmux-$TMUX_VERSION/tmux ]] ||
   fail 'shared tree extractor did not preserve an equal source and destination name'
 
 bad_destination=$test_root/bad-checksum-destination
-# The shared library reads the catalog through a nameref.
-# shellcheck disable=SC2034
-TEST_RELEASES[tmux]="$TMUX_VERSION|https://example.invalid/tmux.tar.gz|$(printf '%064d' 0)"
-if prepare_artifact TEST_RELEASES tmux "$TMUX_VERSION" \
+if prepare_artifact tmux "$TMUX_VERSION" tmux.tar.gz "$(printf '%064d' 0)" \
   "$test_root/tmux.tar.gz" "$bad_destination" >"$test_root/bad-checksum.log" 2>&1; then
   fail 'shared artifact preparation accepted an invalid checksum'
 fi

@@ -9,7 +9,7 @@ health_rg() {
   output=$("$release/bin/rg" --fixed-strings 'offline needle' "$work/input.txt") || return
   printf '%s\n' "$output"
   [[ $output == *'offline needle'* ]] || {
-    die 'ripgrep functional check failed'
+    report_error 'ripgrep functional check failed'
     return 1
   }
 }

@@ -197,19 +197,47 @@ override those defaults.
 Existing binaries or links without that record are rejected without being
 changed; there is no automatic adoption.
 
-The connected installers and offline builder explicitly source the libraries
-they use. `scripts/setup-lib` owns errors, prerequisites, locking and cleanup.
-`scripts/setup-catalog-lib` owns catalog readers and validation, including Git
-plugin records. `scripts/setup-recipes-lib` owns artifact layouts, verification,
-extraction, source compilation and payload preparation for both flows.
-`scripts/setup-tools-lib` owns shared command, dependency, configuration,
-metadata and payload rules, plus connected store publication.
-`scripts/setup-system-lib` owns OS detection and package roles.
-`scripts/setup-tmux-lib` owns pinned tmux Git checkout installation and is
-sourced only by setup-tools and the builder. Sourcing a library does not install
-anything or implicitly source another library.
-Asdf still installs its own executable and delegates plugins/runtimes to asdf;
-no installer is embedded in the standalone offline manager.
+Entry scripts explicitly source the sibling libraries they use and coordinate
+their calls. There is no chain of implicit library imports:
+
+- `scripts/setup-lib` supplies common errors, prerequisites, list membership,
+  locking and cleanup. `report_error()` returns failure; the caller decides
+  whether to return, recover or end the process.
+- `scripts/setup-catalog-lib` loads and validates tool catalogs, selects release
+  and Git plugin records, and writes tool metadata from those records.
+- `scripts/setup-recipes-lib` describes artifact layouts and prepares concrete
+  payloads: hashing, extraction, executable checks and source compilation.
+  It receives the version, asset name, digest and paths from its caller.
+- `scripts/setup-tools-lib` declares shared command, dependency, configuration,
+  metadata-field and payload rules, and checks tool inventories.
+- `scripts/setup-online-lib` manages the connected store, its lock, directories
+  and publication. The caller supplies the checkout and prepared metadata.
+- `scripts/setup-system-lib` loads system/platform configuration and owns OS
+  detection and package roles.
+- `scripts/setup-tmux-lib` installs and verifies tmux Git checkouts using the
+  repository and commit supplied by setup-tools or the builder.
+- `scripts/dotfiles-release-lib` supplies shared release metadata parsing,
+  verification and health checks. The `dotfiles-release` CLI owns activation
+  transactions, rollback, uninstall and its process lifecycle.
+
+For kubectl, the entry script selects a catalog record, downloads its URL and
+passes its version, asset and SHA-256 to the recipe. Shared tool rules declare
+the `kubectl` command and `KUBECTL_VERSIONS` field. The entry script then
+publishes the prepared payload and metadata. Node's additional npm archive and
+tmux's Git pins are also selected explicitly by their entry scripts.
+Libraries can reuse common helpers; catalog validation does not call recipes,
+and recipes do not select catalog records.
+
+`load_tool_catalog(PATH)`, `load_system_config(PATH)` and
+`load_platform_config(PATH)` read trusted Bash configuration from an explicit
+repository or source-snapshot path. Generated package `release.env` is parsed
+as strict metadata by `dotfiles-release-lib`; it is never sourced as code.
+There is no configuration registry or cache. Sourcing a library only defines
+functions; it does not set shell options, initialize installer state, register
+traps or load configuration. Entry scripts own those decisions.
+Asdf still installs its own executable and delegates plugins/runtimes to asdf.
+The standalone manager embeds common runtime checks, without online installers
+or artifact recipes.
 
 Edit OS package lists and their expected commands in `system.env`. Common
 runtime packages are included in every role; build and setup roles add
@@ -235,11 +263,11 @@ and release runtime checks. Arguments are whitespace-separated; empty arguments 
 `--version`. The metadata field is empty for kubectl and Helm, whose retained
 versions are checked through separate lists. Commands such as `node` and `uvx`
 have their own entries even when their releases share a tool record. The
-builder embeds this map and the shared rules from `scripts/setup-tools-lib`
-in the standalone manager, alongside the runtime OS configuration and shared
-setup library, so it works
-outside the checkout. Edit the repository sources and rebuild; do not edit
-generated managers.
+builder embeds this map, the shared rules from `scripts/setup-tools-lib` and
+checks from `scripts/dotfiles-release-lib` in the standalone manager, alongside
+the runtime OS configuration and common setup helpers, so it works outside the
+checkout. Edit the repository sources and rebuild; do not edit generated
+managers.
 
 Kubectl and Helm are installed directly by `setup-tools`, not `setup-asdf`.
 You can select just those tools:
@@ -521,8 +549,11 @@ selection or an asdf plugin.
    public `SPEC_LINKS`. For a standalone executable, follow
    `mytool:mytool-$version`; the shared normalization puts its payload in
    `tools/bin/mytool-VERSION` and makes `bin/mytool` point there.
-   Both flows call the same `prepare_tool_artifact()` for hashing, extraction,
-   executable checks and any source build, then `publish_tool_artifact()`.
+   Both flows select and download the catalog record in their entry script,
+   then call the same
+   `prepare_tool_artifact(name, version, asset, sha256, archive, stage)` for
+   hashing, extraction, executable checks and any source build, followed by
+   `publish_tool_artifact()`.
    A source recipe sets `SPEC_BUILD=true` and extends `compile_tool_source()`
    if it needs different configure flags. Declare build dependencies in the
    setup/build roles in `system.env`. An ordinary CLI needs no branch in
@@ -534,12 +565,15 @@ selection or an asdf plugin.
    Add branches only for additional commands, shared version fields, runtime
    trees or required companions. Additional aliases such as `node`, `npm` and
    `uvx` must not become separately selected tools in `known_tool_names()`.
-   Both metadata writers and the manager follow these declarations; there is
-   no separate metadata allowlist or ordinary-tool builder category.
+   Metadata writers in `setup-catalog-lib` and the manager follow these
+   declarations; there is no separate metadata allowlist or ordinary-tool
+   builder category.
 4. Add special integration only when the tool needs it. Map repository
    configuration in `tool_config_package()`; offline packing follows that
    mapping, while online uses the editable checkout. Declare HOME paths in
-   `release_projection()` and `managed_home_links()` in
+   `release_projection()` in
+   [scripts/dotfiles-release-lib](../scripts/dotfiles-release-lib) and
+   `managed_home_links()` in
    [scripts/dotfiles-release](../scripts/dotfiles-release), guarded by selection,
    so the shared manager can activate, remove and restore them in both flows.
    Keep mutable user data outside frozen offline payloads. A plugin, private
@@ -575,12 +609,14 @@ Verification has separate jobs:
   its checkout diagnostics read `TOOLS` directly. Ordinary tools need no branch.
 - Offline `dotfiles-release verify` validates metadata, exact public commands,
   selected configuration, manifests and safe symlinks without executing tools.
-  `install`, `set` and `health` also use `check_runtime()` for presence,
-  isolated execution and versions. These checks normally follow the shared
-  tool rules and `TOOL_CHECKS`; add manager branches only for special
-  payload structure or runtime behaviour.
-- `tests/tools_runner.sh` runs extended functional checks during
-  offline qualification. A source-only, non-executable
+  `install`, `set` and `health` also use `check_runtime()` from
+  `scripts/dotfiles-release-lib` for presence, isolated execution and versions.
+  These checks normally follow the shared tool rules and `TOOL_CHECKS`; add
+  manager branches only for special payload structure or runtime behaviour.
+- `tests/tools_runner.sh` first calls the packaged manager's public `health`
+  command, then runs extended functional checks during offline qualification.
+  It loads shared read-only helpers, without sourcing the manager CLI or taking
+  over its traps and transaction state. A source-only, non-executable
   `tests/tools/mytool.sh` registers its suite automatically for a selected
   tool. Define `health_mytool()` with the release directory and disposable
   HOME as its two arguments; replace hyphens with underscores in function
@@ -601,6 +637,8 @@ payload, plus a reduced selection that omits the tool and its configuration.
 Changes to connected diagnostics or Bash integration belong in
 `tests/bash_test.sh`; editor functionality stays under
 `nvim2/.config/nvim2/tests/`.
+`tests/setup_architecture_test.sh` protects source-only library behaviour and
+the separation between catalog validation, recipes and CLI lifecycle.
 
 No new top-level test runner is needed for an ordinary tool or OS.
 `scripts/validate` already finds `tests/tools/*.sh` and the existing
@@ -914,7 +952,9 @@ checkout read-only in the builder:
 ```bash
 set -euo pipefail
 test -z "$(git status --porcelain --untracked-files=normal)"
-source release.env
+source scripts/setup-lib
+source scripts/setup-system-lib
+load_platform_config "$PWD/release.env"
 platform=debian-13-x86_64
 image=${DOCKER_IMAGES[$platform]}
 output=${1:-"$PWD/offline-output"}
@@ -968,8 +1008,9 @@ preparation entry point. Each archive and GitHub release includes standalone
 `dotfiles-release` and its `.sha256` file; no separate offline setup script is
 published. `scripts/build-standalone-script` generates the manager from the
 matching release sources: runtime and Docker configuration from `system.env`,
-tool probes from `tools.env`, `scripts/setup-system-lib` and
-`scripts/dotfiles-release`. `##### BEGIN SOURCE #####` and
+tool probes from `tools.env`, `scripts/setup-lib`, `scripts/setup-system-lib`,
+`scripts/setup-tools-lib`, `scripts/dotfiles-release-lib` and the
+`scripts/dotfiles-release` CLI. `##### BEGIN SOURCE #####` and
 `##### END SOURCE #####` comments identify each embedded block. Edit the
 repository sources, not generated scripts; there is no second offline
 installer implementation. The published manager is extracted from the
@@ -1701,8 +1742,9 @@ install the manager:
 ```bash
 set -euo pipefail
 source scripts/setup-lib
-source tools.env
-validate_tool_config
+source scripts/setup-catalog-lib
+source scripts/setup-recipes-lib
+load_tool_catalog "$PWD/tools.env"
 select_default_release TOOL_RELEASES krew
 archive=$(mktemp)
 work=$(mktemp -d)

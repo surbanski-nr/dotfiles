@@ -30,12 +30,12 @@ health_tmux() {
     "$tmux" -S "$socket" new-session -d -s health || exit
     option=$("$tmux" -S "$socket" show-options -gv prefix)
     [[ $option == C-a ]] || {
-      die "tmux prefix is $option, expected C-a"
+      report_error "tmux prefix is $option, expected C-a"
       exit 1
     }
     option=$("$tmux" -S "$socket" show-options -gv @dotfiles-config)
     [[ $option == "$release/dotfiles/tmux/.tmux.conf" ]] || {
-      die 'tmux did not retain its physical config'
+      report_error 'tmux did not retain its physical config'
       exit 1
     }
     "$tmux" -S "$socket" set-option -g status-position bottom || exit
@@ -54,7 +54,7 @@ health_tmux() {
       sleep 0.02
     done
     [[ -n $client ]] || {
-      die 'tmux health client did not attach'
+      report_error 'tmux health client did not attach'
       exit 1
     }
     "$tmux" -S "$socket" send-keys -K -c "$client" C-a R || exit
@@ -65,7 +65,7 @@ health_tmux() {
       sleep 0.02
     done
     [[ $reload_value == top ]] || {
-      die 'tmux Shift-R did not reload the physical offline config'
+      report_error 'tmux Shift-R did not reload the physical offline config'
       exit 1
     }
     if list_has selected_tools tmux-resurrect; then
@@ -76,12 +76,12 @@ health_tmux() {
         sleep 0.05
       done
       [[ -s $state_dir/last ]] || {
-        die 'tmux save key did not persist its session state'
+        report_error 'tmux save key did not persist its session state'
         exit 1
       }
     fi
     [[ ! -s $client_stderr ]] || {
-      die 'tmux offline reload client wrote to stderr'
+      report_error 'tmux offline reload client wrote to stderr'
       exit 1
     }
     "$tmux" -S "$socket" detach-client -t "$client" || exit
@@ -92,7 +92,7 @@ health_tmux() {
       entry=$release/share/tmux/plugins/$plugin/${plugin#tmux-}.tmux
       [[ $plugin != tmux-sensible ]] || entry=$release/share/tmux/plugins/$plugin/sensible.tmux
       [[ -x $entry || -f $entry ]] || {
-        die "tmux plugin entry point is missing: $entry"
+        report_error "tmux plugin entry point is missing: $entry"
         exit 1
       }
       printf -v command 'exec %q' "$entry"

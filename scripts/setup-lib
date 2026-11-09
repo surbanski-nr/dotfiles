@@ -1,12 +1,32 @@
 #!/usr/bin/env bash
 
 report_error() {
-  printf '%s: %s\n' "${0##*/}" "$*" >&2
+  printf '%s: %s\n' "${SETUP_NAME:-${0##*/}}" "$*" >&2
   return 1
 }
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || report_error "required command is missing: $1"
+}
+
+list_has() {
+  local list_name=$1 requested=$2 item
+  local -n items_ref=$list_name
+
+  for item in "${items_ref[@]}"; do
+    if [[ $item == "$requested" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+cleanup_path() {
+  local path=$1
+
+  if [[ -e $path || -L $path ]]; then
+    find "$path" -depth -delete
+  fi
 }
 
 # The descriptor stays open until process exit. The kernel releases flock when
@@ -34,30 +54,9 @@ cleanup_setup() {
   trap - EXIT
   set +e
   for path in "${TEMP_PATHS[@]:-}"; do
-    if [[ -e $path || -L $path ]]; then
-      find "$path" -depth -delete
-    fi
+    cleanup_path "$path"
   done
   exit "$status"
-}
-
-acquire_online_setup_lock() {
-  local directory=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases} descriptor
-
-  if [[ $directory != /* || $directory == / || $directory == "$HOME" ||
-    $directory == *$'\n'* || $directory == *$'\t'* ||
-    /$directory/ == *'/../'* || /$directory/ == *'/./'* ||
-    -L $directory || ( -e $directory && ! -d $directory ) ]]; then
-    report_error "invalid release root: $directory"
-    return 1
-  fi
-  mkdir -p -- "$directory" || return
-  # Share the directory lock with dotfiles-release, including offline activation.
-  exec {descriptor}<"$directory" || return
-  if ! flock -x -n "$descriptor"; then
-    report_error 'another installation or release operation is running'
-    return 1
-  fi
 }
 
 require_setup_commands() {

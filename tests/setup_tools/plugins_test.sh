@@ -211,13 +211,18 @@ repository=$1 root=$2
 shift 2
 source "$repository/scripts/setup-lib"
 source "$repository/scripts/setup-catalog-lib"
-source "$repository/scripts/setup-recipes-lib"
-source "$repository/scripts/setup-tools-lib"
 source "$repository/scripts/setup-tmux-lib"
-source "$repository/tools.env"
+load_tool_catalog "$repository/tools.env"
 TEMP_PATHS=()
 trap cleanup_setup EXIT
-install_tmux_plugins "$root" "$@"
+for plugin in "$@"; do
+  select_git_plugin TMUX_PLUGINS "$plugin"
+  preflight_tmux_plugin "$plugin" "$root" "$PLUGIN_REPO"
+done
+for plugin in "$@"; do
+  select_git_plugin TMUX_PLUGINS "$plugin"
+  install_tmux_plugin "$plugin" "$root" "$PLUGIN_REPO" "$PLUGIN_COMMIT"
+done
 EOF
 for plugin in "${plugins[@]}"; do
   assert_plugin "$offline_root" "$plugin" "${pinned_commits[$plugin]}"

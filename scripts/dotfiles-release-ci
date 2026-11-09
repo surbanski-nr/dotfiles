@@ -3,17 +3,14 @@
 set -euo pipefail
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=setup-lib
+source "$script_dir/setup-lib"
 # shellcheck source=setup-system-lib
 source "$script_dir/setup-system-lib"
 containers=()
 declare -A workers=()
 runtime_image=
 work=
-
-die() {
-  printf 'dotfiles-release-ci: %s\n' "$*" >&2
-  return 1
-}
 
 platform_in_list() {
   local expected=$1 platform
@@ -30,27 +27,26 @@ load_platform_lists() {
   local config=$script_dir/../release.env platform
   local -A seen_test=() seen_release=()
 
-  [[ -r $config ]] || die "cannot read $config"
-  # shellcheck source=../release.env
-  source "$config" || return
+  [[ -r $config ]] || report_error "cannot read $config"
+  load_platform_config "$config" || return
   declare -p PLATFORM_ALIASES DOCKER_IMAGES \
     OFFLINE_TEST_PLATFORMS OFFLINE_RELEASE_PLATFORMS >/dev/null 2>&1 ||
-    die 'release.env must define platform aliases, Docker images and offline platform lists'
+    report_error 'release.env must define platform aliases, Docker images and offline platform lists'
   test_platforms=("${OFFLINE_TEST_PLATFORMS[@]}")
   release_platforms=("${OFFLINE_RELEASE_PLATFORMS[@]}")
-  ((${#test_platforms[@]})) || die 'OFFLINE_TEST_PLATFORMS must not be empty'
+  ((${#test_platforms[@]})) || report_error 'OFFLINE_TEST_PLATFORMS must not be empty'
   for platform in "${test_platforms[@]}"; do
-    [[ -n $platform ]] || die 'OFFLINE_TEST_PLATFORMS contains an empty entry'
+    [[ -n $platform ]] || report_error 'OFFLINE_TEST_PLATFORMS contains an empty entry'
     system_validate_platform_name "$platform" || return
     [[ ${DOCKER_IMAGES[$platform]:-} =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
-      die "no pinned Docker image configured for $platform"
-    [[ ! -v seen_test[$platform] ]] || die "duplicate offline test platform: $platform"
+      report_error "no pinned Docker image configured for $platform"
+    [[ ! -v seen_test[$platform] ]] || report_error "duplicate offline test platform: $platform"
     seen_test[$platform]=1
   done
   for platform in "${release_platforms[@]}"; do
-    [[ -n $platform ]] || die 'OFFLINE_RELEASE_PLATFORMS contains an empty entry'
-    [[ ! -v seen_release[$platform] ]] || die "duplicate offline release platform: $platform"
-    [[ -v seen_test[$platform] ]] || die "offline release platform is not tested: $platform"
+    [[ -n $platform ]] || report_error 'OFFLINE_RELEASE_PLATFORMS contains an empty entry'
+    [[ ! -v seen_release[$platform] ]] || report_error "duplicate offline release platform: $platform"
+    [[ -v seen_test[$platform] ]] || report_error "offline release platform is not tested: $platform"
     seen_release[$platform]=1
   done
 }
@@ -95,7 +91,7 @@ download_asset() {
 check_checksum() {
   local archive=$1 checksum=$2 expected
   expected=$(cd "$(dirname -- "$archive")" && sha256sum "${archive##*/}")
-  [[ $(<"$checksum") == "$expected" ]] || die "checksum does not match ${archive##*/}"
+  [[ $(<"$checksum") == "$expected" ]] || report_error "checksum does not match ${archive##*/}"
 }
 
 verify_asset() {
@@ -105,7 +101,7 @@ verify_asset() {
   metadata=$(tar -xOzf "$archive" "$root/release.env") || return
   [[ $(awk -F= '$1 == "PLATFORM_ID" { print $2 }' <<<"$metadata") == "$platform" &&
     $(awk -F= '$1 == "SOURCE_COMMIT" { print $2 }' <<<"$metadata") == "$COMMIT_SHA" ]] ||
-    die 'archive platform or commit does not match the release job'
+    report_error 'archive platform or commit does not match the release job'
 }
 
 extract_manager() {
@@ -127,7 +123,7 @@ preflight() {
   else
     RELEASE_TAG=$TAG_NAME
   fi
-  [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{7,40}$ ]] || die "invalid release tag: $RELEASE_TAG"
+  [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{7,40}$ ]] || report_error "invalid release tag: $RELEASE_TAG"
   printf 'Resolving release %s.\n' "$RELEASE_TAG"
   [[ $EVENT_NAME != push ]] || attempts=6
   for ((attempt = 1; attempt <= attempts; attempt++)); do
@@ -156,8 +152,8 @@ preflight() {
     object_type=$(jq -r '.object.type' "$object_file")
     COMMIT_SHA=$(jq -r '.object.sha' "$object_file")
   done
-  [[ $object_type == commit && $COMMIT_SHA =~ ^[0-9a-f]{40}$ ]] || die 'tag does not resolve to a full commit ID'
-  [[ $COMMIT_SHA == "${RELEASE_TAG#dotfiles-}"* ]] || die "tag does not match target commit $COMMIT_SHA"
+  [[ $object_type == commit && $COMMIT_SHA =~ ^[0-9a-f]{40}$ ]] || report_error 'tag does not resolve to a full commit ID'
+  [[ $COMMIT_SHA == "${RELEASE_TAG#dotfiles-}"* ]] || report_error "tag does not match target commit $COMMIT_SHA"
   printf 'Release %s resolves to commit %s.\n' "$RELEASE_TAG" "$COMMIT_SHA"
 
   if asset_exists dotfiles-release "$release_file" &&
@@ -194,15 +190,14 @@ read_builder_image() (
   local source_dir=$1 platform=$2 image
   # Read the image pin from the release snapshot without replacing the workflow's lists.
   unset DOCKER_IMAGES
-  # shellcheck source=../release.env
-  source "$source_dir/release.env" || return
+  load_platform_config "$source_dir/release.env" || return
   declare -p DOCKER_IMAGES >/dev/null 2>&1 || {
-    die 'release snapshot must define DOCKER_IMAGES in release.env'
+    report_error 'release snapshot must define DOCKER_IMAGES in release.env'
     return 1
   }
   image=${DOCKER_IMAGES[$platform]:-}
   [[ $image =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] || {
-    die "no pinned Docker image configured for $platform"
+    report_error "no pinned Docker image configured for $platform"
     return 1
   }
   printf '%s\n' "$image"
@@ -219,12 +214,12 @@ build_and_qualify() {
 
   builder_image=$(read_builder_image "$source_dir" "$PLATFORM") || return
   [[ -f $source_dir/scripts/setup-system-lib ]] || {
-    die 'release snapshot is missing scripts/setup-system-lib'
+    report_error 'release snapshot is missing scripts/setup-system-lib'
     return 1
   }
-  [[ $(git -C "$source_dir" rev-parse HEAD) == "$COMMIT_SHA" ]] || die 'checkout does not match release commit'
+  [[ $(git -C "$source_dir" rev-parse HEAD) == "$COMMIT_SHA" ]] || report_error 'checkout does not match release commit'
   [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{7,40}$ &&
-    $COMMIT_SHA == "${RELEASE_TAG#dotfiles-}"* ]] || die 'release tag does not match commit'
+    $COMMIT_SHA == "${RELEASE_TAG#dotfiles-}"* ]] || report_error 'release tag does not match commit'
   mkdir -p "$output_dir" "$evidence"
   builder=dotfiles-builder-$run_key
   container=dotfiles-runtime-$run_key
@@ -258,6 +253,8 @@ build_and_qualify() {
       "$container:/usr/local/lib/dotfiles/scripts/build-dotfiles-release"
     docker cp "$source_dir/scripts/setup-system-lib" \
       "$container:/usr/local/lib/dotfiles/scripts/setup-system-lib"
+    docker cp "$source_dir/scripts/setup-lib" \
+      "$container:/usr/local/lib/dotfiles/scripts/setup-lib"
     docker cp "$source_dir/system.env" "$container:/usr/local/lib/dotfiles/system.env"
     timeout --foreground --signal=TERM --kill-after=15s 900s docker exec "$container" \
       bash /usr/local/lib/dotfiles/scripts/build-dotfiles-release \
@@ -282,7 +279,7 @@ build_and_qualify() {
     2>&1 | tee "$evidence/offline-verify.log"
 
   size=$(stat --format=%s "$archive")
-  ((size < 2147483648)) || die "release asset is $size bytes; GitHub limit is below 2 GiB"
+  ((size < 2147483648)) || report_error "release asset is $size bytes; GitHub limit is below 2 GiB"
   digest=$(sha256sum "$archive" | cut -d ' ' -f 1)
   {
     printf '### %s\n\n' "$PLATFORM"
@@ -307,20 +304,20 @@ test_all_platforms() {
     fi
   done
   ((${#selected[@]})) || {
-    die "unsupported platform: $requested_platform"
+    report_error "unsupported platform: $requested_platform"
     return 2
   }
   source_dir=$(CDPATH='' cd -- "$1" && pwd)
   COMMIT_SHA=$(git -C "$source_dir" rev-parse HEAD)
   source_status=$(git -C "$source_dir" status --porcelain --untracked-files=normal)
   [[ -z $source_status ]] ||
-    die 'offline qualification requires a clean committed checkout'
+    report_error 'offline qualification requires a clean committed checkout'
   parallelism=$(nproc)
-  [[ $parallelism =~ ^[1-9][0-9]*$ ]] || die 'nproc did not report a positive CPU count'
+  [[ $parallelism =~ ^[1-9][0-9]*$ ]] || report_error 'nproc did not report a positive CPU count'
   if ((parallelism > ${#selected[@]})); then
     parallelism=${#selected[@]}
   fi
-  timeout 10s docker info >/dev/null || die 'Docker must be available to the current user'
+  timeout 10s docker info >/dev/null || report_error 'Docker must be available to the current user'
 
   RELEASE_TAG=dotfiles-${COMMIT_SHA:0:7}
   RUNNER_TEMP=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-qualification.XXXXXX")
@@ -391,9 +388,9 @@ publish() {
   local release_file=$work/release.json archive checksum manager=$work/dotfiles-release
   local -a uploads=()
 
-  ((${#release_platforms[@]})) || die 'no offline release platforms are selected'
+  ((${#release_platforms[@]})) || report_error 'no offline release platforms are selected'
   platform_in_list "$PLATFORM" "${release_platforms[@]}" ||
-    die "platform is not selected for offline release: $PLATFORM"
+    report_error "platform is not selected for offline release: $PLATFORM"
   timeout 30s gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_file"
   jq -e '.assets | type == "array"' "$release_file" >/dev/null
   if asset_exists "$asset" "$release_file"; then
@@ -418,7 +415,7 @@ publish() {
       mkdir -p "$work/existing-manager"
       download_asset dotfiles-release "$work/existing-manager"
       cmp -s "$manager" "$work/existing-manager/dotfiles-release" ||
-        die 'dotfiles-release asset does not match the archive manager'
+        report_error 'dotfiles-release asset does not match the archive manager'
     else
       uploads+=("$manager")
     fi
@@ -441,7 +438,7 @@ publish() {
 main() {
   if [[ ${1:-} == test ]]; then
     (($# == 2 || $# == 3)) || {
-      die 'usage: dotfiles-release-ci test SOURCE_DIR [PLATFORM]'
+      report_error 'usage: dotfiles-release-ci test SOURCE_DIR [PLATFORM]'
       return 2
     }
     test_all_platforms "$2" "${3:-}"
@@ -466,7 +463,7 @@ main() {
       fi
       ;;
     *)
-      die 'usage: dotfiles-release-ci test SOURCE_DIR [PLATFORM] | preflight | {build|build-only|verify} SOURCE_DIR OUTPUT_DIR | publish OUTPUT_DIR'
+      report_error 'usage: dotfiles-release-ci test SOURCE_DIR [PLATFORM] | preflight | {build|build-only|verify} SOURCE_DIR OUTPUT_DIR | publish OUTPUT_DIR'
       return 2
       ;;
   esac

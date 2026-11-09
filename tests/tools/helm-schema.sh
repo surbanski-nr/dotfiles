@@ -12,7 +12,7 @@ health_helm_schema() {
 
   plugin_version=$(metadata_value "$release/release.env" HELM_SCHEMA_PLUGIN_VERSION) || return
   helm_versions=$(metadata_value "$release/release.env" HELM_VERSIONS) || return
-  need jq || return
+  require_command jq || return
   cat >"$work/values.yaml" <<'EOF'
 replicas: 2
 tls: {} # @schema $ref: tls.schema.json
@@ -25,12 +25,12 @@ EOF
     awk -v expected="${plugin_version#v}" \
       '$1 == "schema" { count++; valid = ($2 == expected) } END { exit !(count == 1 && valid) }' \
       <<<"$output" || {
-      die "Helm $version schema plugin manifest has an unexpected version"
+      report_error "Helm $version schema plugin manifest has an unexpected version"
       return 1
     }
     output=$(HELM_VERSION="$version" "$release/bin/helm" schema version) || return
     [[ $output == "helm schema version v${plugin_version#v}" ]] || {
-      die "Helm $version schema plugin reported an unexpected version: $output"
+      report_error "Helm $version schema plugin reported an unexpected version: $output"
       return 1
     }
     (cd "$work" && HELM_VERSION="v${version#v}" "$release/bin/helm" schema \
@@ -41,7 +41,7 @@ EOF
       (."$defs"."tls.schema.json" |
         .properties.enabled.type == "boolean" and .required == ["enabled"] and (has("$id") | not))
     ' "$work/schema.json" >/dev/null || {
-      die "Helm $version schema generation failed"
+      report_error "Helm $version schema generation failed"
       return 1
     }
   done
@@ -49,7 +49,7 @@ EOF
   jq -s '.[0] * .[1]' "$work/schema.json" "$work/overlay.json" >"$work/merged.json" || return
   jq -e '.properties.tls.description == "overlay" and .properties.tls."$ref" == "#/$defs/tls.schema.json"' \
     "$work/merged.json" >/dev/null || {
-    die 'jq schema overlay merge failed'
+    report_error 'jq schema overlay merge failed'
     return 1
   }
 }

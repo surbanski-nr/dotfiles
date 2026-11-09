@@ -12,11 +12,6 @@ done
 export PATH=$clean_path
 unset path_entries entry clean_path
 
-die() {
-  printf 'validate: %s\n' "$*" >&2
-  exit 1
-}
-
 usage() {
   printf '%s\n' \
     'usage: validate {bash|configs|nvim2|scripts|tmux|tools|workflows}' \
@@ -24,11 +19,9 @@ usage() {
   exit 2
 }
 
-need() {
-  command -v "$1" >/dev/null 2>&1 || die "required command is missing: $1"
-}
-
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=setup-lib
+source "$repo_dir/scripts/setup-lib"
 tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}
 cleanup_paths=()
 cleanup_tmux_home=
@@ -73,9 +66,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 run_test() {
-  need env
-  need setsid
-  need pkill
+  require_command env
+  require_command setsid
+  require_command pkill
   # A private session keeps batch tests away from the user's terminal and lets
   # cleanup terminate nested timeout groups without touching other tasks.
   # Background Bash ignores INT/QUIT; uutils timeout preserves that state.
@@ -111,7 +104,7 @@ check_shell_files() {
         posix_files+=("$file")
         ;;
       *)
-        die "unsupported or missing shell shebang: $file"
+        report_error "unsupported or missing shell shebang: $file"
         ;;
     esac
   done
@@ -148,7 +141,7 @@ check_markdown_bash() {
         : >"$block_file"
       elif [[ -n $block_file && $line == '```' ]]; then
         if ! bash -n "$block_file"; then
-          die "invalid Bash syntax in $document block starting at line $block_start"
+          report_error "invalid Bash syntax in $document block starting at line $block_start"
         fi
         block_file=
       elif [[ -n $block_file ]]; then
@@ -156,16 +149,16 @@ check_markdown_bash() {
       fi
     done <"$document"
     [[ -z $block_file ]] ||
-      die "unterminated Bash block in $document at line $block_start"
+      report_error "unterminated Bash block in $document at line $block_start"
   done
 }
 
 validate_bash() {
-  need bash
-  need python3
-  need shellcheck
-  need script
-  need timeout
+  require_command bash
+  require_command python3
+  require_command shellcheck
+  require_command script
+  require_command timeout
   local files=(
     bash/.bashrc
     bash/.bash_profile
@@ -187,16 +180,16 @@ validate_bash() {
 }
 
 validate_scripts() {
-  need bash
-  need git
-  need jq
-  need python3
-  need sha256sum
-  need sh
-  need shellcheck
-  need tar
-  need task
-  need timeout
+  require_command bash
+  require_command git
+  require_command jq
+  require_command python3
+  require_command sha256sum
+  require_command sh
+  require_command shellcheck
+  require_command tar
+  require_command task
+  require_command timeout
   local platform alias image checksum
   local -A test_platforms=() release_platforms=()
   local files=(
@@ -216,75 +209,75 @@ validate_scripts() {
     tests/scripts_test.sh
     tests/install_validation_tool_test.sh
     tests/setup_asdf_test.sh
+    tests/setup_architecture_test.sh
     tests/setup_system_test.sh
     tests/setup_tools_runner.sh
     tests/tools_runner.sh
     tests/validate_test.sh
   )
 
-  for file in scripts/setup*-lib tests/dotfiles_release/fixture.sh tests/setup_tools/fixture.sh tests/tools/*.sh; do
-    [[ ! -x $file ]] || die "source-only library is executable: $file"
+  for file in scripts/*-lib tests/dotfiles_release/fixture.sh tests/setup_tools/fixture.sh tests/tools/*.sh; do
+    [[ ! -x $file ]] || report_error "source-only library is executable: $file"
   done
   for file in scripts/* tests/*_runner.sh tests/fixtures/*/* \
     tests/dotfiles_release/*_test.sh tests/setup_tools/*_test.sh \
     bstow vim/setup nvim2/.config/nvim2/tests/check_runner.sh; do
-    [[ $file == scripts/setup*-lib ]] && continue
-    [[ -x $file ]] || die "executable bit is missing: $file"
+    [[ $file == scripts/*-lib ]] && continue
+    [[ -x $file ]] || report_error "executable bit is missing: $file"
   done
 
   check_shell_syntax bash release.env system.env
   # shellcheck source=setup-system-lib
   source scripts/setup-system-lib
-  # shellcheck source=../release.env
-  source release.env
+  load_platform_config "$repo_dir/release.env"
   declare -p PLATFORM_ALIASES DOCKER_IMAGES LXD_IMAGES LXD_IMAGE_SHA256 \
     OFFLINE_TEST_PLATFORMS OFFLINE_RELEASE_PLATFORMS >/dev/null 2>&1 ||
-    die 'release.env must define platform aliases, images and offline platform lists'
+    report_error 'release.env must define platform aliases, images and offline platform lists'
   for platform in "${!DOCKER_IMAGES[@]}"; do
-    system_validate_platform_name "$platform" || die "unsupported platform ID: $platform"
+    system_validate_platform_name "$platform" || report_error "unsupported platform ID: $platform"
     [[ ${DOCKER_IMAGES[$platform]} =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
-      die "Docker image for $platform is not pinned to a SHA-256 digest"
+      report_error "Docker image for $platform is not pinned to a SHA-256 digest"
   done
   for platform in "${!LXD_IMAGES[@]}"; do
-    [[ -n ${DOCKER_IMAGES[$platform]:-} ]] || die "unknown LXD platform: $platform"
+    [[ -n ${DOCKER_IMAGES[$platform]:-} ]] || report_error "unknown LXD platform: $platform"
     image=${LXD_IMAGES[$platform]}
     checksum=${LXD_IMAGE_SHA256[$platform]:-}
-    [[ $image =~ ^[^[:space:]]+$ ]] || die "invalid LXD image for $platform"
+    [[ $image =~ ^[^[:space:]]+$ ]] || report_error "invalid LXD image for $platform"
     if [[ $image == https://* ]]; then
-      [[ $checksum =~ ^[0-9a-f]{64}$ ]] || die "QCOW2 image for $platform needs a SHA256"
+      [[ $checksum =~ ^[0-9a-f]{64}$ ]] || report_error "QCOW2 image for $platform needs a SHA256"
     else
-      [[ -z $checksum ]] || die "remote LXD image for $platform must not have a QCOW2 checksum"
+      [[ -z $checksum ]] || report_error "remote LXD image for $platform must not have a QCOW2 checksum"
     fi
   done
   for platform in "${!LXD_IMAGE_SHA256[@]}"; do
-    [[ -n ${LXD_IMAGES[$platform]:-} ]] || die "checksum has no LXD image: $platform"
+    [[ -n ${LXD_IMAGES[$platform]:-} ]] || report_error "checksum has no LXD image: $platform"
   done
   for alias in "${!PLATFORM_ALIASES[@]}"; do
-    [[ $alias =~ ^[a-z0-9]+$ ]] || die "invalid platform alias: $alias"
+    [[ $alias =~ ^[a-z0-9]+$ ]] || report_error "invalid platform alias: $alias"
     platform=${PLATFORM_ALIASES[$alias]}
-    [[ -n $platform && -n ${LXD_IMAGES[$platform]:-} ]] || die "alias $alias has no LXD image"
+    [[ -n $platform && -n ${LXD_IMAGES[$platform]:-} ]] || report_error "alias $alias has no LXD image"
   done
   alias=${DEFAULT_DEV_PLATFORM:-}
   [[ $alias =~ ^[a-z0-9]+$ && -n ${PLATFORM_ALIASES[$alias]:-} ]] ||
-    die "unknown DEFAULT_DEV_PLATFORM: $alias"
-  ((${#OFFLINE_TEST_PLATFORMS[@]})) || die 'OFFLINE_TEST_PLATFORMS must not be empty'
+    report_error "unknown DEFAULT_DEV_PLATFORM: $alias"
+  ((${#OFFLINE_TEST_PLATFORMS[@]})) || report_error 'OFFLINE_TEST_PLATFORMS must not be empty'
   for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
-    [[ -n $platform && -n ${DOCKER_IMAGES[$platform]:-} ]] || die "unknown offline test platform: $platform"
-    [[ ! -v test_platforms[$platform] ]] || die "duplicate offline test platform: $platform"
+    [[ -n $platform && -n ${DOCKER_IMAGES[$platform]:-} ]] || report_error "unknown offline test platform: $platform"
+    [[ ! -v test_platforms[$platform] ]] || report_error "duplicate offline test platform: $platform"
     test_platforms[$platform]=1
   done
   for platform in "${OFFLINE_RELEASE_PLATFORMS[@]}"; do
-    [[ -n $platform ]] || die 'OFFLINE_RELEASE_PLATFORMS contains an empty entry'
-    [[ -v test_platforms[$platform] ]] || die "offline release platform is not tested: $platform"
-    [[ ! -v release_platforms[$platform] ]] || die "duplicate offline release platform: $platform"
+    [[ -n $platform ]] || report_error 'OFFLINE_RELEASE_PLATFORMS contains an empty entry'
+    [[ -v test_platforms[$platform] ]] || report_error "offline release platform is not tested: $platform"
+    [[ ! -v release_platforms[$platform] ]] || report_error "duplicate offline release platform: $platform"
     release_platforms[$platform]=1
   done
-  [[ ! -e offline ]] || die 'legacy offline source directory still exists'
+  [[ ! -e offline ]] || report_error 'legacy offline source directory still exists'
   if grep -qE \
     'nvim2-release|NVIM2_RELEASE|TARGET_(USER|UID|HOME)' \
     scripts/dotfiles-release scripts/build-dotfiles-release release.env \
     .github/workflows/dotfiles-release.yml; then
-    die 'offline release files retain a legacy name or baked target identity'
+    report_error 'offline release files retain a legacy name or baked target identity'
   fi
 
   while IFS= read -r -d '' file; do
@@ -306,6 +299,7 @@ validate_scripts() {
   fi
 
   check_shell_files "${files[@]}"
+  run_test 30s bash tests/setup_architecture_test.sh
   run_test 30s bash tests/install_validation_tool_test.sh
   run_test 120s bash tests/validate_test.sh
   run_test 120s bash tests/bstow_test.sh
@@ -323,10 +317,10 @@ validate_scripts() {
 }
 
 validate_nvim2() {
-  need bash
-  need jq
-  need shellcheck
-  need stylua
+  require_command bash
+  require_command jq
+  require_command shellcheck
+  require_command stylua
   local -a test_scripts=(
     nvim2/.config/nvim2/tests/check_runner.sh
     nvim2/.config/nvim2/tests/fixtures/*.sh
@@ -335,10 +329,10 @@ validate_nvim2() {
 
   for file in nvim2/.config/nvim2/python-locks/*.in nvim2/.config/nvim2/python-locks/*.lock; do
     [[ -e $file || -L $file ]] || continue
-    [[ -f $file && ! -L $file ]] || die "invalid Nvim2 Python lock source: $file"
+    [[ -f $file && ! -L $file ]] || report_error "invalid Nvim2 Python lock source: $file"
     local base=${file%.*}
     [[ -f $base.in && ! -L $base.in && -f $base.lock && ! -L $base.lock ]] ||
-      die "Nvim2 Python lock pair is incomplete: $base"
+      report_error "Nvim2 Python lock pair is incomplete: $base"
   done
   stylua --check \
     --config-path nvim2/.config/nvim2/.stylua.toml \
@@ -360,18 +354,18 @@ validate_nvim2() {
 }
 
 validate_configs() {
-  need git
-  need jq
-  need yamllint
+  require_command git
+  require_command jq
+  require_command yamllint
   local grep_status
   local json_files=()
   local yaml_files=()
 
   if git grep --untracked -nI -E '[[:blank:]]+$' -- .; then
-    die 'trailing whitespace found'
+    report_error 'trailing whitespace found'
   else
     grep_status=$?
-    ((grep_status == 1)) || die 'cannot inspect repository whitespace'
+    ((grep_status == 1)) || report_error 'cannot inspect repository whitespace'
   fi
 
   while IFS= read -r -d '' file; do
@@ -397,13 +391,13 @@ validate_configs() {
 }
 
 validate_tmux() {
-  need awk
-  need git
-  need python3
-  need script
-  need shellcheck
-  need tmux
-  need timeout
+  require_command awk
+  require_command git
+  require_command python3
+  require_command script
+  require_command shellcheck
+  require_command tmux
+  require_command timeout
   local socket="dotfiles-validate-$$"
   local client configured_path pane_active_border_style pane_border_lines
   local pane_border_style repeat_time reloaded_value status_style tmux_config
@@ -450,31 +444,31 @@ validate_tmux() {
   )
   HOME="$temporary_home" tmux -L "$socket" show-options -gv prefix >/dev/null
   repeat_time=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv repeat-time)
-  [[ $repeat_time == 2000 ]] || die "tmux repeat time is not 2000 ms: $repeat_time"
+  [[ $repeat_time == 2000 ]] || report_error "tmux repeat time is not 2000 ms: $repeat_time"
   pane_border_lines=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv pane-border-lines)
   [[ $pane_border_lines == single ]] ||
-    die "tmux pane borders are not single-width: $pane_border_lines"
+    report_error "tmux pane borders are not single-width: $pane_border_lines"
   pane_border_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv pane-border-style)
   [[ $pane_border_style == 'fg=colour238' ]] ||
-    die "tmux inactive pane border is not muted: $pane_border_style"
+    report_error "tmux inactive pane border is not muted: $pane_border_style"
   pane_active_border_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv pane-active-border-style)
   [[ $pane_active_border_style == *'fg=#008080'* ]] ||
-    die "tmux active pane border is not Windows 95 teal: $pane_active_border_style"
+    report_error "tmux active pane border is not Windows 95 teal: $pane_active_border_style"
   status_style=$(HOME="$temporary_home" tmux -L "$socket" display-message -p '#{E:status-style}')
   [[ $status_style == 'bg=#008080,fg=#ffffff' ]] ||
-    die "tmux status bar does not use white on teal: $status_style"
+    report_error "tmux status bar does not use white on teal: $status_style"
   window_status_current_style=$(HOME="$temporary_home" tmux -L "$socket" show-options -gwv window-status-current-style)
   [[ $window_status_current_style == default ]] ||
-    die "tmux current window does not inherit the complete status style: $window_status_current_style"
+    report_error "tmux current window does not inherit the complete status style: $window_status_current_style"
   HOME="$temporary_home" tmux -L "$socket" show-options -gv status-right >/dev/null
   configured_path=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv @dotfiles-config)
   [[ $configured_path == "$tmux_config" ]] ||
-    die "tmux reload path does not preserve explicit -f config: $configured_path"
+    report_error "tmux reload path does not preserve explicit -f config: $configured_path"
   plugin_root=$temporary_home/.tmux/plugins
   expected_plugins="$plugin_root/tmux-sensible/sensible.tmux|$plugin_root/tmux-resurrect/resurrect.tmux|$plugin_root/tmux-continuum/continuum.tmux"
   reloaded_value=$(HOME="$temporary_home" tmux -L "$socket" show-options -gqv @validation-plugins)
   [[ $reloaded_value == "$expected_plugins" ]] ||
-    die "tmux did not load the default plugins in order: $reloaded_value"
+    report_error "tmux did not load the default plugins in order: $reloaded_value"
   HOME="$temporary_home" tmux -L "$socket" set-option -gu @validation-plugins
   HOME="$temporary_home" tmux -L "$socket" set-environment -g \
     DOTFILES_TMUX_PLUGIN_DIR "$temporary_home/custom-plugins"
@@ -494,7 +488,7 @@ validate_tmux() {
     [[ -n $client ]] && break
     sleep 0.02
   done
-  [[ -n $client ]] || die 'tmux validation client did not attach'
+  [[ -n $client ]] || report_error 'tmux validation client did not attach'
   printf '\001R' >&"$client_input_fd"
   reloaded_value=
   for _ in {1..50}; do
@@ -506,9 +500,9 @@ validate_tmux() {
     sleep 0.02
   done
   [[ $reloaded_value == "$expected_plugins" ]] ||
-    die "tmux Shift-R did not load the custom plugins in order: $reloaded_value"
+    report_error "tmux Shift-R did not load the custom plugins in order: $reloaded_value"
   reloaded_value=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv status-position)
-  [[ $reloaded_value == top ]] || die 'tmux Shift-R did not apply the configured file'
+  [[ $reloaded_value == top ]] || report_error 'tmux Shift-R did not apply the configured file'
   ln -s old "$temporary_home/offline-releases/current"
   HOME="$temporary_home" tmux -L "$socket" set-environment -g TMUX_OFFLINE_RELEASE_ROOT "$offline_root"
   HOME="$temporary_home" tmux -L "$socket" set-option -gu @validation-plugins
@@ -520,8 +514,8 @@ validate_tmux() {
   expected_plugins="$plugin_root/tmux-sensible/sensible.tmux|$plugin_root/tmux-resurrect/resurrect.tmux|$plugin_root/tmux-continuum/continuum.tmux"
   reloaded_value=$(HOME="$temporary_home" tmux -L "$socket" show-options -gqv @validation-plugins)
   [[ $reloaded_value == "$expected_plugins" ]] ||
-    die "tmux reload followed current or the online plugin override: $reloaded_value"
-  [[ ! -s $client_stderr ]] || die 'tmux reload client wrote to stderr'
+    report_error "tmux reload followed current or the online plugin override: $reloaded_value"
+  [[ ! -s $client_stderr ]] || report_error 'tmux reload client wrote to stderr'
   HOME="$temporary_home" tmux -L "$socket" detach-client -t "$client"
   exec {client_input_fd}>&-
   wait "$cleanup_tmux_client_pid"
@@ -530,36 +524,60 @@ validate_tmux() {
 }
 
 validate_tools() {
-  need bash
-  local grep_status
+  require_command bash
+  local grep_status catalog_name tool version
 
   check_shell_syntax bash tools.env validation.env
-  # shellcheck source=../tools.env
-  source tools.env
-  # shellcheck source=../validation.env
-  source validation.env
-  # shellcheck source=setup-lib
-  source scripts/setup-lib
   source scripts/setup-catalog-lib
   source scripts/setup-recipes-lib
   source scripts/setup-tools-lib
+  load_tool_catalog "$repo_dir/tools.env"
+  load_tool_catalog "$repo_dir/validation.env"
   validate_tool_config
+  validate_tool_selection TOOLS online
+  validate_tool_selection OFFLINE_RELEASE_TOOLS offline
   validate_validation_config
+  for catalog_name in TOOL_RELEASES VALIDATION_RELEASES; do
+    local -n releases=$catalog_name
+    for tool in "${!releases[@]}"; do
+      if [[ $catalog_name == TOOL_RELEASES ]]; then
+        if [[ $tool == npm ]]; then
+          if ! list_has TOOLS nodejs && ! list_has OFFLINE_RELEASE_TOOLS nodejs; then
+            continue
+          fi
+        elif [[ $tool != asdf ]] &&
+          ! list_has TOOLS "$tool" && ! list_has OFFLINE_RELEASE_TOOLS "$tool"; then
+          continue
+        fi
+      elif ! list_has VALIDATION_TOOLS "$tool"; then
+        continue
+      fi
+      release_versions "$catalog_name" "$tool"
+      for version in "${RELEASE_VERSIONS[@]}"; do
+        select_release "$catalog_name" "$tool" "$version"
+        if [[ $RELEASE_URL == - ]]; then
+          continue
+        fi
+        artifact_layout "$tool" "$version" "$RELEASE_ASSET"
+      done
+    done
+    unset -n releases
+  done
   if grep -Eq \
     '^(ASDF|GH|K9S|TRIVY|KYVERNO|KUBECONFORM|SHELLCHECK|RG|ZOXIDE|UV|OMP|NVIM|NPM|TMUX|FZF|KREW|ACTIONLINT|STYLUA|ZIZMOR|TASK)_(VERSION|SHA256)=' \
     tools.env validation.env; then
-    die 'legacy editable release scalars remain in the catalogs'
+    report_error 'legacy editable release scalars remain in the catalogs'
   else
     grep_status=$?
-    ((grep_status == 1)) || die 'cannot inspect release catalogs for legacy scalars'
+    ((grep_status == 1)) || report_error 'cannot inspect release catalogs for legacy scalars'
   fi
 }
 
 validate_workflows() {
-  need actionlint
-  need shellcheck
-  need yamllint
-  need zizmor
+  require_command actionlint
+  require_command shellcheck
+  require_command yamllint
+  require_command zizmor
   local token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
   local discovered_token
 

@@ -13,7 +13,7 @@ health_helm() {
       "$release/bin/helm" template offline-health "$work/chart") || return
     printf '%s\n' "$output"
     [[ $output == *'name: offline-health'* ]] || {
-      die "Helm $version did not render the local chart"
+      report_error "Helm $version did not render the local chart"
       return 1
     }
   done

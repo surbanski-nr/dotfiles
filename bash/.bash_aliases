@@ -149,15 +149,14 @@ dotfiles-check() (
     return
   fi
   if [[ -r $manifest_dir/tools.env ]]; then
-    # shellcheck source=../tools.env
-    source "$manifest_dir/tools.env"
     # Loaded only for diagnostics, never during normal shell startup.
     # shellcheck source=../scripts/setup-lib
     source "$manifest_dir/scripts/setup-lib"
     source "$manifest_dir/scripts/setup-catalog-lib"
-    source "$manifest_dir/scripts/setup-recipes-lib"
     source "$manifest_dir/scripts/setup-tools-lib"
+    load_tool_catalog "$manifest_dir/tools.env"
     validate_tool_config online || return
+    validate_tool_selection TOOLS online || return
     selected=("${TOOLS[@]}")
   fi
 

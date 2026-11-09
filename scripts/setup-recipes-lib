@@ -341,19 +341,14 @@ extract_artifact() {
 }
 
 prepare_artifact() {
-  local catalog_name=$1 name=$2 version=$3 archive=$4 destination=$5
+  local name=$1 version=$2 asset=$3 digest=$4 archive=$5 destination=$6
 
-  select_release "$catalog_name" "$name" "$version" || return
-  if [[ $RELEASE_URL == - ]]; then
-    report_error "$name $version has no direct artifact"
-    return 1
-  fi
-  artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
+  artifact_layout "$name" "$version" "$asset" || return
   if ! [[ -f $archive && ! -L $archive ]]; then
     report_error "missing artifact: $archive"
     return 1
   fi
-  verify_sha256 "$archive" "$RELEASE_SHA256" || return
+  verify_sha256 "$archive" "$digest" || return
   mkdir -p "$destination" || return
   extract_artifact "$archive" "$destination"
 }
@@ -394,10 +389,10 @@ verify_prepared_tool() {
 }
 
 prepare_tool_artifact() {
-  local catalog=$1 name=$2 version=$3 archive=$4 stage=$5
+  local name=$1 version=$2 asset=$3 digest=$4 archive=$5 stage=$6
   local source_tree built_tree build_dir
 
-  prepare_artifact "$catalog" "$name" "$version" "$archive" "$stage" || return
+  prepare_artifact "$name" "$version" "$asset" "$digest" "$archive" "$stage" || return
   if [[ $SPEC_BUILD == true ]]; then
     # Upstream install hooks do not quote prefix paths. Compile away from the
     # store, then return the finished tree to its publication staging directory.
@@ -409,25 +404,18 @@ prepare_tool_artifact() {
     compile_tool_source "$name" "$source_tree" "$built_tree" || return
     mv -- "$built_tree" "$stage/${SPEC_DESTS[0]}" || return
   fi
-  if [[ $name == nodejs ]]; then
-    prepare_node_npm "$stage/${SPEC_DESTS[0]}" "$(dirname -- "$archive")" || return
-  fi
   verify_prepared_tool "$name" "$version" "$stage"
 }
 
 prepare_node_npm() {
-  local prefix=$1 archives=$2 archive upstream
-  local RELEASE_VERSION RELEASE_URL RELEASE_SHA256 RELEASE_ASSET
+  local prefix=$1 archive=$2 version=$3 digest=$4 upstream
 
   upstream=$(PATH="$prefix/bin:$PATH" "$prefix/bin/npm" --version) || return
   printf '%s\n' "$upstream" >"$prefix/.upstream-npm-version" || return
-  select_default_release TOOL_RELEASES npm || return
-  archive=$archives/npm-$RELEASE_ASSET
-  download_file "$RELEASE_URL" "$archive" || return
-  verify_sha256 "$archive" "$RELEASE_SHA256" || return
+  verify_sha256 "$archive" "$digest" || return
   PATH="$prefix/bin:$PATH" NPM_CONFIG_AUDIT=false NPM_CONFIG_UPDATE_NOTIFIER=false \
     "$prefix/bin/npm" install --global --prefix "$prefix" "$archive" >/dev/null || return
-  PATH="$prefix/bin:$PATH" verify_tool_executable npm "$prefix/bin/npm" "$RELEASE_VERSION"
+  PATH="$prefix/bin:$PATH" verify_tool_executable npm "$prefix/bin/npm" "$version"
 }
 
 publish_tool_artifact() {

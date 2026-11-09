@@ -3,8 +3,17 @@
 set -euo pipefail
 
 test_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=../scripts/dotfiles-release
-source "$test_dir/../scripts/dotfiles-release"
+# shellcheck source=../scripts/setup-lib
+source "$test_dir/../scripts/setup-lib"
+# shellcheck source=../scripts/setup-catalog-lib
+source "$test_dir/../scripts/setup-catalog-lib"
+# shellcheck source=../scripts/setup-tools-lib
+source "$test_dir/../scripts/setup-tools-lib"
+# shellcheck source=../scripts/setup-system-lib
+source "$test_dir/../scripts/setup-system-lib"
+# shellcheck source=../scripts/dotfiles-release-lib
+source "$test_dir/../scripts/dotfiles-release-lib"
+load_tool_catalog "$test_dir/../tools.env"
 # shellcheck source=tools/fixture.sh
 source "$test_dir/tools/fixture.sh"
 
@@ -15,7 +24,7 @@ health_stage() {
   printf 'tools_runner: checking %s\n' "$label"
   "$@" && return
   status=$?
-  die "$label health check failed (status $status)" || true
+  report_error "$label health check failed (status $status)" || true
   return "$status"
 }
 
@@ -24,20 +33,20 @@ main() {
   local DOTFILES_IGNORE_USER_BIN=1 VIRTUAL_ENV='' KUBECTL_VERSION='' HELM_VERSION=''
   local PYTHONDONTWRITEBYTECODE=1
   local LC_ALL=C.UTF-8 LANG=C.UTF-8
+  local RELEASE_ROOT
   local -a selected_tools=()
   local -A release_metadata=()
 
   (($# == 1)) || {
-    die 'usage: tools_runner RELEASE_DIRECTORY'
+    report_error 'usage: tools_runner RELEASE_DIRECTORY'
     return 2
   }
   release=$(readlink -f -- "$release") || return
-  validate_release_directory "$release" || return
-  verify_installed_manifest "$release" || return
+  RELEASE_ROOT=${release%/*}
   read_release_metadata "$release/release.env" release_metadata || return
   read_release_tools release_metadata selected_tools || return
-  system_validate_release_host "${release_metadata[PLATFORM_ID]}" || return
-  health_stage versions check_runtime "$release" || return
+  health_stage installation env DOTFILES_RELEASE_ROOT="$RELEASE_ROOT" \
+    "$release/bin/dotfiles-release" health "${release_metadata[RELEASE_ID]}" || return
   health_home=$(mktemp -d) || return
   TEMP_PATHS+=("$health_home")
   local PATH="$release/bin:/usr/bin:/bin"
@@ -70,5 +79,9 @@ main() {
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  TEMP_PATHS=()
+  trap cleanup_setup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   main "$@"
 fi

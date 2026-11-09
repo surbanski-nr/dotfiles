@@ -9,13 +9,13 @@ health_yq() {
   expected=$(metadata_value "$release/release.env" YQ_VERSION) || return
   output=$("$release/bin/yq" --version) || return
   [[ $output == "yq (https://github.com/mikefarah/yq/) version v${expected#v}" ]] || {
-    die 'yq is not the pinned Mike Farah implementation'
+    report_error 'yq is not the pinned Mike Farah implementation'
     return 1
   }
   printf 'name: first\n---\nname: second\n' >"$work/documents.yaml" || return
   output=$("$release/bin/yq" eval -r '.name' "$work/documents.yaml") || return
   [[ $output == $'first\n---\nsecond' ]] || {
-    die 'yq YAML document check failed'
+    report_error 'yq YAML document check failed'
     return 1
   }
 }

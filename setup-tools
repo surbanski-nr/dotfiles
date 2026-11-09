@@ -19,6 +19,7 @@ EOF
 main() {
   local -a requested=()
   local full_selection=false
+  local metadata upstream_npm_version=''
 
   while (($#)); do
     case $1 in
@@ -49,16 +50,43 @@ main() {
   if [[ $full_selection == true ]]; then
     remove_unselected_commands
   fi
-  finish_online_setup "$REPO_DIR"
+  metadata=$(mktemp "$ONLINE_ROOT/.release-env.XXXXXX")
+  TEMP_PATHS+=("$metadata")
+  if list_has TOOLS nodejs; then
+    upstream_npm_version=$(<"$PAYLOAD_DIR/node/.upstream-npm-version")
+  fi
+  write_online_tool_metadata "$metadata" "$upstream_npm_version"
+  finish_online_setup "$REPO_DIR" "$metadata"
 }
 
 load_setup_config() {
-  # shellcheck source=system.env
-  source "$REPO_DIR/system.env"
+  load_system_config "$REPO_DIR/system.env"
   validate_tool_config online
+  validate_tool_selection TOOLS online
+  validate_setup_recipes
 
   configure_online_paths
   STATE_DIR=$ONLINE_ROOT/state/setup-tools
+}
+
+validate_setup_recipes() {
+  local tool version
+  local -a versions=()
+
+  for tool in "${TOOLS[@]}"; do
+    if [[ $tool == python || -v TMUX_PLUGINS[$tool] ]]; then
+      continue
+    fi
+    release_versions TOOL_RELEASES "$tool" || return
+    versions=("${RELEASE_VERSIONS[@]}")
+    for version in "${versions[@]}"; do
+      load_tool_release "$tool" "$version" || return
+    done
+  done
+  if list_has TOOLS nodejs; then
+    select_default_release TOOL_RELEASES npm || return
+    artifact_layout npm "$RELEASE_VERSION" "$RELEASE_ASSET" || return
+  fi
 }
 
 validate_host() {
@@ -112,7 +140,11 @@ load_tool_release() {
     report_error "$name $version has no direct artifact"
     return 1
   fi
-  artifact_layout "$name" "$version" "$RELEASE_ASSET"
+  artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
+  if ((${#SPEC_LINKS[@]} == 0)); then
+    report_error "TOOLS tool $name is not supported by setup-tools"
+    return 1
+  fi
 }
 
 state_path() {
@@ -284,9 +316,10 @@ preflight() {
   fi
   acquire_online_setup_lock
   prepare_online_directories
-  if ((${#plugins[@]})); then
-    preflight_tmux_plugins "$TMUX_PLUGIN_DIR" "${plugins[@]}" || return
-  fi
+  for name in "${plugins[@]}"; do
+    select_git_plugin TMUX_PLUGINS "$name" || return
+    preflight_tmux_plugin "$name" "$TMUX_PLUGIN_DIR" "$PLUGIN_REPO" || return
+  done
   if ((${#binary_tools[@]})); then
     mkdir -p "$STATE_DIR"
   fi
@@ -367,8 +400,10 @@ install_version() {
   local version=$2
   local input
   local content
+  local artifact_digest npm_archive
 
   load_tool_release "$name" "$version"
+  artifact_digest=$RELEASE_SHA256
   classify_installation "$name" "$version" "$RELEASE_SHA256"
   case $INSTALLATION_STATE in
     complete)
@@ -391,12 +426,18 @@ install_version() {
   TEMP_PATHS+=("$STAGE_DIR")
   input="$STAGE_DIR/$SPEC_ASSET"
   download_file "$RELEASE_URL" "$input"
-  prepare_tool_artifact TOOL_RELEASES "$name" "$version" "$input" "$STAGE_DIR"
+  prepare_tool_artifact "$name" "$version" "$RELEASE_ASSET" "$artifact_digest" "$input" "$STAGE_DIR"
+  if [[ $name == nodejs ]]; then
+    select_default_release TOOL_RELEASES npm
+    npm_archive=$STAGE_DIR/npm-$RELEASE_ASSET
+    download_file "$RELEASE_URL" "$npm_archive"
+    prepare_node_npm "$STAGE_DIR/${SPEC_DESTS[0]}" "$npm_archive" "$RELEASE_VERSION" "$RELEASE_SHA256"
+  fi
 
   content=$(tool_content_digest "$STAGE_DIR" "${SPEC_DESTS[@]}")
-  write_state "$name" "$version" pending "$content" "$RELEASE_SHA256"
+  write_state "$name" "$version" pending "$content" "$artifact_digest"
   publish_tool_artifact "$STAGE_DIR" "$PAYLOAD_DIR"
-  write_state "$name" "$version" complete "$content" "$RELEASE_SHA256"
+  write_state "$name" "$version" complete "$content" "$artifact_digest"
   printf 'setup-tools: installed %s %s\n' "$name" "$version"
 }
 
@@ -519,7 +560,8 @@ install_selected_tools() {
   for name in "$@"; do
     if [[ -v TMUX_PLUGINS[$name] ]]; then
       printf 'setup-tools: installing %s\n' "$name"
-      install_tmux_plugin "$name" "$TMUX_PLUGIN_DIR" || return
+      select_git_plugin TMUX_PLUGINS "$name" || return
+      install_tmux_plugin "$name" "$TMUX_PLUGIN_DIR" "$PLUGIN_REPO" "$PLUGIN_COMMIT" || return
       continue
     fi
     load_tool_versions "$name"
@@ -555,12 +597,13 @@ source "$REPO_DIR/scripts/setup-lib"
 source "$REPO_DIR/scripts/setup-catalog-lib"
 source "$REPO_DIR/scripts/setup-recipes-lib"
 source "$REPO_DIR/scripts/setup-tools-lib"
+source "$REPO_DIR/scripts/setup-online-lib"
+source "$REPO_DIR/scripts/setup-system-lib"
 # shellcheck source=scripts/setup-tmux-lib
 source "$REPO_DIR/scripts/setup-tmux-lib"
 # Tool lists are needed by --help and by the default selection. Sourcing
 # this file does not download, install or validate anything.
-# shellcheck source=tools.env
-source "$REPO_DIR/tools.env"
+load_tool_catalog "$REPO_DIR/tools.env"
 # Cleanup must also work when --help returns before any installation starts.
 declare -a TEMP_PATHS=()
 trap cleanup_setup EXIT

@@ -17,6 +17,8 @@ source /etc/os-release
 
 checkout=/workspace/dotfiles
 cd "$checkout"
+# shellcheck source=setup-lib
+source "$checkout/scripts/setup-lib"
 # shellcheck source=setup-system-lib
 source "$checkout/scripts/setup-system-lib"
 SETUP_NAME=dev-vm

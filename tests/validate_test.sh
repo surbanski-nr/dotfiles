@@ -34,6 +34,7 @@ fi
 syntax_repo=$test_root/syntax-repo
 mkdir -p "$syntax_repo/bash" "$syntax_repo/scripts" "$syntax_repo/tests"
 cp "$repo_dir/scripts/validate" "$syntax_repo/scripts/validate"
+cp "$repo_dir/scripts/"*-lib "$syntax_repo/scripts/"
 for file in .bashrc .bash_profile .bash_aliases .bash_history_lib; do
   printf ':\n' >"$syntax_repo/bash/$file"
 done

@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 
-# Artifact validation uses the functions in setup-recipes-lib.
+load_tool_catalog() {
+  local file=$1
+
+  if [[ ! -r $file ]]; then
+    report_error "cannot read tool catalog: $file"
+    return 1
+  fi
+  # shellcheck disable=SC1090
+  source "$file"
+}
 
 validate_version() {
   local name=$1
@@ -196,7 +205,6 @@ validate_validation_config() {
         report_error "validation release $tool $version requires an artifact"
         return 1
       fi
-      artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
     done
   done
 }
@@ -246,21 +254,14 @@ validate_git_plugin_catalog() {
   done
 }
 
-validate_tool_delivery() {
+validate_tool_releases() {
   local tools_name=$1 tool version
   local -n tools_ref=$tools_name
 
-  if [[ $tools_name == OFFLINE_RELEASE_TOOLS ]]; then
-    validate_tool_dependencies "$tools_name" || return
-  fi
   for tool in "${tools_ref[@]}"; do
     [[ $tool == yamllint || -v TMUX_PLUGINS[$tool] ]] && continue
     [[ $tools_name != TOOLS || $tool != python ]] || continue
     if [[ $tools_name == OFFLINE_RELEASE_TOOLS ]]; then
-      tool_metadata_fields "$tool" >/dev/null || {
-        report_error "unsupported offline tool: $tool"
-        return 1
-      }
       select_default_release TOOL_RELEASES "$tool" || return
       RELEASE_VERSIONS=("$RELEASE_VERSION")
     else
@@ -272,11 +273,6 @@ validate_tool_delivery() {
         report_error "$tools_name release $tool $version requires an artifact"
         return 1
       }
-      artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
-      if [[ $tools_name == TOOLS && ${#SPEC_LINKS[@]} == 0 ]]; then
-        report_error "TOOLS tool $tool is not supported by setup-tools"
-        return 1
-      fi
     done
   done
   if list_has "$tools_name" kubectx && list_has "$tools_name" kubens; then
@@ -295,7 +291,6 @@ validate_tool_delivery() {
       report_error 'npm default requires an artifact'
       return 1
     }
-    artifact_layout npm "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   fi
 }
 
@@ -332,14 +327,14 @@ validate_tool_config() {
   done
   case $mode in
     all)
-      validate_tool_delivery OFFLINE_RELEASE_TOOLS || return
-      validate_tool_delivery TOOLS || return
+      validate_tool_releases OFFLINE_RELEASE_TOOLS || return
+      validate_tool_releases TOOLS || return
       ;;
     offline)
-      validate_tool_delivery OFFLINE_RELEASE_TOOLS || return
+      validate_tool_releases OFFLINE_RELEASE_TOOLS || return
       ;;
     online)
-      validate_tool_delivery TOOLS || return
+      validate_tool_releases TOOLS || return
       ;;
     asdf)
       ;;
@@ -354,7 +349,6 @@ validate_tool_config() {
       report_error 'asdf default requires an artifact'
       return 1
     }
-    artifact_layout asdf "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   fi
   validate_version PIP_TOOLS_VERSION "${PIP_TOOLS_VERSION:-}" || return
 
@@ -364,4 +358,68 @@ validate_tool_config() {
       return 1
     fi
   done
+}
+
+write_tool_metadata() {
+  local tools_name=$1 file=$2 upstream_npm_version=${3:-} tool fields field value
+  local -n metadata_tools=$tools_name
+  local -A emitted=()
+
+  for tool in "${metadata_tools[@]}"; do
+    fields=$(tool_metadata_fields "$tool") || return
+    if [[ -z $fields ]]; then
+      continue
+    fi
+    while IFS= read -r field; do
+      if [[ -v emitted[$field] ]]; then
+        continue
+      fi
+      case $field in
+        *_COMMIT)
+          select_git_plugin TMUX_PLUGINS "$tool" || return
+          value=$PLUGIN_COMMIT
+          ;;
+        *_VERSIONS)
+          release_versions TOOL_RELEASES "$tool" || return
+          value=$(
+            IFS=,
+            printf '%s' "${RELEASE_VERSIONS[*]}"
+          )
+          ;;
+        PYTHON_BUILD)
+          if [[ $tools_name == TOOLS ]]; then
+            continue
+          fi
+          select_default_release TOOL_RELEASES python || return
+          if ! [[ $RELEASE_URL =~ /releases/download/([0-9]{8})/ ]]; then
+            return 1
+          fi
+          value=${BASH_REMATCH[1]}
+          ;;
+        NODE_UPSTREAM_NPM_VERSION)
+          value=$upstream_npm_version
+          ;;
+        NPM_VERSION)
+          select_default_release TOOL_RELEASES npm || return
+          value=$RELEASE_VERSION
+          ;;
+        *)
+          select_default_release TOOL_RELEASES "$tool" || return
+          value=$RELEASE_VERSION
+          ;;
+      esac
+      printf '%s=%s\n' "$field" "$value" >>"$file" || return
+      emitted[$field]=1
+    done <<<"$fields"
+  done
+}
+
+write_online_tool_metadata() {
+  local file=$1 upstream_npm_version=${2:-}
+
+  printf 'RELEASE_ID=online\nTOOLS=%s\n' "$(
+    IFS=,
+    printf '%s' "${TOOLS[*]}"
+  )" >"$file" || return
+  write_tool_metadata TOOLS "$file" "$upstream_npm_version"
 }

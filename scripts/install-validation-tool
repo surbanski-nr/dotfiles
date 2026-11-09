@@ -2,25 +2,27 @@
 
 set -euo pipefail
 
-die() {
-  printf 'install-validation-tool: %s\n' "$*" >&2
-  exit 1
-}
-
-[[ $# -eq 1 ]] || die 'usage: install-validation-tool TOOL'
-
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=setup-lib
+source "$repo_dir/scripts/setup-lib"
+[[ $# -eq 1 ]] || report_error 'usage: install-validation-tool TOOL'
 tools_dir=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}
 tool=$1
 
-# shellcheck source=setup-lib
-source "$repo_dir/scripts/setup-lib"
 source "$repo_dir/scripts/setup-catalog-lib"
 source "$repo_dir/scripts/setup-recipes-lib"
-source "$repo_dir/scripts/setup-tools-lib"
-# shellcheck source=../validation.env
-source "$repo_dir/validation.env"
+load_tool_catalog "$repo_dir/validation.env"
 validate_validation_config
+for configured_tool in "${VALIDATION_TOOLS[@]}"; do
+  if [[ $configured_tool == yamllint ]]; then
+    continue
+  fi
+  release_versions VALIDATION_RELEASES "$configured_tool"
+  for configured_version in "${RELEASE_VERSIONS[@]}"; do
+    select_release VALIDATION_RELEASES "$configured_tool" "$configured_version"
+    artifact_layout "$configured_tool" "$configured_version" "$RELEASE_ASSET"
+  done
+done
 
 supported=false
 for configured_tool in "${VALIDATION_TOOLS[@]}"; do
@@ -29,7 +31,7 @@ for configured_tool in "${VALIDATION_TOOLS[@]}"; do
     break
   fi
 done
-[[ $supported == true ]] || die "unsupported tool: $tool"
+[[ $supported == true ]] || report_error "unsupported tool: $tool"
 
 mkdir -p "$tools_dir"
 export PATH="$tools_dir:$PATH"
@@ -69,7 +71,7 @@ if [[ -x $executable ]] && [[ $(tool_version "$executable") == "$version" ]]; th
 fi
 
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] ||
-  die 'automatic tool installation supports Linux x86_64 only'
+  report_error 'automatic tool installation supports Linux x86_64 only'
 
 stage=$(mktemp -d "$tools_dir/install-$tool.XXXXXX")
 staged_tree=
@@ -89,7 +91,7 @@ activate_binary() {
   install -m 0755 "$candidate" "$stage/$tool.candidate"
   candidate=$stage/$tool.candidate
   [[ $(tool_version "$candidate") == "$version" ]] ||
-    die "$tool $version candidate validation failed"
+    report_error "$tool $version candidate validation failed"
 
   if [[ -e $destination || -L $destination ]]; then
     cp -a "$destination" "$previous"
@@ -104,7 +106,7 @@ activate_binary() {
   if ((previous_exists)); then
     mv "$previous" "$destination"
   fi
-  die "$tool $version activation failed; restored the previous executable"
+  report_error "$tool $version activation failed; restored the previous executable"
 }
 
 activate_link() {
@@ -115,7 +117,7 @@ activate_link() {
   local previous_exists=0
 
   [[ $(tool_version "$candidate_executable") == "$version" ]] ||
-    die "$tool $version candidate validation failed"
+    report_error "$tool $version candidate validation failed"
   ln -s "$candidate" "$link"
 
   if [[ -e $destination || -L $destination ]]; then
@@ -132,7 +134,7 @@ activate_link() {
   if ((previous_exists)); then
     mv "$previous" "$destination"
   fi
-  die "$tool $version activation failed; restored the previous environment"
+  report_error "$tool $version activation failed; restored the previous environment"
 }
 
 if [[ $tool == yamllint ]]; then
@@ -146,10 +148,11 @@ if [[ $tool == yamllint ]]; then
     "yamllint==$version"
   activate_link "$venv/bin/yamllint" "$venv/bin/yamllint"
 else
+  artifact_layout "$tool" "$version" "$RELEASE_ASSET"
   archive=$stage/$RELEASE_ASSET
   prepared=$stage/prepared
   download_file "$url" "$archive"
-  prepare_artifact VALIDATION_RELEASES "$tool" "$version" "$archive" "$prepared"
+  prepare_artifact "$tool" "$version" "$RELEASE_ASSET" "$RELEASE_SHA256" "$archive" "$prepared"
   if [[ $tool == python ]]; then
     runtime=$tools_dir/python-$version
     # Existing venvs point here directly, so never replace a published runtime.
@@ -165,4 +168,4 @@ else
 fi
 
 [[ $(tool_version "$executable") == "$version" ]] ||
-  die "$tool $version installation failed"
+  report_error "$tool $version installation failed"

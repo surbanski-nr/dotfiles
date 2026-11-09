@@ -14,6 +14,15 @@ For a prepared release, use dotfiles-release setup instead.
 EOF
 }
 
+main() {
+  SETUP_NAME=${SETUP_NAME:-${0##*/}}
+  system_validate_host
+  SETUP_WARNINGS=0
+  SETUP_TEMP_DIR=$(mktemp -d)
+  trap 'find "$SETUP_TEMP_DIR" -depth -delete' EXIT
+  setup_system setup
+}
+
 case ${1:-} in
   '')
     (($# == 0)) || {
@@ -36,8 +45,9 @@ case ${1:-} in
 esac
 
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=system.env
-source "$REPO_DIR/system.env"
+# shellcheck source=scripts/setup-lib
+source "$REPO_DIR/scripts/setup-lib"
 # shellcheck source=scripts/setup-system-lib
 source "$REPO_DIR/scripts/setup-system-lib"
-setup_system setup
+load_system_config "$REPO_DIR/system.env"
+main

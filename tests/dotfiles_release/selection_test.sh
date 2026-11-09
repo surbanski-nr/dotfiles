@@ -15,6 +15,7 @@ if bash -c '
   source "$1/scripts/setup-tools-lib"
   OFFLINE_RELEASE_TOOLS=(nvim)
   validate_tool_config offline
+  validate_tool_selection OFFLINE_RELEASE_TOOLS offline
 ' bash "$repo_dir" >"$test_root/missing-rg-config.log" 2>&1; then
   fail 'offline configuration accepted Nvim without ripgrep'
 fi
@@ -30,6 +31,7 @@ bash -c '
   source "$1/scripts/setup-tools-lib"
   OFFLINE_RELEASE_TOOLS=(nvim rg)
   validate_tool_config offline
+  validate_tool_selection OFFLINE_RELEASE_TOOLS offline
 ' bash "$repo_dir"
 
 full=$test_root/selected-full.tar.gz

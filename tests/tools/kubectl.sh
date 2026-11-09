@@ -12,7 +12,7 @@ health_kubectl() {
     output=$(KUBECTL_VERSION="$version" KUBECONFIG="$kubeconfig" \
       "$release/bin/kubectl" config current-context) || return
     [[ $output == offline-a ]] || {
-      die "kubectl $version did not read the isolated kubeconfig"
+      report_error "kubectl $version did not read the isolated kubeconfig"
       return 1
     }
   done

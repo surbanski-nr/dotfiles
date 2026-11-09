@@ -1,0 +1,1273 @@
+#!/usr/bin/env bash
+
+archive_prerequisites() {
+  local command_name
+  for command_name in awk cmp dirname find mktemp readlink sed sha256sum sort tar wc xargs; do
+    require_command "$command_name" || return
+  done
+}
+
+operation_prerequisites() {
+  local command_name
+  archive_prerequisites || return
+  for command_name in bash chmod cp env flock gawk ln mkdir mv stat timeout uname unlink; do
+    require_command "$command_name" || return
+  done
+}
+
+metadata_value() {
+  local file=$1 key=$2
+  local count value
+
+  count=$(awk -F= -v key="$key" '$1 == key { count++ } END { print count + 0 }' "$file") || return
+  [[ $count -eq 1 ]] || {
+    report_error "metadata key $key occurs $count times in $file"
+    return 1
+  }
+  value=$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print }' "$file") || return
+  [[ $value != *$'\n'* && $value != *$'\r'* ]] || {
+    report_error "invalid metadata value for $key"
+    return 1
+  }
+  printf '%s\n' "$value"
+}
+
+read_release_tools() {
+  local metadata_name=$1 tools_name=$2
+  local -n metadata_ref=$metadata_name tools_out=$tools_name
+
+  [[ ${metadata_ref[OFFLINE_RELEASE_TOOLS]} != *, ]] || {
+    report_error 'invalid offline tool list'
+    return 1
+  }
+  IFS=, read -r -a tools_out <<<"${metadata_ref[OFFLINE_RELEASE_TOOLS]}"
+  ((${#tools_out[@]} > 0)) || {
+    report_error 'offline tool list must not be empty'
+    return 1
+  }
+}
+
+read_metadata_file() {
+  local file=$1 map_name=$2 line key value
+  local -n parsed=$map_name
+
+  [[ -f $file && ! -L $file ]] || {
+    report_error "invalid release metadata file: $file"
+    return 1
+  }
+  parsed=()
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ $line =~ ^([A-Z0-9_]+)=([[:print:]]+)$ ]] || {
+      report_error "invalid release metadata line in $file"
+      return 1
+    }
+    key=${BASH_REMATCH[1]}
+    value=${BASH_REMATCH[2]}
+    [[ ! -v parsed[$key] ]] || {
+      report_error "duplicate release metadata key: $key"
+      return 1
+    }
+    ((${#value} <= 512)) || {
+      report_error "release metadata value is too long: $key"
+      return 1
+    }
+    parsed["$key"]=$value
+  done <"$file"
+}
+
+validate_tool_metadata() {
+  local map_name=$1 selection_key=$2 key value tool field fields seen=' '
+  local -n tool_metadata_ref=$map_name
+  local -a selected_tools=() versions=()
+  local -A required_fields=()
+  shift 2
+
+  for key in "$@"; do
+    required_fields[$key]=1
+  done
+
+  for key in "${!required_fields[@]}"; do
+    [[ -v tool_metadata_ref[$key] ]] || {
+      report_error "missing release metadata key: $key"
+      return 1
+    }
+  done
+  [[ -v tool_metadata_ref[$selection_key] && ${tool_metadata_ref[$selection_key]} != *, ]] || {
+    report_error "invalid tool list: $selection_key"
+    return 1
+  }
+  IFS=, read -r -a selected_tools <<<"${tool_metadata_ref[$selection_key]}"
+  ((${#selected_tools[@]})) || {
+    report_error "$selection_key must not be empty"
+    return 1
+  }
+  for tool in "${selected_tools[@]}"; do
+    [[ $tool =~ ^[a-z0-9-]+$ && $seen != *" $tool "* ]] || {
+      report_error "invalid or duplicate offline tool: $tool"
+      return 1
+    }
+    seen+="$tool "
+    fields=$(tool_metadata_fields "$tool") || {
+      report_error "unknown offline tool: $tool"
+      return 1
+    }
+    if [[ -z $fields ]]; then
+      continue
+    fi
+    while IFS= read -r field; do
+      if [[ $selection_key == TOOLS && $field == PYTHON_BUILD ]]; then
+        continue
+      fi
+      required_fields[$field]=1
+    done <<<"$fields"
+  done
+  if [[ $selection_key == OFFLINE_RELEASE_TOOLS ]]; then
+    validate_tool_dependencies selected_tools || return
+  fi
+  for key in "${!required_fields[@]}"; do
+    [[ -v tool_metadata_ref[$key] ]] || {
+      report_error "missing release metadata key: $key"
+      return 1
+    }
+  done
+  for key in "${!tool_metadata_ref[@]}"; do
+    [[ -v required_fields[$key] ]] || {
+      report_error "unknown or unselected release metadata key: $key"
+      return 1
+    }
+    value=${tool_metadata_ref[$key]}
+    case $key in
+      *_VERSION)
+        [[ $value =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ ]] || {
+          report_error "invalid release tool version: $key"
+          return 1
+        }
+        ;;
+      *_VERSIONS)
+        [[ $value != *, ]] || {
+          report_error "invalid release version list: $key"
+          return 1
+        }
+        IFS=, read -r -a versions <<<"$value"
+        seen=' '
+        for value in "${versions[@]}"; do
+          [[ $value =~ ^v?[0-9]+([.][0-9]+){1,3}([0-9A-Za-z.+-]*[0-9A-Za-z])?$ &&
+            $seen != *" $value "* ]] || {
+            report_error "invalid release version list: $key"
+            return 1
+          }
+          seen+="$value "
+        done
+        ;;
+      *_COMMIT)
+        [[ $value =~ ^[0-9a-f]{40}$ ]] || {
+          report_error "invalid release commit: $key"
+          return 1
+        }
+        ;;
+    esac
+  done
+}
+
+read_release_metadata() {
+  local file=$1 map_name=$2
+  local -n release_parsed_ref=$map_name
+
+  read_metadata_file "$file" "$map_name" || return
+  validate_tool_metadata "$map_name" OFFLINE_RELEASE_TOOLS \
+    RELEASE_ID PLATFORM_ID SOURCE_COMMIT SOURCE_TREE BUILDER_IMAGE OFFLINE_RELEASE_TOOLS PAYLOAD_PATHS || return
+  system_validate_platform_name "${release_parsed_ref[PLATFORM_ID]}" || return
+  [[ ${release_parsed_ref[RELEASE_ID]} =~ ^dotfiles-[0-9a-f]{12}$ &&
+    ${release_parsed_ref[SOURCE_TREE]} =~ ^[0-9a-f]{40}$ &&
+    ${release_parsed_ref[BUILDER_IMAGE]} =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]] || {
+    report_error 'invalid release identity'
+    return 1
+  }
+  if [[ -v release_parsed_ref[PYTHON_BUILD] ]]; then
+    [[ ${release_parsed_ref[PYTHON_BUILD]} =~ ^[0-9]{8}$ ]] || {
+      report_error 'invalid standalone Python build'
+      return 1
+    }
+  fi
+  [[ ${release_parsed_ref[PAYLOAD_PATHS]} == bin,config,dotfiles,python-locks,python-wheelhouse,share,tools ]] || {
+    report_error 'release metadata has an invalid payload layout'
+    return 1
+  }
+}
+
+read_online_metadata() {
+  local file=$1 map_name=$2
+  local -n online_parsed_ref=$map_name
+
+  read_metadata_file "$file" "$map_name" || return
+  validate_tool_metadata "$map_name" TOOLS RELEASE_ID TOOLS || return
+  [[ ${online_parsed_ref[RELEASE_ID]} == online ]] || {
+    report_error 'invalid online installation identity'
+    return 1
+  }
+}
+
+read_installation_metadata() {
+  local release=$1 map_name=$2
+
+  if [[ $release == "$RELEASE_ROOT/online" ]]; then
+    read_online_metadata "$release/release.env" "$map_name"
+  else
+    read_release_metadata "$release/release.env" "$map_name"
+  fi
+}
+
+read_installation_tools() {
+  local release=$1 tools_name=$2 key=OFFLINE_RELEASE_TOOLS
+  local -n installation_tools=$tools_name
+  local -A installation_metadata=()
+
+  read_installation_metadata "$release" installation_metadata || return
+  if [[ $release == "$RELEASE_ROOT/online" ]]; then
+    key=TOOLS
+  fi
+  # Written through the caller's nameref.
+  # shellcheck disable=SC2034
+  IFS=, read -r -a installation_tools <<<"${installation_metadata[$key]}"
+}
+
+validate_archive_members() (
+  local archive=$1 first member root line mode name target resolved remainder
+  local stage members verbose
+  local LC_ALL=C
+  local -A seen=()
+
+  stage=$(mktemp -d) || return
+  trap 'cleanup_path "$stage"' EXIT
+  members=$stage/members
+  verbose=$stage/verbose
+  LC_ALL=C tar --quoting-style=literal -tzf "$archive" >"$members" || return
+  first=$(sed -n '1p' "$members") || return
+  root=${first%%/*}
+  [[ $root =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
+    report_error 'archive has an invalid top-level directory'
+    return 1
+  }
+  while IFS= read -r member; do
+    member=${member%/}
+    [[ $member == "$root" || $member == "$root/"* ]] || {
+      report_error "archive has multiple roots: $member"
+      return 1
+    }
+    [[ $member != /* && /$member/ != *'/../'* && /$member/ != *'/./'* &&
+      $member != *'//'* ]] || {
+      report_error "unsafe archive member: $member"
+      return 1
+    }
+    [[ $member != *[[:cntrl:]]* ]] || {
+      report_error "archive member has unsupported characters: $member"
+      return 1
+    }
+    [[ ! -v seen[$member] ]] || {
+      report_error "duplicate archive member: $member"
+      return 1
+    }
+    seen["$member"]=1
+  done <"$members"
+  LC_ALL=C tar --quoting-style=literal -tvzf "$archive" >"$verbose" || return
+  while IFS= read -r line; do
+    mode=${line:0:1}
+    case $mode in
+      - | d)
+        ;;
+      l)
+        read -r _ _ _ _ _ remainder <<<"$line"
+        [[ $remainder == *' -> '* ]] || {
+          report_error "cannot parse archive link: $line"
+          return 1
+        }
+        name=${remainder% -> *}
+        target=${remainder##* -> }
+        [[ $name == "$root/"* && $target != /* && $target != *[[:cntrl:]]* ]] || {
+          report_error "unsafe archive link: $name -> $target"
+          return 1
+        }
+        resolved=$(readlink -m -- "/$(dirname -- "$name")/$target") || return
+        [[ $resolved == "/$root/"* ]] || {
+          report_error "archive link escapes its root: $name -> $target"
+          return 1
+        }
+        ;;
+      h)
+        report_error "archive hard links are not supported: $line"
+        return 1
+        ;;
+      *)
+        report_error "archive contains an unsupported member type: $line"
+        return 1
+        ;;
+    esac
+  done <"$verbose"
+  printf '%s\n' "$root"
+)
+
+release_commands() {
+  local release=$1 tool
+  local -a selected_tools=()
+  local -A release_metadata=()
+
+  read_installation_tools "$release" selected_tools || return
+  printf '%s\n' dotfiles-release
+  for tool in "${selected_tools[@]}"; do
+    tool_commands "$tool" || return
+  done
+}
+
+verify_release_symlinks() {
+  local release=$1 mode=$2 package_list=$3 link target resolved package relative links
+  local python_package mason_packages=''
+
+  if [[ -n $package_list ]]; then
+    while IFS= read -r python_package; do
+      package=$(python_mason_package "$release" "$python_package") || return
+      mason_packages+="$package"$'\n'
+    done <<<"$package_list"
+  fi
+  package_list=${mason_packages%$'\n'}
+
+  links=$(mktemp) || return
+  TEMP_PATHS+=("$links")
+  find "$release" -type l -print0 >"$links" || return
+  while IFS= read -r -d '' link; do
+    target=$(readlink -- "$link") || return
+    resolved=$(readlink -m -- "$(dirname -- "$link")/$target") || return
+    if [[ $target == /* ]]; then
+      [[ $mode == installed ]] || {
+        report_error "absolute archive symlink: $link"
+        return 1
+      }
+      resolved=$(readlink -m -- "$target") || return
+    fi
+    [[ $resolved == "$release/"* ]] || {
+      report_error "release symlink escapes its root: $link -> $target"
+      return 1
+    }
+    [[ ! -e $link ]] || continue
+    # Upstream test links point into a test-only submodule that is not bundled.
+    if [[ $resolved == "$release/share/tmux/plugins/tmux-resurrect/lib/tmux-test/"* &&
+      ($link == "$release/share/tmux/plugins/tmux-resurrect/run_tests" ||
+      $link == "$release/share/tmux/plugins/tmux-resurrect/tests/"*) ]]; then
+      continue
+    fi
+    if [[ $mode == archive && $resolved == "$release/share/nvim2/mason/packages/"* ]]; then
+      relative=${resolved#"$release/share/nvim2/mason/packages/"}
+      package=${relative%%/*}
+      if [[ $relative == "$package/venv/"* && $'\n'$package_list$'\n' == *$'\n'"$package"$'\n'* ]]; then
+        continue
+      fi
+    fi
+    report_error "release symlink has a missing target: $link -> $target"
+    return 1
+  done <"$links"
+}
+
+verify_tool_payload() {
+  local release=$1 tools_name=$2 tool paths pattern commands command_name version path package
+  local -n tools_ref=$tools_name
+  local -a expected_commands=(dotfiles-release) packages=(bash git ssh vim scripts tools.env)
+  local -A metadata=()
+  local expected actual
+
+  read_release_metadata "$release/release.env" metadata || return
+  while IFS= read -r tool; do
+    list_has "$tools_name" "$tool" && continue
+    paths=$(tool_payload_paths "$tool") || return
+    [[ -n $paths ]] || continue
+    while IFS= read -r pattern; do
+      if compgen -G "$release/$pattern" >/dev/null; then
+        report_error "release contains unselected $tool payload: $pattern"
+        return 1
+      fi
+    done <<<"$paths"
+  done < <(known_tool_names)
+  for tool in "${tools_ref[@]}"; do
+    commands=$(tool_commands "$tool") || return
+    if [[ -n $commands ]]; then
+      while IFS= read -r command_name; do
+        expected_commands+=("$command_name")
+      done <<<"$commands"
+    fi
+    case $tool in
+      kubectl | helm)
+        for version in ${metadata[${tool^^}_VERSIONS]//,/ }; do
+          expected_commands+=("$tool-$version")
+        done
+        ;;
+    esac
+    package=$(tool_config_package "$tool") || return
+    [[ -z $package ]] || packages+=("$package")
+  done
+  expected=$(printf '%s\n' "${expected_commands[@]}" | LC_ALL=C sort) || return
+  actual=$(find "$release/bin" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort) || return
+  [[ $actual == "$expected" ]] || {
+    report_error 'release public commands differ from its offline tool selection'
+    return 1
+  }
+  for path in "$release/dotfiles/"* "$release/dotfiles/".*; do
+    [[ -e $path || -L $path ]] || continue
+    list_has packages "${path##*/}" || {
+      report_error "release contains an unselected dotfiles package: ${path##*/}"
+      return 1
+    }
+  done
+  if ! list_has "$tools_name" nvim; then
+    for path in python-locks python-wheelhouse; do
+      [[ ! -d $release/$path || -z $(find "$release/$path" -mindepth 1 -print -quit) ]] || {
+        report_error 'release contains editor Python data without Nvim'
+        return 1
+      }
+    done
+  fi
+}
+
+validate_release_directory() {
+  local release=$1 mode=${2:-installed} path package_output command_output command_name version tool
+  local -A release_metadata=()
+
+  [[ -d $release && ! -L $release ]] || {
+    report_error "invalid release directory: $release"
+    return 1
+  }
+  read_release_metadata "$release/release.env" release_metadata || return
+  [[ ${release_metadata[RELEASE_ID]} == "${release##*/}" &&
+    ${release_metadata[RELEASE_ID]} == "dotfiles-${release_metadata[SOURCE_COMMIT]:0:12}" ]] || {
+    report_error 'release ID does not match its directory and source commit'
+    return 1
+  }
+  for path in bin config dotfiles python-locks share tools; do
+    [[ -d $release/$path && ! -L $release/$path ]] || {
+      report_error "release payload directory is missing: $path"
+      return 1
+    }
+  done
+  for path in SHA256SUMS build-manifest.txt dotfiles/bash/.bashrc \
+    dotfiles/bash/.bash_profile dotfiles/bash/.bash_aliases \
+    dotfiles/bash/.bash_history_lib dotfiles/scripts/bash-history-archive \
+    dotfiles/git/.gitconfig dotfiles/vim/.vimrc \
+    dotfiles/ssh/.ssh/config dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service; do
+    [[ -f $release/$path && ! -L $release/$path ]] || {
+      report_error "release payload file is missing: $path"
+      return 1
+    }
+  done
+  local -a selected_tools=()
+  read_release_tools release_metadata selected_tools || return
+  if list_has selected_tools nvim; then
+    [[ -f $release/config/nvim2/init.lua && -x $release/config/nvim2/tests/check_runner.sh &&
+      -x $release/tools/nvim/bin/nvim && -d $release/tools/nvim/share/nvim/runtime &&
+      -d $release/share/nvim2/mason/bin ]] || {
+      report_error 'release Nvim payload is incomplete'
+      return 1
+    }
+  fi
+  for tool in tmux oh-my-posh; do
+    list_has selected_tools "$tool" || continue
+    path=dotfiles/$tool/.$tool.conf
+    [[ $tool != oh-my-posh ]] || path=dotfiles/oh-my-posh/.oh-my-posh.omp.json
+    [[ -f $release/$path && ! -L $release/$path ]] || {
+      report_error "release payload file is missing: $path"
+      return 1
+    }
+  done
+  for tool in go tmux htop; do
+    list_has selected_tools "$tool" || continue
+    [[ -x $release/tools/$tool/bin/$tool ]] || {
+      report_error "release private executable is missing: $tool"
+      return 1
+    }
+  done
+  if list_has selected_tools k9s; then
+    for path in config.yaml aliases.yaml plugins.yaml; do
+      [[ -f $release/dotfiles/k9s/.config/k9s/$path &&
+        ! -L $release/dotfiles/k9s/.config/k9s/$path ]] || {
+        report_error "release k9s configuration is missing: $path"
+        return 1
+      }
+    done
+    [[ -d $release/dotfiles/k9s/.config/k9s/skins ]] || {
+      report_error 'release k9s skins are missing'
+      return 1
+    }
+  fi
+  [[ -s $release/build-manifest.txt && -x $release/dotfiles-release ]] || {
+    report_error 'release manager or build manifest is missing'
+    return 1
+  }
+  if list_has selected_tools python; then
+    [[ -x $release/tools/python-${release_metadata[PYTHON_VERSION]}/bin/python3 &&
+      -L $release/tools/python &&
+      $(readlink -- "$release/tools/python") == "python-${release_metadata[PYTHON_VERSION]}" ]] || {
+      report_error 'private Python SDK is missing or incorrect'
+      return 1
+    }
+  fi
+  for path in bin/python bin/python3; do
+    [[ ! -e $release/$path && ! -L $release/$path ]] || {
+      report_error "private Python must not be exposed in $path; rebuild the release"
+      return 1
+    }
+  done
+  for tool in "${selected_tools[@]}"; do
+    [[ $tool == tmux-* ]] || continue
+    path=$release/share/tmux/plugins/$tool
+    [[ -d $path/.git && -f $path/${tool#tmux-}.tmux ]] || {
+      report_error "release tmux plugin is missing: $tool"
+      return 1
+    }
+    local commit_field=${tool^^}
+    commit_field=${commit_field//-/_}_COMMIT
+    [[ $(<"$path/.git/HEAD") == "${release_metadata[$commit_field]}" ]] || {
+      report_error "release tmux plugin commit does not match: $tool"
+      return 1
+    }
+  done
+  package_output=
+  if list_has selected_tools nvim; then
+    package_output=$(python_inventory_packages "$release") || return
+    verify_nvim_inventory "$release" "$mode" selected_tools || return
+  fi
+  verify_release_symlinks "$release" "$mode" "$package_output" || return
+  command_output=$(release_commands "$release") || return
+  while IFS= read -r command_name; do
+    if [[ $mode == archive && $command_name == yamllint ]]; then
+      [[ -L $release/bin/yamllint ]] || {
+        report_error 'release executable is missing: yamllint'
+        return 1
+      }
+    else
+      [[ -x $release/bin/$command_name ]] || {
+        report_error "release executable is missing: $command_name"
+        return 1
+      }
+    fi
+  done <<<"$command_output"
+  for tool in kubectl helm; do
+    list_has selected_tools "$tool" || continue
+    for version in ${release_metadata[${tool^^}_VERSIONS]//,/ }; do
+      [[ -x $release/bin/$tool-$version ]] || {
+        report_error "release executable is missing: $tool-$version"
+        return 1
+      }
+    done
+  done
+  if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
+    path=$release/share/helm/plugins/helm-values-schema-json
+    [[ -f $path/plugin.yaml && ! -L $path/plugin.yaml && -x $path/schema && -s $path/LICENSE ]] || {
+      report_error 'release Helm schema plugin is incomplete'
+      return 1
+    }
+    awk -v expected="${release_metadata[HELM_SCHEMA_PLUGIN_VERSION]#v}" \
+      '$1 == "name:" { name = $2 } $1 == "version:" { gsub(/"/, "", $2); version = $2 }
+       END { exit !(name == "schema" && version == expected) }' "$path/plugin.yaml" || {
+      report_error 'release Helm schema plugin metadata does not match its version'
+      return 1
+    }
+  fi
+  verify_tool_payload "$release" selected_tools || return
+  if [[ $mode == archive ]]; then
+    if list_has selected_tools nvim && [[ -n $package_output ]]; then
+      [[ -d $release/python-wheelhouse && ! -L $release/python-wheelhouse &&
+        -n $(find "$release/python-wheelhouse" -type f -name '*.whl' -print -quit) ]] || {
+        report_error 'release Python wheelhouse is missing'
+        return 1
+      }
+    fi
+    for path in installed.sha256 installed.modes installed.symlinks .complete .incomplete .artifact.sha256; do
+      [[ ! -e $release/$path && ! -L $release/$path ]] || {
+        report_error 'archive contains installed-state metadata'
+        return 1
+      }
+    done
+    verify_archive_checksums "$release" || return
+  fi
+}
+
+verify_archive_checksums() {
+  local release=$1 expected
+  expected=$(mktemp) || return
+  TEMP_PATHS+=("$expected")
+  (
+    cd "$release" || exit
+    find . -type f ! -path './SHA256SUMS' -print0 | LC_ALL=C sort -z |
+      xargs -0 -r sha256sum >"$expected" || exit
+  ) || return
+  cmp -s "$release/SHA256SUMS" "$expected" || {
+    report_error 'archive checksums do not match the complete file inventory'
+    return 1
+  }
+}
+
+extract_archive() {
+  local archive=$1 parent=$2 top
+  [[ -f $archive && ! -L $archive ]] || {
+    report_error "artifact is not a regular file: $archive"
+    return 1
+  }
+  top=$(validate_archive_members "$archive") || return
+  tar -xzf "$archive" -C "$parent" --keep-old-files --no-same-owner --no-same-permissions || return
+  validate_release_directory "$parent/$top" archive || return
+  EXTRACTED_ID=$top
+}
+
+verify_archive() {
+  local archive=$1 stage top
+  local -A release_metadata=()
+  archive_prerequisites || return
+  stage=$(mktemp -d) || return
+  TEMP_PATHS+=("$stage")
+  extract_archive "$archive" "$stage" || return
+  top=$EXTRACTED_ID
+  read_release_metadata "$stage/$top/release.env" release_metadata || return
+  printf '%s: verified %s (%s)\n' "${0##*/}" "$top" "${release_metadata[PLATFORM_ID]}"
+}
+
+manifest_content() {
+  local release=$1 kind=$2
+  (
+    cd "$release" || exit
+    case $kind in
+      hashes)
+        find . -type f ! -path './installed.sha256' ! -path './installed.modes' \
+          ! -path './installed.symlinks' ! -path './.complete' ! -path './.incomplete' -print0 |
+          LC_ALL=C sort -z | xargs -0 -r sha256sum
+        ;;
+      modes)
+        find . \( -type f -o -type d \) ! -path './installed.sha256' ! -path './installed.modes' \
+          ! -path './installed.symlinks' ! -path './.complete' ! -path './.incomplete' -print0 |
+          LC_ALL=C sort -z | xargs -0 -r stat -c '%a %n'
+        ;;
+      links)
+        find . -type l -printf '%p\t%l\n' | LC_ALL=C sort
+        ;;
+    esac
+  )
+}
+
+verify_installed_manifest() {
+  local release=$1 kind name expected
+  if [[ $release == "$RELEASE_ROOT/online" ]]; then
+    verify_online_tools "$release"
+    return
+  fi
+  for kind in hashes modes links; do
+    case $kind in
+      hashes)
+        name=installed.sha256
+        ;;
+      modes)
+        name=installed.modes
+        ;;
+      links)
+        name=installed.symlinks
+        ;;
+    esac
+    [[ -f $release/$name && ! -L $release/$name ]] || {
+      report_error "installed manifest is missing in $release; uninstall and reinstall this ID"
+      return 1
+    }
+    expected=$(mktemp) || return
+    TEMP_PATHS+=("$expected")
+    manifest_content "$release" "$kind" >"$expected" || return
+    cmp -s "$release/$name" "$expected" || {
+      report_error "installed $kind changed in $release"
+      return 1
+    }
+  done
+}
+
+validate_home() {
+  [[ $HOME == /* && $HOME != / && $HOME != *$'\n'* && $HOME != *$'\t'* ]] || {
+    report_error "unsafe HOME: $HOME"
+    return 1
+  }
+  [[ -d $HOME && ! -L $HOME && -w $HOME ]] || {
+    report_error "HOME must be a writable real directory: $HOME"
+    return 1
+  }
+}
+
+validate_release_root() {
+  [[ $RELEASE_ROOT == /* && $RELEASE_ROOT != / && $RELEASE_ROOT != "$HOME" &&
+    $RELEASE_ROOT != *$'\n'* && $RELEASE_ROOT != *$'\t'* &&
+    /$RELEASE_ROOT/ != *'/../'* && /$RELEASE_ROOT/ != *'/./'* ]] || {
+    report_error "unsafe release root: $RELEASE_ROOT"
+    return 1
+  }
+  if [[ -e $RELEASE_ROOT || -L $RELEASE_ROOT ]]; then
+    [[ -d $RELEASE_ROOT && ! -L $RELEASE_ROOT ]] || {
+      report_error "invalid release root: $RELEASE_ROOT"
+      return 1
+    }
+  fi
+}
+
+acquire_lock() {
+  validate_home || return
+  validate_release_root || return
+  mkdir -p -- "$RELEASE_ROOT" || return
+  # Lock the directory inode; no persistent lock marker or state directory.
+  exec {LOCK_FD}<"$RELEASE_ROOT" || return
+  flock -x -n "$LOCK_FD" || {
+    report_error 'another release operation is running'
+    return 1
+  }
+  current_id >/dev/null
+}
+
+current_id() {
+  local path=$RELEASE_ROOT/current target
+  [[ -e $path || -L $path ]] || return 0
+  [[ -L $path ]] || {
+    report_error "reserved current path is not a symlink: $path"
+    return 1
+  }
+  target=$(readlink -- "$path") || return
+  [[ $target == online || $target =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
+    report_error "invalid current link: $target"
+    return 1
+  }
+  [[ -d $RELEASE_ROOT/$target && ! -L $RELEASE_ROOT/$target ]] || {
+    report_error "current selects a missing release: $target"
+    return 1
+  }
+  printf '%s\n' "$target"
+}
+
+validate_link_parent() {
+  local path=$1 parent relative component
+  local -a components=()
+  [[ $path == "$HOME/"* ]] || {
+    report_error "unsafe managed path: $path"
+    return 1
+  }
+  relative=${path#"$HOME/"}
+  IFS=/ read -r -a components <<<"$relative"
+  parent=$HOME
+  for component in "${components[@]:0:${#components[@]}-1}"; do
+    parent=$parent/$component
+    [[ ! -L $parent ]] || {
+      report_error "managed path has a symlink parent: $parent"
+      return 1
+    }
+    [[ ! -e $parent || -d $parent ]] || {
+      report_error "managed path has a non-directory parent: $parent"
+      return 1
+    }
+  done
+}
+
+add_projection() {
+  LINK_PATHS+=("$1")
+  LINK_TARGETS+=("$2")
+}
+
+release_projection() {
+  local release=$1 current=$RELEASE_ROOT/current file relative skin_list tool
+  local -a selected_tools=()
+  local -A release_metadata=()
+
+  read_installation_tools "$release" selected_tools || return
+  LINK_PATHS=()
+  LINK_TARGETS=()
+  for file in .bashrc .bash_profile .bash_aliases; do
+    add_projection "$HOME/$file" "$current/dotfiles/bash/$file"
+  done
+  add_projection "$HOME/.gitconfig" "$current/dotfiles/git/.gitconfig"
+  add_projection "$HOME/.vimrc" "$current/dotfiles/vim/.vimrc"
+  add_projection "$HOME/.ssh/config" "$current/dotfiles/ssh/.ssh/config"
+  add_projection "$HOME/.config/systemd/user/dotfiles-ssh-agent.service" \
+    "$current/dotfiles/ssh/.config/systemd/user/dotfiles-ssh-agent.service"
+  if list_has selected_tools nvim; then
+    add_projection "$HOME/.config/nvim2" "$current/config/nvim2"
+    add_projection "$HOME/.local/share/nvim2" "$current/share/nvim2"
+  fi
+  if list_has selected_tools tmux; then
+    add_projection "$HOME/.tmux.conf" "$current/dotfiles/tmux/.tmux.conf"
+  fi
+  if list_has selected_tools oh-my-posh; then
+    add_projection "$HOME/.oh-my-posh.omp.json" "$current/dotfiles/oh-my-posh/.oh-my-posh.omp.json"
+  fi
+  if list_has selected_tools k9s; then
+    for file in config.yaml aliases.yaml plugins.yaml; do
+      add_projection "$HOME/.config/k9s/$file" "$current/dotfiles/k9s/.config/k9s/$file"
+    done
+    skin_list=$(mktemp) || return
+    TEMP_PATHS+=("$skin_list")
+    find "$release/dotfiles/k9s/.config/k9s/skins" -type f -print0 >"$skin_list" || return
+    while IFS= read -r -d '' file; do
+      relative=${file#"$release/dotfiles/k9s/.config/k9s/skins/"}
+      add_projection "$HOME/.config/k9s/skins/$relative" \
+        "$current/dotfiles/k9s/.config/k9s/skins/$relative"
+    done <"$skin_list"
+  fi
+  for tool in "${selected_tools[@]}"; do
+    [[ $tool != tmux-* ]] || add_projection "$HOME/.tmux/plugins/$tool" "$current/share/tmux/plugins/$tool"
+  done
+}
+
+verify_projection() {
+  local index path
+  for index in "${!LINK_PATHS[@]}"; do
+    path=${LINK_PATHS[$index]}
+    validate_link_parent "$path" || return
+    [[ -L $path && -e $path && $(readlink -- "$path") == "${LINK_TARGETS[$index]}" ]] || {
+      report_error "active release link is missing or incorrect: $path"
+      return 1
+    }
+  done
+}
+
+validate_online_installation() {
+  local release=$1 file tool
+  local -a online_tools=()
+  local -A online_metadata=()
+
+  [[ -d $release && ! -L $release && -L $release/dotfiles && -d $release/dotfiles ]] || {
+    report_error 'online installation or its source checkout is missing; run setup-tools first'
+    return 1
+  }
+  for file in bin tools state config share; do
+    [[ -d $release/$file && ! -L $release/$file ]] || {
+      report_error "online directory is missing or is a symlink: $file"
+      return 1
+    }
+  done
+  [[ -L $release/bin/dotfiles-release && -x $release/bin/dotfiles-release &&
+    $(readlink -- "$release/bin/dotfiles-release") == ../dotfiles/scripts/dotfiles-release ]] || {
+    report_error 'online manager command is missing or incorrect'
+    return 1
+  }
+  read_online_metadata "$release/release.env" online_metadata || return
+  read_installation_tools "$release" online_tools || return
+  for file in bash/.bashrc bash/.bash_profile bash/.bash_aliases bash/.bash_history_lib \
+    git/.gitconfig vim/.vimrc ssh/.ssh/config \
+    ssh/.config/systemd/user/dotfiles-ssh-agent.service scripts/dotfiles-release \
+    tools.env scripts/setup-lib scripts/setup-catalog-lib scripts/setup-tools-lib \
+    scripts/setup-system-lib scripts/dotfiles-release-lib; do
+    [[ -f $release/dotfiles/$file ]] || {
+      report_error "online source file is missing: $file"
+      return 1
+    }
+  done
+  for tool in "${online_tools[@]}"; do
+    if [[ $tool == nvim ]]; then
+      [[ -L $release/config/nvim2 && -f $release/config/nvim2/init.lua &&
+        -d $release/share/nvim2 && ! -L $release/share/nvim2 ]] || {
+        report_error 'online Neovim configuration or data directory is missing'
+        return 1
+      }
+    fi
+  done
+  verify_online_tools "$release"
+}
+
+verify_online_tools() {
+  local release=$1
+  local tool commands command_name target state path payload
+  local actual matched field changes version
+  local -a online_tools=() versions=()
+  local -A checked_states=() online_metadata=()
+
+  read_online_metadata "$release/release.env" online_metadata || return
+  read_installation_tools "$release" online_tools || return
+  for tool in "${online_tools[@]}"; do
+    if [[ $tool == tmux-* ]]; then
+      path=$release/share/tmux/plugins/$tool
+      field=${tool^^}
+      field=${field//-/_}_COMMIT
+      actual=$(timeout 30s git -C "$path" rev-parse HEAD) || return
+      [[ $actual == "${online_metadata[$field]}" ]] || {
+        report_error "online tmux plugin commit differs: $tool"
+        return 1
+      }
+      changes=$(timeout 30s git -C "$path" status --porcelain --untracked-files=no) || return
+      [[ -z $changes ]] || {
+        report_error "online tmux plugin checkout was modified: $tool"
+        return 1
+      }
+      continue
+    fi
+    if [[ $tool == python ]]; then
+      tool=uv
+    fi
+    commands=$(tool_commands "$tool") || return
+    if [[ $tool == kubectl || $tool == helm ]]; then
+      IFS=, read -r -a versions <<<"${online_metadata[${tool^^}_VERSIONS]}"
+      for version in "${versions[@]}"; do
+        commands+=$'\n'"$tool-$version"
+      done
+    fi
+    while IFS= read -r command_name; do
+      if [[ -z $command_name ]]; then
+        continue
+      fi
+      path=$release/bin/$command_name
+      [[ -L $path && -x $path ]] || {
+        report_error "online command is missing or is not a managed link: $command_name"
+        return 1
+      }
+      target=$(readlink -f -- "$path") || return
+      [[ $target == "$release/tools/"* ]] || {
+        report_error "online command points outside its tools: $command_name"
+        return 1
+      }
+      matched=false
+      for state in "$release/state/setup-tools/$tool-"*.state; do
+        if [[ ! -f $state || -L $state ]]; then
+          continue
+        fi
+        if ! read_tool_state "$state"; then
+          continue
+        fi
+        if [[ $RECORDED_INSTALL_PHASE != complete ]]; then
+          continue
+        fi
+        for payload in "${RECORDED_PAYLOAD_PATHS[@]}"; do
+          if [[ $target != "$release/tools/$payload" &&
+            $target != "$release/tools/$payload/"* ]]; then
+            continue
+          fi
+          if [[ ! -v checked_states[$state] ]]; then
+            actual=$(tool_content_digest "$release/tools" "${RECORDED_PAYLOAD_PATHS[@]}") || return
+            [[ $actual == "$RECORDED_PAYLOAD_SHA256" ]] || {
+              report_error "online tool payload was modified: $tool"
+              return 1
+            }
+            checked_states[$state]=1
+          fi
+          matched=true
+          break
+        done
+        if [[ $matched == true ]]; then
+          break
+        fi
+      done
+      [[ $matched == true ]] || {
+        report_error "online command has no complete ownership record: $command_name"
+        return 1
+      }
+    done <<<"$commands"
+  done
+  path=$release/bin/asdf
+  if [[ -e $path || -L $path ]]; then
+    target=$(readlink -f -- "$path") || return
+    [[ $target == "$release/tools/bin/asdf-"* && -f $target && -x $target ]] || {
+      report_error 'online asdf command has an invalid target'
+      return 1
+    }
+    state=$release/state/setup-asdf/installations/${target##*/}.sha256
+    [[ -f $state && ! -L $state && $(<"$state") =~ ^[0-9a-f]{64}$ ]] || {
+      report_error 'online asdf ownership record is missing'
+      return 1
+    }
+    actual=$(sha256sum "$target" | awk '{print $1}') || return
+    [[ $actual == "$(<"$state")" ]] || {
+      report_error 'online asdf payload was modified'
+      return 1
+    }
+  fi
+}
+
+check_online_runtime() {
+  local release=$1
+  local tool commands command_name field arguments expected output version
+  local PATH=$1/bin:/usr/local/bin:/usr/bin:/bin
+  local -a online_tools=() probe_args=() versions=()
+  local -A online_metadata=()
+
+  export PATH
+  read_online_metadata "$release/release.env" online_metadata || return
+  read_installation_tools "$release" online_tools || return
+  for tool in "${online_tools[@]}"; do
+    if [[ $tool == python ]]; then
+      output=$(timeout 30s "$release/bin/uv" python find \
+        --directory "${XDG_CONFIG_HOME:-$HOME/.config}/uv" \
+        --no-project --managed-python --offline --show-version) || return
+      [[ $output == *"${online_metadata[PYTHON_VERSION]}"* ]] || {
+        report_error "uv Python reported an unexpected version: $output"
+        return 1
+      }
+      continue
+    fi
+    commands=$(tool_commands "$tool") || return
+    if [[ -z $commands ]]; then
+      continue
+    fi
+    while IFS= read -r command_name; do
+      if [[ ! -v TOOL_CHECKS[$command_name] ]]; then
+        continue
+      fi
+      IFS='|' read -r field arguments <<<"${TOOL_CHECKS[$command_name]}"
+      if [[ -n $field && -v online_metadata[$field] ]]; then
+        expected=${online_metadata[$field]}
+      elif [[ -v online_metadata[${tool^^}_VERSIONS] ]]; then
+        expected=${online_metadata[${tool^^}_VERSIONS]%%,*}
+      else
+        continue
+      fi
+      read -r -a probe_args <<<"${arguments:---version}"
+      output=$(timeout 30s "$release/bin/$command_name" "${probe_args[@]}" 2>&1) || return
+      [[ $output == *"${expected#v}"* ]] || {
+        report_error "$command_name reported an unexpected online version: $output"
+        return 1
+      }
+    done <<<"$commands"
+    if [[ $tool == kubectl || $tool == helm ]]; then
+      IFS=, read -r -a versions <<<"${online_metadata[${tool^^}_VERSIONS]}"
+      for version in "${versions[@]}"; do
+        output=$(timeout 30s "$release/bin/$tool-$version" "${probe_args[@]}" 2>&1) || return
+        [[ $output == *"${version#v}"* ]] || {
+          report_error "$tool-$version reported an unexpected online version: $output"
+          return 1
+        }
+      done
+    fi
+  done
+  if [[ -x $release/bin/asdf ]]; then
+    check_online_asdf "$release" || return
+  fi
+}
+
+check_online_asdf() (
+  local release=$1 tool command_list command_name output check expected target
+  local -a arguments=()
+
+  # Connected setup uses the editable checkout's asdf catalog. Keep these
+  # declarations out of the standalone manager's embedded offline probes.
+  # shellcheck source=setup-lib
+  source "$release/dotfiles/scripts/setup-lib"
+  # shellcheck source=setup-catalog-lib
+  source "$release/dotfiles/scripts/setup-catalog-lib"
+  # This checkout can differ from the embedded offline catalog. Keep its
+  # declarations inside this subshell.
+  load_tool_catalog "$release/dotfiles/tools.env"
+  target=$(readlink -f -- "$release/bin/asdf") || return
+  expected=${target##*/asdf-}
+  output=$(timeout 30s "$release/bin/asdf" version) || return
+  [[ $output == *"${expected#v}"* ]] || {
+    report_error "asdf reported an unexpected version: $output"
+    return 1
+  }
+  cd -- "$HOME" || return
+  for tool in "${!ASDF_PLUGINS[@]}"; do
+    select_default_release TOOL_RELEASES "$tool" || return
+    expected=$RELEASE_VERSION
+    command_list=$(tool_commands "$tool") || return
+    command_name=${command_list%%$'\n'*}
+    [[ -x $release/bin/$command_name ]] || {
+      report_error "online asdf command is missing: $command_name"
+      return 1
+    }
+    check=${TOOL_CHECKS[$command_name]:-}
+    read -r -a arguments <<<"${check#*|}"
+    if ((${#arguments[@]} == 0)); then
+      arguments=(--version)
+    fi
+    output=$(timeout 30s "$release/bin/$command_name" "${arguments[@]}" 2>&1) || return
+    [[ $output == *"${expected#v}"* ]] || {
+      report_error "$command_name reported an unexpected asdf version: $output"
+      return 1
+    }
+  done
+)
+
+check_installed_release() {
+  local release=$1
+  local -A release_metadata=()
+  if [[ $release == "$RELEASE_ROOT/online" ]]; then
+    validate_online_installation "$release"
+    return
+  fi
+  validate_release_directory "$release" || return
+  read_release_metadata "$release/release.env" release_metadata || return
+  system_validate_release_host "${release_metadata[PLATFORM_ID]}" || return
+  verify_installed_manifest "$release"
+}
+
+health_python() {
+  local release=$1 python_version=$2 python package mason_package venv package_output
+
+  python=$release/tools/python-$python_version/bin/python3
+  env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
+    timeout --kill-after=5s 30s "$python" -I -B - "$release" "$python_version" <<'PY' || return
+import hashlib
+import json
+import pathlib
+import sqlite3
+import ssl
+import sys
+import venv
+
+root = pathlib.Path(sys.argv[1]).resolve()
+expected = sys.argv[2]
+assert sys.version.split()[0] == expected, (sys.version, expected)
+assert pathlib.Path(sys.executable).resolve().is_relative_to(root)
+assert pathlib.Path(sys.prefix).resolve().is_relative_to(root)
+assert pathlib.Path(sys.base_prefix).resolve().is_relative_to(root)
+for value in sys.path:
+    if value:
+        assert pathlib.Path(value).resolve().is_relative_to(root), value
+print('python-runtime=' + sys.version.split()[0])
+print('python-openssl=' + ssl.OPENSSL_VERSION)
+print('python-sqlite=' + sqlite3.sqlite_version)
+PY
+
+  [[ -d $release/config/nvim2 ]] || return 0
+  package_output=$(python_inventory_packages "$release") || return
+  [[ -n $package_output ]] || return 0
+  while IFS= read -r package; do
+    mason_package=$(python_mason_package "$release" "$package") || return
+    venv=$release/share/nvim2/mason/packages/$mason_package/venv
+    [[ -f $venv/pyvenv.cfg && -x $venv/bin/python ]] || {
+      report_error "incomplete Python environment: $venv"
+      return 1
+    }
+    env -u PYTHONHOME -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 \
+      timeout --kill-after=5s 30s "$venv/bin/python" -I -B - "$release" "$package" <<'PY' || return
+import importlib.metadata
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve()
+package = sys.argv[2]
+assert pathlib.Path(sys.executable).resolve().is_relative_to(root)
+assert pathlib.Path(sys.prefix).resolve().is_relative_to(root)
+assert pathlib.Path(sys.base_prefix).resolve().is_relative_to(root)
+for value in sys.path:
+    if value:
+        assert pathlib.Path(value).resolve().is_relative_to(root), value
+versions = dict(line.split('\t') for line in (root / 'python-locks/inventory.tsv').read_text().splitlines())
+assert importlib.metadata.version(package) == versions[package]
+print('python-venv=' + sys.argv[2] + ':' + sys.prefix)
+PY
+    env -u PYTHONHOME -u PYTHONPATH PIP_CONFIG_FILE=/dev/null PYTHONDONTWRITEBYTECODE=1 \
+      timeout --kill-after=5s 120s "$venv/bin/python" -I -B -m pip check || return
+  done <<<"$package_output"
+
+  if [[ -d $release/share/nvim2/mason/packages/ansible-lint ]]; then
+    PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
+      timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/ansible-config" --version || return
+    PATH="$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/bin:/usr/bin:/bin" \
+      timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/ansible-lint" --offline --version || return
+  fi
+  if [[ -d $release/share/nvim2/mason/packages/yamllint ]]; then
+    PATH="$release/share/nvim2/mason/packages/yamllint/venv/bin:$release/bin:/usr/bin:/bin" \
+      timeout --kill-after=5s 30s "$release/share/nvim2/mason/bin/yamllint" --version || return
+  fi
+}
+
+check_runtime() {
+  local release=$1 runtime_home command_name expected field serialized output tool version
+  local command_output
+  local PATH=$PATH DOTFILES_OFFLINE_RELEASE_ROOT=$1 DOTFILES_IGNORE_USER_BIN=1 VIRTUAL_ENV=''
+  local KUBECTL_VERSION='' HELM_VERSION='' PYTHONDONTWRITEBYTECODE=1
+  local HELM_PLUGINS=''
+  local LC_ALL=C.UTF-8 LANG=C.UTF-8
+  local -a probe_args=() versions=()
+  local -A release_metadata=()
+
+  if [[ $release == "$RELEASE_ROOT/online" ]]; then
+    check_online_runtime "$release"
+    return
+  fi
+  read_release_metadata "$release/release.env" release_metadata || return
+  runtime_home=$(mktemp -d) || return
+  TEMP_PATHS+=("$runtime_home")
+  PATH="$release/bin:$release/share/nvim2/mason/packages/ansible-lint/venv/bin:$release/share/nvim2/mason/bin:/usr/bin:/bin"
+  export PATH DOTFILES_OFFLINE_RELEASE_ROOT DOTFILES_IGNORE_USER_BIN VIRTUAL_ENV
+  command_output=$(release_commands "$release") || return
+  while IFS= read -r command_name; do
+    [[ $(type -P -- "$command_name") == "$release/bin/$command_name" ]] || {
+      report_error "release command does not resolve in its PATH: $command_name"
+      return 1
+    }
+  done <<<"$command_output"
+  if [[ -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
+    HELM_PLUGINS=$release/share/helm/plugins
+  fi
+  export KUBECTL_VERSION HELM_VERSION PYTHONDONTWRITEBYTECODE HELM_PLUGINS LC_ALL LANG
+  if [[ -v release_metadata[PYTHON_VERSION] ]]; then
+    HOME="$runtime_home" XDG_CONFIG_HOME="$runtime_home/.config" \
+      XDG_DATA_HOME="$runtime_home/.local/share" XDG_CACHE_HOME="$runtime_home/.cache" \
+      XDG_STATE_HOME="$runtime_home/.local/state" \
+      health_python "$release" "${release_metadata[PYTHON_VERSION]}" || return
+  fi
+  while IFS= read -r command_name; do
+    [[ -v TOOL_CHECKS[$command_name] ]] || continue
+    IFS='|' read -r field serialized <<<"${TOOL_CHECKS[$command_name]}"
+    [[ -n $field && -v release_metadata[$field] ]] || continue
+    expected=${release_metadata[$field]}
+    read -r -a probe_args <<<"${serialized:---version}"
+    output=$(HOME="$runtime_home" XDG_CONFIG_HOME="$runtime_home/.config" \
+      XDG_DATA_HOME="$runtime_home/.local/share" XDG_CACHE_HOME="$runtime_home/.cache" \
+      XDG_STATE_HOME="$runtime_home/.local/state" \
+      timeout 30s "$release/bin/$command_name" "${probe_args[@]}") || return
+    [[ $output == *"${expected#v}"* ]] || {
+      report_error "$command_name reported an unexpected version: $output"
+      return 1
+    }
+  done <<<"$command_output"
+  for tool in kubectl helm; do
+    [[ -v release_metadata[${tool^^}_VERSIONS] ]] || continue
+    IFS=, read -r -a versions <<<"${release_metadata[${tool^^}_VERSIONS]}"
+    serialized=${TOOL_CHECKS[$tool]#*|}
+    read -r -a probe_args <<<"$serialized"
+    for version in '' "${versions[@]}"; do
+      expected=${version:-${versions[0]}}
+      output=$(HOME="$runtime_home" XDG_CONFIG_HOME="$runtime_home/.config" \
+        XDG_DATA_HOME="$runtime_home/.local/share" XDG_CACHE_HOME="$runtime_home/.cache" \
+        XDG_STATE_HOME="$runtime_home/.local/state" \
+        timeout 30s env "${tool^^}_VERSION=$version" \
+        "$release/bin/$tool" "${probe_args[@]}") || return
+      [[ $output == *"${expected#v}"* ]] || {
+        report_error "$tool reported an unexpected version: $output"
+        return 1
+      }
+      if [[ $tool == helm && -v release_metadata[HELM_SCHEMA_PLUGIN_VERSION] ]]; then
+        output=$(HOME="$runtime_home" timeout 30s env HELM_VERSION="$version" \
+          "$release/bin/helm" schema version) || return
+        [[ $output == "helm schema version v${release_metadata[HELM_SCHEMA_PLUGIN_VERSION]#v}" ]] || {
+          report_error "Helm $expected schema plugin reported an unexpected version: $output"
+          return 1
+        }
+      fi
+    done
+  done
+}
+
+health_release() {
+  local release_id=${1:-} release
+  operation_prerequisites || return
+  [[ -z $release_id || $release_id == online || $release_id =~ ^dotfiles-[0-9a-f]{12}$ ]] || {
+    report_error "invalid release ID: $release_id"
+    return 1
+  }
+  validate_home || return
+  validate_release_root || return
+  [[ -d $RELEASE_ROOT ]] || {
+    report_error 'no installed releases'
+    return 1
+  }
+  acquire_lock || return
+  if [[ -z $release_id ]]; then
+    release_id=$(current_id) || return
+  fi
+  [[ -n $release_id ]] || {
+    report_error 'no current release is selected; specify an installed ID'
+    return 1
+  }
+  release=$RELEASE_ROOT/$release_id
+  check_installed_release "$release" || return
+  if [[ $(current_id) == "$release_id" ]]; then
+    release_projection "$release" || return
+    verify_projection || return
+  fi
+  check_runtime "$release" || return
+  verify_installed_manifest "$release" || return
+  printf '%s: %s is healthy\n' "${0##*/}" "$release_id"
+}

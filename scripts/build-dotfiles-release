@@ -6,17 +6,14 @@ export DOTFILES_IGNORE_USER_BIN=1
 unset VIRTUAL_ENV
 
 builder_script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=setup-lib
+source "$builder_script_dir/setup-lib"
 # shellcheck source=setup-system-lib
 source "$builder_script_dir/setup-system-lib"
 
 TEMP_PATHS=()
 NODE_UPSTREAM_NPM_VERSION=
 declare -A BUILD_VERSIONS=()
-
-die() {
-  printf '%s: %s\n' "${0##*/}" "$*" >&2
-  return 1
-}
 
 usage() {
   cat <<'EOF'
@@ -27,13 +24,6 @@ Usage:
 Platforms: debian-13-x86_64, ubuntu-24.04-x86_64,
            ubuntu-26.04-x86_64, amzn-2023-x86_64
 EOF
-}
-
-cleanup_path() {
-  local path=$1
-  if [[ -e $path || -L $path ]]; then
-    find "$path" -depth -delete
-  fi
 }
 
 cleanup() {
@@ -53,15 +43,15 @@ load_build_config() {
   local source_dir=$1
 
   [[ -f $source_dir/tools.env ]] || {
-    die "missing $source_dir/tools.env"
+    report_error "missing $source_dir/tools.env"
     return 1
   }
   [[ -f $source_dir/release.env ]] || {
-    die "missing $source_dir/release.env"
+    report_error "missing $source_dir/release.env"
     return 1
   }
   [[ -f $source_dir/scripts/setup-lib ]] || {
-    die "missing $source_dir/scripts/setup-lib"
+    report_error "missing $source_dir/scripts/setup-lib"
     return 1
   }
   # shellcheck source=setup-lib
@@ -69,13 +59,13 @@ load_build_config() {
   source "$source_dir/scripts/setup-catalog-lib" || return
   source "$source_dir/scripts/setup-recipes-lib" || return
   source "$source_dir/scripts/setup-tools-lib" || return
+  source "$source_dir/scripts/setup-system-lib" || return
   # shellcheck source=setup-tmux-lib
   source "$source_dir/scripts/setup-tmux-lib" || return
-  # shellcheck source=../system.env
-  source "$source_dir/system.env" || return
-  # shellcheck source=../tools.env
-  source "$source_dir/tools.env" || return
+  load_system_config "$source_dir/system.env" || return
+  load_tool_catalog "$source_dir/tools.env" || return
   validate_tool_config offline || return
+  validate_tool_selection OFFLINE_RELEASE_TOOLS offline || return
   local tool
   BUILD_VERSIONS=()
   BUILD_TMUX_PLUGINS=()
@@ -87,13 +77,14 @@ load_build_config() {
     [[ $tool == yamllint ]] && continue
     select_default_release TOOL_RELEASES "$tool" || return
     [[ $RELEASE_URL != - ]] || {
-      die "offline default $tool $RELEASE_VERSION has no artifact"
+      report_error "offline default $tool $RELEASE_VERSION has no artifact"
       return 1
     }
     BUILD_VERSIONS[$tool]=$RELEASE_VERSION
+    artifact_layout "$tool" "$RELEASE_VERSION" "$RELEASE_ASSET" || return
     if [[ $tool == python ]]; then
       [[ $RELEASE_URL =~ /releases/download/([0-9]{8})/ ]] || {
-        die 'Python release URL must include its YYYYMMDD build date'
+        report_error 'Python release URL must include its YYYYMMDD build date'
         return 1
       }
     fi
@@ -102,28 +93,27 @@ load_build_config() {
   if list_has OFFLINE_RELEASE_TOOLS nodejs; then
     select_default_release TOOL_RELEASES npm || return
     BUILD_VERSIONS[npm]=$RELEASE_VERSION
+    artifact_layout npm "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   fi
-  # shellcheck source=../release.env
-  source "$source_dir/release.env" || return
+  load_platform_config "$source_dir/release.env" || return
 }
 
 install_build_packages() {
   local platform=$1 role=$2
 
   if ! declare -p SYSTEM_RUNTIME_PACKAGES >/dev/null 2>&1; then
-    # shellcheck source=../system.env
-    source "$builder_script_dir/../system.env" || return
+    load_system_config "$builder_script_dir/../system.env" || return
   fi
   install_system_packages "$platform" "$role" true
 }
 
 prepare_release_artifact() {
   local catalog=$1 name=$2 version=$3 inputs=$4
-  local archive stage
+  local archive stage npm_archive
 
   select_release "$catalog" "$name" "$version" || return
   [[ $RELEASE_URL != - ]] || {
-    die "$name $version has no direct artifact"
+    report_error "$name $version has no direct artifact"
     return 1
   }
   artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
@@ -132,9 +122,15 @@ prepare_release_artifact() {
   stage=$(mktemp -d) || return
   TEMP_PATHS+=("$stage")
   if ((${#SPEC_LINKS[@]})); then
-    prepare_tool_artifact "$catalog" "$name" "$version" "$archive" "$stage" || return
+    prepare_tool_artifact "$name" "$version" "$RELEASE_ASSET" "$RELEASE_SHA256" "$archive" "$stage" || return
   else
-    prepare_artifact "$catalog" "$name" "$version" "$archive" "$stage" || return
+    prepare_artifact "$name" "$version" "$RELEASE_ASSET" "$RELEASE_SHA256" "$archive" "$stage" || return
+  fi
+  if [[ $name == nodejs ]]; then
+    select_default_release TOOL_RELEASES npm || return
+    npm_archive=$inputs/npm-$RELEASE_ASSET
+    download_file "$RELEASE_URL" "$npm_archive" || return
+    prepare_node_npm "$stage/${SPEC_DESTS[0]}" "$npm_archive" "$RELEASE_VERSION" "$RELEASE_SHA256" || return
   fi
   PREPARED_STAGE=$stage
   PREPARED_ARCHIVE=$archive
@@ -200,6 +196,19 @@ install_release_tools() {
   write_launchers "$release" || return
 }
 
+install_release_tmux_plugins() {
+  local plugin root=$1/share/tmux/plugins
+
+  for plugin in "${BUILD_TMUX_PLUGINS[@]}"; do
+    select_git_plugin TMUX_PLUGINS "$plugin" || return
+    preflight_tmux_plugin "$plugin" "$root" "$PLUGIN_REPO" || return
+  done
+  for plugin in "${BUILD_TMUX_PLUGINS[@]}"; do
+    select_git_plugin TMUX_PLUGINS "$plugin" || return
+    install_tmux_plugin "$plugin" "$root" "$PLUGIN_REPO" "$PLUGIN_COMMIT" || return
+  done
+}
+
 install_helm_schema_plugin() {
   local release=$1 inputs=$2 plugin
   local version=${BUILD_VERSIONS['helm-schema']}
@@ -210,7 +219,7 @@ install_helm_schema_plugin() {
   install -m 0755 "$PREPARED_STAGE/${SPEC_DESTS[0]}" "$plugin/schema" || return
   tar -xOzf "$PREPARED_ARCHIVE" -- LICENSE >"$plugin/LICENSE" || return
   [[ -s $plugin/LICENSE ]] || {
-    die 'Helm schema plugin license is missing'
+    report_error 'Helm schema plugin license is missing'
     return 1
   }
   cat >"$plugin/plugin.yaml" <<EOF
@@ -267,7 +276,7 @@ write_debug_launchers() {
 
   for command_name in debugpy debugpy-adapter; do
     [[ -x $release/share/nvim2/mason/packages/debugpy/$command_name ]] || {
-      die "debug adapter launcher is missing: $command_name"
+      report_error "debug adapter launcher is missing: $command_name"
       return 1
     }
     install -m 0755 "$source" \
@@ -303,7 +312,7 @@ end
 LUA
   while IFS= read -r dependency; do
     list_has OFFLINE_RELEASE_TOOLS "$dependency" || {
-      die "configured Neovim tools require $dependency in OFFLINE_RELEASE_TOOLS"
+      report_error "configured Neovim tools require $dependency in OFFLINE_RELEASE_TOOLS"
       return 1
     }
   done <"$data/mason/requirements.txt"
@@ -372,7 +381,7 @@ LUA
       "$release"/*)
         ;;
       *)
-        die "generated Neovim link points outside its payload: $link -> $target"
+        report_error "generated Neovim link points outside its payload: $link -> $target"
         return 1
         ;;
     esac
@@ -385,7 +394,7 @@ LUA
   if [[ -d $data/mason/packages/lua-language-server ]]; then
     [[ -x $lua_launcher &&
       -x $release/share/nvim2/mason/packages/lua-language-server/libexec/bin/lua-language-server ]] || {
-      die 'lua-language-server payload is incomplete'
+      report_error 'lua-language-server payload is incomplete'
       return 1
     }
     cat >"$lua_launcher" <<'BASH' || return
@@ -408,7 +417,7 @@ BASH
       mason_package=$(python_mason_package "$release" "$package") || return
       receipt="$release/share/nvim2/mason/packages/$mason_package/mason-receipt.json"
       [[ -f $receipt ]] || {
-        die "Mason receipt is missing for $package"
+        report_error "Mason receipt is missing for $package"
         return 1
       }
       cleanup_path "$release/share/nvim2/mason/packages/$mason_package/venv" || return
@@ -437,7 +446,7 @@ verify_release_symlinks() {
       resolved=$(readlink -m -- "$(dirname -- "$link")/$target")
     fi
     [[ $resolved == "$release" || $resolved == "$release"/* ]] || {
-      die "release symlink escapes its root: $link -> $target"
+      report_error "release symlink escapes its root: $link -> $target"
       return 1
     }
   done <"$links"
@@ -461,7 +470,7 @@ write_release_metadata() {
     )" \
     'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
     >"$release/release.env" || return
-  write_tool_metadata OFFLINE_RELEASE_TOOLS "$release/release.env" || return
+  write_tool_metadata OFFLINE_RELEASE_TOOLS "$release/release.env" "$NODE_UPSTREAM_NPM_VERSION" || return
 
   {
     printf 'source_commit=%s\nsource_tree=%s\nplatform=%s\nbuilder_image=%s\n' \
@@ -537,22 +546,22 @@ build_release() {
   local source_commit source_tree source_status release_id image work release inputs build_home archive
 
   [[ $(id -u) -eq 0 ]] || {
-    die 'build must run as root in a disposable builder'
+    report_error 'build must run as root in a disposable builder'
     return 1
   }
   system_validate_release_host "$platform" || return
   [[ -d $source_dir/.git ]] || {
-    die "source is not a Git checkout: $source_dir"
+    report_error "source is not a Git checkout: $source_dir"
     return 1
   }
   load_build_config "$source_dir" || return
   image=${DOCKER_IMAGES[$platform]:-}
   [[ $image =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] || {
-    die "no pinned Docker image configured for $platform"
+    report_error "no pinned Docker image configured for $platform"
     return 1
   }
   [[ ${BUILDER_IMAGE:-$image} == "$image" ]] || {
-    die 'builder image does not match the configured digest'
+    report_error 'builder image does not match the configured digest'
     return 1
   }
   install_build_packages "$platform" build || return
@@ -561,7 +570,7 @@ build_release() {
   source_status=$(git -c safe.directory="$source_dir" -C "$source_dir" \
     status --porcelain --untracked-files=normal) || return
   [[ -z $source_status ]] || {
-    die 'build source must be clean'
+    report_error 'build source must be clean'
     return 1
   }
   release_id=dotfiles-${source_commit:0:12}
@@ -584,7 +593,7 @@ build_release() {
   fi
   ln -s ../dotfiles-release "$release/bin/dotfiles-release" || return
   if (("${#BUILD_TMUX_PLUGINS[@]}" > 0)); then
-    install_tmux_plugins "$release/share/tmux/plugins" "${BUILD_TMUX_PLUGINS[@]}" || return
+    install_release_tmux_plugins "$release" || return
   fi
   if list_has OFFLINE_RELEASE_TOOLS nvim; then
     prepare_nvim_payload "$release" "$build_home" "$platform" || return
@@ -606,19 +615,19 @@ prepare_runtime() {
   local platform=$1 user=$2 uid=$3 home=$4 group
 
   [[ $(id -u) -eq 0 ]] || {
-    die 'prepare-runtime must run as root'
+    report_error 'prepare-runtime must run as root'
     return 1
   }
   [[ $user =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || {
-    die "invalid user name: $user"
+    report_error "invalid user name: $user"
     return 1
   }
   [[ $uid =~ ^[0-9]+$ ]] || {
-    die "invalid UID: $uid"
+    report_error "invalid UID: $uid"
     return 1
   }
   [[ $home == /* && $home != / ]] || {
-    die "invalid home: $home"
+    report_error "invalid home: $home"
     return 1
   }
   system_validate_release_host "$platform" || return
@@ -630,7 +639,7 @@ prepare_runtime() {
       --shell /bin/bash "$user" || return
   fi
   [[ $(id -u "$user") -eq $uid ]] || {
-    die "$user does not have UID $uid"
+    report_error "$user does not have UID $uid"
     return 1
   }
   mkdir -p "$home" || return

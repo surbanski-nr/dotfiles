@@ -5,9 +5,8 @@ tmux_plugin_git() {
     git -c core.hooksPath=/dev/null "$@"
 }
 
-preflight_tmux_plugins() {
-  local root=${1%/} name destination origin changes
-  shift
+preflight_tmux_plugin() {
+  local name=$1 root=${2%/} repository=$3 destination origin changes
 
   require_command git || return
   require_command timeout || return
@@ -17,16 +16,14 @@ preflight_tmux_plugins() {
     report_error "tmux plugin directory must be absolute, without whitespace or control characters, and not a symlink: $root"
     return 1
   fi
-  for name in "$@"; do
-    select_git_plugin TMUX_PLUGINS "$name" || return
-    destination=$root/$name
-    [[ -e $destination || -L $destination ]] || continue
+  destination=$root/$name
+  if [[ -e $destination || -L $destination ]]; then
     if [[ -L $destination || ! -d $destination/.git || -L $destination/.git ]]; then
       report_error "refusing unmanaged tmux plugin path: $destination"
       return 1
     fi
     origin=$(tmux_plugin_git -C "$destination" config --get remote.origin.url) || return
-    if [[ ${origin%.git} != "${PLUGIN_REPO%.git}" ]]; then
+    if [[ ${origin%.git} != "${repository%.git}" ]]; then
       report_error "unexpected tmux plugin origin: $destination -> $origin"
       return 1
     fi
@@ -35,7 +32,7 @@ preflight_tmux_plugins() {
       report_error "modified tmux plugin checkout: $destination"
       return 1
     fi
-  done
+  fi
 }
 
 verify_tmux_plugin() {
@@ -60,11 +57,9 @@ validate_tmux_plugin_revision() {
 }
 
 install_tmux_plugin() {
-  local name=$1 root=${2%/} destination stage repository commit current
+  local name=$1 root=${2%/} repository=$3 commit=$4 destination stage current
 
-  preflight_tmux_plugins "$root" "$name" || return
-  repository=$PLUGIN_REPO
-  commit=$PLUGIN_COMMIT
+  preflight_tmux_plugin "$name" "$root" "$repository" || return
   destination=$root/$name
   if [[ -d $destination ]]; then
     current=$(tmux_plugin_git -C "$destination" rev-parse HEAD) || return
@@ -93,14 +88,4 @@ install_tmux_plugin() {
     rmdir "$stage" || return
   fi
   printf '%s: pinned %s at %s\n' "${0##*/}" "$name" "$commit"
-}
-
-install_tmux_plugins() {
-  local root=$1 name
-  shift
-
-  preflight_tmux_plugins "$root" "$@" || return
-  for name in "$@"; do
-    install_tmux_plugin "$name" "$root" || return
-  done
 }

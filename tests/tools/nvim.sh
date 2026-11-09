@@ -11,7 +11,7 @@ health_nvim() {
     health_chart "$health_home/nvim-chart" || return
     (cd "$health_home/nvim-chart" && "$release/share/nvim2/mason/bin/helm_ls" lint) || return
   fi
-  need setsid || return
+  require_command setsid || return
   (
     if [[ -n ${LOCK_FD:-} ]]; then
       exec {LOCK_FD}>&-
