@@ -5,17 +5,56 @@ system_error() {
   return 1
 }
 
+system_validate_platform_name() {
+  case $1 in
+    debian-13-x86_64 | ubuntu-24.04-x86_64 | ubuntu-26.04-x86_64 | amzn-2023-x86_64)
+      ;;
+    *)
+      system_error "unsupported platform: $1"
+      return 1
+      ;;
+  esac
+}
+
+system_validate_release_host() {
+  local platform=$1 os_release_file=${DOTFILES_OS_RELEASE_FILE:-/etc/os-release}
+  local expected_os expected_id expected_version ID='' VERSION_ID=''
+
+  system_validate_platform_name "$platform" || return
+  expected_os=${platform%-x86_64}
+  expected_id=${expected_os%%-*}
+  expected_version=${expected_os#*-}
+  [[ -r $os_release_file ]] || {
+    system_error "cannot read OS identity: $os_release_file"
+    return 1
+  }
+  # shellcheck disable=SC1090
+  source "$os_release_file" || return
+  [[ $ID == "$expected_id" ]] || {
+    system_error "$platform requires OS ID $expected_id, found ${ID:-unknown}"
+    return 1
+  }
+  [[ $VERSION_ID == "$expected_version" ]] || {
+    system_error "$platform requires OS version $expected_version, found ${VERSION_ID:-unknown}"
+    return 1
+  }
+  [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || {
+    system_error 'only Linux x86-64 is supported'
+    return 1
+  }
+}
+
 setup_system() {
-  local package_profile=$1
+  local package_role=$1
   SETUP_NAME=${SETUP_NAME:-${0##*/}}
   system_validate_host
-  printf '%s: preparing %s packages on %s\n' "$SETUP_NAME" "$package_profile" "$PLATFORM"
+  printf '%s: preparing %s packages on %s\n' "$SETUP_NAME" "$package_role" "$PLATFORM"
   SETUP_WARNINGS=0
   SETUP_TEMP_DIR=$(mktemp -d)
   trap 'find "$SETUP_TEMP_DIR" -depth -delete' EXIT
-  install_system_packages "$PLATFORM" "$package_profile" false system_setup_package_command
+  install_system_packages "$PLATFORM" "$package_role" false system_setup_package_command
   system_install_docker
-  system_verify_packages "$package_profile"
+  system_verify_packages "$package_role"
   if ((SETUP_WARNINGS > 0)); then
     printf '%s: completed with %s warnings; host preparation may be incomplete. Rerun when network access is available.\n' "$SETUP_NAME" "$SETUP_WARNINGS" >&2
   fi
@@ -29,14 +68,8 @@ system_validate_host() {
   [[ -r $os_release_file ]] || system_error "cannot read $os_release_file"
   # shellcheck disable=SC1090
   source "$os_release_file"
-  case "${ID:-}:${VERSION_ID:-}" in
-    debian:13 | ubuntu:24.04 | ubuntu:26.04 | amzn:2023)
-      PLATFORM="$ID:$VERSION_ID"
-      ;;
-    *)
-      system_error "unsupported distribution: ${ID:-unknown} ${VERSION_ID:-unknown}"
-      ;;
-  esac
+  system_validate_platform_name "${ID:-}-${VERSION_ID:-}-x86_64" || return
+  PLATFORM="$ID:$VERSION_ID"
   ROOT_COMMAND=()
   if ((EUID != 0)); then
     command -v sudo >/dev/null 2>&1 || system_error 'required command is missing: sudo'
@@ -223,11 +256,11 @@ system_install_docker() {
 }
 
 system_verify_packages() {
-  local package_profile=$1
+  local package_role=$1
   local command_name
   local -a commands=("${SYSTEM_RUNTIME_COMMANDS[@]}")
 
-  if [[ $package_profile == setup ]]; then
+  if [[ $package_role == setup ]]; then
     commands+=("${SYSTEM_SETUP_COMMANDS[@]}")
   fi
   for command_name in "${commands[@]}"; do
@@ -240,7 +273,7 @@ system_verify_packages() {
     fi
   done
   ((SETUP_WARNINGS == 0)) || return 0
-  if [[ $package_profile == setup ]]; then
+  if [[ $package_role == setup ]]; then
     printf '%s: host setup packages ready on %s\n' "$SETUP_NAME" "$PLATFORM"
   else
     printf '%s: release prerequisites ready on %s\n' "$SETUP_NAME" "$PLATFORM"
@@ -265,7 +298,8 @@ system_package_list() {
   esac
   local -n runtime_platform=SYSTEM_${family}_RUNTIME_PACKAGES
   case $role in
-    runtime) ;;
+    runtime)
+      ;;
     build | setup)
       local -n common=SYSTEM_${role^^}_PACKAGES
       local -n specific=SYSTEM_${family}_${role^^}_PACKAGES

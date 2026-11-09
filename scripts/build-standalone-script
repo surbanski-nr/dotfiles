@@ -36,7 +36,7 @@ mkdir -p -- "$(dirname -- "$output")"
   )
   printf '##### END tools.env (TOOL_CHECKS) #####\n'
   embed_file scripts/setup-system-lib
-  embed_file scripts/setup-profile-lib
+  embed_file scripts/setup-tools-lib
   embed_file scripts/dotfiles-release
 } >"$output"
 bash -n "$output"

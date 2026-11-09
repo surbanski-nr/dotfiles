@@ -16,7 +16,7 @@ come from the same source commit recorded in `release.env`.
 The connected builder starts from empty Neovim data and runs
 `Nvim2ToolsInstallSync` and the tool-enabled test suite. It removes the Mason
 venvs for selected Python-backed packages before packaging. Their exact generated
-inputs and locks are maintained in the source profile at
+inputs and locks are maintained in the Neovim configuration at
 `nvim2/.config/nvim2/python-locks/`; the builder copies the selected pairs into the
 payload path `python-locks/`, alongside the downloaded wheels. The target
 installer uses the bundled standalone Python to recreate ordinary isolated
@@ -74,9 +74,9 @@ values and are consumed only by the release Bash startup.
 For Go-bearing releases, the launcher clears an inherited `GOROOT` and selects
 `GOTOOLCHAIN=local`. Go and the Go editor tools use that physical release's SDK
 and cannot auto-download a different version. Bash terminals restore the
-original Go environment together with the XDG values. The newer manager also
-supports original and fd-only tool profiles with no Go metadata, packaged
-with the current private-Python layout described in the setup guide.
+original Go environment together with the XDG values. Releases without `go`
+omit Go metadata; whether the SDK is required follows the enabled Mason
+packages described below.
 
 ## Mutable data
 
@@ -110,9 +110,9 @@ Both flows use the loader beside that physical config, with plugin pins and
 order from its matching `tools.env`. No TPM or first-session download is needed;
 see [Tmux plugins](../../../maintenance/setup.md#tmux-plugins).
 
-## Language dependencies and reduced editor profiles
+## Language dependencies and reduced tool selections
 
-`OFFLINE_RELEASE_TOOLS` selects standalone tools and the Nvim profile.
+`OFFLINE_RELEASE_TOOLS` selects standalone tools and the Nvim configuration.
 `M.tools` in `lua/custom/lsp.lua` selects pinned Mason packages. Existing
 `M.servers`, Conform formatter declarations, `lint.linters_by_ft`, workflow
 linters and debugger setup calls select active editor features. No extra
@@ -131,11 +131,11 @@ After installation, the builder generates `share/nvim2/mason/inventory.tsv`
 from every selected package and its receipt. Each row records the Mason name,
 pinned version, Python distribution name (or `-`) and launcher names.
 `requirements.txt` in the same directory records standalone dependencies.
-`release.env` marks this inventory with `NVIM_TOOLS_FORMAT=1`. The manager reads
-and validates these files without executing Neovim or Lua from the archive.
+Whenever Nvim is selected, the manager requires these inventories and validates
+them without executing Neovim or Lua from the archive.
 Missing declared packages, receipts, launchers, runtimes, or extra packages are
-errors. Earlier archives without that marker retain their original full-profile
-requirements; rebuild them to use reduced editor profiles.
+errors. Rebuild older archives that lack these inventories; the current manager
+does not infer a complete tool set or support earlier archive layouts.
 
 Ansible comes from the locked `ansible-core` dependency of Mason's
 `ansible-lint`, not from an OS package or a separate release tool. Ansible LSP
@@ -179,7 +179,7 @@ activation, defaulting to `current`. Install and set accept `--skip-health` to
 skip runtime probes only; structure, platform and integrity checks remain
 mandatory. There is no `--skip-tests` flag.
 
-Full qualification belongs to the CI-only `scripts/check-dotfiles-release`
+Full qualification belongs to the CI-only `tests/tools_runner.sh`
 from the trusted workflow checkout. It verifies installed content before and
 after its functional checks, so unexpected tool writes into the payload fail.
 New releases also bundle kind, uv/uvx, actionlint, ShellCheck, gh, htop,
@@ -196,7 +196,7 @@ and a real interactive Bash reload. Finally it executes:
 
 ```bash
 NVIM2_CHECK_TOOLS=1 NVIM2_BENCHMARK_RUNS=3 \
-  bash "$PHYSICAL_RELEASE/config/nvim2/tests/check.sh"
+  bash "$PHYSICAL_RELEASE/config/nvim2/tests/check_runner.sh"
 ```
 
 The Nvim2 suite covers plugin HEAD and cleanliness, Mason receipts and probes,
@@ -222,9 +222,12 @@ parser or server is a release failure.
 
 ## Platform qualification and workflow
 
-The supported Linux x86-64 platforms are Debian 13, Ubuntu 24.04, Ubuntu
-26.04 and Amazon Linux 2023. Standalone Python wheels, tmux dynamic libraries
-and the complete Neovim profile are qualified separately in each pinned image.
+The supported and locally qualified Linux x86-64 platforms are Debian 13,
+Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2023. Standalone Python wheels,
+tmux dynamic libraries and the complete Neovim profile are qualified separately
+in each pinned image. `OFFLINE_RELEASE_PLATFORMS` in `release.env` independently
+selects which qualified artifacts the GitHub workflow publishes. Ubuntu 24.04
+publication is currently paused.
 The final runtime check uses a fresh prepared container, a read-only artifact,
 an ordinary user and `--network none`.
 
@@ -243,10 +246,11 @@ Existing archives are checked with the trusted checkout's
 and full source commit with the release job's expected identity.
 Only missing archives are built. Each archive is published together with its
 `.tar.gz.sha256` sidecar. The release also includes a standalone
-`dotfiles-release` script, extracted from the qualified Debian archive with its
-embedded tool-probe configuration. Download it with the matching platform
-archive and checksum; installation needs no Git checkout.
-Only the Debian job publishes this shared script. A retry verifies existing
+`dotfiles-release` script, extracted from the first platform listed in
+`OFFLINE_RELEASE_PLATFORMS`, currently Debian, with its embedded tool-probe
+configuration. Download it with the matching platform archive and checksum;
+installation needs no Git checkout. Only that first platform's job publishes
+the shared script. A retry verifies existing
 assets and supplies a missing checksum or manager without rebuilding or
 overwriting the archive. An existing manager must match the one in the archive;
 a mismatched manager or checksum fails rather than being replaced. The workflow never creates
@@ -260,7 +264,6 @@ Expected assets are:
 ```text
 dotfiles-release
 dotfiles-COMMIT-debian-13-x86_64.tar.gz
-dotfiles-COMMIT-ubuntu-24.04-x86_64.tar.gz
 dotfiles-COMMIT-ubuntu-26.04-x86_64.tar.gz
 dotfiles-COMMIT-amzn-2023-x86_64.tar.gz
 ```

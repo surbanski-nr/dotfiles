@@ -24,7 +24,7 @@ cp "$python_repository/.python-version" "$test_root/python-version-before"
   TEST_UV_LOG="$python_log" XDG_CONFIG_HOME="$python_xdg" \
     run_setup "$python_home" "$python_repository" "$archive_root" python
 )
-[[ -x $python_home/bin/uv && -d $python_home/.local/share/uv/python/3.9.7 &&
+[[ -x $python_home/dotfiles-releases/online/bin/uv && -d $python_home/.local/share/uv/python/3.9.7 &&
   -d $python_home/.local/share/uv/python/3.9.8 ]] ||
   fail 'Python setup did not install uv and all catalog versions'
 [[ $(<"$python_xdg/uv/.python-version") == 3.9.7 ]] ||
@@ -33,7 +33,9 @@ cmp "$python_repository/.tool-versions" "$test_root/python-tool-versions-before"
   fail 'Python setup changed project .tool-versions'
 cmp "$python_repository/.python-version" "$test_root/python-version-before" ||
   fail 'Python setup changed project .python-version'
-[[ ! -e $python_home/.asdf && ! -e $python_home/bin/python && ! -e $python_home/bin/python3 ]] ||
+[[ ! -e $python_home/.asdf &&
+  ! -e $python_home/dotfiles-releases/online/bin/python &&
+  ! -e $python_home/dotfiles-releases/online/bin/python3 ]] ||
   fail 'Python setup introduced asdf or extra public interpreter links'
 TEST_UV_LOG="$python_log" XDG_CONFIG_HOME="$python_xdg" \
   run_setup "$python_home" "$python_repository" "$test_root/no-downloads" python

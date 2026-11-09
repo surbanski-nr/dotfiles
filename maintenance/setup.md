@@ -6,6 +6,9 @@ user. In the connected workflow, run from the repository root; only
 `setup-system` uses `sudo`. Release host preparation uses `dotfiles-release setup`,
 while payload installation and selection never use `sudo`.
 
+For repository maintenance, see [adding and removing tools](#adding-and-removing-tools)
+and [managing OS support and offline publication](#managing-os-support-and-offline-publication).
+
 ## Connected machine
 
 Clone the repository, then run:
@@ -16,25 +19,66 @@ cd "$HOME/github.com/surbanski/dotfiles"
 ./setup-tools
 # Optional online project runtimes:
 ./setup-asdf terraform nodejs terragrunt
-
-for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
-  if [[ -f $file && ! -L $file && ! -e $file.before-dotfiles && ! -L $file.before-dotfiles ]]; then
-    mv -- "$file" "$file.before-dotfiles"
-  fi
-done
+./scripts/dotfiles-release set online
+# Additional packages outside the managed installation:
 ./bstow --dry-run -v -t "$HOME" stow \
-  git ssh tmux bash mc oh-my-posh k9s nvim2 gnupg codex
+  mc gnupg codex
 ./bstow -v -t "$HOME" stow \
-  git ssh tmux bash mc oh-my-posh k9s nvim2 gnupg codex
+  mc gnupg codex
 
 source "$HOME/.bashrc"
 hash -r
 dotfiles-check
 ```
 
-The setup sequence moves regular distribution-provided Bash startup files
-aside without overwriting an existing backup. `bstow --dry-run` reports any
-remaining conflict, including a foreign symlink.
+Both flows publish managed commands through the same selection:
+
+```text
+~/dotfiles-releases/
+  current -> online or dotfiles-COMMIT
+  online/
+    bin/                  command links and optional asdf shims
+    tools/                retained versions and complete runtime trees
+    dotfiles -> CHECKOUT   editable repository configuration
+    state/                installer ownership records
+    config/ and share/    editor configuration and data, tmux plugins
+    release.env           generated TOOLS selection and version metadata
+  dotfiles-COMMIT/         prepared offline package with a frozen checkout
+```
+
+Use an absolute `DOTFILES_RELEASE_ROOT` to relocate the whole store. Both
+connected installers always write `online`, even while an offline package is
+selected. Setup prepares tools; `./scripts/dotfiles-release set online` selects
+them and links base Bash, Git, SSH and Vim configuration plus selected tools'
+configuration into HOME. The same manager handles offline selection, backups,
+recovery and uninstall. Online configuration follows edits and pulls in the Git
+checkout; offline configuration stays frozen. Online editor data is retained
+when switching away and back.
+
+Activation saves existing files or directories as `<path>.before-dotfiles-release`
+and refuses conflicting backups and unsafe parent paths. This includes existing
+Bash startup files and SSH configuration. Review the saved originals when
+merging local settings. Additional `bstow` packages keep their own ownership and
+conflict checks.
+
+`~/bin` contains your executable overrides in both flows. The installers do
+not publish tools there. After preparing `online`, use
+`dotfiles-release set online`, `dotfiles-release set ID`,
+`dotfiles-release health [ID]` and `dotfiles-release uninstall [ID]`.
+`dotfiles-check` delegates to the selected installation's health checks.
+
+### Moving from the former connected layout
+
+Stop older installers before using the shared store. Review old `~/bin` links
+and payloads: they now take priority as user overrides. Move or remove only the
+old managed entries you identify, retaining personal scripts and overrides.
+The new installers create fresh ownership records under `online/state`; they
+do not adopt old payloads or delete old XDG state.
+
+Older offline packages using `OFFLINE_TOOLS` must be rebuilt. If you need to
+remove one, use its original manager before selecting `online`. The current
+manager accepts the current metadata layout rather than keeping a permanent
+compatibility path.
 
 Interactive Bash shells preserve a working inherited agent, including SSH
 forwarding. Otherwise they use the fixed socket of `dotfiles-ssh-agent.service`.
@@ -45,8 +89,8 @@ socket share keys added in any one of them. The managed SSH config selects
 adds the key automatically. Systemd starts the empty agent and never prompts
 for passphrases. Keys remain unlocked only until the agent stops; restarting
 the agent or rebooting requires adding them again. User lingering is not
-enabled automatically. A pre-existing `~/.ssh/config` is a deliberate stow
-conflict and must be reviewed before installation.
+enabled automatically. Activation backs up a pre-existing `~/.ssh/config`;
+review it before relying on the managed host settings.
 
 Both deployment flows keep interactive Bash history in `~/.histfile`, outside
 the repository and release payloads. Before each prompt, synchronization takes
@@ -98,7 +142,7 @@ recording commands with `HISTCONTROL=ignoreboth:erasedups`. Imported entries are
 not filtered, so repeated executions already saved in the shared file can
 reappear after a refresh. Synchronization does not deduplicate the file.
 
-`tools.env` owns tool profiles, release records, version checks and asdf/tmux
+`tools.env` owns tool lists, release records, version checks and asdf/tmux
 plugin pins. It stores direct releases in `TOOL_RELEASES`. Each tool has ordered
 `version|full_URL|SHA256` records, and the first record is the default. A
 required default without an artifact is an error, with no fallback to a later
@@ -115,7 +159,7 @@ the exact `YAMLLINT_VERSION` from `validation.env` with pip in an isolated
 venv. Offline releases use the Nvim Python lock and expose that executable
 in `release/bin`.
 
-`TOOLS` and `OFFLINE_RELEASE_TOOLS` are the authoritative tool profiles, with
+`TOOLS` and `OFFLINE_RELEASE_TOOLS` are the authoritative tool lists, with
 one tool per line. Each includes tmux-sensible, tmux-resurrect and tmux-continuum
 as separate Git-backed tools, in startup order. The tmux binary remains a
 separate source-archive tool. Both include `fd`, installed from its verified official
@@ -126,11 +170,11 @@ Both lists must contain at least one tool. An empty list is a configuration
 error and stops setup before installation. A single tool is supported, subject
 to the explicit offline dependencies below.
 
-Both profiles include Mike Farah's yq `4.52.4` as the verified upstream Go
+Both lists include Mike Farah's yq `4.52.4` as the verified upstream Go
 binary, independently of the Python package also named yq.
 
-Both tool profiles also include the full official Go SDK, verified with its
-upstream SHA-256. Connected setup keeps it under `~/bin/go-VERSION` and selects
+Both lists also include the full official Go SDK, verified with its
+upstream SHA-256. Connected setup keeps it under `online/tools/go-VERSION` and selects
 `go` and `gofmt` together with relative links. The SDK includes its compiler,
 tools and standard library. No asdf Go plugin or OS Go package is required.
 
@@ -153,12 +197,17 @@ override those defaults.
 Existing binaries or links without that record are rejected without being
 changed; there is no automatic adoption.
 
-The connected installers and offline builder source `scripts/setup-lib` for
-archive preparation, source compilation, prerequisites, locking and cleanup.
-It sources `scripts/setup-catalog-lib`, which owns catalog readers and validation,
-including the shared Git-plugin record reader. Catalog validation is not a
-download or installation step. `scripts/setup-tmux-lib` owns pinned tmux Git
-checkout installation and is sourced only by setup-tools and the builder.
+The connected installers and offline builder explicitly source the libraries
+they use. `scripts/setup-lib` owns errors, prerequisites, locking and cleanup.
+`scripts/setup-catalog-lib` owns catalog readers and validation, including Git
+plugin records. `scripts/setup-recipes-lib` owns artifact layouts, verification,
+extraction, source compilation and payload preparation for both flows.
+`scripts/setup-tools-lib` owns shared command, dependency, configuration,
+metadata and payload rules, plus connected store publication.
+`scripts/setup-system-lib` owns OS detection and package roles.
+`scripts/setup-tmux-lib` owns pinned tmux Git checkout installation and is
+sourced only by setup-tools and the builder. Sourcing a library does not install
+anything or implicitly source another library.
 Asdf still installs its own executable and delegates plugins/runtimes to asdf;
 no installer is embedded in the standalone offline manager.
 
@@ -186,7 +235,7 @@ and release runtime checks. Arguments are whitespace-separated; empty arguments 
 `--version`. The metadata field is empty for kubectl and Helm, whose retained
 versions are checked through separate lists. Commands such as `node` and `uvx`
 have their own entries even when their releases share a tool record. The
-builder embeds this map and the shared rules from `scripts/setup-profile-lib`
+builder embeds this map and the shared rules from `scripts/setup-tools-lib`
 in the standalone manager, alongside the runtime OS configuration and shared
 setup library, so it works
 outside the checkout. Edit the repository sources and rebuild; do not edit
@@ -197,11 +246,11 @@ You can select just those tools:
 
 ```bash
 ./setup-tools kubectl helm
-"$HOME/bin/kubectl-1.27.11" version --client
-"$HOME/bin/helm-3.21.0" version --short
+"$HOME/dotfiles-releases/online/bin/kubectl-1.27.11" version --client
+"$HOME/dotfiles-releases/online/bin/helm-3.21.0" version --short
 ```
 
-Versioned installations remain in `~/bin`. For each requested tool, setup
+Versioned installations remain in `online/tools`. For each requested tool, setup
 installs every catalog version, then points the relative canonical command links
 at the first record. `setup-tools: selected NAME VERSION` reports that link
 selection. `setup-tools: reuse NAME VERSION` means the recorded installation
@@ -213,8 +262,8 @@ setup from an older reviewed repository revision can also select a retained
 version. For a temporary change, point the link at an already installed version:
 
 ```bash
-readlink -- "$HOME/bin/kubectl"
-ln -sfn -- kubectl-1.27.11 "$HOME/bin/kubectl"
+readlink -- "$HOME/dotfiles-releases/online/bin/kubectl"
+ln -sfn -- ../tools/bin/kubectl-1.27.11 "$HOME/dotfiles-releases/online/bin/kubectl"
 kubectl version --client
 ```
 
@@ -307,7 +356,7 @@ the shared conflict list is the union of their documented incompatible packages.
 Amazon Linux's conflict list is a local protection against replacing another
 provider, not an upstream Docker instruction.
 
-Full VM installations use systemd by default. Both setup profiles explicitly ensure
+Full VM installations use systemd by default. Both package roles explicitly ensure
 the `systemctl` prerequisite, then start the services; installing the package
 does not make a minimal container boot systemd. Use a VM for host setup.
 Disposable release builder/runtime images deliberately do not install Docker
@@ -321,7 +370,7 @@ operation and skip Docker once it is present. OS package operations have a
 600-second deadline, signing
 key downloads 120 seconds, Docker service startup 180 seconds and the local
 daemon check 30 seconds. Timed-out commands are killed after another five seconds.
-Host setup announces the package profile and platform, names each apt/dnf
+Host setup announces the package role and platform, names each apt/dnf
 operation before starting it and streams command output as it runs. APT setup
 runs `apt-get update` followed by `apt-get install` for the configured packages.
 Network/DNS/connection failures and timeouts are warnings, not fatal errors.
@@ -349,7 +398,7 @@ each link to the first configured version. This is not a transaction across
 all requested tools: earlier successfully selected tools remain selected.
 
 `setup-asdf` records verified binary ownership before publishing the binary, then
-selects it with an atomic replacement of `~/bin/asdf`. That link is the only
+selects it with an atomic replacement of `online/bin/asdf`. That link is the only
 selected-version record. Rerunning finishes interrupted publication, verifies
 retained binary content, reuses installed runtimes and regenerates shims. It can
 restore a missing command link and accepts a manual selection of another intact,
@@ -359,15 +408,13 @@ builds remain the asdf plugin's responsibility; a broken provider installation
 may require provider-specific repair. Home defaults are changed only after all
 requested runtime installations succeed.
 
-Both installers share one nonblocking process-held lock at
-`${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup.lock`. This serializes
-`setup-tools` and `setup-asdf`, including requests for different tools, without a
-shared tool inventory. The kernel releases the lock when the last holding
-descriptor closes, including after a killed process; a running child may retain
-an inherited lock until it exits. The empty lock file is retained and must not
-be deleted to bypass an active lock. Stop any older installer before using the
-new scripts: their old per-tool and asdf locks are no longer used or removed
-automatically.
+Both installers and the release manager share one nonblocking process-held
+lock on the release root directory itself. This serializes `setup-tools`,
+`setup-asdf` and release installation, selection or removal, even for different
+tools or a custom store. There is no lock file or separate XDG lock location.
+The kernel releases the lock when the last holding descriptor closes, including
+after a killed process; a running child may retain an inherited lock until it
+exits. Do not rename or replace the store to bypass an active lock.
 
 Modified managed binaries, malformed ownership state, foreign paths and dirty
 plugin checkouts fail safely instead of being overwritten. Do not delete state
@@ -390,13 +437,269 @@ profile explicitly. Normal `./setup-system` provides Docker; log out and back
 in before using it without sudo. `./setup-tools kubectl kind k9s` and offline
 releases provide the clients. Cluster creation and image downloads remain opt-in.
 
+## Adding and removing tools
+
+The lists in `tools.env` select tools whose installation is already implemented.
+Adding a new name also requires an artifact recipe and verification support.
+The steps below use `mytool` as a placeholder for an ordinary standalone CLI.
+OS support is managed separately in the [platform instructions](#managing-os-support-and-offline-publication).
+
+An ordinary single executable usually needs changes only in `tools.env` and
+the shared artifact recipe in `scripts/setup-recipes-lib`, plus its functional test.
+The existing installers and version checks handle it without a new setup
+script, Task entry or workflow. The additional steps below cover exceptions
+such as runtime trees, plugins and configuration files.
+
+### Selecting or disabling an existing tool
+
+Edit the existing arrays in `tools.env`, keeping one tool per line:
+
+- `TOOLS` selects the default connected installation and required connected
+  `dotfiles-check` diagnostics.
+- `OFFLINE_RELEASE_TOOLS` selects the next offline archive's executables,
+  launchers, plugins and tool-specific configuration.
+
+The lists are independent. Comment a tool in one list to disable only that
+flow, or in both to disable both. Keep its release records and implementation
+for an easy reversal. Both lists must remain nonempty; a single tool is valid
+when its dependencies are satisfied. Dependencies are not automatically
+removed with the tool: review the remaining selection and run
+`bin/task validate:tools`.
+
+Selection is membership in the corresponding list. An offline archive freezes
+`OFFLINE_RELEASE_TOOLS` under the same name in its generated `release.env`.
+Online metadata records `TOOLS`. The manager and functional runner use the
+selected installation's saved list. Later edits affect the next setup/build.
+
+After commenting a connected entry, run `./setup-tools` without names.
+It removes that tool's authenticated command links from `online/bin` while
+retaining versioned payloads and ownership records for rollback. Named requests
+install only the requested tools and do not prune other commands.
+Then run `./scripts/dotfiles-release set online` to reconcile HOME configuration
+with the new selection. User overrides in `~/bin` and optional asdf/provider
+data are preserved. To remove the whole online installation, use
+`dotfiles-release uninstall online`; the editable checkout stays outside it.
+
+For individual disk cleanup, inspect `type -a mytool` and
+`ls -la "$HOME/dotfiles-releases/online/bin"`. Remove only inactive, reviewed
+payloads under `online/tools` and their matching records under
+`online/state/setup-tools`. Keep versions that links or processes still use.
+Additional configuration managed separately by `bstow` is removed separately:
+
+```bash
+./bstow --dry-run -v -t "$HOME" unstow mytool
+./bstow -v -t "$HOME" unstow mytool
+hash -r
+```
+
+Removing an offline entry affects newly built archives. Build a new package,
+then install or select it normally. Selection removes obsolete managed HOME
+links and restores saved originals while preserving user data. Existing
+archives and retained installations are not rewritten or automatically deleted.
+
+To restore a tool, uncomment its selection and rerun connected setup, or build
+and select a new offline archive. When permanently deleting implementation,
+first uninstall retained packages that require it, using their original
+embedded manager. A newer manager need not keep removed tool rules just to
+recognize those packages. Do not delete a release record still used by another
+selection or an asdf plugin.
+
+### Adding a standalone tool
+
+1. In [tools.env](../tools.env), add an ordered `TOOL_RELEASES[mytool]`
+   record with its exact version, full HTTPS artifact URL and upstream SHA-256.
+   Add the name to `TOOLS`, `OFFLINE_RELEASE_TOOLS`, or both.
+   Add `TOOL_CHECKS[mytool]='MYTOOL_VERSION|'`; empty arguments mean
+   `--version`. Supply different version arguments after the separator when
+   needed. Keep the metadata name uppercase and ending in `_VERSION`.
+   Connected setup retains every direct version; offline builds normally
+   bundle the first. Kubectl and Helm bundle every listed version in both flows.
+2. In [scripts/setup-recipes-lib](../scripts/setup-recipes-lib), extend
+   `artifact_layout()`. Reuse an existing format where possible: `yq` is raw,
+   `zoxide` is a gzip member, `rg` has a nested member and `terraform` is a zip
+   member. The recipe declares extraction members, versioned `SPEC_DESTS` and
+   public `SPEC_LINKS`. For a standalone executable, follow
+   `mytool:mytool-$version`; the shared normalization puts its payload in
+   `tools/bin/mytool-VERSION` and makes `bin/mytool` point there.
+   Both flows call the same `prepare_tool_artifact()` for hashing, extraction,
+   executable checks and any source build, then `publish_tool_artifact()`.
+   A source recipe sets `SPEC_BUILD=true` and extends `compile_tool_source()`
+   if it needs different configure flags. Declare build dependencies in the
+   setup/build roles in `system.env`. An ordinary CLI needs no branch in
+   `setup-tools` or `build-dotfiles-release`.
+3. In [scripts/setup-tools-lib](../scripts/setup-tools-lib), review
+   `tool_commands()`, `tool_metadata_fields()`, `tool_payload_paths()` and
+   `tool_dependencies()`. Their defaults cover a single command matching the
+   tool name, a payload under `tools/bin`, one version field and no dependencies.
+   Add branches only for additional commands, shared version fields, runtime
+   trees or required companions. Additional aliases such as `node`, `npm` and
+   `uvx` must not become separately selected tools in `known_tool_names()`.
+   Both metadata writers and the manager follow these declarations; there is
+   no separate metadata allowlist or ordinary-tool builder category.
+4. Add special integration only when the tool needs it. Map repository
+   configuration in `tool_config_package()`; offline packing follows that
+   mapping, while online uses the editable checkout. Declare HOME paths in
+   `release_projection()` and `managed_home_links()` in
+   [scripts/dotfiles-release](../scripts/dotfiles-release), guarded by selection,
+   so the shared manager can activate, remove and restore them in both flows.
+   Keep mutable user data outside frozen offline payloads. A plugin, private
+   editor dependency or custom launcher may need a focused builder or runtime
+   hook. Put downloads and compilation in setup/the builder; offline target
+   installation consumes prepared payloads.
+5. Add the relevant [tool tests and qualification](#tool-tests-and-qualification)
+   below. Usually this means a functional `tests/tools/mytool.sh` suite and
+   extending an existing installer scenario, without a new setup script,
+   runner, Task entry or workflow. Update this guide when default selection or
+   installation behaviour changes; use [tool-updates.md](tool-updates.md) for
+   version changes and rollback.
+
+A wrapper such as `scripts/offline-mytool` is needed only when the tool
+requires release-specific environment, state paths or runtime selection.
+Simple executables use relative symlinks. If a wrapper is necessary, install
+it through the builder's `write_launchers()` and extend
+`tests/offline_launchers_test.sh`, or the existing focused wrapper test
+when it needs its own behaviour. Do not hand-edit the generated
+`dotfiles-release`, payload `release.env`, checksums or installed manifests.
+`scripts/build-standalone-script` embeds repository sources during a normal
+build; no new embedding step is needed for an ordinary tool.
+
+### Tool tests and qualification
+
+Verification has separate jobs:
+
+- `bin/task validate:tools` checks catalogs, selections, dependencies and
+  artifact recipes without downloading.
+- Connected `setup-tools` verifies staged executable versions and recorded
+  payload integrity. Active `dotfiles-check` delegates to `dotfiles-release health`,
+  which uses saved selection and `TOOL_CHECKS` in both flows. Before activation,
+  its checkout diagnostics read `TOOLS` directly. Ordinary tools need no branch.
+- Offline `dotfiles-release verify` validates metadata, exact public commands,
+  selected configuration, manifests and safe symlinks without executing tools.
+  `install`, `set` and `health` also use `check_runtime()` for presence,
+  isolated execution and versions. These checks normally follow the shared
+  tool rules and `TOOL_CHECKS`; add manager branches only for special
+  payload structure or runtime behaviour.
+- `tests/tools_runner.sh` runs extended functional checks during
+  offline qualification. A source-only, non-executable
+  `tests/tools/mytool.sh` registers its suite automatically for a selected
+  tool. Define `health_mytool()` with the release directory and disposable
+  HOME as its two arguments; replace hyphens with underscores in function
+  names. Invoke the packaged executable by its release path, prepare inputs
+  under that disposable HOME, assert useful output or behaviour, and propagate
+  failures. Tests must work without network access. Tools without a dedicated
+  functional suite still receive the common presence and version checks.
+  Bash always has an integration suite; uv's Python-management suite additionally
+  requires selected Python.
+
+Keep installer scenarios grouped by operation. Extend existing cases under
+`tests/setup_tools/` for connected installation, archive handling,
+ownership, recovery or locking, and under `tests/dotfiles_release/` for
+verification, selection, HOME links, health or recovery. Extend their
+`fixture.sh` when a fake executable or archive needs a new layout. For a
+new tool, cover successful installation and the relevant missing or invalid
+payload, plus a reduced selection that omits the tool and its configuration.
+Changes to connected diagnostics or Bash integration belong in
+`tests/bash_test.sh`; editor functionality stays under
+`nvim2/.config/nvim2/tests/`.
+
+No new top-level test runner is needed for an ordinary tool or OS.
+`scripts/validate` already finds `tests/tools/*.sh` and the existing
+installer scenario directories for linting. If a distinct new scenario really
+needs a file, register its name in `tests/setup_tools_runner.sh` or
+`tests/dotfiles_release_runner.sh`. A separate top-level `tests/*_test.sh`
+needs both the shell-file list and a bounded `run_test` call in
+`validate_scripts()`; merely creating that file does not run it.
+
+During development, use the relevant existing scenarios, then run full
+repository validation:
+
+```bash
+bash tests/setup_tools_runner.sh install
+bash tests/setup_tools_runner.sh archives
+bash tests/setup_tools_runner.sh configuration
+bash tests/dotfiles_release_runner.sh selection
+bash tests/dotfiles_release_runner.sh verification
+bash tests/dotfiles_release_runner.sh health
+bash tests/dotfiles_release_runner.sh online
+bin/task validate
+```
+
+In an isolated connected development VM, follow the
+[connected setup](#connected-machine), install the new tool explicitly with
+`./setup-tools mytool`, and rerun that command to check reuse.
+`dotfiles-check` expects the complete current `TOOLS` selection, so install
+that selection before its final check. For offline qualification, use a clean
+committed test checkout containing the new tool and run
+`bin/task test -- debian13` while debugging, then `bin/task test` for all
+selected platforms before publication. The existing
+[reduced tool selections](#complete-offline-release) can be used for occasional
+smaller-package qualification. There is no need for a matrix of every possible
+tool combination.
+
+Neither `Taskfile.yml` nor `.github/workflows` needs a per-tool entry for
+ordinary installation or release tests: they invoke the existing runners.
+Repository validation tools are the separate exception described below.
+
+### OS packages, plugins and editor tools
+
+An OS-provided tool such as MC belongs in `system.env`, not
+`TOOL_RELEASES`. Add or remove it in the appropriate common or family-specific
+`SYSTEM_*_PACKAGES` role and update `SYSTEM_RUNTIME_COMMANDS`,
+`SYSTEM_SETUP_COMMANDS` or `SETUP_PREREQUISITES` when the required commands
+change. Runtime-role packages are host prerequisites, not copied binaries in
+the archive; build-role packages prepare the builder; setup-role packages
+prepare connected hosts. Review fixed system diagnostics in
+`bash/.bash_aliases` when changing that baseline and extend
+`tests/setup_system_test.sh`. Package-list removal does not uninstall
+already installed OS packages.
+
+An asdf runtime needs its records in `TOOL_RELEASES` and a pinned
+`repository|commit` entry in `ASDF_PLUGINS`. Those keys already determine
+the supported arguments and default runtime list in `setup-asdf`; no new
+entry script is needed. A delegated `version|-|-` record is valid for
+asdf and cannot supply a directly installed
+online or offline tool. Asdf itself is not included in offline releases.
+
+A tmux Git plugin uses `TMUX_PLUGINS` and the desired online/offline lists.
+Its shared checkout installer is `scripts/setup-tmux-lib`; no per-plugin
+installer is needed. For a new plugin, extend the explicit commit-field,
+dependency and private-payload cases in `setup-tools-lib`, the manager's
+metadata allowlist and the tmux startup configuration. Extend
+`tests/setup_tools/plugins_test.sh` and the relevant tmux/release checks.
+The existing [tmux plugin instructions](#tmux-plugins) cover pins and loading.
+
+For a Mason tool, edit `M.tools` and, where needed, `M.tool_probes` in
+`nvim2/.config/nvim2/lua/custom/lsp.lua`, then configure its LSP, formatter,
+linter or debugger in the existing editor modules. Do not add a private
+Mason package to the standalone lists just to satisfy editor checks.
+`custom.tools` derives inventories and provider dependencies; the builder
+and manager consume them. Existing npm, PyPI and Go providers use the
+declared Node.js, Python and Go runtimes. A tool needing another external
+runtime also needs its requirement in `custom.tools.requirements()`,
+corresponding runtime support and acceptance in `verify_nvim_inventory()`
+in `setup-tools-lib`. Add a representative editor functional case for a
+new feature. Python-backed package changes also require
+`bin/task update:python-locks`; never edit generated locks by hand.
+Follow the [language guide](../nvim2/.config/nvim2/guide.md#temporarily-disabling-language-support)
+for disabling activation, optional `MasonUninstall`, restoration and checks,
+and the [offline editor notes](../nvim2/.config/nvim2/offline-releases.md#language-dependencies-and-reduced-tool-selections)
+for private runtimes and inventories.
+
+A tool used to validate this repository needs an entry in
+`VALIDATION_TOOLS` and an independent pin in `VALIDATION_RELEASES` in
+`validation.env`, supported artifact preparation in `setup-recipes-lib`, and,
+when necessary, an internal Task bootstrap dependency using
+`scripts/install-validation-tool`. Extend
+`tests/install_validation_tool_test.sh` for new installation behaviour.
+Development-tool and Mason pins do not select the repository validation version.
+
 ## Complete offline release
 
 For a restricted host, use the complete platform artifact. This is the only
 supported offline installation route; `setup-tools` and `setup-asdf` are not
 used. The default artifact contains an immutable snapshot of shared and selected
 configuration together
-with Neovim and its complete profile, Node.js, private standalone Python, the
+with Neovim and its complete tool set, Node.js, private standalone Python, the
 complete Go SDK,
 ripgrep, fd, tmux and plugins, htop, Oh My Posh, gh, k9s, kind, uv/uvx, zoxide,
 kubectx, kubens, kubeconform, Kyverno, Trivy, Task, actionlint, ShellCheck,
@@ -414,7 +717,7 @@ repository. For example, removing k9s removes its binary, configuration and skin
 unselected MC configuration and local-share files are not bundled.
 
 Nvim stays in the default list but can be removed as a whole, including its
-configuration, plugins, Mason payload and editor tests. Its full profile requires
+configuration, plugins, Mason payload and editor tests. Its default configuration requires
 Node.js, Python, Go, ripgrep and Terraform. Terraform is required by the editor's
 Terraform formatter and language server. These are separate tools: removing
 Nvim does not automatically remove them. Reduced editor requirements follow
@@ -430,47 +733,54 @@ When selected, Mason's `ansible-lint` environment contains
 the locked `ansible-core`; offline builds expose `ansible`, `ansible-config` and
 `ansible-playbook` through `share/nvim2/mason/bin`. Bash adds that directory to
 PATH. These commands disappear when that Mason package is omitted. `setup-system` does not
-install Ansible, and connected `dotfiles-check` reports it only as an optional
-integration, so its absence does not fail that check.
+install Ansible. Online Ansible LSP finds these commands directly in Mason's
+venv, after any commands supplied by the project's environment. That venv is
+not added to the interactive shell PATH; expose project Ansible commands
+through an activated project venv when needed.
 
 To pause editor support or optionally remove Mason packages on a connected
 machine, follow the [language support guide](../nvim2/.config/nvim2/guide.md#temporarily-disabling-language-support).
-The [Nvim offline notes](../nvim2/.config/nvim2/offline-releases.md#language-dependencies-and-reduced-editor-profiles)
+The [Nvim offline notes](../nvim2/.config/nvim2/offline-releases.md#language-dependencies-and-reduced-tool-selections)
 describe how builder, installer and functional tests follow those declarations
-for reduced editor profiles.
+for reduced editor tool selections.
 
-New archives record `RELEASE_FORMAT=2` and the complete selection, including tmux
-plugins, in `OFFLINE_TOOLS`. Required version fields, payload checks and public
-links follow that selection. The manager also accepts earlier archives, whose
-tmux plugins and Helm schema plugin were implicit. Selecting a smaller profile
+Archives record the complete selection, including tmux plugins, in
+`OFFLINE_RELEASE_TOOLS`. Required version fields, payload checks and public links follow
+that selection. Selecting fewer tools
 removes obsolete managed HOME links and restores saved originals in the same
 transaction as switching `current`; it preserves user state and caches.
-Keep a downloaded copy of the newer manager when selecting older profiles:
-older managers do not understand newer metadata.
 
-Adding `current/bin` directly to PATH requires a newly built archive: private
-Python now lives only under `tools`, not in public `bin`. The new manager
-rejects the old layout with public Python links rather than exposing that SDK
-as your shell's Python. It does not rewrite older archives or installed payloads.
+The manager supports one current archive contract, without `RELEASE_FORMAT`
+or `NVIM_TOOLS_FORMAT` flags. Archives containing those flags, implicit plugins
+or missing Neovim inventories are rejected. Rebuild from current sources
+instead of adding migration branches or rewriting published archives. For an
+installation using an older contract, use its original embedded manager to
+uninstall retained releases before installing the rebuilt package. Keep user
+state and caches.
 
-The supported artifacts are `debian-13-x86_64`, `ubuntu-24.04-x86_64`,
-`ubuntu-26.04-x86_64` and `amzn-2023-x86_64`. For a complete local qualification,
-run from a clean committed checkout on a connected machine with Docker access:
+The private Python interpreter lives only under `tools`. Adding `current/bin`
+to PATH does not select it as your shell's Python.
+
+The supported setup and qualification platforms are `debian-13-x86_64`,
+`ubuntu-24.04-x86_64`, `ubuntu-26.04-x86_64` and `amzn-2023-x86_64`.
+For a complete local qualification, run from a clean committed checkout on a
+connected machine with Docker access:
 
 ```bash
 bin/task test
-# Show the available PLATFORM values:
+# Show usage and the location of the platform configuration:
 bin/task --summary test
 # Build and qualify just one platform:
 bin/task test -- ubuntu2404
 ```
 
 The task uses `scripts/dotfiles-release-ci test` and the immutable images from
-`release.env`. By default it builds all four packages in parallel, waits for
-all builds to finish, then prepares and verifies successful builds in parallel.
+`release.env`. By default it builds every platform in
+`OFFLINE_TEST_PLATFORMS` in parallel, waits for all builds to finish, then
+prepares and verifies successful builds in parallel.
 Each installation uses a fresh container, an ordinary user and `--network none`.
 Each job verifies the archive, installs it with the downloaded manager, then
-runs `scripts/check-dotfiles-release` from the trusted workflow checkout.
+runs `tests/tools_runner.sh` from the trusted workflow checkout.
 That CI-only checker runs the full functional suites and verifies installed
 content before and after them. It is not needed on the target host.
 The task prints a retained `/tmp/dotfiles-qualification.XXXXXX` directory:
@@ -487,7 +797,116 @@ if any selected platform failed. It preserves packages and logs from successful
 and failed jobs while cleaning up containers and temporary runtime images.
 No GitHub release or credentials are required, and nothing is published.
 `task validate` runs the repository's local
-fixture tests, including installer profiles, rather than this full qualification.
+fixture tests, including reduced tool lists, rather than this full qualification.
+
+### Managing OS support and offline publication
+
+Platform selection and image configuration live in `release.env`:
+
+- `PLATFORM_ALIASES` maps names such as `ubuntu2404` to platform IDs such as
+  `ubuntu-24.04-x86_64`. Both `task dev -- NAME` and `task test -- NAME` use it.
+  `DEFAULT_DEV_PLATFORM` selects the alias used by `task dev` without an argument.
+- `LXD_IMAGES` selects development VM images by platform ID.
+  `LXD_IMAGE_SHA256` is needed only for direct QCOW2 downloads, currently Amazon
+  Linux. Remote LXD cloud images do not use this checksum map.
+- `DOCKER_IMAGES` pins the container images used for building and qualification
+  by platform ID. These are independent of the VM images.
+- `OFFLINE_TEST_PLATFORMS` selects the platforms built and installed by the
+  default `task test`. Explicit qualification also requires membership in this
+  list. `task dev` is independent of it.
+- `OFFLINE_RELEASE_PLATFORMS` selects artifacts published by the GitHub
+  offline-release workflow.
+
+`Taskfile.yml` forwards the chosen name to the scripts; it contains no platform
+map or image tags. VM resources such as CPU, memory, storage and network remain
+Task variables. Host installation support remains in `scripts/setup-system-lib`,
+`system.env` and `setup-system`. The builder, installer and validators share
+`system_validate_platform_name()` and `system_validate_release_host()` from
+`setup-system-lib`; the generated standalone manager includes that library.
+Supported OS identities are declared once there, separately from image pins
+and the lists selecting development, qualification and publication.
+
+Keep at least one qualification platform; the release list may be empty.
+The release list must be a subset of the test list. `scripts/validate` and the
+release workflow reject duplicates, unknown qualification platforms and release
+platforms that are not tested. The first release platform also supplies the
+standalone `dotfiles-release` asset, so keep a stable primary platform first.
+
+Ubuntu 24.04 remains supported and qualified, but its artifact publication is
+currently paused. This is represented by one commented line in
+`OFFLINE_RELEASE_PLATFORMS`. To publish it again, uncomment that line. Do not
+remove its image entries, alias, test-list entry or setup logic. Run
+`task validate` and `task test -- ubuntu2404` before triggering the release
+workflow. Commenting every release-list entry disables artifact publication;
+local qualification continues to follow the test list. Existing GitHub release
+assets are not deleted.
+
+To stop qualifying an OS while keeping its development VM and host support,
+comment its entries in both offline platform lists. Keep its alias and images.
+To change the default development VM, edit only `DEFAULT_DEV_PLATFORM`, for
+example `DEFAULT_DEV_PLATFORM=ubuntu2604`. An image change affects newly created
+VMs; existing VMs continue to be reused with their current image and resources.
+
+The `runs-on: ubuntu-24.04` values under `.github/workflows` select GitHub-hosted
+CI runners. They do not select Ubuntu 24.04 as an offline package target and do
+not need to change when its artifact publication is paused.
+
+To add a future platform such as Ubuntu 28.04 or Debian 14:
+
+1. In `scripts/setup-system-lib`, extend `system_validate_platform_name()`
+   with the new `ID-VERSION_ID-x86_64` platform and `system_install_docker_repository()`
+   for its Debian/Ubuntu repository suite. Review runtime, build and setup
+   package roles and expected commands in `system.env` against the new
+   distribution, and update the supported-host help in `setup-system` and
+   the platform help in `scripts/build-dotfiles-release`.
+   `system_validate_release_host()` derives the expected OS ID and version
+   from the platform name, then checks `/etc/os-release` and x86-64.
+   The builder, installer, CI and catalog validation need no separate
+   platform cases.
+2. Review package-family support in `scripts/setup-system-lib` and `system.env`.
+   A new Debian/Ubuntu version reuses the existing package family. An entirely
+   new distribution family also needs package roles and package-manager support
+   in `system.env` and `setup-system-lib`, plus the runtime/Docker arrays
+   embedded by `scripts/build-standalone-script`. Add that family's bootstrap
+   prerequisites in `scripts/dev-vm-setup`; its existing Debian/Ubuntu branch
+   already covers new versions of those distributions.
+3. In `release.env`, add its short alias to `PLATFORM_ALIASES`, its pinned
+   Docker image to `DOCKER_IMAGES` and its VM image to `LXD_IMAGES`.
+   Add `LXD_IMAGE_SHA256` only for a direct QCOW2 download. The tasks, CI image
+   selection and image validation use these maps without OS-specific edits.
+4. Add focused cases to `tests/setup_system_test.sh`,
+   `tests/dev_vm_test.sh` and `tests/dotfiles_release_ci_test.sh`.
+   Cover archive platform acceptance and host mismatch in the existing
+   `tests/dotfiles_release/verification_test.sh` scenarios and fixtures.
+   These are extensions to existing scripts; a new `setup-OS`, `dev-OS`
+   or top-level test script is not needed. Update the
+   supported-platform text in `README.md`, this guide,
+   `maintenance/tool-updates.md` and
+   `nvim2/.config/nvim2/offline-releases.md`.
+5. Add it to `OFFLINE_TEST_PLATFORMS`, run `bin/task validate`, and
+   check connected setup inside `bin/task dev -- NEW_ALIAS` using
+   `./setup-system`, `./setup-tools` and `dotfiles-check` after linking
+   the configuration. Run full local offline qualification with
+   `bin/task test -- NEW_ALIAS`. Add it to `OFFLINE_RELEASE_PLATFORMS`
+   only after these checks succeed.
+
+Fully retiring an OS requires reversing those additions in `release.env` and
+`scripts/setup-system-lib`, updating the help in `setup-system` and
+`scripts/build-dotfiles-release`, then removing its focused cases and
+supported-platform documentation listed above. If it is the default VM, select
+another alias in `DEFAULT_DEV_PLATFORM`. Package arrays in
+`system.env` only need removal when the retired OS was the last member of that
+distribution family; also remove that family's embedded arrays from
+`scripts/build-standalone-script` and its bootstrap branch from
+`scripts/dev-vm-setup` when retiring the whole family.
+`.github/workflows/dotfiles-release.yml` receives its
+artifact matrix from the release list, so it has no OS target list to edit.
+The shared platform rules are embedded so the standalone manager can recognize
+an archive without a checkout. Task aliases, VM and container image
+metadata, publication and default qualification are centralized in `release.env`.
+The workflow reads `DOCKER_IMAGES` from the selected release's source snapshot.
+Snapshots with older individual image variables are unsupported; use a release
+tag from current sources.
 
 To build only one platform, select its image from `release.env` and keep the
 checkout read-only in the builder:
@@ -497,7 +916,7 @@ set -euo pipefail
 test -z "$(git status --porcelain --untracked-files=normal)"
 source release.env
 platform=debian-13-x86_64
-image=$DEBIAN_13_IMAGE
+image=${DOCKER_IMAGES[$platform]}
 output=${1:-"$PWD/offline-output"}
 mkdir -p "$output"
 
@@ -513,7 +932,7 @@ timeout --signal=TERM --kill-after=30s 5400s docker run --rm --init \
 
 The builder verifies every downloaded archive, compiles tmux and htop against the
 target distribution libraries, starts from empty Neovim data, and runs the
-tool-enabled profile checks. The official Node archive initially contains its
+tool-enabled editor checks. The official Node archive initially contains its
 upstream npm, then the builder installs the separately pinned and hashed npm
 archive. The standalone CPython runtime contains the standard library but not
 ansible-lint, yamllint, ansible-core or debugpy. Separate generated hashed locks and a
@@ -528,7 +947,7 @@ package. The builder supplies its hashed wheel and portable launchers; the
 existing installer recreates its isolated venv at the final retained path.
 It adds no Python-specific OS packages or project runtimes. For a connected
 Nvim2 installation, run
-`:Nvim2ToolsInstallSync` after installing the profile. The debugger's Python
+`:Nvim2ToolsInstallSync` after installing the configuration. The debugger's Python
 is separate from a project's `.venv`; project dependencies still belong to the
 project and are not bundled. No browser, GPU or TypeScript debug adapter is
 required. See the [Python debugger guide](../nvim2/.config/nvim2/guide.md#python-debugger).
@@ -566,7 +985,7 @@ manager from the matching archive, never from a newer workflow checkout.
 A published script or checksum that differs is rejected, not overwritten.
 
 The artifact contains selected paths from a Git archive of the matching commit,
-without the repository history. The default profile also contains the full
+without the repository history. The default selection also contains the full
 Neovim runtime tree, pinned plugin Git metadata, parsers, queries, Mason receipts,
 tmux plugins, Python locks and the temporary wheelhouse.
 `release.env`, `build-manifest.txt` and `SHA256SUMS` record source identity,
@@ -586,11 +1005,11 @@ It still needs access to apt/dnf and, for a new Debian/Ubuntu Docker
 installation, Docker's repository. It detects the host OS without an archive
 or platform argument and never installs or activates a release. The connected
 `setup-system` entry point uses the same `scripts/setup-system-lib` with its
-broader normal-host package profile; there is no copied offline implementation.
+broader normal-host package set; there is no copied offline implementation.
 Neither selects a tool list: `setup-tools` selects `TOOLS`, and the builder selects
-`OFFLINE_RELEASE_TOOLS`. The archive retains the metadata key `OFFLINE_TOOLS`.
-With `RELEASE_FORMAT=2` it lists the complete selection, including Git plugins;
-earlier archives listed only runtime tools and selected plugins implicitly.
+`OFFLINE_RELEASE_TOOLS`. The archive retains the metadata key `OFFLINE_RELEASE_TOOLS`.
+It lists the complete selection, including Git plugins; the installer never
+adds tools that are absent from that list.
 Selected plugin commits are recorded in `release.env`; repository and commit
 identities also remain in `build-manifest.txt`, with files in `SHA256SUMS`.
 No published archive, tag or release needs to be rewritten.
@@ -660,7 +1079,7 @@ release through the same code used by `set ID`. Reinstalling an unchanged
 retained ID reuses it after integrity and runtime checks.
 
 Extended functional cases are grouped by tool in `tests/tools/` and run by
-`scripts/check-dotfiles-release` according to the package's declared selection.
+`tests/tools_runner.sh` according to the package's declared selection.
 Bash integration checks follow that selection too; full Nvim tests stay in the
 editor's test directory. A missing selected program is a failure, not a skipped
 test. Installer tests remain grouped by verification, installation, switching,
@@ -669,7 +1088,7 @@ with networking disabled before publication, but are not part of target
 installation or archive verification. There is no `--skip-tests` switch.
 
 The fast installer tests cover empty-list rejection, single-tool selections,
-smaller profiles and switching back to the full selection. `task test` qualifies
+smaller tool lists and switching back to the full selection. `task test` qualifies
 the current `OFFLINE_RELEASE_TOOLS` on the requested platforms; it does not run
 a matrix of every tool combination. For occasional checks of smaller real
 archives, use four cumulative selections:
@@ -723,8 +1142,8 @@ and debugger behavior remain covered by the offline CI functional checker.
 Releases are retained under `~/dotfiles-releases/dotfiles-COMMIT`. Override the
 store with an absolute `DOTFILES_RELEASE_ROOT` when needed. `current` is the
 only selection link; there is no `previous`, ownership database, pending
-journal or completion flag. `list` displays prepared directories with installed
-manifests and marks the selected ID. An unfinished import is not listed and
+journal or completion flag. `list` displays prepared offline directories with installed manifests and the
+prepared `online` installation, marking the selected ID. An unfinished import is not listed and
 cannot be selected; remove its exact ID with `uninstall ID` before retrying.
 `set` validates metadata, manifests and runtime rather than trusting a flag.
 
@@ -735,7 +1154,7 @@ symlink parent stops activation; foreign links are backed up like other
 originals. This deliberately needs no setup-tools or bstow ownership records.
 Only configuration links, packaged k9s skins and the three tmux plugin paths
 are managed. Release commands are available directly from `current/bin` on
-PATH. `~/bin` is user-owned in this flow: the manager never creates it, scans
+PATH. `~/bin` is user-owned in both flows: the manager never creates it, scans
 its contents, backs up its files or changes its links. Private k9s files,
 kubeconfig inputs and unrelated tmux plugins are also untouched.
 
@@ -886,13 +1305,10 @@ documents and jq overlay merging. These checks use no network or user plugins.
 Missing or wrong-version tools prevent activation; broken functional behavior
 fails CI qualification before publication.
 
-For the first upgrade from a pre-yq release, run `scripts/dotfiles-release`
-from this reviewed checkout, or extract the candidate's standalone
-`dotfiles-release` from the checksum-verified archive into a private directory.
-The installed old manager cannot read the new profile. Keep the newer manager
-outside the release links when selecting an older ID, and use it to return to
-the newer release with `set ID`. Let the manager update selection; do not edit
-retained payloads or `current` by hand.
+Switch between retained packages with `dotfiles-release set ID`. Both packages
+must use the current archive contract described above; rebuild packages with
+obsolete layouts. Let the manager update selection; do not edit retained
+payloads or `current` by hand.
 
 For NetReveal chart validation, offline means delivery of executables.
 Chart repositories, schema endpoints and project pip dependencies may still
@@ -949,8 +1365,9 @@ For a nondefault store, export `DOTFILES_RELEASE_ROOT` before starting or
 reloading Bash; its location is not inferred from the configuration.
 Switching between repository and release deployment is a manual choice, not
 a startup migration.
-Connected `setup-tools` and `setup-asdf` still install into `~/bin`;
-the offline release manager never changes it. The old `bin-extras` directory
+Connected `setup-tools` and `setup-asdf` publish commands in `online/bin`;
+the shared manager selects them through `current/bin`. Both flows leave `~/bin`
+untouched. The old `bin-extras` directory
 is no longer added to PATH. The private `~/.extras` configuration hook is separate.
 
 ```bash
@@ -978,14 +1395,13 @@ DOTFILES_IGNORE_USER_BIN=1 "$HOME/dotfiles-releases/current/bin/nvim"
 In an existing Bash session, export that variable and reload `.bashrc` to
 rebuild PATH. Prefixing an arbitrary command with the variable does not rebuild
 its inherited PATH. Release runtime checks, builds and repository checks enforce this
-setting so local replacements cannot hide a broken payload. In release mode,
-`dotfiles-check` delegates to the same isolated `health`. Connected diagnostics
-require the tools selected in `TOOLS`, including their tmux plugins. System
-utilities and optional integrations are reported separately; asdf runtime checks
-use `ASDF_PLUGINS` when asdf is installed. Removing a tool from `TOOLS` changes
-future default installations and diagnostics, but does not remove existing tools
-or configuration linked by `bstow`. Connected checks can report a version mismatch
-for an intentional override. Use `type -a TOOL` or
+setting so local replacements cannot hide a broken payload. With either online
+or offline selected, `dotfiles-check` delegates to its managed `health` check.
+Online checks use saved `TOOLS` and the optional asdf catalog; offline checks use
+saved `OFFLINE_RELEASE_TOOLS` and the package's inventories. Removing a connected
+tool takes effect after a full `setup-tools` run and `set online`; retained payloads,
+provider data and separately stowed configuration remain. Managed health checks
+ignore intentional `~/bin` overrides. Use `type -a TOOL` or
 `type -P TOOL` to inspect your interactive selection.
 
 Aliases, absolute executable paths and project-local tools such as
@@ -1232,7 +1648,7 @@ They also run as part of `task validate:tmux` and `task validate`.
 Connected setup and offline builds use the same pinned Git-checkout installer.
 `TMUX_PLUGINS` in `tools.env` owns the repository and commit of each plugin;
 `TOOLS` and `OFFLINE_RELEASE_TOOLS` select them and define startup order.
-New offline releases freeze that selection and order in `OFFLINE_TOOLS` in
+New offline releases freeze that selection and order in `OFFLINE_RELEASE_TOOLS` in
 `release.env`, which the loader reads when starting tmux.
 There is no TPM install/update step or first-session plugin download.
 
@@ -1244,19 +1660,24 @@ the complete tmux setup or an individual plugin explicitly with:
 ./setup-tools tmux-resurrect
 ```
 
-Connected checkouts live under `~/.tmux/plugins/PLUGIN`. For a custom root,
-export `DOTFILES_TMUX_PLUGIN_DIR` before setup and before starting the tmux
-server. Connected plugin roots must be absolute paths without whitespace because
-the upstream plugins embed them in tmux shell commands. Configuration paths may
-contain spaces. This replaces the TPM-specific `TMUX_PLUGIN_MANAGER_PATH` setting.
+Connected checkouts live under `online/share/tmux/plugins/PLUGIN`.
+`set online` links selected plugins into `~/.tmux/plugins/PLUGIN`. Relocate the
+store with `DOTFILES_RELEASE_ROOT`. Tmux plugin directories must not contain
+whitespace: upstream save/restore commands embed their paths without shell
+quoting. If HOME contains spaces, choose a store without spaces before setup;
+configuration and user data may still live under HOME. The online loader uses
+`online/share/tmux/plugins`, with `~/.tmux/plugins` as the bootstrap fallback.
+`DOTFILES_TMUX_PLUGIN_DIR` is a runtime override for an independently managed
+plugin root, not an installer destination. This replaces the TPM-specific
+`TMUX_PLUGIN_MANAGER_PATH` setting.
 
 The installer verifies the repository, selected commit and executable entry
 point. It refuses symlinks, non-Git paths, different origins and tracked/staged
 edits before installing any requested tool. Untracked and ignored files are
 preserved; a conflicting file stops a checkout. A selected pin is reused without
 network access. A failed clone leaves no partially published plugin directory.
-Plugin-only requests do not create `~/bin` or setup-tools ownership state.
-The existing common `setup.lock` still serializes connected installers.
+Plugin-only requests prepare the online store and manager link without binary
+ownership records. The common release-root lock serializes all installers.
 Session data under `~/.tmux/resurrect` or the plugin's XDG data path is untouched.
 
 Offline builds place the same checkouts under `release/share/tmux/plugins`.
@@ -1329,8 +1750,8 @@ is unchanged; installation failure preserves the previous venv and interpreter.
 Previously published Python runtimes and venvs are kept because existing venvs
 can still reference them. There is no ownership database or previous/pending state.
 
-Tmux for configuration tests comes from the existing PATH, including `~/bin`
-from `setup-tools` or the offline release's `current/bin`. Validation prepends
+Tmux for configuration tests comes from the existing PATH, including the
+selected installation's `current/bin` and user overrides in `~/bin`. Validation prepends
 its private Python bin and pinned tool directory without hiding those providers.
 Empty PATH entries are removed to avoid resolving programs from the working directory.
 
@@ -1345,8 +1766,8 @@ Release manager and connected tool tests run in separate scenarios with fresh
 temporary homes. Run a focused scenario while investigating a failure:
 
 ```bash
-bash tests/dotfiles_release_test.sh lifecycle
-bash tests/setup_tools_test.sh recovery
+bash tests/dotfiles_release_runner.sh lifecycle
+bash tests/setup_tools_runner.sh recovery
 ```
 
 Repository-owned shell sources are linted from their real checked-in paths.

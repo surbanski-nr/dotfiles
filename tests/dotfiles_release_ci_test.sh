@@ -22,10 +22,51 @@ fail() {
 }
 
 source_dir=$test_root/source
-mkdir -p "$source_dir/scripts"
+workflow_dir=$test_root/workflow
+mkdir -p "$source_dir/scripts" "$workflow_dir/scripts" "$workflow_dir/tests"
 cp "$repo_dir/Taskfile.yml" "$source_dir/Taskfile.yml"
 cp "$repo_dir/scripts/dotfiles-release-ci" "$source_dir/scripts/dotfiles-release-ci"
 cp "$repo_dir/release.env" "$source_dir/release.env"
+# Exercise publication and parallel qualification independently of the currently enabled targets.
+cat >>"$source_dir/release.env" <<'EOF'
+OFFLINE_TEST_PLATFORMS=(
+  debian-13-x86_64
+  ubuntu-24.04-x86_64
+  ubuntu-26.04-x86_64
+  amzn-2023-x86_64
+)
+OFFLINE_RELEASE_PLATFORMS=(
+  debian-13-x86_64
+  ubuntu-26.04-x86_64
+  amzn-2023-x86_64
+)
+EOF
+cp "$source_dir/release.env" "$workflow_dir/release.env"
+cp "$repo_dir/scripts/dotfiles-release-ci" "$workflow_dir/scripts/dotfiles-release-ci"
+ln -s "$repo_dir/tools.env" "$workflow_dir/tools.env"
+ln -s "$repo_dir/tests/tools" "$workflow_dir/tests/tools"
+ln -s "$repo_dir/tests/tools_runner.sh" "$workflow_dir/tests/tools_runner.sh"
+for script in dotfiles-release setup-tools-lib setup-system-lib; do
+  ln -s "$repo_dir/scripts/$script" "$workflow_dir/scripts/$script"
+done
+printf '%s\n' \
+  'DOCKER_IMAGES[debian-13-x86_64]=fixture.invalid/debian:13@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  >>"$source_dir/release.env"
+# shellcheck source=../release.env
+source "$source_dir/release.env"
+test_platform_count=${#OFFLINE_TEST_PLATFORMS[@]}
+release_platform_count=${#OFFLINE_RELEASE_PLATFORMS[@]}
+build_failure_platform=${OFFLINE_TEST_PLATFORMS[0]}
+verify_failure_platform=${OFFLINE_TEST_PLATFORMS[1]}
+successful_platform=${OFFLINE_TEST_PLATFORMS[2]}
+excluded_release_platform=
+for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
+  if [[ " ${OFFLINE_RELEASE_PLATFORMS[*]} " != *" $platform "* ]]; then
+    excluded_release_platform=$platform
+    break
+  fi
+done
+
 cp "$repo_dir/tools.env" "$source_dir/tools.env"
 cp "$repo_dir/scripts/dotfiles-release" "$source_dir/scripts/dotfiles-release"
 printf '\n# Fixture release snapshot differs from workflow tooling.\n' >>"$source_dir/scripts/dotfiles-release"
@@ -33,7 +74,8 @@ printf '#!/bin/sh\nexit 0\n' >"$source_dir/scripts/build-dotfiles-release"
 cp "$repo_dir/scripts/build-standalone-script" "$source_dir/scripts/build-standalone-script"
 cp "$repo_dir/scripts/setup-lib" "$source_dir/scripts/setup-lib"
 cp "$repo_dir/scripts/setup-catalog-lib" "$source_dir/scripts/setup-catalog-lib"
-cp "$repo_dir/scripts/setup-profile-lib" "$source_dir/scripts/setup-profile-lib"
+cp "$repo_dir/scripts/setup-recipes-lib" "$source_dir/scripts/setup-recipes-lib"
+cp "$repo_dir/scripts/setup-tools-lib" "$source_dir/scripts/setup-tools-lib"
 cp "$repo_dir/scripts/setup-system-lib" "$source_dir/scripts/setup-system-lib"
 cp "$repo_dir/system.env" "$source_dir/system.env"
 printf 'SYSTEM_RUNTIME_PACKAGES+=(fixture-release-package)\n' >>"$source_dir/system.env"
@@ -68,24 +110,16 @@ archive=$RELEASE_TAG-$PLATFORM.tar.gz
 
 make_archive() {
   local stage=$test_root/payload platform=${1:-$PLATFORM}
+  local include_extra_tools=${2:-false}
   find "$stage" -depth -delete 2>/dev/null || true
   find "$test_root/stage-ci-archive" -depth -delete 2>/dev/null || true
-  make_artifact "$TEST_COMMIT" ci-archive "$test_root/ci-fixture.tar.gz" 1.0 false false
+  make_artifact "$TEST_COMMIT" ci-archive "$test_root/ci-fixture.tar.gz" \
+    1.0 "$include_extra_tools" "$include_extra_tools" "$include_extra_tools" "$include_extra_tools"
   mv "$test_root/stage-ci-archive" "$stage"
   printf 'fixture payload\n' >"$stage/$RELEASE_TAG/payload"
   bash "$source_dir/scripts/build-standalone-script" "$source_dir" "$stage/$RELEASE_TAG/dotfiles-release"
   printf 'fixture build manifest\n' >"$stage/$RELEASE_TAG/build-manifest.txt"
-  printf '%s\n' \
-    "RELEASE_ID=$RELEASE_TAG" "PLATFORM_ID=$platform" "SOURCE_COMMIT=$TEST_COMMIT" \
-    'SOURCE_TREE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
-    'BUILDER_IMAGE=fixture@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' \
-    'NVIM_VERSION=v1.0' 'NODE_VERSION=1.0' 'NPM_VERSION=1.0' 'NODE_UPSTREAM_NPM_VERSION=1.0' \
-    'PYTHON_VERSION=3.12.12' 'PYTHON_BUILD=20260127' 'TMUX_VERSION=1.0' 'RG_VERSION=1.0' \
-    'FZF_VERSION=1.0' 'ZOXIDE_VERSION=1.0' 'K9S_VERSION=1.0' 'KUBECTX_VERSION=1.0' \
-    'OMP_VERSION=1.0' 'TASK_VERSION=1.0' 'TERRAFORM_VERSION=1.0' 'KUBECTL_VERSIONS=1.0' 'HELM_VERSIONS=1.0' \
-    'OFFLINE_TOOLS=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm' \
-    'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
-    >"$stage/$RELEASE_TAG/release.env"
+  sed -i "s/^PLATFORM_ID=.*/PLATFORM_ID=$platform/" "$stage/$RELEASE_TAG/release.env"
   repack_archive
 }
 
@@ -101,7 +135,7 @@ repack_archive() {
 }
 
 run_ci() {
-  bash "$repo_dir/scripts/dotfiles-release-ci" "$@"
+  bash "$workflow_dir/scripts/dotfiles-release-ci" "$@"
 }
 task_executable=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}/task
 run_task_test() {
@@ -120,39 +154,58 @@ root=$(HOME="$test_root/empty-home" bash "$repo_dir/scripts/dotfiles-release" ve
 [[ $root == *"verified $RELEASE_TAG ($PLATFORM)"* && -z $(find "$test_root/empty-home" -mindepth 1 -print -quit) ]] ||
   fail 'archive verification changed HOME or did not report its identity'
 run_preflight
-matrix | jq -e 'length == 4 and all(.[]; .build_archive == true)' >/dev/null || fail 'missing archives did not select four builds'
+matrix | jq -e --argjson count "$release_platform_count" \
+  'length == $count and all(.[]; .build_archive == true)' >/dev/null ||
+  fail 'missing archives did not select every release build'
 grep -Fx 'should_run=true' "$GITHUB_OUTPUT" >/dev/null || fail 'missing assets did not schedule work'
+if [[ -n $excluded_release_platform ]]; then
+  if PLATFORM=$excluded_release_platform run_ci publish "$test_root/nonexistent-output" \
+    >"$test_root/excluded-platform.log" 2>&1; then
+    fail 'publish accepted a platform excluded from OFFLINE_RELEASE_PLATFORMS'
+  fi
+  grep -F "platform is not selected for offline release: $excluded_release_platform" \
+    "$test_root/excluded-platform.log" >/dev/null || fail 'excluded release platform was not identified'
+fi
 
-for command_name in fd kind uv uvx actionlint shellcheck gh kubeconform kyverno trivy yq; do
-  write_fake_tool "$test_root/payload/$RELEASE_TAG/tools/bin/$command_name" 1.0
-  ln -s "../tools/bin/$command_name" "$test_root/payload/$RELEASE_TAG/bin/$command_name"
+cp "$workflow_dir/release.env" "$test_root/workflow-config.env"
+for invalid in duplicate untested unknown-os missing-image empty; do
+  cp "$test_root/workflow-config.env" "$workflow_dir/release.env"
+  case $invalid in
+    duplicate)
+      printf 'OFFLINE_TEST_PLATFORMS+=(debian-13-x86_64)\n' >>"$workflow_dir/release.env"
+      ;;
+    untested)
+      printf 'OFFLINE_RELEASE_PLATFORMS+=(ubuntu-28.04-x86_64)\n' >>"$workflow_dir/release.env"
+      ;;
+    unknown-os)
+      printf '%s\n' \
+        'DOCKER_IMAGES[ubuntu-28.04-x86_64]=fixture.invalid/ubuntu:28@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+        'OFFLINE_TEST_PLATFORMS+=(ubuntu-28.04-x86_64)' >>"$workflow_dir/release.env"
+      ;;
+    missing-image)
+      printf 'unset "DOCKER_IMAGES[debian-13-x86_64]"\n' >>"$workflow_dir/release.env"
+      ;;
+    empty)
+      printf 'OFFLINE_TEST_PLATFORMS=()\nOFFLINE_RELEASE_PLATFORMS=()\n' >>"$workflow_dir/release.env"
+      ;;
+  esac
+  if run_preflight >"$test_root/config-$invalid.log" 2>&1; then
+    fail "workflow accepted $invalid platform configuration"
+  fi
 done
-for command_name in go gofmt; do
-  write_fake_tool "$test_root/payload/$RELEASE_TAG/tools/go/bin/$command_name" 1.0
-  ln -s "../tools/go/bin/$command_name" "$test_root/payload/$RELEASE_TAG/bin/$command_name"
-done
-write_fake_tool "$test_root/payload/$RELEASE_TAG/tools/htop/bin/htop" 1.0
-ln -s ../tools/htop/bin/htop "$test_root/payload/$RELEASE_TAG/bin/htop"
-ln -s ../share/nvim2/mason/packages/yamllint/venv/bin/yamllint \
-  "$test_root/payload/$RELEASE_TAG/bin/yamllint"
-plugin=$test_root/payload/$RELEASE_TAG/share/helm/plugins/helm-values-schema-json
-mkdir -p "$plugin"
-printf 'name: schema\nversion: "2.4.0"\n' >"$plugin/plugin.yaml"
-printf '#!/bin/sh\nexit 0\n' >"$plugin/schema"
-chmod 0755 "$plugin/schema"
-printf 'fixture license\n' >"$plugin/LICENSE"
-printf '%s\n' \
-  'FD_VERSION=1.0' 'GO_VERSION=1.0' 'KIND_VERSION=1.0' 'UV_VERSION=1.0' \
-  'ACTIONLINT_VERSION=1.0' 'SHELLCHECK_VERSION=1.0' 'GH_VERSION=1.0' 'HTOP_VERSION=1.0' \
-  'KUBECONFORM_VERSION=1.0' 'KYVERNO_VERSION=1.0' 'TRIVY_VERSION=1.0' \
-  'YQ_VERSION=4.52.4' 'HELM_SCHEMA_PLUGIN_VERSION=2.4.0' \
-  >>"$test_root/payload/$RELEASE_TAG/release.env"
-sed -i 's/^OFFLINE_TOOLS=.*/OFFLINE_TOOLS=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm,fd,go,kind,uv,actionlint,shellcheck,yamllint,gh,htop,kubeconform,kyverno,trivy,yq/' \
-  "$test_root/payload/$RELEASE_TAG/release.env"
-repack_archive
+cp "$test_root/workflow-config.env" "$workflow_dir/release.env"
+printf 'OFFLINE_RELEASE_PLATFORMS=()\n' >>"$workflow_dir/release.env"
+run_preflight >"$test_root/publication-disabled.log" 2>&1
+matrix | jq -e 'length == 0' >/dev/null || fail 'disabled publication scheduled platform jobs'
+grep -Fx 'should_run=false' "$GITHUB_OUTPUT" >/dev/null || fail 'disabled publication scheduled a release'
+cp "$test_root/workflow-config.env" "$workflow_dir/release.env"
+
+make_archive "$PLATFORM" true
 cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
 run_preflight
-matrix | jq -e 'length == 4 and .[0].build_archive == false' >/dev/null || fail 'CI rejected the new validation tool profile'
+matrix | jq -e --argjson count "$release_platform_count" \
+  'length == $count and .[0].build_archive == false' >/dev/null ||
+  fail 'CI rejected the new validation tool profile'
 for field in YQ_VERSION HELM_SCHEMA_PLUGIN_VERSION; do
   cp "$test_root/payload/$RELEASE_TAG/release.env" "$test_root/profile.env"
   sed -i "/^$field=/d" "$test_root/payload/$RELEASE_TAG/release.env"
@@ -184,7 +237,8 @@ fi
 
 cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
 TEST_TAG_TYPE=tag run_preflight
-matrix | jq -e 'length == 4 and .[0].build_archive == false and all(.[1:][]; .build_archive == true)' >/dev/null ||
+matrix | jq -e --argjson count "$release_platform_count" \
+  'length == $count and .[0].build_archive == false and all(.[1:][]; .build_archive == true)' >/dev/null ||
   fail 'missing checksum scheduled an archive rebuild'
 
 run_ci publish "$test_root/nonexistent-output"
@@ -207,7 +261,9 @@ done
 grep -F 'fixture-release-package' "$TEST_RELEASE_ASSETS/dotfiles-release" >/dev/null ||
   fail 'standalone manager used the workflow OS configuration instead of the release snapshot'
 run_preflight
-matrix | jq -e 'length == 3 and all(.[]; .platform != "debian-13-x86_64")' >/dev/null || fail 'complete platform was not skipped'
+matrix | jq -e --argjson count "$((release_platform_count - 1))" \
+  'length == $count and all(.[]; .platform != "debian-13-x86_64")' >/dev/null ||
+  fail 'complete platform was not skipped'
 upload_before=$(sha256sum "$TEST_UPLOAD_LOG")
 run_ci publish "$test_root/nonexistent-output"
 [[ $(sha256sum "$TEST_UPLOAD_LOG") == "$upload_before" ]] || fail 'complete assets were uploaded twice'
@@ -277,7 +333,7 @@ $(grep -Fxc dotfiles-release "$TEST_UPLOAD_LOG") -eq 1 &&
 $(grep -Fxc dotfiles-release.sha256 "$TEST_UPLOAD_LOG") -eq 1 ]] ||
   fail 'partial upload retry did not publish each asset exactly once'
 
-for platform in ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
+for platform in "${OFFLINE_RELEASE_PLATFORMS[@]:1}"; do
   make_archive "$platform"
   asset=$RELEASE_TAG-$platform.tar.gz
   cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$asset"
@@ -311,18 +367,38 @@ run_preflight
 make_archive
 export TEST_BUILD_ARCHIVE=$test_root/$archive
 run_ci build "$source_dir" "$test_root/output" >"$test_root/build.log"
+grep -Fx "pull ${DOCKER_IMAGES[$PLATFORM]}" "$TEST_DOCKER_LOG" >/dev/null ||
+  fail 'build used the workflow image pin instead of the release snapshot'
 grep -F 'fixture offline health succeeded' "$RUNNER_TEMP/dotfiles-evidence/$PLATFORM/offline-verify.log" >/dev/null ||
   fail 'build did not perform ordinary-user offline qualification'
 for file in build.log prepare-runtime.log release.env build-manifest.txt archive.sha256; do
   [[ -s $RUNNER_TEMP/dotfiles-evidence/$PLATFORM/$file ]] || fail 'build evidence was not preserved'
 done
 
+cp "$source_dir/release.env" "$test_root/source-config.env"
+printf 'DEBIAN_13_IMAGE=%s\n' "${DOCKER_IMAGES[debian-13-x86_64]}" >"$source_dir/release.env"
+: >"$TEST_DOCKER_LOG"
+if run_ci verify "$source_dir" "$test_root/output" >"$test_root/legacy-image.log" 2>&1; then
+  fail 'qualification accepted obsolete image variables in a release snapshot'
+fi
+grep -F 'release snapshot must define DOCKER_IMAGES' "$test_root/legacy-image.log" >/dev/null ||
+  fail 'qualification did not explain the unsupported image configuration'
+[[ ! -s $TEST_DOCKER_LOG ]] || fail 'qualification touched Docker with obsolete image variables'
+printf 'declare -gA DOCKER_IMAGES=()\n' >"$source_dir/release.env"
+: >"$TEST_DOCKER_LOG"
+if run_ci verify "$source_dir" "$test_root/output" >"$test_root/missing-image.log" 2>&1; then
+  fail 'qualification accepted a release snapshot without its Docker image'
+fi
+[[ ! -s $TEST_DOCKER_LOG ]] || fail 'qualification touched Docker with a missing release image'
+cp "$test_root/source-config.env" "$source_dir/release.env"
+
 mv "$source_dir/scripts/setup-system-lib" "$test_root/setup-system-lib"
 : >"$TEST_DOCKER_LOG"
-run_ci verify "$source_dir" "$test_root/output" >"$test_root/legacy-verify.log"
+if run_ci verify "$source_dir" "$test_root/output" >"$test_root/missing-system-lib.log" 2>&1; then
+  fail 'qualification accepted a release snapshot without its system library'
+fi
+[[ ! -s $TEST_DOCKER_LOG ]] || fail 'qualification touched Docker without its system library'
 mv "$test_root/setup-system-lib" "$source_dir/scripts/setup-system-lib"
-grep -F "cp $source_dir/scripts/setup-lib dotfiles-runtime-fixture-1-$PLATFORM:/usr/local/lib/dotfiles/setup-lib" \
-  "$TEST_DOCKER_LOG" >/dev/null || fail 'qualification lost the OS helpers for an older release source'
 
 for stage in BUILD VERIFY PREPARE; do
   failure_runner=$test_root/runner-$stage
@@ -330,7 +406,7 @@ for stage in BUILD VERIFY PREPARE; do
   : >"$TEST_DOCKER_LOG"
   set +e
   env "TEST_${stage}_FAIL=1" RUNNER_TEMP="$failure_runner" \
-    bash "$repo_dir/scripts/dotfiles-release-ci" build "$source_dir" "$test_root/output" \
+    bash "$workflow_dir/scripts/dotfiles-release-ci" build "$source_dir" "$test_root/output" \
     >"$test_root/failure-$stage.log" 2>&1
   failure_status=$?
   set -e
@@ -359,20 +435,29 @@ qualification_archives=$test_root/qualification-archives
 qualification_tmp=$test_root/'local with spaces'
 qualification_parallel=$test_root/qualification-parallel
 mkdir -p "$qualification_archives" "$qualification_tmp" "$qualification_parallel"
-for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
+for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
   make_archive "$platform"
   cp "$test_root/$archive" "$qualification_archives/dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz"
 done
 : >"$TEST_DOCKER_LOG"
 TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" TEST_PARALLEL_DIR="$qualification_parallel" \
   run_task_test >"$test_root/qualification.log" 2>&1
-awk '
+awk -v expected="$test_platform_count" '
   /^built / { builds++ }
-  / verify / { if (builds != 4) exit 1; verifications++ }
-  END { if (builds != 4 || verifications != 4) exit 1 }
-' "$TEST_DOCKER_LOG" || fail 'qualification did not build all four packages before installing them'
+  / verify / {
+    if (builds != expected) {
+      exit 1
+    }
+    verifications++
+  }
+  END {
+    if (builds != expected || verifications != expected) {
+      exit 1
+    }
+  }
+' "$TEST_DOCKER_LOG" || fail 'qualification did not build every package before installing them'
 qualification_root=$(sed -n 's/^Offline packages and logs: //p' "$test_root/qualification.log")
-for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
+for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
   [[ -s $qualification_root/output/$platform/dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz &&
     -x $qualification_root/output/$platform/dotfiles-release ]] || fail 'qualification did not retain its artifacts'
   (cd "$qualification_root/output/$platform" && sha256sum --check --strict dotfiles-release.sha256 >/dev/null)
@@ -384,7 +469,8 @@ for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-20
 done
 # shellcheck source=../release.env
 source "$source_dir/release.env"
-for image in "$DEBIAN_13_IMAGE" "$UBUNTU_2404_IMAGE" "$UBUNTU_2604_IMAGE" "$AMZN_2023_IMAGE"; do
+for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
+  image=${DOCKER_IMAGES[$platform]}
   [[ $(grep -Fxc "pull $image" "$TEST_DOCKER_LOG") -eq 1 ]] || fail 'qualification did not use the pinned platform image'
 done
 
@@ -397,11 +483,12 @@ TMPDIR="$qualification_tmp" TEST_BUILD_FAIL=1 TEST_BUILD_ARCHIVES_DIR="$qualific
 qualification_status=$?
 set -e
 [[ $qualification_status -eq 81 ]] || fail 'qualification hid a failed parallel build'
-[[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 4 ]] || fail 'qualification did not launch four parallel builds'
+[[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq $test_platform_count ]] ||
+  fail 'qualification did not launch every parallel build'
 if grep -q ' verify ' "$TEST_DOCKER_LOG"; then
   fail 'qualification installed packages when every build failed'
 fi
-for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
+for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
   grep -E "^rm --force dotfiles-builder-local-.*-$platform " "$TEST_DOCKER_LOG" >/dev/null ||
     fail "failed parallel qualification did not clean up $platform"
 done
@@ -418,55 +505,56 @@ for cpu_count in 4 2 1; do
   TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
     TEST_CI_CPUS="$cpu_count" TEST_WORKER_EVENTS="$worker_events" \
     TEST_PARALLEL_DIR="$qualification_parallel" TEST_PARALLEL_VERIFY_COUNT=3 \
-    TEST_BUILD_FAIL=debian-13-x86_64 TEST_VERIFY_FAIL=ubuntu-24.04-x86_64 \
+    TEST_BUILD_FAIL="$build_failure_platform" TEST_VERIFY_FAIL="$verify_failure_platform" \
     run_ci test "$source_dir" >"$test_root/qualification-partial.log" 2>&1
   qualification_status=$?
   set -e
   [[ $qualification_status -eq 81 ]] || fail 'qualification hid the failed platform'
-  [[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 4 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq 3 ]] ||
+  [[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq $test_platform_count &&
+    $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq $((test_platform_count - 1)) ]] ||
     fail 'one failed platform stopped qualification of the others'
-  awk -v cpus="$cpu_count" '
+  awk -v cpus="$cpu_count" -v builds="$test_platform_count" \
+    -v verifications="$((test_platform_count - 1))" '
     $2 == "start" { active[$1]++; if (active[$1] > peak[$1]) peak[$1] = active[$1] }
     $2 == "end" { active[$1]--; completed[$1]++ }
     { if (active[$1] < 0 || active[$1] > cpus) failed = 1 }
     END {
       if (failed || active["build"] || active["verify"] ||
-          completed["build"] != 4 || completed["verify"] != 3 ||
-          peak["build"] != (cpus < 4 ? cpus : 4) ||
-          peak["verify"] != (cpus < 3 ? cpus : 3)) exit 1
+          completed["build"] != builds || completed["verify"] != verifications ||
+          peak["build"] != (cpus < builds ? cpus : builds) ||
+          peak["verify"] != (cpus < verifications ? cpus : verifications)) exit 1
     }
   ' "$worker_events" || fail "qualification did not respect $cpu_count available CPUs"
   qualification_root=$(sed -n 's/^Offline packages and logs: //p' "$test_root/qualification-partial.log")
-  for platform in debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64; do
-    case $platform in
-      debian-13-x86_64)
-        result='build=81 verify=skipped'
-        ;;
-      ubuntu-24.04-x86_64)
-        result='build=0 verify=82'
-        ;;
-      *)
-        result='build=0 verify=0'
-        ;;
-    esac
+  for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
+    if [[ $platform == "$build_failure_platform" ]]; then
+      result='build=81 verify=skipped'
+    elif [[ $platform == "$verify_failure_platform" ]]; then
+      result='build=0 verify=82'
+    else
+      result='build=0 verify=0'
+    fi
     grep -Fx "$platform: $result; logs: $qualification_root/dotfiles-evidence/$platform" \
       "$qualification_root/summary.md" >/dev/null || fail "qualification lost the final result for $platform"
     [[ -s $qualification_root/dotfiles-evidence/$platform/build-only.log ]] || fail "qualification lost the build log for $platform"
-    if [[ $platform != debian-13-x86_64 ]]; then
+    if [[ $platform != "$build_failure_platform" ]]; then
       [[ -s $qualification_root/dotfiles-evidence/$platform/verify.log ]] || fail "qualification lost the verification log for $platform"
     fi
   done
-  grep -F 'fixture build failure' "$qualification_root/dotfiles-evidence/debian-13-x86_64/build-only.log" >/dev/null ||
+  grep -F 'fixture build failure' \
+    "$qualification_root/dotfiles-evidence/$build_failure_platform/build-only.log" >/dev/null ||
     fail 'qualification lost the failed build output'
-  grep -F 'fixture offline failure' "$qualification_root/dotfiles-evidence/ubuntu-24.04-x86_64/verify.log" >/dev/null ||
+  grep -F 'fixture offline failure' \
+    "$qualification_root/dotfiles-evidence/$verify_failure_platform/verify.log" >/dev/null ||
     fail 'qualification lost the failed verification output'
-  grep -F 'fixture offline health succeeded' "$qualification_root/dotfiles-evidence/amzn-2023-x86_64/verify.log" >/dev/null ||
+  grep -F 'fixture offline health succeeded' \
+    "$qualification_root/dotfiles-evidence/$successful_platform/verify.log" >/dev/null ||
     fail 'qualification did not finish a successful platform after other failures'
 done
 
-for pair in 'debian13 debian-13-x86_64' 'ubuntu2404 ubuntu-24.04-x86_64' \
-  'ubuntu2604 ubuntu-26.04-x86_64' 'amazonlinux2023 amzn-2023-x86_64'; do
-  read -r alias platform <<<"$pair"
+for alias in "${!PLATFORM_ALIASES[@]}"; do
+  platform=${PLATFORM_ALIASES[$alias]}
+  [[ " ${OFFLINE_TEST_PLATFORMS[*]} " == *" $platform "* ]] || continue
   : >"$TEST_DOCKER_LOG"
   TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
     run_task_test -- "$alias" >"$test_root/qualification-single.log" 2>&1
@@ -480,7 +568,7 @@ for phase in build verify; do
   ready=$test_root/cancellation-$phase.ready
   TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
     TEST_HANG_PHASE="$phase" TEST_WORKER_READY="$ready" \
-    setsid env --default-signal=INT,QUIT bash "$repo_dir/scripts/dotfiles-release-ci" \
+    setsid env --default-signal=INT,QUIT bash "$workflow_dir/scripts/dotfiles-release-ci" \
     test "$source_dir" debian-13-x86_64 >"$test_root/cancellation-$phase.log" 2>&1 &
   cancellation_pid=$!
   deadline=$((SECONDS + 10))
@@ -506,6 +594,37 @@ for phase in build verify; do
   fi
   cancellation_pid=
 done
+
+cat >>"$source_dir/release.env" <<'EOF'
+PLATFORM_ALIASES[fixture]=ubuntu-24.04-x86_64
+OFFLINE_TEST_PLATFORMS=(ubuntu-24.04-x86_64)
+OFFLINE_RELEASE_PLATFORMS=()
+EOF
+git -C "$source_dir" add release.env
+git -C "$source_dir" -c user.name=fixture -c user.email=fixture@example.invalid \
+  commit -qm 'reduced qualification configuration'
+TEST_COMMIT=$(git -C "$source_dir" rev-parse HEAD)
+COMMIT_SHA=$TEST_COMMIT
+RELEASE_TAG=dotfiles-${TEST_COMMIT:0:12}
+archive=$RELEASE_TAG-$PLATFORM.tar.gz
+make_archive ubuntu-24.04-x86_64
+cp "$test_root/$archive" "$qualification_archives/dotfiles-${COMMIT_SHA:0:12}-ubuntu-24.04-x86_64.tar.gz"
+for alias in '' fixture; do
+  task_args=()
+  [[ -z $alias ]] || task_args=(-- "$alias")
+  : >"$TEST_DOCKER_LOG"
+  TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
+    run_task_test "${task_args[@]}" >"$test_root/configured-selection.log" 2>&1
+  [[ $(grep -c ' build ' "$TEST_DOCKER_LOG") == 1 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") == 1 ]] ||
+    fail 'release.env did not restrict qualification to one platform'
+  grep -F 'ubuntu-24.04-x86_64: build=0 verify=0;' "$test_root/configured-selection.log" >/dev/null ||
+    fail 'release.env did not control the new alias and default test selection'
+done
+: >"$TEST_DOCKER_LOG"
+if run_task_test -- debian13 >"$test_root/omitted-platform.log" 2>&1; then
+  fail 'task test accepted a platform omitted from the test list'
+fi
+[[ ! -s $TEST_DOCKER_LOG ]] || fail 'an omitted qualification platform touched Docker'
 
 : >"$TEST_DOCKER_LOG"
 if run_task_test -- invalid-platform >"$test_root/qualification-alias.log" 2>&1; then

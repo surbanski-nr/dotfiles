@@ -35,9 +35,15 @@ ln -s "$(command -v dirname)" "$test_root/wrong-arch/dirname"
 cat >"$test_root/wrong-arch/uname" <<'EOF'
 #!/bin/sh
 case $1 in
-  -s) printf 'Linux\n' ;;
-  -m) printf 'aarch64\n' ;;
-  *) exit 1 ;;
+  -s)
+    printf 'Linux\n'
+    ;;
+  -m)
+    printf 'aarch64\n'
+    ;;
+  *)
+    exit 1
+    ;;
 esac
 EOF
 chmod 0755 "$test_root/wrong-arch/uname"
@@ -228,8 +234,12 @@ cat >"$fixture_bin/timeout" <<'EOF'
 arguments=("$@")
 for index in "${!arguments[@]}"; do
   case ${arguments[index]} in
-    600s) arguments[index]=5s ;;
-    --kill-after=5s) arguments[index]=--kill-after=1s ;;
+    600s)
+      arguments[index]=5s
+      ;;
+    --kill-after=5s)
+      arguments[index]=--kill-after=1s
+      ;;
   esac
 done
 exec "$TEST_REAL_TIMEOUT" "${arguments[@]}"
@@ -363,7 +373,7 @@ fi
 config_repo=$test_root/config-repo
 mkdir -p "$config_repo/scripts"
 cp "$repo_dir/scripts/setup-system-lib" "$config_repo/scripts/setup-system-lib"
-cp "$repo_dir/scripts/setup-profile-lib" "$config_repo/scripts/setup-profile-lib"
+cp "$repo_dir/scripts/setup-tools-lib" "$config_repo/scripts/setup-tools-lib"
 cp "$repo_dir/scripts/dotfiles-release" "$config_repo/scripts/dotfiles-release"
 cp "$repo_dir/tools.env" "$config_repo/tools.env"
 cp "$repo_dir/system.env" "$config_repo/system.env"

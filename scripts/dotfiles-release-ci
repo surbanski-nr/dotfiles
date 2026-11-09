@@ -3,7 +3,8 @@
 set -euo pipefail
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-platforms=(debian-13-x86_64 ubuntu-24.04-x86_64 ubuntu-26.04-x86_64 amzn-2023-x86_64)
+# shellcheck source=setup-system-lib
+source "$script_dir/setup-system-lib"
 containers=()
 declare -A workers=()
 runtime_image=
@@ -13,6 +14,49 @@ die() {
   printf 'dotfiles-release-ci: %s\n' "$*" >&2
   return 1
 }
+
+platform_in_list() {
+  local expected=$1 platform
+  shift
+  for platform in "$@"; do
+    if [[ $platform == "$expected" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+load_platform_lists() {
+  local config=$script_dir/../release.env platform
+  local -A seen_test=() seen_release=()
+
+  [[ -r $config ]] || die "cannot read $config"
+  # shellcheck source=../release.env
+  source "$config" || return
+  declare -p PLATFORM_ALIASES DOCKER_IMAGES \
+    OFFLINE_TEST_PLATFORMS OFFLINE_RELEASE_PLATFORMS >/dev/null 2>&1 ||
+    die 'release.env must define platform aliases, Docker images and offline platform lists'
+  test_platforms=("${OFFLINE_TEST_PLATFORMS[@]}")
+  release_platforms=("${OFFLINE_RELEASE_PLATFORMS[@]}")
+  ((${#test_platforms[@]})) || die 'OFFLINE_TEST_PLATFORMS must not be empty'
+  for platform in "${test_platforms[@]}"; do
+    [[ -n $platform ]] || die 'OFFLINE_TEST_PLATFORMS contains an empty entry'
+    system_validate_platform_name "$platform" || return
+    [[ ${DOCKER_IMAGES[$platform]:-} =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
+      die "no pinned Docker image configured for $platform"
+    [[ ! -v seen_test[$platform] ]] || die "duplicate offline test platform: $platform"
+    seen_test[$platform]=1
+  done
+  for platform in "${release_platforms[@]}"; do
+    [[ -n $platform ]] || die 'OFFLINE_RELEASE_PLATFORMS contains an empty entry'
+    [[ ! -v seen_release[$platform] ]] || die "duplicate offline release platform: $platform"
+    [[ -v seen_test[$platform] ]] || die "offline release platform is not tested: $platform"
+    seen_release[$platform]=1
+  done
+}
+
+declare -a test_platforms=() release_platforms=()
+load_platform_lists
 
 cleanup() {
   local status=$?
@@ -75,7 +119,7 @@ preflight() {
   local release_file=$work/release.json error_file=$work/release-error.txt
   local object_file=$work/tag-object.json attempts=1 attempt object_type
   local platform asset build_archive matrix
-  local release_found=false manager_complete=false
+  local release_found=false manager_complete=false should_run=false
   local -a selected=()
 
   if [[ $EVENT_NAME == workflow_dispatch ]]; then
@@ -120,12 +164,12 @@ preflight() {
     asset_exists dotfiles-release.sha256 "$release_file"; then
     manager_complete=true
   fi
-  for platform in "${platforms[@]}"; do
+  for platform in "${release_platforms[@]}"; do
     asset=dotfiles-${COMMIT_SHA:0:12}-$platform.tar.gz
     build_archive=true
     if asset_exists "$asset" "$release_file"; then
       if asset_exists "$asset.sha256" "$release_file" &&
-        [[ $platform != "${platforms[0]}" || $manager_complete == true ]]; then
+        [[ $platform != "${release_platforms[0]}" || $manager_complete == true ]]; then
         printf '%s: assets complete; skipping.\n' "$platform"
         continue
       fi
@@ -138,50 +182,46 @@ preflight() {
       '{platform: $platform, build_archive: $build_archive}')")
   done
   matrix=$(printf '%s\n' "${selected[@]}" | jq -s '.')
+  if ((${#selected[@]} > 0)); then
+    should_run=true
+  fi
   printf '%s\n' "release_tag=$RELEASE_TAG" "commit_sha=$COMMIT_SHA" \
     "platforms=$(jq -c '.' <<<"$matrix")" \
-    "should_run=$([[ ${#selected[@]} -gt 0 ]] && printf true || printf false)" >>"$GITHUB_OUTPUT"
+    "should_run=$should_run" >>"$GITHUB_OUTPUT"
 }
 
-select_platform() {
-  local source_dir=$1
+read_builder_image() (
+  local source_dir=$1 platform=$2 image
+  # Read the image pin from the release snapshot without replacing the workflow's lists.
+  unset DOCKER_IMAGES
   # shellcheck source=../release.env
-  source "$source_dir/release.env"
-  case $PLATFORM in
-    debian-13-x86_64)
-      builder_image=$DEBIAN_13_IMAGE
-      test_uid=23131
-      test_home='/srv/debian offline'
-      ;;
-    ubuntu-24.04-x86_64)
-      builder_image=$UBUNTU_2404_IMAGE
-      test_uid=24141
-      test_home=/opt/ubuntu2404
-      ;;
-    ubuntu-26.04-x86_64)
-      builder_image=$UBUNTU_2604_IMAGE
-      test_uid=26161
-      test_home=/srv/ubuntu2604
-      ;;
-    amzn-2023-x86_64)
-      builder_image=$AMZN_2023_IMAGE
-      test_uid=23171
-      test_home=/opt/amazon2023
-      ;;
-    *)
-      die "unsupported platform: $PLATFORM"
-      ;;
-  esac
-}
+  source "$source_dir/release.env" || return
+  declare -p DOCKER_IMAGES >/dev/null 2>&1 || {
+    die 'release snapshot must define DOCKER_IMAGES in release.env'
+    return 1
+  }
+  image=${DOCKER_IMAGES[$platform]:-}
+  [[ $image =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] || {
+    die "no pinned Docker image configured for $platform"
+    return 1
+  }
+  printf '%s\n' "$image"
+)
 
 build_and_qualify() {
-  local source_dir=$1 output_dir=$2 archive root delivered_manager size digest library
+  local source_dir=$1 output_dir=$2 archive root delivered_manager size digest
   local phase=${3:-build}
-  local builder_image test_uid test_home builder container verifier
+  local builder_image builder container verifier
+  # Exercise installation with a nonstandard UID and a HOME containing spaces.
+  local test_uid=23131 test_home='/srv/dotfiles offline'
   local evidence=$RUNNER_TEMP/dotfiles-evidence/$PLATFORM
   local run_key=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PLATFORM
 
-  select_platform "$source_dir"
+  builder_image=$(read_builder_image "$source_dir" "$PLATFORM") || return
+  [[ -f $source_dir/scripts/setup-system-lib ]] || {
+    die 'release snapshot is missing scripts/setup-system-lib'
+    return 1
+  }
   [[ $(git -C "$source_dir" rev-parse HEAD) == "$COMMIT_SHA" ]] || die 'checkout does not match release commit'
   [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{7,40}$ &&
     $COMMIT_SHA == "${RELEASE_TAG#dotfiles-}"* ]] || die 'release tag does not match commit'
@@ -213,31 +253,32 @@ build_and_qualify() {
 
   {
     docker run --detach --init --name "$container" "$builder_image" sleep infinity
-    docker cp "$source_dir/scripts/build-dotfiles-release" "$container:/usr/local/bin/build-dotfiles-release"
-    docker exec "$container" mkdir -p /usr/local/lib/dotfiles
-    # Older release builders keep their OS helpers in setup-lib.
-    for library in "$source_dir"/scripts/setup*-lib; do
-      docker cp "$library" "$container:/usr/local/lib/dotfiles/${library##*/}"
-    done
+    docker exec "$container" mkdir -p /usr/local/lib/dotfiles/scripts
+    docker cp "$source_dir/scripts/build-dotfiles-release" \
+      "$container:/usr/local/lib/dotfiles/scripts/build-dotfiles-release"
+    docker cp "$source_dir/scripts/setup-system-lib" \
+      "$container:/usr/local/lib/dotfiles/scripts/setup-system-lib"
     docker cp "$source_dir/system.env" "$container:/usr/local/lib/dotfiles/system.env"
     timeout --foreground --signal=TERM --kill-after=15s 900s docker exec "$container" \
-      bash /usr/local/bin/build-dotfiles-release prepare-runtime "$PLATFORM" offline-test "$test_uid" "$test_home"
+      bash /usr/local/lib/dotfiles/scripts/build-dotfiles-release \
+      prepare-runtime "$PLATFORM" offline-test "$test_uid" "$test_home"
     timeout --foreground 300s docker commit "$container" "$runtime_image"
     docker rm --force "$container"
   } 2>&1 | tee "$evidence/prepare-runtime.log"
-  # HOME in the command below is expanded by the container's shell.
+  # HOME exercises spaces; upstream tmux plugins need a store without them.
   # shellcheck disable=SC2016
   timeout --foreground --signal=TERM --kill-after=30s 1800s docker run --rm --init --name "$verifier" \
     --network none --user "$test_uid:$test_uid" --env HOME="$test_home" \
+    --env DOTFILES_RELEASE_ROOT=/tmp/dotfiles-releases \
     --env DOTFILES=/tmp/inherited-dotfiles --env DOTFILES_AUTO_ROOT=/tmp/inherited-auto-root \
     --volume "$archive:/artifact.tar.gz:ro" \
     --volume "$delivered_manager:/usr/local/bin/dotfiles-release:ro" \
-    --volume "$script_dir:/ci:ro" --volume "$script_dir/../tools.env:/tools.env:ro" \
-    --volume "$script_dir/../tests/tools:/tests/tools:ro" "$runtime_image" \
+    --volume "$script_dir:/scripts:ro" --volume "$script_dir/../tools.env:/tools.env:ro" \
+    --volume "$script_dir/../tests:/tests:ro" "$runtime_image" \
     bash -euo pipefail -c \
-    'bash /ci/dotfiles-release verify /artifact.tar.gz
+    'bash /scripts/dotfiles-release verify /artifact.tar.gz
      bash /usr/local/bin/dotfiles-release install /artifact.tar.gz
-     bash /ci/check-dotfiles-release "$HOME/dotfiles-releases/current"' \
+     bash /tests/tools_runner.sh "$DOTFILES_RELEASE_ROOT/current"' \
     2>&1 | tee "$evidence/offline-verify.log"
 
   size=$(stat --format=%s "$archive")
@@ -255,7 +296,12 @@ test_all_platforms() {
   local requested_platform=${2:-}
   local -a selected=() batch=()
   local -A build_status=() verify_status=()
-  for platform in "${platforms[@]}"; do
+  if [[ $requested_platform =~ ^[a-z0-9]+$ ]]; then
+    # The workflow's aliases deliberately survive sourcing a release snapshot in a subshell.
+    # shellcheck disable=SC2031
+    requested_platform=${PLATFORM_ALIASES[$requested_platform]:-$requested_platform}
+  fi
+  for platform in "${test_platforms[@]}"; do
     if [[ -z $requested_platform || $platform == "$requested_platform" ]]; then
       selected+=("$platform")
     fi
@@ -345,6 +391,9 @@ publish() {
   local release_file=$work/release.json archive checksum manager=$work/dotfiles-release
   local -a uploads=()
 
+  ((${#release_platforms[@]})) || die 'no offline release platforms are selected'
+  platform_in_list "$PLATFORM" "${release_platforms[@]}" ||
+    die "platform is not selected for offline release: $PLATFORM"
   timeout 30s gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_file"
   jq -e '.assets | type == "array"' "$release_file" >/dev/null
   if asset_exists "$asset" "$release_file"; then
@@ -363,7 +412,7 @@ publish() {
     (cd "$(dirname -- "$archive")" && sha256sum "$asset") >"$checksum"
     uploads+=("$checksum")
   fi
-  if [[ $PLATFORM == "${platforms[0]}" ]]; then
+  if [[ $PLATFORM == "${release_platforms[0]}" ]]; then
     extract_manager "$archive" "$manager"
     if asset_exists dotfiles-release "$release_file"; then
       mkdir -p "$work/existing-manager"

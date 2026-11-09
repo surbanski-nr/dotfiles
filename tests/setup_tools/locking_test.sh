@@ -15,12 +15,12 @@ assert_locked() {
   if output=$(HOME="$test_home" "$test_repository/$installer" "$name" 2>&1); then
     fail "$installer ignored the shared online installation lock"
   fi
-  [[ $output == *'another online installer is running'* ]] ||
+  [[ $output == *'another installation or release operation is running'* ]] ||
     fail "$installer did not report the shared lock"
 }
 
-lock_path=$test_home/.local/state/dotfiles/setup.lock
-exec {test_lock_fd}>"$lock_path"
+lock_path=$test_home/dotfiles-releases
+exec {test_lock_fd}<"$lock_path"
 flock -n "$test_lock_fd"
 assert_locked setup-tools k9s
 assert_locked setup-tools yq
@@ -31,7 +31,7 @@ run_setup "$test_home" "$test_repository" "$archive_root" k9s >/dev/null
 # The lock is shared even when XDG state lives outside the target home.
 test_xdg=$test_root/'shared state elsewhere'
 mkdir -p "$test_xdg/dotfiles"
-exec {test_lock_fd}>"$test_xdg/dotfiles/setup.lock"
+exec {test_lock_fd}<"$lock_path"
 flock -n "$test_lock_fd"
 XDG_STATE_HOME="$test_xdg" assert_locked setup-tools k9s
 XDG_STATE_HOME="$test_xdg" assert_locked setup-asdf terraform
@@ -88,12 +88,13 @@ for installer in setup-tools setup-asdf; do
 done
 
 invalid_lock_home=$test_root/invalid-lock-home
-mkdir -p "$invalid_lock_home/.local/state/dotfiles/setup.lock"
+mkdir -p "$invalid_lock_home"
+printf 'private root bytes\n' >"$invalid_lock_home/dotfiles-releases"
 if run_setup "$invalid_lock_home" "$test_repository" "$archive_root" k9s \
   >"$test_root/invalid-lock.log" 2>&1; then
-  fail 'an invalid directory lock was silently removed'
+  fail 'an invalid release-root lock was silently replaced'
 fi
-[[ -d $invalid_lock_home/.local/state/dotfiles/setup.lock ]] ||
-  fail 'invalid lock path was changed'
+[[ $(<"$invalid_lock_home/dotfiles-releases") == 'private root bytes' ]] ||
+  fail 'invalid release root was changed'
 
 printf 'setup_tools: locking passed\n'

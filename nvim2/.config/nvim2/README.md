@@ -56,7 +56,7 @@ an incomplete profile:
 ```bash
 cd ~/github.com/surbanski/dotfiles
 ./bstow -v -f -t "$HOME" restow nvim2
-bash ~/.config/nvim2/tests/check.sh
+bash ~/.config/nvim2/tests/check_runner.sh
 ```
 
 Plugins are restored from `nvim-pack-lock.json` when Neovim starts. External
@@ -78,7 +78,7 @@ both during Mason installation and when working on projects. Then run:
 Then validate the complete profile from the shell:
 
 ```bash
-bash ~/.config/nvim2/tests/check.sh
+bash ~/.config/nvim2/tests/check_runner.sh
 ```
 
 Use Neovim 0.12.5 or newer.
@@ -131,7 +131,7 @@ timeout 1200s env NVIM_APPNAME=nvim2 \
   nvim --headless '+qa!'
 timeout 1200s env NVIM_APPNAME=nvim2 \
   nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
-timeout 120s bash "$HOME/.config/nvim2/tests/check.sh"
+timeout 120s bash "$HOME/.config/nvim2/tests/check_runner.sh"
 ```
 
 The first Nvim2 startup restores only plugins declared in the current config at
@@ -185,7 +185,7 @@ unit.
 | Apply proposed plugin updates                         | `:write` in the update window                         |
 | Cancel proposed plugin updates                        | `:quit` in the update window                          |
 | Check locked plugins, tools, parsers and hardening    | `:Nvim2Check`                                         |
-| Run smoke tests and startup benchmark                 | `bash ~/.config/nvim2/tests/check.sh`                 |
+| Run smoke tests and startup benchmark                 | `bash ~/.config/nvim2/tests/check_runner.sh`                 |
 | Check profile health                                  | `:checkhealth kickstart`                              |
 | Check LSP health                                      | `:checkhealth vim.lsp`                                |
 | Check Treesitter health                               | `:checkhealth nvim-treesitter`                        |
@@ -210,11 +210,11 @@ Run the stronger headless check after provisioning a VM and after accepting
 plugin, Mason or parser updates:
 
 ```bash
-bash ~/.config/nvim2/tests/check.sh
+bash ~/.config/nvim2/tests/check_runner.sh
 ```
 
 From this repository's Nvim2 configuration directory, the equivalent command
-is `bash tests/check.sh`. The script exits nonzero when a check fails. It runs
+is `bash tests/check_runner.sh`. The script exits nonzero when a check fails. It runs
 focused dependency and feature regressions, the broader smoke suite, and a
 real-file language integration suite. It exercises real Git checkouts and diff
 shortcuts, persistent project marks, tab-out, native search and its statusline count, Mini Jump2d,
@@ -229,7 +229,9 @@ The language suite covers Lua, Python, Bash, TypeScript, TSX, Terraform,
 Terraform variables, Ansible, Helm and generic YAML. Some servers also call
 programs that are not Mason packages. The complete offline release supplies
 Terraform and the isolated ansible-core entry points used by Ansible Language
-Server. Connected installations must provide those commands separately.
+Server. Online Ansible LSP uses the CLI in Mason's ansible-lint venv as a
+fallback after the project's environment. Connected Terraform support requires
+Terraform CLI from setup-asdf or another provider.
 
 Generated Python inputs and hashed locks for Python-backed Mason packages live
 in `python-locks/` beside this configuration's plugin lock. Regenerate them
@@ -243,7 +245,7 @@ and cache, so there is no shared default failure limit. After measuring a
 healthy machine, enforce a local median limit when checking future updates:
 
 ```bash
-NVIM2_MAX_STARTUP_MS=200 bash ~/.config/nvim2/tests/check.sh
+NVIM2_MAX_STARTUP_MS=200 bash ~/.config/nvim2/tests/check_runner.sh
 ```
 
 Change `200` to a suitable value for that machine. Use
@@ -252,7 +254,7 @@ profile for inspection:
 
 ```bash
 NVIM2_STARTUP_LOG=/tmp/nvim2-startup.log \
-  bash ~/.config/nvim2/tests/check.sh
+  bash ~/.config/nvim2/tests/check_runner.sh
 ```
 
 Before running `:Nvim2ToolsInstallSync`, use `NVIM2_CHECK_TOOLS=0` to skip only
@@ -288,7 +290,7 @@ Perform updates on a connected trusted machine:
 
 6. Run the health checks and exercise the affected workflows before
    committing `nvim-pack-lock.json`. At minimum, run
-   `bash ~/.config/nvim2/tests/check.sh`.
+   `bash ~/.config/nvim2/tests/check_runner.sh`.
 
 To return to a known revision, restore the wanted lockfile version from Git,
 set that plugin's `version` temporarily to its locked `rev`, restart, and run
@@ -321,7 +323,7 @@ parser list is in `lua/custom/treesitter.lua`.
      nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
    ```
 
-5. Inspect `:Mason`, run `bash ~/.config/nvim2/tests/check.sh`, and test the
+5. Inspect `:Mason`, run `bash ~/.config/nvim2/tests/check_runner.sh`, and test the
    relevant LSP, formatter or linter. Commit the changed custom module after
    it passes.
 

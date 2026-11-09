@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Sourced by setup-lib. Artifact validation uses its shared layout adapters.
+# Artifact validation uses the functions in setup-recipes-lib.
 
 validate_version() {
   local name=$1
@@ -147,25 +147,25 @@ validate_release_catalog() {
   done
 }
 
-validate_profile() {
-  local profile_name=$1 tool seen=' '
-  local -n profile=$profile_name
+validate_tool_list() {
+  local tools_name=$1 tool seen=' '
+  local -n tools_ref=$tools_name
 
-  if ! declare -p "$profile_name" 2>/dev/null | grep -q '^declare -a'; then
-    report_error "$profile_name must be an indexed array"
+  if ! declare -p "$tools_name" 2>/dev/null | grep -q '^declare -a'; then
+    report_error "$tools_name must be an indexed array"
     return 1
   fi
-  if ((${#profile[@]} == 0)); then
-    report_error "$profile_name is empty"
+  if ((${#tools_ref[@]} == 0)); then
+    report_error "$tools_name is empty"
     return 1
   fi
-  for tool in "${profile[@]}"; do
+  for tool in "${tools_ref[@]}"; do
     if ! [[ $tool =~ ^[a-z0-9-]+$ ]]; then
-      report_error "$profile_name contains invalid tool name $tool"
+      report_error "$tools_name contains invalid tool name $tool"
       return 1
     fi
     if [[ $seen == *" $tool "* ]]; then
-      report_error "$profile_name contains duplicate $tool"
+      report_error "$tools_name contains duplicate $tool"
       return 1
     fi
     seen+="$tool "
@@ -175,7 +175,7 @@ validate_profile() {
 validate_validation_config() {
   local tool version
 
-  validate_profile VALIDATION_TOOLS || return
+  validate_tool_list VALIDATION_TOOLS || return
   validate_release_catalog VALIDATION_RELEASES || return
   validate_version YAMLLINT_VERSION "${YAMLLINT_VERSION:-}" || return
   if [[ -v VALIDATION_RELEASES[yamllint] ]]; then
@@ -247,16 +247,16 @@ validate_git_plugin_catalog() {
 }
 
 validate_tool_delivery() {
-  local profile_name=$1 tool version
-  local -n delivery_profile=$profile_name
+  local tools_name=$1 tool version
+  local -n tools_ref=$tools_name
 
-  if [[ $profile_name == OFFLINE_RELEASE_TOOLS ]]; then
-    profile_dependencies "$profile_name" || return
+  if [[ $tools_name == OFFLINE_RELEASE_TOOLS ]]; then
+    validate_tool_dependencies "$tools_name" || return
   fi
-  for tool in "${delivery_profile[@]}"; do
+  for tool in "${tools_ref[@]}"; do
     [[ $tool == yamllint || -v TMUX_PLUGINS[$tool] ]] && continue
-    [[ $profile_name != TOOLS || $tool != python ]] || continue
-    if [[ $profile_name == OFFLINE_RELEASE_TOOLS ]]; then
+    [[ $tools_name != TOOLS || $tool != python ]] || continue
+    if [[ $tools_name == OFFLINE_RELEASE_TOOLS ]]; then
       tool_metadata_fields "$tool" >/dev/null || {
         report_error "unsupported offline tool: $tool"
         return 1
@@ -269,17 +269,17 @@ validate_tool_delivery() {
     for version in "${RELEASE_VERSIONS[@]}"; do
       select_release TOOL_RELEASES "$tool" "$version" || return
       [[ $RELEASE_URL != - ]] || {
-        report_error "$profile_name release $tool $version requires an artifact"
+        report_error "$tools_name release $tool $version requires an artifact"
         return 1
       }
       artifact_layout "$tool" "$version" "$RELEASE_ASSET" || return
-      if [[ $profile_name == TOOLS && ${#SPEC_LINKS[@]} == 0 ]]; then
+      if [[ $tools_name == TOOLS && ${#SPEC_LINKS[@]} == 0 ]]; then
         report_error "TOOLS tool $tool is not supported by setup-tools"
         return 1
       fi
     done
   done
-  if profile_has "$profile_name" kubectx && profile_has "$profile_name" kubens; then
+  if list_has "$tools_name" kubectx && list_has "$tools_name" kubens; then
     # These tools share one version field in release metadata.
     select_default_release TOOL_RELEASES kubectx || return
     local kubectx_version=$RELEASE_VERSION
@@ -289,7 +289,7 @@ validate_tool_delivery() {
       return 1
     fi
   fi
-  if profile_has "$profile_name" nodejs; then
+  if list_has "$tools_name" nodejs; then
     select_default_release TOOL_RELEASES npm || return
     [[ $RELEASE_URL != - ]] || {
       report_error 'npm default requires an artifact'
@@ -300,7 +300,7 @@ validate_tool_delivery() {
 }
 
 validate_tool_config() {
-  local mode=${1:-all} tool profile
+  local mode=${1:-all} tool list_name
 
   validate_release_catalog TOOL_RELEASES || return
   validate_git_plugin_catalog ASDF_PLUGINS || return
@@ -315,30 +315,38 @@ validate_tool_config() {
       return 1
     fi
   done
-  for profile in TOOLS OFFLINE_RELEASE_TOOLS; do
-    validate_profile "$profile" || return
+  for list_name in TOOLS OFFLINE_RELEASE_TOOLS; do
+    validate_tool_list "$list_name" || return
   done
-  for profile in TOOLS OFFLINE_RELEASE_TOOLS; do
-    local -n profile_tools=$profile
-    for tool in "${profile_tools[@]}"; do
-      [[ $profile == OFFLINE_RELEASE_TOOLS && $tool == yamllint ]] && continue
+  for list_name in TOOLS OFFLINE_RELEASE_TOOLS; do
+    local -n tools_ref=$list_name
+    for tool in "${tools_ref[@]}"; do
+      [[ $list_name == OFFLINE_RELEASE_TOOLS && $tool == yamllint ]] && continue
       [[ -v TMUX_PLUGINS[$tool] ]] && continue
       if ! [[ -v TOOL_RELEASES[$tool] ]]; then
-        report_error "$profile references unknown tool $tool"
+        report_error "$list_name references unknown tool $tool"
         return 1
       fi
     done
-    unset -n profile_tools
+    unset -n tools_ref
   done
   case $mode in
     all)
       validate_tool_delivery OFFLINE_RELEASE_TOOLS || return
       validate_tool_delivery TOOLS || return
       ;;
-    offline) validate_tool_delivery OFFLINE_RELEASE_TOOLS || return ;;
-    online) validate_tool_delivery TOOLS || return ;;
-    asdf) ;;
-    *) report_error "unknown tool validation mode: $mode"; return 1 ;;
+    offline)
+      validate_tool_delivery OFFLINE_RELEASE_TOOLS || return
+      ;;
+    online)
+      validate_tool_delivery TOOLS || return
+      ;;
+    asdf)
+      ;;
+    *)
+      report_error "unknown tool validation mode: $mode"
+      return 1
+      ;;
   esac
   if [[ $mode == all || $mode == asdf ]]; then
     select_default_release TOOL_RELEASES asdf || return

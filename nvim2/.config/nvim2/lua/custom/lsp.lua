@@ -1,4 +1,5 @@
 local M = {}
+local mason_root = vim.fn.stdpath 'data' .. '/mason'
 
 M.mason = {
   -- CSS, HTML and JSON otherwise install the same npm package concurrently.
@@ -10,7 +11,12 @@ M.mason = {
 
 ---@type table<string, vim.lsp.Config>
 M.servers = {
-  ansiblels = {},
+  ansiblels = {
+    -- Mason keeps Ansible CLI inside ansible-lint's virtual environment.
+    cmd_env = {
+      PATH = table.concat({ vim.env.PATH or '/usr/bin:/bin', mason_root .. '/bin', mason_root .. '/packages/ansible-lint/venv/bin' }, ':'),
+    },
+  },
   bashls = {},
   cssls = {},
   docker_language_server = {},

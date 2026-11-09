@@ -1308,7 +1308,7 @@ server, formatter, linter or debugger whose Mason package was removed fails
 with an explanation. The functional suite reads the same feature configuration:
 disabled features lose their positive cases, while enabled features still must
 work even if an executable is missing. Shared tools remain tested by the other
-features that use them. Run `bash nvim2/.config/nvim2/tests/check.sh` on a
+features that use them. Run `bash nvim2/.config/nvim2/tests/check_runner.sh` on a
 connected machine after changing the profile. `NVIM2_CHECK_TOOLS=0` is not a
 check of a reduced profile.
 
@@ -1331,7 +1331,7 @@ disabled. Public standalone tools selected in `TOOLS` or `OFFLINE_RELEASE_TOOLS`
 retain their own checks independently of editor activation.
 
 The same editor functional suite runs during building and offline qualification.
-See [Language dependencies and reduced editor profiles](offline-releases.md#language-dependencies-and-reduced-editor-profiles)
+See [Language dependencies and reduced tool selections](offline-releases.md#language-dependencies-and-reduced-tool-selections)
 for the generated inventory and installation checks.
 
 ## Git and Gitsigns

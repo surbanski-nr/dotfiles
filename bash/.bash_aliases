@@ -79,7 +79,7 @@ _dotfiles_check_version() {
   fi
   if [[ (-e $HOME/bin/$command_name || -L $HOME/bin/$command_name) &&
     $path != "$HOME/bin/$command_name" ]]; then
-    printf '  SHADOWED %-21s selected=%s path=%s managed=%s\n' \
+    printf '  SHADOWED %-21s selected=%s path=%s override=%s\n' \
       "$label" "$expected" "$path" "$HOME/bin/$command_name"
     return 1
   fi
@@ -131,6 +131,19 @@ dotfiles-check() (
     manifest_dir=$(CDPATH='' cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
   fi
   release_root=${manifest_dir%/dotfiles}
+  if [[ -L ${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}/current ]]; then
+    release_root=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}/current
+    if [[ $(readlink -f -- "$release_root/dotfiles") == "$(readlink -f -- "$manifest_dir")" ]]; then
+      [[ -x $release_root/bin/dotfiles-release ]] || {
+        printf 'dotfiles-check: active release manager is missing: %s\n' \
+          "$release_root/bin/dotfiles-release" >&2
+        return 1
+      }
+      DOTFILES_RELEASE_ROOT=${release_root%/current} "$release_root/bin/dotfiles-release" health
+      return
+    fi
+    release_root=${manifest_dir%/dotfiles}
+  fi
   if [[ -f $release_root/release.env && -x $release_root/bin/dotfiles-release ]]; then
     DOTFILES_RELEASE_ROOT=${release_root%/*} "$release_root/bin/dotfiles-release" health
     return
@@ -141,6 +154,9 @@ dotfiles-check() (
     # Loaded only for diagnostics, never during normal shell startup.
     # shellcheck source=../scripts/setup-lib
     source "$manifest_dir/scripts/setup-lib"
+    source "$manifest_dir/scripts/setup-catalog-lib"
+    source "$manifest_dir/scripts/setup-recipes-lib"
+    source "$manifest_dir/scripts/setup-tools-lib"
     validate_tool_config online || return
     selected=("${TOOLS[@]}")
   fi

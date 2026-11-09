@@ -3,12 +3,14 @@
 set -euo pipefail
 
 unset VIRTUAL_ENV
-# Connected tools live in HOME/bin; release build and qualification opt out.
+# User overrides live in HOME/bin; automated checks opt out.
 if [[ ${DOTFILES_IGNORE_USER_BIN:-} == 1 ]]; then
   IFS=: read -r -a path_entries <<<"$PATH"
   clean_path=
   for entry in "${path_entries[@]}"; do
-    [[ -n $entry && $entry != "$HOME/bin" ]] || continue
+    if [[ -z $entry || $entry == "$HOME/bin" ]]; then
+      continue
+    fi
     clean_path+=${clean_path:+:}$entry
   done
   export PATH=$clean_path
@@ -60,11 +62,23 @@ test_files=(
 )
 
 for test_file in "${test_files[@]}"; do
+  lua_check=$(
+    cat <<LUA
+local ok, message = xpcall(function()
+  dofile(vim.fn.stdpath('config') .. '/tests/$test_file')
+end, debug.traceback)
+
+if not ok then
+  vim.api.nvim_err_writeln(message)
+  vim.cmd('cquit 1')
+end
+LUA
+  )
   timeout --signal=TERM --kill-after=10s "$timeout_seconds" env \
-  XDG_CONFIG_HOME="$xdg_config_home" \
-  NVIM_APPNAME="$app_name" \
-  NVIM2_CHECK_TOOLS="${NVIM2_CHECK_TOOLS:-1}" \
-  nvim --headless "+lua local ok, message = xpcall(function() dofile(vim.fn.stdpath('config') .. '/tests/$test_file') end, debug.traceback); if not ok then vim.api.nvim_err_writeln(message); vim.cmd('cquit 1') end"
+    XDG_CONFIG_HOME="$xdg_config_home" \
+    NVIM_APPNAME="$app_name" \
+    NVIM2_CHECK_TOOLS="${NVIM2_CHECK_TOOLS:-1}" \
+    nvim --headless "+lua $lua_check"
 done
 
 temporary_dir=$(mktemp -d)
@@ -77,7 +91,15 @@ for ((run = 1; run <= runs; run++)); do
     XDG_CONFIG_HOME="$xdg_config_home" \
     NVIM_APPNAME="$app_name" \
     nvim --headless --startuptime "$startup_log" '+qa!'
-  awk '/NVIM STARTED/ { value = $1 } END { if (value == "") exit 1; print value }' "$startup_log" >> "$times_file"
+  awk '
+    /NVIM STARTED/ { value = $1 }
+    END {
+      if (value == "") {
+        exit 1
+      }
+      print value
+    }
+  ' "$startup_log" >>"$times_file"
 done
 
 minimum=$(sort -n "$times_file" | awk 'NR == 1 { print; exit }')
@@ -91,7 +113,9 @@ if [[ -n ${NVIM2_STARTUP_LOG:-} ]]; then
   printf 'Last startup profile: %s\n' "$NVIM2_STARTUP_LOG"
 fi
 
-if [[ -n ${NVIM2_MAX_STARTUP_MS:-} ]] && ! awk -v measured="$median" -v limit="$NVIM2_MAX_STARTUP_MS" 'BEGIN { exit !(measured <= limit) }'; then
+if [[ -n ${NVIM2_MAX_STARTUP_MS:-} ]] &&
+  ! awk -v measured="$median" -v limit="$NVIM2_MAX_STARTUP_MS" \
+    'BEGIN { exit !(measured <= limit) }'; then
   printf 'Nvim2 startup median %s ms exceeds limit %s ms\n' "$median" "$NVIM2_MAX_STARTUP_MS" >&2
   exit 1
 fi

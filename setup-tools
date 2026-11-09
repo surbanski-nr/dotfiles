@@ -6,8 +6,9 @@ usage() {
   cat <<'EOF'
 Usage: setup-tools [NAME ...]
 
-Install selected Linux x86-64 tools under ~/bin and tmux Git plugins
-under ~/.tmux/plugins (or DOTFILES_TMUX_PLUGIN_DIR).
+Install selected Linux x86-64 tools and tmux plugins under
+${DOTFILES_RELEASE_ROOT:-~/dotfiles-releases}/online.
+Activate them with: dotfiles-release set online
 For offline deployment, use the complete dotfiles release instead.
 EOF
   printf 'Names:'
@@ -17,6 +18,7 @@ EOF
 
 main() {
   local -a requested=()
+  local full_selection=false
 
   while (($#)); do
     case $1 in
@@ -37,12 +39,17 @@ main() {
   load_setup_config
   if ((${#requested[@]} == 0)); then
     requested=("${TOOLS[@]}")
+    full_selection=true
   fi
   validate_host
   select_requested_tools "${requested[@]}"
   printf 'setup-tools: checking requested tools\n'
   preflight "${SELECTED_TOOLS[@]}"
   install_selected_tools "${SELECTED_TOOLS[@]}"
+  if [[ $full_selection == true ]]; then
+    remove_unselected_commands
+  fi
+  finish_online_setup "$REPO_DIR"
 }
 
 load_setup_config() {
@@ -50,9 +57,8 @@ load_setup_config() {
   source "$REPO_DIR/system.env"
   validate_tool_config online
 
-  BIN_DIR=${SETUP_TOOLS_BIN_DIR:-$HOME/bin}
-  STATE_DIR=${SETUP_TOOLS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/setup-tools}
-  TMUX_PLUGIN_DIR=${DOTFILES_TMUX_PLUGIN_DIR:-$HOME/.tmux/plugins}
+  configure_online_paths
+  STATE_DIR=$ONLINE_ROOT/state/setup-tools
 }
 
 validate_host() {
@@ -113,42 +119,12 @@ state_path() {
   printf '%s/%s-%s.state\n' "$STATE_DIR" "$1" "$2"
 }
 
-# Hash a deterministic tar stream of installed payloads, not the downloaded archive.
-# Example for root=$HOME/bin and the two uv destinations:
-# tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-#   -C "$HOME/bin" -cf - -- uv-0.12.19 uvx-0.12.19 | sha256sum | awk '{print $1}'
-# Timestamps and owner/group IDs are normalized; contents, paths and modes remain.
-content_digest() {
-  local root=$1
-  local destination
-  local -a basenames=()
-  shift
-
-  for destination in "$@"; do
-    basenames+=("$(basename -- "$destination")")
-  done
-  tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-    -C "$root" -cf - -- "${basenames[@]}" | sha256sum | awk '{print $1}'
-}
-
-read_state() {
-  local path=$1
-  # Artifact hash authenticates the download; payload hash detects local edits.
-  RECORDED_INSTALL_PHASE=
-  RECORDED_ARTIFACT_SHA256=
-  RECORDED_PAYLOAD_SHA256=
-  [[ -f $path && ! -L $path && $(wc -l <"$path") == 1 ]] || return 1
-  IFS=$'\t' read -r RECORDED_INSTALL_PHASE RECORDED_ARTIFACT_SHA256 \
-    RECORDED_PAYLOAD_SHA256 <"$path" || return 1
-  [[ $RECORDED_INSTALL_PHASE == pending || $RECORDED_INSTALL_PHASE == complete ]] || return 1
-  validate_digest state-artifact "$RECORDED_ARTIFACT_SHA256" || return 1
-  validate_digest state-content "$RECORDED_PAYLOAD_SHA256" || return 1
-}
-
 destinations_exist() {
   local destination
   for destination in "${SPEC_DESTS[@]}"; do
-    [[ -e $BIN_DIR/$destination || -L $BIN_DIR/$destination ]] || return 1
+    if [[ ! -e $PAYLOAD_DIR/$destination && ! -L $PAYLOAD_DIR/$destination ]]; then
+      return 1
+    fi
   done
 }
 
@@ -161,20 +137,33 @@ classify_installation() {
   local path
   local actual
   local destination
+  local expected_paths recorded_paths
 
   path=$(state_path "$name" "$version")
   if [[ ! -e $path && ! -L $path ]]; then
     for destination in "${SPEC_DESTS[@]}"; do
-      if [[ -e $BIN_DIR/$destination || -L $BIN_DIR/$destination ]]; then
-        report_error "unmanaged versioned destination exists: $BIN_DIR/$destination"
+      if [[ -e $PAYLOAD_DIR/$destination || -L $PAYLOAD_DIR/$destination ]]; then
+        report_error "unmanaged versioned destination exists: $PAYLOAD_DIR/$destination"
         return 1
       fi
     done
     INSTALLATION_STATE=missing
     return 0
   fi
-  if ! read_state "$path"; then
+  if ! read_tool_state "$path"; then
     report_error "invalid installation state: $path"
+    return 1
+  fi
+  expected_paths=$(
+    IFS=,
+    printf '%s' "${SPEC_DESTS[*]}"
+  )
+  recorded_paths=$(
+    IFS=,
+    printf '%s' "${RECORDED_PAYLOAD_PATHS[*]}"
+  )
+  if [[ $recorded_paths != "$expected_paths" ]]; then
+    report_error "installation state has unexpected payload paths: $path"
     return 1
   fi
   if [[ $RECORDED_ARTIFACT_SHA256 != "$expected_artifact" ]]; then
@@ -189,7 +178,7 @@ classify_installation() {
     INSTALLATION_STATE=pending-incomplete
     return 0
   fi
-  actual=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}") || return
+  actual=$(tool_content_digest "$PAYLOAD_DIR" "${SPEC_DESTS[@]}") || return
   if [[ $actual != "$RECORDED_PAYLOAD_SHA256" ]]; then
     if [[ $RECORDED_INSTALL_PHASE == complete ]]; then
       report_error "managed installation was modified: $name $version"
@@ -206,41 +195,32 @@ classify_installation() {
 }
 
 state_owns_link_target() {
-  local name=$1
-  local command_name=$2
-  local target=$3
-  local version
-  local state
-  local entry
-  local actual
+  local name=$1 command_name=$2 target=$3
+  local state version entry actual
 
-  case "$command_name:$target" in
-    nvim:nvim-*/bin/nvim | htop:htop-*/bin/htop | tmux:tmux-*/bin/tmux)
-      version=${target#"$command_name-"}
-      version=${version%/bin/"$command_name"}
-      ;;
-    go:go-*/bin/go | gofmt:go-*/bin/gofmt)
-      version=${target#go-}
-      version=${version%/bin/*}
-      ;;
-    "$command_name:$command_name-"*)
-      version=${target#"$command_name-"}
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-  [[ -n $version && $version != */* ]] || return 1
-  state=$(state_path "$name" "$version")
-  read_state "$state" || return 1
-  [[ $RECORDED_INSTALL_PHASE == complete ]] || return 1
-  artifact_layout "$name" "$version" retained
-  for entry in "${SPEC_LINKS[@]}"; do
-    [[ $entry == "$command_name:$target" ]] || continue
-    destinations_exist || return 1
-    actual=$(content_digest "$BIN_DIR" "${SPEC_DESTS[@]}") || return 1
-    [[ $actual == "$RECORDED_PAYLOAD_SHA256" ]]
-    return
+  for state in "$STATE_DIR/$name-"*.state; do
+    if [[ ! -f $state || -L $state ]]; then
+      continue
+    fi
+    version=${state##*/}
+    version=${version#"$name-"}
+    version=${version%.state}
+    if ! read_tool_state "$state"; then
+      continue
+    fi
+    if [[ $RECORDED_INSTALL_PHASE != complete ]]; then
+      continue
+    fi
+    artifact_layout "$name" "$version" retained || return
+    for entry in "${SPEC_LINKS[@]}"; do
+      if [[ $entry != "$command_name:$target" ]]; then
+        continue
+      fi
+      destinations_exist || return 1
+      actual=$(tool_content_digest "$PAYLOAD_DIR" "${SPEC_DESTS[@]}") || return 1
+      [[ $actual == "$RECORDED_PAYLOAD_SHA256" ]]
+      return
+    done
   done
   return 1
 }
@@ -251,12 +231,16 @@ preflight_link() {
   local entry=$2
   local command_name=${entry%%:*}
   local link="$BIN_DIR/$command_name"
-  local provider
   local target
+  local ownership_command=$command_name
+
+  if [[ $command_name == "$name-"* ]]; then
+    ownership_command=$name
+  fi
 
   if [[ -L $link ]]; then
     target=$(readlink -- "$link")
-    if ! state_owns_link_target "$name" "$command_name" "$target"; then
+    if ! state_owns_link_target "$name" "$ownership_command" "$target"; then
       report_error "refusing foreign link: $link -> $target"
       return 1
     fi
@@ -266,15 +250,6 @@ preflight_link() {
     report_error "refusing unmanaged path: $link"
     return 1
   fi
-  if ! provider=$(command -v "$command_name" 2>/dev/null); then
-    return 0
-  fi
-  case $provider in
-    "$HOME/.asdf/shims/"* | "$HOME/.krew/bin/"* | "$HOME/.local/share/nvim2/mason/bin/"*)
-      report_error "$command_name is already provided by $provider"
-      return 1
-      ;;
-  esac
 }
 
 preflight() {
@@ -293,10 +268,14 @@ preflight() {
   done
   if ((${#binary_tools[@]})); then
     if [[ -e $BIN_DIR || -L $BIN_DIR ]]; then
-      [[ -d $BIN_DIR && ! -L $BIN_DIR ]] || report_error "invalid bin directory: $BIN_DIR"
+      if [[ ! -d $BIN_DIR || -L $BIN_DIR ]]; then
+        report_error "invalid bin directory: $BIN_DIR"
+      fi
     fi
     if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
-      [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || report_error "invalid state directory: $STATE_DIR"
+      if [[ ! -d $STATE_DIR || -L $STATE_DIR ]]; then
+        report_error "invalid state directory: $STATE_DIR"
+      fi
     fi
   fi
   if ((${#plugins[@]})); then
@@ -304,23 +283,29 @@ preflight() {
     require_command timeout || return
   fi
   acquire_online_setup_lock
+  prepare_online_directories
   if ((${#plugins[@]})); then
     preflight_tmux_plugins "$TMUX_PLUGIN_DIR" "${plugins[@]}" || return
   fi
   if ((${#binary_tools[@]})); then
-    mkdir -p "$BIN_DIR" "$STATE_DIR"
+    mkdir -p "$STATE_DIR"
   fi
   for name in "${binary_tools[@]}"; do
-    if [[ $name == htop || $name == tmux ]]; then
-      for build_command in cc getconf make pkg-config; do
-        require_command "$build_command" || return
-      done
+    if [[ $name == python ]]; then
+      continue
     fi
-    [[ $name == python ]] && continue
     load_tool_versions "$name"
     for version in "${TOOL_VERSIONS[@]}"; do
       load_tool_release "$name" "$version"
+      if [[ $SPEC_BUILD == true ]]; then
+        for build_command in cc getconf make pkg-config; do
+          require_command "$build_command" || return
+        done
+      fi
       classify_installation "$name" "$version" "$RELEASE_SHA256"
+      if [[ $name == kubectl || $name == helm ]]; then
+        preflight_link "$name" "$name-$version:${SPEC_LINKS[0]#*:}"
+      fi
     done
     load_tool_release "$name" "${TOOL_VERSIONS[0]}"
     for entry in "${SPEC_LINKS[@]}"; do
@@ -341,7 +326,11 @@ write_state() {
   path=$(state_path "$name" "$version")
   temporary=$(mktemp "$STATE_DIR/.state.XXXXXX")
   TEMP_PATHS+=("$temporary")
-  printf '%s\t%s\t%s\n' "$status" "$artifact_digest" "$content" >"$temporary"
+  printf '%s\t%s\t%s\t%s\n' "$status" "$artifact_digest" "$content" \
+    "$(
+      IFS=,
+      printf '%s' "${SPEC_DESTS[*]}"
+    )" >"$temporary"
   mv -- "$temporary" "$path"
 }
 
@@ -358,7 +347,7 @@ remove_incomplete_payload() {
       command_name=${entry%%:*}
       if [[ -L $BIN_DIR/$command_name ]]; then
         link_target=$(readlink -- "$BIN_DIR/$command_name")
-        if [[ $link_target == "$destination" || $link_target == "$destination/"* ]]; then
+        if [[ $link_target == "../tools/$destination" || $link_target == "../tools/$destination/"* ]]; then
           report_error "pending installation is active: $destination"
           return 1
         fi
@@ -366,47 +355,10 @@ remove_incomplete_payload() {
     done
   done
   for destination in "${SPEC_DESTS[@]}"; do
-    if [[ -e $BIN_DIR/$destination || -L $BIN_DIR/$destination ]]; then
-      find "$BIN_DIR/$destination" -depth -delete
+    if [[ -e $PAYLOAD_DIR/$destination || -L $PAYLOAD_DIR/$destination ]]; then
+      find "$PAYLOAD_DIR/$destination" -depth -delete
     fi
   done
-}
-
-verify_executable() {
-  local name=$1
-  local executable=$2
-  local version=${3#v}
-  local output check
-  local -a arguments=()
-
-  check=${TOOL_CHECKS[$name]:-}
-  check=${check#*|}
-  read -r -a arguments <<<"${check:---version}"
-  output=$("$executable" "${arguments[@]}" 2>&1)
-  [[ $output == *"$version"* ]] ||
-    report_error "$name executable did not report version $version: ${output%%$'\n'*}"
-}
-
-verify_staged() {
-  local name=$1
-  local version=$2
-  local executable
-
-  case $name in
-    nvim | go | htop | tmux)
-      executable="$STAGE_DIR/${SPEC_DESTS[0]}/bin/$name"
-      ;;
-    *)
-      executable="$STAGE_DIR/${SPEC_DESTS[0]}"
-      ;;
-  esac
-  verify_executable "$name" "$executable" "$version"
-  if [[ $name == uv ]]; then
-    verify_executable uvx "$STAGE_DIR/${SPEC_DESTS[1]}" "$version"
-  fi
-  if [[ $name == go ]]; then
-    [[ -x $STAGE_DIR/${SPEC_DESTS[0]}/bin/gofmt ]] || report_error 'Go SDK is missing gofmt'
-  fi
 }
 
 # Install or recover one version, without changing the selected command links.
@@ -415,7 +367,6 @@ install_version() {
   local version=$2
   local input
   local content
-  local destination source_tree built_tree
 
   load_tool_release "$name" "$version"
   classify_installation "$name" "$version" "$RELEASE_SHA256"
@@ -436,25 +387,15 @@ install_version() {
   esac
 
   printf 'setup-tools: installing %s %s\n' "$name" "$version"
-  STAGE_DIR=$(mktemp -d "$BIN_DIR/.setup-tools.XXXXXX")
+  STAGE_DIR=$(mktemp -d "$PAYLOAD_DIR/.setup-tools.XXXXXX")
   TEMP_PATHS+=("$STAGE_DIR")
   input="$STAGE_DIR/$SPEC_ASSET"
   download_file "$RELEASE_URL" "$input"
-  prepare_artifact TOOL_RELEASES "$name" "$version" "$input" "$STAGE_DIR"
-  if [[ $name == htop || $name == tmux ]]; then
-    source_tree=$STAGE_DIR/${SPEC_DESTS[0]}
-    built_tree=$STAGE_DIR/.built-$name-$version
-    compile_tool_source "$name" "$source_tree" "$built_tree"
-    find "$source_tree" -depth -delete
-    mv -- "$built_tree" "$source_tree"
-  fi
-  verify_staged "$name" "$version"
+  prepare_tool_artifact TOOL_RELEASES "$name" "$version" "$input" "$STAGE_DIR"
 
-  content=$(content_digest "$STAGE_DIR" "${SPEC_DESTS[@]}")
+  content=$(tool_content_digest "$STAGE_DIR" "${SPEC_DESTS[@]}")
   write_state "$name" "$version" pending "$content" "$RELEASE_SHA256"
-  for destination in "${SPEC_DESTS[@]}"; do
-    mv -- "$STAGE_DIR/$destination" "$BIN_DIR/$destination"
-  done
+  publish_tool_artifact "$STAGE_DIR" "$PAYLOAD_DIR"
   write_state "$name" "$version" complete "$content" "$RELEASE_SHA256"
   printf 'setup-tools: installed %s %s\n' "$name" "$version"
 }
@@ -473,6 +414,9 @@ activate_links() {
   local -a previous_targets=()
   local -a had_previous=()
 
+  for entry in "$@"; do
+    preflight_link "$name" "$entry" || return
+  done
   for entry in "$@"; do
     command_name=${entry%%:*}
     target=${entry#*:}
@@ -514,6 +458,58 @@ activate_links() {
   printf 'setup-tools: selected %s %s\n' "$name" "$version"
 }
 
+select_runtime_tree() {
+  local name=$1 version=$2 tree=${SPEC_DESTS[0]}
+  local canonical command_name target temporary
+
+  canonical=${tree%-"$version"}
+  command_name=${SPEC_LINKS[0]%%:*}
+  if [[ -e $PAYLOAD_DIR/$canonical || -L $PAYLOAD_DIR/$canonical ]]; then
+    if [[ ! -L $PAYLOAD_DIR/$canonical ]]; then
+      report_error "refusing unmanaged runtime path: $PAYLOAD_DIR/$canonical"
+      return 1
+    fi
+    target=$(readlink -- "$PAYLOAD_DIR/$canonical")
+    if ! state_owns_link_target "$name" "$command_name" "../tools/$target/bin/$command_name"; then
+      report_error "refusing foreign runtime link: $PAYLOAD_DIR/$canonical"
+      return 1
+    fi
+  fi
+  temporary=$PAYLOAD_DIR/.$canonical.link.$$
+  TEMP_PATHS+=("$temporary")
+  ln -s -- "$tree" "$temporary"
+  mv -T -- "$temporary" "$PAYLOAD_DIR/$canonical"
+}
+
+remove_unselected_commands() {
+  local tool commands command_name link target
+
+  while IFS= read -r tool; do
+    if list_has TOOLS "$tool"; then
+      continue
+    fi
+    if [[ $tool == uv ]] && list_has TOOLS python; then
+      continue
+    fi
+    commands=$(tool_commands "$tool") || return
+    if [[ -z $commands ]]; then
+      continue
+    fi
+    while IFS= read -r command_name; do
+      for link in "$BIN_DIR/$command_name" "$BIN_DIR/$command_name-"*; do
+        if [[ ! -L $link ]]; then
+          continue
+        fi
+        target=$(readlink -- "$link") || return
+        if state_owns_link_target "$tool" "$command_name" "$target"; then
+          unlink -- "$link" || return
+          printf 'setup-tools: removed unselected command %s\n' "${link##*/}"
+        fi
+      done
+    done <<<"$commands"
+  done < <(known_tool_names)
+}
+
 # Reconcile every configured version, then select the first only after success.
 install_selected_tools() {
   local name
@@ -538,7 +534,17 @@ install_selected_tools() {
     for version in "${TOOL_VERSIONS[@]}"; do
       install_version "$name" "$version"
     done
+    if [[ $name == kubectl || $name == helm ]]; then
+      for version in "${TOOL_VERSIONS[@]}"; do
+        load_tool_release "$name" "$version"
+        activate_links "$name" "$version" "$name-$version:${SPEC_LINKS[0]#*:}"
+      done
+    fi
     load_tool_release "$name" "$selected"
+    if [[ $SPEC_FORMAT == *-tree ]]; then
+      select_runtime_tree "$name" "$selected"
+      load_tool_release "$name" "$selected"
+    fi
     activate_links "$name" "$selected" "${SPEC_LINKS[@]}"
   done
 }
@@ -546,9 +552,12 @@ install_selected_tools() {
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/setup-lib
 source "$REPO_DIR/scripts/setup-lib"
+source "$REPO_DIR/scripts/setup-catalog-lib"
+source "$REPO_DIR/scripts/setup-recipes-lib"
+source "$REPO_DIR/scripts/setup-tools-lib"
 # shellcheck source=scripts/setup-tmux-lib
 source "$REPO_DIR/scripts/setup-tmux-lib"
-# Profiles are data needed by --help and by the default selection. Sourcing
+# Tool lists are needed by --help and by the default selection. Sourcing
 # this file does not download, install or validate anything.
 # shellcheck source=tools.env
 source "$REPO_DIR/tools.env"

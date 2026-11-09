@@ -26,7 +26,7 @@ unsafe_status=$?
 set -e
 [[ $unsafe_status -ne 0 && $unsafe_output == *'archive link escapes its root'* ]] ||
   fail 'setup-tools accepted an escaping archive symlink'
-[[ ! -e $unsafe_home/bin/nvim && ! -L $unsafe_home/bin/nvim ]] ||
+[[ ! -e $unsafe_home/dotfiles-releases/online/bin/nvim && ! -L $unsafe_home/dotfiles-releases/online/bin/nvim ]] ||
   fail 'unsafe archive changed the selected Neovim'
 
 tmux_work=$test_root/tmux-work
@@ -37,6 +37,9 @@ tar -C "$tmux_work" -czf "$test_root/tmux.tar.gz" "tmux-$TMUX_VERSION"
 TMUX_SHA256=$(sha256sum "$test_root/tmux.tar.gz" | awk '{print $1}')
 # shellcheck source=../../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
+source "$repo_dir/scripts/setup-catalog-lib"
+source "$repo_dir/scripts/setup-recipes-lib"
+source "$repo_dir/scripts/setup-tools-lib"
 # Used through a nameref in prepare_artifact.
 # shellcheck disable=SC2034
 declare -A TEST_RELEASES=([tmux]=$'\n'"$TMUX_VERSION|https://example.invalid/tmux.tar.gz|$TMUX_SHA256"$'\n')
@@ -83,7 +86,7 @@ failure_home="$test_root/failure-home"
 make_test_repo "$failure_repo"
 make_archives "$failure_repo" "$failure_archives"
 run_setup "$failure_home" "$failure_repo" "$failure_archives" k9s
-old_target=$(readlink -- "$failure_home/bin/k9s")
+old_target=$(readlink -- "$failure_home/dotfiles-releases/online/bin/k9s")
 write_fake "$failure_archives/k9s/99.1.0/k9s_Linux_amd64.tar.gz" k9s 99.1.0
 append_release "$failure_repo/tools.env" TOOL_RELEASES k9s 99.1.0 \
   https://example.invalid/k9s/99.1.0/k9s_Linux_amd64.tar.gz \
@@ -93,8 +96,8 @@ run_setup "$failure_home" "$failure_repo" "$failure_archives" k9s >/dev/null 2>&
 checksum_status=$?
 set -e
 [[ $checksum_status -ne 0 ]] || fail 'bad checksum was accepted'
-[[ $(readlink -- "$failure_home/bin/k9s") == "$old_target" ]] ||
+[[ $(readlink -- "$failure_home/dotfiles-releases/online/bin/k9s") == "$old_target" ]] ||
   fail 'checksum failure changed the selected version'
-[[ ! -e $failure_home/bin/k9s-99.1.0 ]] || fail 'checksum failure installed a candidate'
+[[ ! -e $failure_home/dotfiles-releases/online/tools/bin/k9s-99.1.0 ]] || fail 'checksum failure installed a candidate'
 
 printf 'setup_tools: archives passed\n'

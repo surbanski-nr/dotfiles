@@ -11,22 +11,6 @@ vars:
   DEV_PROJECT: default
   DEV_NETWORK: lxdbr0
   DEV_STORAGE: default
-  PLATFORMS:
-    map:
-      debian13:
-        platform: debian-13-x86_64
-        image: images:debian/13/cloud
-      ubuntu2404:
-        platform: ubuntu-24.04-x86_64
-        image: ubuntu:24.04
-      ubuntu2604:
-        platform: ubuntu-26.04-x86_64
-        image: ubuntu:26.04
-      amazonlinux2023:
-        platform: amzn-2023-x86_64
-        image: "https://cdn.amazonlinux.com/al2023/os-images/2023.12.20261026.1/kvm/\
-          al2023-kvm-2023.12.20261026.1-kernel-6.1-x86_64.xfs.gpt.qcow2"
-        sha256: 547b7e403b5b78aad57cdaf4c4adcb6815534fa50ce7ae43e2c14dc36d8b759f
 
 tasks:
   default:
@@ -36,19 +20,18 @@ tasks:
       - '"{{.TASK_EXE}}" --list'
 
   dev:
-    desc: Open a persistent development VM (default debian13)
+    desc: Open a persistent development VM
     summary: |
       Create or reuse one LXD VM per checkout and platform, then open a shell.
       Mount this development checkout writable, with private guest bin/HOME.
       No host SSH keys, HOME or Docker socket are shared. Run setup-* in the VM.
       Exiting a shell leaves the VM running; another invocation opens a new shell.
 
-      Platforms: debian13, ubuntu2404, ubuntu2604, amazonlinux2023.
+      Platform aliases and the default VM are configured in release.env.
       Example: task dev DEV_MEMORY=8GiB -- ubuntu2404
     dir: '{{.ROOT_DIR}}'
     env:
-      PLATFORM_ALIAS: '{{.CLI_ARGS | default "debian13"}}'
-      PLATFORMS_JSON: '{{.PLATFORMS | toJson}}'
+      PLATFORM_ALIAS: '{{.CLI_ARGS}}'
       DEV_CPUS: '{{.DEV_CPUS}}'
       DEV_MEMORY: '{{.DEV_MEMORY}}'
       DEV_DISK: '{{.DEV_DISK}}'
@@ -133,7 +116,7 @@ tasks:
       - bash scripts/validate workflows
 
   update:python-locks:
-    desc: Regenerate Python-backed Mason locks in the Nvim2 profile
+    desc: Regenerate Python-backed Mason locks for Nvim2
     cmds:
       - bash scripts/update-offline-python-locks
 
@@ -148,24 +131,13 @@ tasks:
       Run in a development VM to use its Docker instead of the host daemon.
       The checkout must be clean and committed; Git operations stay on the host.
 
-      Platforms: debian13, ubuntu2404, ubuntu2604, amazonlinux2023.
+      Platform aliases and the default test list are configured in release.env.
       Example: task test -- ubuntu2404
     dir: '{{.ROOT_DIR}}'
     env:
       PLATFORM_ALIAS: '{{.CLI_ARGS}}'
-      PLATFORMS_JSON: '{{.PLATFORMS | toJson}}'
     cmds:
-      - |
-        set -eu
-        platform=
-        if [ -n "$PLATFORM_ALIAS" ]; then
-          platform=$(printf '%s\n' "$PLATFORMS_JSON" |
-            jq -er --arg alias "$PLATFORM_ALIAS" '.[$alias].platform') || {
-            printf 'Unknown platform: %s\n' "$PLATFORM_ALIAS" >&2
-            exit 1
-          }
-        fi
-        bash scripts/dotfiles-release-ci test "$PWD" "$platform"
+      - bash scripts/dotfiles-release-ci test "$PWD" "$PLATFORM_ALIAS"
 
   tools:actionlint:
     internal: true

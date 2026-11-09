@@ -19,6 +19,9 @@ fail() {
 source "$repo_dir/tools.env"
 # shellcheck source=../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
+source "$repo_dir/scripts/setup-catalog-lib"
+source "$repo_dir/scripts/setup-recipes-lib"
+source "$repo_dir/scripts/setup-tools-lib"
 ASDF_VERSION=9.9.0
 
 append_release() {
@@ -52,11 +55,16 @@ source "$test_catalog"
 write_asdf_fixture() {
   local path=$1 version=$2
   mkdir -p "$(dirname -- "$path")"
+  if [[ $path == */online/tools/bin/asdf-* ]]; then
+    mkdir -p "${path%/tools/bin/*}/bin"
+  fi
   cat >"$path" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 case \${1:-} in
-  version) printf 'asdf version $version\n' ;;
+  version)
+    printf 'asdf version $version\n'
+    ;;
   list)
     [[ -d \$ASDF_DATA_DIR/installs/\$2/\$3 ]] && printf '  %s\n' "\$3"
     ;;
@@ -65,11 +73,18 @@ case \${1:-} in
     [[ \${TEST_ASDF_FAIL_VERSION:-} != "\$3" ]] || exit 65
     mkdir -p "\$ASDF_DATA_DIR/installs/\$2/\$3"
     ;;
-  reshim) printf 'reshim\t%s\t%s\n' "\$2" "\$3" >>"\$TEST_ASDF_LOG" ;;
+  reshim)
+    printf 'reshim\t%s\t%s\n' "\$2" "\$3" >>"\$TEST_ASDF_LOG"
+    mkdir -p "\$ASDF_DATA_DIR/shims"
+    printf '#!/usr/bin/env bash\nprintf "%s shim\\\\n"\n' "\$2" >"\$ASDF_DATA_DIR/shims/\$2"
+    chmod 0755 "\$ASDF_DATA_DIR/shims/\$2"
+    ;;
   set)
     printf 'set\t%s\t%s\n' "\$3" "\$4" >>"\$TEST_ASDF_LOG"
     ;;
-  *) exit 66 ;;
+  *)
+    exit 66
+    ;;
 esac
 EOF
   chmod 0755 "$path"
@@ -77,9 +92,9 @@ EOF
 
 record_asdf_fixture() {
   local home=$1 target=$2 installs
-  installs=$home/.local/state/dotfiles/setup-asdf/installations
+  installs=$home/dotfiles-releases/online/state/setup-asdf/installations
   mkdir -p "$installs"
-  sha256sum "$home/bin/$target" | awk '{print $1}' >"$installs/$target.sha256"
+  sha256sum "$home/dotfiles-releases/online/tools/bin/$target" | awk '{print $1}' >"$installs/$target.sha256"
   chmod 0600 "$installs/$target.sha256"
 }
 
@@ -102,33 +117,34 @@ prepare_plugin() {
 
 test_repo="$test_root/repository"
 test_home="$test_root/home"
-mkdir -p "$test_repo/scripts" "$test_home/bin"
+mkdir -p "$test_repo/scripts" "$test_home/dotfiles-releases/online/bin"
 cp "$repo_dir/setup-asdf" "$test_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$test_repo/scripts/setup-lib"
 cp "$repo_dir/scripts/setup-catalog-lib" "$test_repo/scripts/setup-catalog-lib"
-cp "$repo_dir/scripts/setup-profile-lib" "$test_repo/scripts/setup-profile-lib"
+cp "$repo_dir/scripts/setup-recipes-lib" "$test_repo/scripts/setup-recipes-lib"
+cp "$repo_dir/scripts/setup-tools-lib" "$test_repo/scripts/setup-tools-lib"
 cp "$test_catalog" "$test_repo/tools.env"
 cp "$repo_dir/system.env" "$test_repo/system.env"
 
 for tool in kubectl helm python; do
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$test_home/bin/$tool"
-  chmod 0755 "$test_home/bin/$tool"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$test_home/dotfiles-releases/online/bin/$tool"
+  chmod 0755 "$test_home/dotfiles-releases/online/bin/$tool"
   set +e
   unsupported_output=$(HOME="$test_home" "$test_repo/setup-asdf" "$tool" 2>&1)
   unsupported_status=$?
   set -e
   [[ $unsupported_status -ne 0 && $unsupported_output == *"unknown project tool: $tool"* ]] ||
     fail "setup-asdf still accepts $tool"
-  [[ ! -e $test_home/bin/asdf && ! -e $test_home/.asdf &&
-    ! -e $test_home/.local/state/dotfiles/setup-asdf ]] ||
+  [[ ! -e $test_home/dotfiles-releases/online/bin/asdf && ! -e $test_home/.asdf &&
+    ! -e $test_home/dotfiles-releases/online/state/setup-asdf ]] ||
     fail 'unsupported tool request changed the asdf installation'
 done
 
-cat >"$test_home/bin/terraform" <<'EOF'
+cat >"$test_home/dotfiles-releases/online/bin/terraform" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod 0755 "$test_home/bin/terraform"
+chmod 0755 "$test_home/dotfiles-releases/online/bin/terraform"
 set +e
 conflict_output=$(HOME="$test_home" "$test_repo/setup-asdf" terraform 2>&1)
 conflict_status=$?
@@ -136,44 +152,46 @@ set -e
 [[ $conflict_status -ne 0 ]] || fail 'direct terraform launcher conflict was accepted'
 [[ $conflict_output == *'conflicts with the direct launcher'* ]] ||
   fail 'direct launcher conflict was not reported'
-[[ ! -e $test_home/bin/asdf && ! -e $test_home/.asdf ]] ||
+[[ ! -e $test_home/dotfiles-releases/online/bin/asdf && ! -e $test_home/.asdf ]] ||
   fail 'provider conflict changed the asdf installation'
 
-rm "$test_home/bin/terraform"
+rm "$test_home/dotfiles-releases/online/bin/terraform"
 mkdir -p "$test_home/.local/state/dotfiles"
-exec {test_lock_fd}>"$test_home/.local/state/dotfiles/setup.lock"
+exec {test_lock_fd}<"$test_home/dotfiles-releases"
 flock -n "$test_lock_fd"
 set +e
 lock_output=$(HOME="$test_home" "$test_repo/setup-asdf" terraform 2>&1)
 lock_status=$?
 set -e
 [[ $lock_status -ne 0 ]] || fail 'concurrent setup-asdf lock was ignored'
-[[ $lock_output == *'another online installer is running'* ]] ||
+[[ $lock_output == *'another installation or release operation is running'* ]] ||
   fail 'concurrent setup-asdf did not report the lock'
-[[ ! -e $test_home/bin/asdf ]] || fail 'lock conflict installed asdf'
+[[ ! -e $test_home/dotfiles-releases/online/bin/asdf ]] || fail 'lock conflict installed asdf'
 
 exec {test_lock_fd}>&-
-write_asdf_fixture "$test_home/bin/asdf-manual" manual
-ln -s asdf-manual "$test_home/bin/asdf"
+write_asdf_fixture "$test_home/dotfiles-releases/online/bin/asdf-manual" manual
+ln -s "../tools/bin/asdf-manual" "$test_home/dotfiles-releases/online/bin/asdf"
 set +e
 foreign_output=$(HOME="$test_home" "$test_repo/setup-asdf" terraform 2>&1)
 foreign_status=$?
 set -e
 [[ $foreign_status -ne 0 && $foreign_output == *'refusing foreign asdf link'* ]] ||
   fail 'foreign asdf-manual link was accepted'
-[[ $(readlink -- "$test_home/bin/asdf") == asdf-manual ]] ||
+[[ $(readlink -- "$test_home/dotfiles-releases/online/bin/asdf") == ../tools/bin/asdf-manual ]] ||
   fail 'foreign asdf link was changed'
 
 install_repo=$test_root/install-repository
 install_home=$test_root/install-home
+install_prefix=$install_home/dotfiles-releases/online
 install_log=$test_root/install.log
 archive_root=$test_root/archive
 asdf_archive=$test_root/asdf.tar.gz
-mkdir -p "$install_repo/scripts" "$install_home/bin" "$archive_root"
+mkdir -p "$install_repo/scripts" "$install_prefix/bin" "$archive_root"
 cp "$repo_dir/setup-asdf" "$install_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$install_repo/scripts/setup-lib"
 cp "$repo_dir/scripts/setup-catalog-lib" "$install_repo/scripts/setup-catalog-lib"
-cp "$repo_dir/scripts/setup-profile-lib" "$install_repo/scripts/setup-profile-lib"
+cp "$repo_dir/scripts/setup-recipes-lib" "$install_repo/scripts/setup-recipes-lib"
+cp "$repo_dir/scripts/setup-tools-lib" "$install_repo/scripts/setup-tools-lib"
 cp "$test_catalog" "$install_repo/tools.env"
 cp "$repo_dir/system.env" "$install_repo/system.env"
 prepare_plugin "$install_home" "$install_repo"
@@ -182,94 +200,112 @@ tar -C "$archive_root" -czf "$asdf_archive" asdf
 archive_digest=$(sha256sum "$asdf_archive" | awk '{print $1}')
 append_release "$install_repo/tools.env" asdf "$ASDF_VERSION" \
   https://example.invalid/asdf.tar.gz "$archive_digest"
-cat >"$install_home/bin/curl" <<'EOF'
+cat >"$install_prefix/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 destination=
 while (($#)); do
   case $1 in
-    --output) destination=$2; shift 2 ;;
-    *) shift ;;
+    --output)
+      destination=$2
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
   esac
 done
 [[ -n $destination ]]
 cp "$TEST_ASDF_ARCHIVE" "$destination"
 EOF
-chmod 0755 "$install_home/bin/curl"
+chmod 0755 "$install_prefix/bin/curl"
 
 # Even an exact pinned binary is foreign without its installation record.
 unmanaged_home=$test_root/unmanaged-home
-mkdir -p "$unmanaged_home/bin"
+unmanaged_prefix=$unmanaged_home/dotfiles-releases/online
+mkdir -p "$unmanaged_prefix/bin" \
+  "$unmanaged_prefix/tools/bin"
 cp -a "$install_home/.asdf" "$unmanaged_home/.asdf"
-cp "$archive_root/asdf" "$unmanaged_home/bin/asdf-$ASDF_VERSION"
-ln -s "asdf-$ASDF_VERSION" "$unmanaged_home/bin/asdf"
-cp "$install_home/bin/curl" "$unmanaged_home/bin/curl"
-unmanaged_digest=$(sha256sum "$unmanaged_home/bin/asdf-$ASDF_VERSION")
+cp "$archive_root/asdf" "$unmanaged_prefix/tools/bin/asdf-$ASDF_VERSION"
+ln -s "../tools/bin/asdf-$ASDF_VERSION" "$unmanaged_prefix/bin/asdf"
+cp "$install_prefix/bin/curl" "$unmanaged_prefix/bin/curl"
+unmanaged_digest=$(sha256sum "$unmanaged_prefix/tools/bin/asdf-$ASDF_VERSION")
 for selection in linked unlinked; do
   if [[ $selection == unlinked ]]; then
-    unlink "$unmanaged_home/bin/asdf"
+    unlink "$unmanaged_prefix/bin/asdf"
   fi
   set +e
-  unmanaged_output=$(HOME="$unmanaged_home" PATH="$unmanaged_home/bin:/usr/bin:/bin" \
+  unmanaged_output=$(HOME="$unmanaged_home" PATH="$unmanaged_prefix/bin:/usr/bin:/bin" \
     TEST_ASDF_ARCHIVE="$asdf_archive" TEST_ASDF_LOG="$test_root/unmanaged.log" \
     "$install_repo/setup-asdf" terraform 2>&1)
   unmanaged_status=$?
   set -e
   [[ $unmanaged_status -ne 0 && $unmanaged_output == *'refusing unmanaged asdf installation'* ]] ||
     fail "$selection unrecorded asdf installation was accepted"
-  [[ $(sha256sum "$unmanaged_home/bin/asdf-$ASDF_VERSION") == "$unmanaged_digest" ]] ||
+  [[ $(sha256sum "$unmanaged_prefix/tools/bin/asdf-$ASDF_VERSION") == "$unmanaged_digest" ]] ||
     fail 'unrecorded asdf binary was changed'
   if [[ $selection == linked ]]; then
-    [[ $(readlink -- "$unmanaged_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+    [[ $(readlink -- "$unmanaged_prefix/bin/asdf") == "../tools/bin/asdf-$ASDF_VERSION" ]] ||
       fail 'unrecorded asdf command link was changed'
   else
-    [[ ! -e $unmanaged_home/bin/asdf && ! -L $unmanaged_home/bin/asdf ]] ||
+    [[ ! -e $unmanaged_prefix/bin/asdf && ! -L $unmanaged_prefix/bin/asdf ]] ||
       fail 'unrecorded asdf binary was selected'
   fi
-  [[ ! -e $unmanaged_home/.local/state/dotfiles/setup-asdf/installations &&
+  [[ ! -e $unmanaged_prefix/state/setup-asdf/installations &&
     ! -e $test_root/unmanaged.log ]] || fail 'unrecorded asdf rejection changed installation state'
 done
 
-HOME="$install_home" PATH="$install_home/bin:/usr/bin:/bin" \
+mkdir -p "$install_home/bin"
+printf '#!/usr/bin/env bash\nprintf "user terraform override\\n"\n' >"$install_home/bin/terraform"
+chmod 0755 "$install_home/bin/terraform"
+override_digest=$(sha256sum "$install_home/bin/terraform")
+HOME="$install_home" PATH="$install_prefix/bin:/usr/bin:/bin" \
   TEST_ASDF_ARCHIVE="$asdf_archive" TEST_ASDF_LOG="$install_log" \
   "$install_repo/setup-asdf" terraform
-[[ $(readlink -- "$install_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+[[ $(readlink -- "$install_prefix/bin/asdf") == "../tools/bin/asdf-$ASDF_VERSION" ]] ||
   fail 'fresh asdf installation was not selected'
-[[ $(sha256sum "$install_home/bin/asdf-$ASDF_VERSION" | awk '{print $1}') == $(<"$install_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") ]] ||
+install_binary=$install_prefix/tools/bin/asdf-$ASDF_VERSION
+install_record=$install_prefix/state/setup-asdf/installations/asdf-$ASDF_VERSION.sha256
+install_digest=$(sha256sum "$install_binary" | awk '{print $1}')
+recorded_digest=$(<"$install_record")
+[[ $install_digest == "$recorded_digest" ]] ||
   fail 'fresh asdf installation digest was not recorded'
-install_state_digest=$(sha256sum \
-  "$install_home/bin/asdf-$ASDF_VERSION" \
-  "$install_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256")
-HOME="$install_home" PATH="$install_home/bin:/usr/bin:/bin" \
+[[ $(readlink -- "$install_prefix/bin/terraform") == "$install_home/.asdf/shims/terraform" &&
+  $("$install_prefix/bin/terraform") == 'terraform shim' &&
+  $(sha256sum "$install_home/bin/terraform") == "$override_digest" ]] ||
+  fail 'asdf did not publish a working provider command or changed a user override'
+install_state_digest=$(sha256sum "$install_binary" "$install_record")
+HOME="$install_home" PATH="$install_prefix/bin:/usr/bin:/bin" \
   TEST_ASDF_ARCHIVE="$test_root/absent-archive" TEST_ASDF_LOG="$install_log" \
   "$install_repo/setup-asdf" terraform
-[[ $(sha256sum \
-  "$install_home/bin/asdf-$ASDF_VERSION" \
-  "$install_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") == "$install_state_digest" ]] || fail 'fresh asdf installation retry changed ownership state'
+retried_state_digest=$(sha256sum "$install_binary" "$install_record")
+[[ $retried_state_digest == "$install_state_digest" ]] ||
+  fail 'fresh asdf installation retry changed ownership state'
 
 reconcile_repo=$test_root/reconcile-repository
 reconcile_home=$test_root/reconcile-home
 reconcile_log=$test_root/reconcile.log
-mkdir -p "$reconcile_repo/scripts" "$reconcile_home/bin"
+mkdir -p "$reconcile_repo/scripts" "$reconcile_home/dotfiles-releases/online/bin"
 cp "$repo_dir/setup-asdf" "$reconcile_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$reconcile_repo/scripts/setup-lib"
 cp "$repo_dir/scripts/setup-catalog-lib" "$reconcile_repo/scripts/setup-catalog-lib"
-cp "$repo_dir/scripts/setup-profile-lib" "$reconcile_repo/scripts/setup-profile-lib"
+cp "$repo_dir/scripts/setup-recipes-lib" "$reconcile_repo/scripts/setup-recipes-lib"
+cp "$repo_dir/scripts/setup-tools-lib" "$reconcile_repo/scripts/setup-tools-lib"
 cp "$test_catalog" "$reconcile_repo/tools.env"
 cp "$repo_dir/system.env" "$reconcile_repo/system.env"
 prepare_plugin "$reconcile_home" "$reconcile_repo"
-write_asdf_fixture "$reconcile_home/bin/asdf-0.0.1" 0.0.1
-write_asdf_fixture "$reconcile_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
-ln -s asdf-0.0.1 "$reconcile_home/bin/asdf"
+write_asdf_fixture "$reconcile_home/dotfiles-releases/online/tools/bin/asdf-0.0.1" 0.0.1
+write_asdf_fixture "$reconcile_home/dotfiles-releases/online/tools/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
+ln -s "../tools/bin/asdf-0.0.1" "$reconcile_home/dotfiles-releases/online/bin/asdf"
 record_asdf_fixture "$reconcile_home" asdf-0.0.1
-sha256sum "$reconcile_home/bin/asdf-$ASDF_VERSION" | awk '{print $1}' \
-  >"$reconcile_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256"
+sha256sum "$reconcile_home/dotfiles-releases/online/tools/bin/asdf-$ASDF_VERSION" | awk '{print $1}' \
+  >"$reconcile_home/dotfiles-releases/online/state/setup-asdf/installations/asdf-$ASDF_VERSION.sha256"
 
 HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
   "$reconcile_repo/setup-asdf" terraform
-[[ $(readlink -- "$reconcile_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+[[ $(readlink -- "$reconcile_home/dotfiles-releases/online/bin/asdf") == "../tools/bin/asdf-$ASDF_VERSION" ]] ||
   fail 'managed asdf was not upgraded to the selected version'
-[[ -x $reconcile_home/bin/asdf-0.0.1 ]] || fail 'previous asdf binary was removed'
+[[ -x $reconcile_home/dotfiles-releases/online/tools/bin/asdf-0.0.1 ]] || fail 'previous asdf binary was removed'
 HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
   "$reconcile_repo/setup-asdf" terraform
 [[ $(grep -c '^install' "$reconcile_log") -eq 2 ]] ||
@@ -279,50 +315,51 @@ HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
 
 # A verified retained binary may be selected manually. Obsolete selection
 # records are ignored and neither override the link nor get rewritten.
-unlink "$reconcile_home/bin/asdf"
-ln -s asdf-0.0.1 "$reconcile_home/bin/asdf"
-obsolete_state=$reconcile_home/.local/state/dotfiles/setup-asdf
+unlink "$reconcile_home/dotfiles-releases/online/bin/asdf"
+ln -s "../tools/bin/asdf-0.0.1" "$reconcile_home/dotfiles-releases/online/bin/asdf"
+obsolete_state=$reconcile_home/dotfiles-releases/online/state/setup-asdf
 printf 'obsolete selection\n' >"$obsolete_state/asdf-target"
 printf 'obsolete journal\n' >"$obsolete_state/pending-selection"
 obsolete_digest=$(sha256sum "$obsolete_state/asdf-target" "$obsolete_state/pending-selection")
 HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
   "$reconcile_repo/setup-asdf" terraform >/dev/null
-[[ $(readlink -- "$reconcile_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+[[ $(readlink -- "$reconcile_home/dotfiles-releases/online/bin/asdf") == "../tools/bin/asdf-$ASDF_VERSION" ]] ||
   fail 'a manual managed selection did not reconcile to the catalog pin'
 [[ $(sha256sum "$obsolete_state/asdf-target" "$obsolete_state/pending-selection") == "$obsolete_digest" ]] ||
   fail 'obsolete selection records were rewritten'
 
 # A missing command link can be recreated from a verified retained binary.
-unlink "$reconcile_home/bin/asdf"
+unlink "$reconcile_home/dotfiles-releases/online/bin/asdf"
 HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
   "$reconcile_repo/setup-asdf" terraform >/dev/null
-[[ $(readlink -- "$reconcile_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+[[ $(readlink -- "$reconcile_home/dotfiles-releases/online/bin/asdf") == "../tools/bin/asdf-$ASDF_VERSION" ]] ||
   fail 'missing managed asdf command link was not restored'
 
-printf '# local edit\n' >>"$reconcile_home/bin/asdf-$ASDF_VERSION"
-modified_digest=$(sha256sum "$reconcile_home/bin/asdf-$ASDF_VERSION")
+printf '# local edit\n' >>"$reconcile_home/dotfiles-releases/online/tools/bin/asdf-$ASDF_VERSION"
+modified_digest=$(sha256sum "$reconcile_home/dotfiles-releases/online/tools/bin/asdf-$ASDF_VERSION")
 if HOME="$reconcile_home" TEST_ASDF_LOG="$reconcile_log" \
   "$reconcile_repo/setup-asdf" terraform >"$test_root/modified-asdf.log" 2>&1; then
   fail 'a modified managed asdf binary was accepted'
 fi
 grep -F 'managed asdf installation was modified' "$test_root/modified-asdf.log" >/dev/null ||
   fail 'modified managed asdf binary was not diagnosed'
-[[ $(sha256sum "$reconcile_home/bin/asdf-$ASDF_VERSION") == "$modified_digest" ]] ||
+[[ $(sha256sum "$reconcile_home/dotfiles-releases/online/tools/bin/asdf-$ASDF_VERSION") == "$modified_digest" ]] ||
   fail 'modified managed asdf binary was overwritten'
 
 order_repo=$test_root/order-repository
 order_home=$test_root/order-home
 order_log=$test_root/order.log
-mkdir -p "$order_repo/scripts" "$order_home/bin"
+mkdir -p "$order_repo/scripts" "$order_home/dotfiles-releases/online/bin"
 cp "$repo_dir/setup-asdf" "$order_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$order_repo/scripts/setup-lib"
 cp "$repo_dir/scripts/setup-catalog-lib" "$order_repo/scripts/setup-catalog-lib"
-cp "$repo_dir/scripts/setup-profile-lib" "$order_repo/scripts/setup-profile-lib"
+cp "$repo_dir/scripts/setup-recipes-lib" "$order_repo/scripts/setup-recipes-lib"
+cp "$repo_dir/scripts/setup-tools-lib" "$order_repo/scripts/setup-tools-lib"
 cp "$test_catalog" "$order_repo/tools.env"
 cp "$repo_dir/system.env" "$order_repo/system.env"
 prepare_plugin "$order_home" "$order_repo"
-write_asdf_fixture "$order_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
-ln -s "asdf-$ASDF_VERSION" "$order_home/bin/asdf"
+write_asdf_fixture "$order_home/dotfiles-releases/online/tools/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
+ln -s "../tools/bin/asdf-$ASDF_VERSION" "$order_home/dotfiles-releases/online/bin/asdf"
 record_asdf_fixture "$order_home" "asdf-$ASDF_VERSION"
 printf 'TOOL_RELEASES[terraform]=%q\n' \
   $'\n9.1.0|https://example.invalid/terraform-9.1.0.zip|0000000000000000000000000000000000000000000000000000000000000000\n9.2.0|https://example.invalid/terraform-9.2.0.zip|1111111111111111111111111111111111111111111111111111111111111111\n' \
@@ -335,22 +372,23 @@ $(tail -n 1 "$order_log") == $'set\tterraform\t9.1.0' ]] ||
 default_repo=$test_root/default-repository
 default_home=$test_root/default-home
 default_log=$test_root/default.log
-mkdir -p "$default_repo/scripts" "$default_home/bin"
+mkdir -p "$default_repo/scripts" "$default_home/dotfiles-releases/online/bin"
 cp "$repo_dir/setup-asdf" "$default_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$default_repo/scripts/setup-lib"
 cp "$repo_dir/scripts/setup-catalog-lib" "$default_repo/scripts/setup-catalog-lib"
-cp "$repo_dir/scripts/setup-profile-lib" "$default_repo/scripts/setup-profile-lib"
+cp "$repo_dir/scripts/setup-recipes-lib" "$default_repo/scripts/setup-recipes-lib"
+cp "$repo_dir/scripts/setup-tools-lib" "$default_repo/scripts/setup-tools-lib"
 cp "$test_catalog" "$default_repo/tools.env"
 cp "$repo_dir/system.env" "$default_repo/system.env"
 for tool in "${!ASDF_PLUGINS[@]}"; do
   prepare_plugin "$default_home" "$default_repo" "$tool"
 done
-write_asdf_fixture "$default_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
-ln -s "asdf-$ASDF_VERSION" "$default_home/bin/asdf"
+write_asdf_fixture "$default_home/dotfiles-releases/online/tools/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
+ln -s "../tools/bin/asdf-$ASDF_VERSION" "$default_home/dotfiles-releases/online/bin/asdf"
 record_asdf_fixture "$default_home" "asdf-$ASDF_VERSION"
 for tool in kubectl helm; do
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$default_home/bin/$tool"
-  chmod 0755 "$default_home/bin/$tool"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$default_home/dotfiles-releases/online/bin/$tool"
+  chmod 0755 "$default_home/dotfiles-releases/online/bin/$tool"
 done
 HOME="$default_home" TEST_ASDF_LOG="$default_log" "$default_repo/setup-asdf"
 for installation in terraform/9.2.0 terraform/9.1.0 nodejs/89.1.0 terragrunt/9.3.0; do
@@ -385,16 +423,17 @@ fi
 failure_repo=$test_root/failure-repository
 failure_home=$test_root/failure-home
 failure_log=$test_root/failure.log
-mkdir -p "$failure_repo/scripts" "$failure_home/bin"
+mkdir -p "$failure_repo/scripts" "$failure_home/dotfiles-releases/online/bin"
 cp "$repo_dir/setup-asdf" "$failure_repo/setup-asdf"
 cp "$repo_dir/scripts/setup-lib" "$failure_repo/scripts/setup-lib"
 cp "$repo_dir/scripts/setup-catalog-lib" "$failure_repo/scripts/setup-catalog-lib"
-cp "$repo_dir/scripts/setup-profile-lib" "$failure_repo/scripts/setup-profile-lib"
+cp "$repo_dir/scripts/setup-recipes-lib" "$failure_repo/scripts/setup-recipes-lib"
+cp "$repo_dir/scripts/setup-tools-lib" "$failure_repo/scripts/setup-tools-lib"
 cp "$test_catalog" "$failure_repo/tools.env"
 cp "$repo_dir/system.env" "$failure_repo/system.env"
 prepare_plugin "$failure_home" "$failure_repo"
-write_asdf_fixture "$failure_home/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
-ln -s "asdf-$ASDF_VERSION" "$failure_home/bin/asdf"
+write_asdf_fixture "$failure_home/dotfiles-releases/online/tools/bin/asdf-$ASDF_VERSION" "$ASDF_VERSION"
+ln -s "../tools/bin/asdf-$ASDF_VERSION" "$failure_home/dotfiles-releases/online/bin/asdf"
 record_asdf_fixture "$failure_home" "asdf-$ASDF_VERSION"
 set +e
 HOME="$failure_home" TEST_ASDF_LOG="$failure_log" \
@@ -438,22 +477,24 @@ EOF
 chmod 0755 "$recovery_bin/mv"
 for point in digest binary after-binary selection after-selection; do
   recovery_home=$test_root/recovery-$point
+  recovery_prefix=$recovery_home/dotfiles-releases/online
   recovery_repo=$test_root/recovery-repository-$point
   recovery_log=$test_root/recovery-$point.log
-  mkdir -p "$recovery_home/bin" "$recovery_repo/scripts"
+  mkdir -p "$recovery_prefix/bin" "$recovery_repo/scripts"
   cp "$repo_dir/setup-asdf" "$recovery_repo/setup-asdf"
   cp "$repo_dir/scripts/setup-lib" "$recovery_repo/scripts/setup-lib"
   cp "$repo_dir/scripts/setup-catalog-lib" "$recovery_repo/scripts/setup-catalog-lib"
-  cp "$repo_dir/scripts/setup-profile-lib" "$recovery_repo/scripts/setup-profile-lib"
+  cp "$repo_dir/scripts/setup-recipes-lib" "$recovery_repo/scripts/setup-recipes-lib"
+  cp "$repo_dir/scripts/setup-tools-lib" "$recovery_repo/scripts/setup-tools-lib"
   cp "$install_repo/tools.env" "$recovery_repo/tools.env"
   cp "$repo_dir/system.env" "$recovery_repo/system.env"
   prepare_plugin "$recovery_home" "$recovery_repo"
-  cp "$install_home/bin/curl" "$recovery_home/bin/curl"
-  write_asdf_fixture "$recovery_home/bin/asdf-0.0.1" 0.0.1
+  cp "$install_prefix/bin/curl" "$recovery_prefix/bin/curl"
+  write_asdf_fixture "$recovery_prefix/tools/bin/asdf-0.0.1" 0.0.1
   record_asdf_fixture "$recovery_home" asdf-0.0.1
-  ln -s asdf-0.0.1 "$recovery_home/bin/asdf"
+  ln -s "../tools/bin/asdf-0.0.1" "$recovery_prefix/bin/asdf"
   set +e
-  HOME="$recovery_home" PATH="$recovery_bin:$recovery_home/bin:/usr/bin:/bin" \
+  HOME="$recovery_home" PATH="$recovery_bin:$recovery_prefix/bin:/usr/bin:/bin" \
     TEST_ASDF_ARCHIVE="$asdf_archive" TEST_ASDF_LOG="$recovery_log" \
     TEST_ASDF_FAIL_POINT="$point" TEST_ASDF_FAIL_MARKER="$test_root/failed-$point" \
     "$recovery_repo/setup-asdf" terraform >"$test_root/failure-$point.log" 2>&1
@@ -466,38 +507,42 @@ for point in digest binary after-binary selection after-selection; do
   fi
   [[ $publication_status -eq $expected_status ]] || fail "$point publication failure was hidden"
   if [[ $point == after-selection ]]; then
-    expected_target=asdf-$ASDF_VERSION
+    expected_target=../tools/bin/asdf-$ASDF_VERSION
   else
-    expected_target=asdf-0.0.1
+    expected_target=../tools/bin/asdf-0.0.1
   fi
-  [[ $(readlink -- "$recovery_home/bin/asdf") == "$expected_target" ]] ||
+  [[ $(readlink -- "$recovery_prefix/bin/asdf") == "$expected_target" ]] ||
     fail "$point interruption changed selection unexpectedly"
   if [[ $point == after-binary || $point == selection || $point == after-selection ]]; then
     recovery_archive=$test_root/absent-archive
   else
     recovery_archive=$asdf_archive
   fi
-  HOME="$recovery_home" PATH="$recovery_home/bin:/usr/bin:/bin" \
+  HOME="$recovery_home" PATH="$recovery_prefix/bin:/usr/bin:/bin" \
     TEST_ASDF_ARCHIVE="$recovery_archive" TEST_ASDF_LOG="$recovery_log" \
     "$recovery_repo/setup-asdf" terraform >/dev/null
-  [[ $(readlink -- "$recovery_home/bin/asdf") == "asdf-$ASDF_VERSION" ]] ||
+  [[ $(readlink -- "$recovery_prefix/bin/asdf") == "../tools/bin/asdf-$ASDF_VERSION" ]] ||
     fail "$point retry did not select the verified binary"
-  [[ $(sha256sum "$recovery_home/bin/asdf-$ASDF_VERSION" | awk '{print $1}') == $(<"$recovery_home/.local/state/dotfiles/setup-asdf/installations/asdf-$ASDF_VERSION.sha256") ]] ||
+  recovery_binary=$recovery_prefix/tools/bin/asdf-$ASDF_VERSION
+  recovery_record=$recovery_prefix/state/setup-asdf/installations/asdf-$ASDF_VERSION.sha256
+  recovery_digest=$(sha256sum "$recovery_binary" | awk '{print $1}')
+  recorded_digest=$(<"$recovery_record")
+  [[ $recovery_digest == "$recorded_digest" ]] ||
     fail "$point retry lost verified binary ownership"
-  [[ -x $recovery_home/bin/asdf-0.0.1 ]] || fail "$point retry removed the old binary"
-  [[ ! -e $recovery_home/.local/state/dotfiles/setup-asdf/asdf-target &&
-    ! -e $recovery_home/.local/state/dotfiles/setup-asdf/pending-selection ]] ||
+  [[ -x $recovery_prefix/tools/bin/asdf-0.0.1 ]] || fail "$point retry removed the old binary"
+  [[ ! -e $recovery_prefix/state/setup-asdf/asdf-target &&
+    ! -e $recovery_prefix/state/setup-asdf/pending-selection ]] ||
     fail "$point retry recreated redundant selection records"
 done
 
 # Retry must not interpret a foreign command link as interrupted publication.
-unlink "$recovery_home/bin/asdf"
-ln -s asdf-manual "$recovery_home/bin/asdf"
+unlink "$recovery_prefix/bin/asdf"
+ln -s "../tools/bin/asdf-manual" "$recovery_prefix/bin/asdf"
 if HOME="$recovery_home" TEST_ASDF_LOG="$recovery_log" \
   "$recovery_repo/setup-asdf" terraform >"$test_root/foreign-retry.log" 2>&1; then
   fail 'retry replaced an unrelated asdf link'
 fi
-[[ $(readlink -- "$recovery_home/bin/asdf") == asdf-manual ]] ||
+[[ $(readlink -- "$recovery_prefix/bin/asdf") == ../tools/bin/asdf-manual ]] ||
   fail 'retry modified an unrelated asdf link'
 
 printf 'Setup asdf tests passed\n'

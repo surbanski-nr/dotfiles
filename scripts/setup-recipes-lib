@@ -1,0 +1,440 @@
+#!/usr/bin/env bash
+
+verify_sha256() {
+  local path=$1
+  local digest=$2
+
+  printf '%s  %s\n' "$digest" "$path" | sha256sum --check --strict >/dev/null
+}
+
+download_file() {
+  local url=$1
+  local destination=$2
+
+  curl --fail --location --silent --show-error \
+    --connect-timeout 15 --max-time 900 --retry 3 --retry-all-errors \
+    --output "$destination" "$url"
+}
+
+artifact_layout() {
+  local name=$1 version=$2 asset=$3
+  local index entry command_name target
+
+  if ! [[ $asset =~ ^[0-9A-Za-z][0-9A-Za-z._+%-]*$ ]]; then
+    report_error "unsafe artifact name for $name $version: $asset"
+    return 1
+  fi
+  # Consumed by callers after sourcing this library.
+  # shellcheck disable=SC2034
+  SPEC_ASSET=$asset
+  SPEC_DESTS=()
+  SPEC_LINKS=()
+  SPEC_SECOND_MEMBER=
+  SPEC_BUILD=false
+  case $name in
+    actionlint | asdf | kyverno | task | trivy | k9s | kubeconform | kubectx | kubens | zizmor | zoxide)
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=$name
+      SPEC_DESTS=("$name-$version")
+      SPEC_LINKS=("$name:$name-$version")
+      ;;
+    gh)
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER="gh_${version}_linux_amd64/bin/gh"
+      SPEC_DESTS=("gh-$version")
+      SPEC_LINKS=("gh:gh-$version")
+      ;;
+    shellcheck)
+      SPEC_FORMAT=xz-member
+      SPEC_MEMBER="shellcheck-v${version}/shellcheck"
+      SPEC_DESTS=("shellcheck-$version")
+      SPEC_LINKS=("shellcheck:shellcheck-$version")
+      ;;
+    oh-my-posh | kubectl | kind | yq)
+      SPEC_FORMAT=raw
+      SPEC_MEMBER=
+      SPEC_DESTS=("$name-$version")
+      SPEC_LINKS=("$name:$name-$version")
+      ;;
+    rg)
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER="ripgrep-${version}-x86_64-unknown-linux-musl/rg"
+      SPEC_DESTS=("rg-$version")
+      SPEC_LINKS=("rg:rg-$version")
+      ;;
+    fd)
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER="fd-v${version}-x86_64-unknown-linux-musl/fd"
+      SPEC_DESTS=("fd-$version")
+      SPEC_LINKS=("fd:fd-$version")
+      ;;
+    uv)
+      SPEC_FORMAT=gz-pair
+      SPEC_MEMBER=uv-x86_64-unknown-linux-gnu/uv
+      SPEC_SECOND_MEMBER=uv-x86_64-unknown-linux-gnu/uvx
+      SPEC_DESTS=("uv-$version" "uvx-$version")
+      SPEC_LINKS=("uv:uv-$version" "uvx:uvx-$version")
+      ;;
+    nvim)
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER=nvim-linux-x86_64
+      SPEC_DESTS=("nvim-$version")
+      SPEC_LINKS=("nvim:nvim-$version/bin/nvim")
+      ;;
+    go)
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER=go
+      SPEC_DESTS=("go-$version")
+      SPEC_LINKS=("go:go-$version/bin/go" "gofmt:go-$version/bin/gofmt")
+      ;;
+    helm)
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=linux-amd64/helm
+      SPEC_DESTS=("helm-$version")
+      SPEC_LINKS=("helm:helm-$version")
+      ;;
+    helm-schema)
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=schema
+      SPEC_DESTS=("helm-schema-$version")
+      SPEC_LINKS=()
+      ;;
+    nodejs)
+      SPEC_FORMAT=xz-tree
+      SPEC_MEMBER="node-v${version}-linux-x64"
+      SPEC_DESTS=("node-$version")
+      SPEC_LINKS=(
+        "node:node-$version/bin/node"
+        "npm:node-$version/bin/npm"
+        "npx:node-$version/bin/npx"
+        "corepack:node-$version/bin/corepack"
+      )
+      ;;
+    npm)
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER=package
+      SPEC_DESTS=(npm-package)
+      SPEC_LINKS=()
+      ;;
+    python)
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER=python
+      SPEC_DESTS=("python-$version")
+      SPEC_LINKS=()
+      ;;
+    fzf)
+      SPEC_FORMAT=gz-member
+      SPEC_MEMBER=fzf
+      SPEC_DESTS=("fzf-$version")
+      SPEC_LINKS=("fzf:fzf-$version")
+      ;;
+    stylua | terraform)
+      SPEC_FORMAT=zip-member
+      SPEC_MEMBER=$name
+      SPEC_DESTS=("$name-$version")
+      SPEC_LINKS=("$name:$name-$version")
+      ;;
+    tmux)
+      SPEC_BUILD=true
+      SPEC_FORMAT=gz-tree
+      SPEC_MEMBER="tmux-$version"
+      SPEC_DESTS=("tmux-$version")
+      SPEC_LINKS=("tmux:tmux-$version/bin/tmux")
+      ;;
+    htop)
+      SPEC_BUILD=true
+      SPEC_FORMAT=xz-tree
+      SPEC_MEMBER="htop-$version"
+      SPEC_DESTS=("htop-$version")
+      SPEC_LINKS=("htop:htop-$version/bin/htop")
+      ;;
+    *)
+      report_error "missing artifact mapping for $name"
+      return 1
+      ;;
+  esac
+
+  # Trees keep their runtime files together; standalone executables share tools/bin.
+  if [[ $SPEC_FORMAT != *-tree ]]; then
+    for index in "${!SPEC_DESTS[@]}"; do
+      SPEC_DESTS[index]=bin/${SPEC_DESTS[index]}
+    done
+  fi
+  for index in "${!SPEC_LINKS[@]}"; do
+    entry=${SPEC_LINKS[index]}
+    command_name=${entry%%:*}
+    target=${entry#*:}
+    if [[ $SPEC_FORMAT != *-tree ]]; then
+      target=bin/$target
+    fi
+    SPEC_LINKS[index]=$command_name:../tools/$target
+  done
+}
+
+compile_tool_source() {
+  local name=$1 source=$2 prefix=$3 jobs
+  local -a configure_args=("--prefix=$prefix")
+
+  case $name in
+    htop)
+      configure_args+=(
+        --disable-capabilities
+        --disable-delayacct
+        --disable-sensors
+      )
+      ;;
+    tmux)
+      ;;
+    *)
+      report_error "unsupported source build: $name"
+      return 1
+      ;;
+  esac
+  jobs=$(getconf _NPROCESSORS_ONLN) || return
+  if ! [[ $jobs =~ ^[1-9][0-9]*$ ]]; then
+    report_error "invalid processor count: $jobs"
+    return 1
+  fi
+  (
+    cd "$source" || exit
+    ./configure "${configure_args[@]}" || exit
+    make -j"$jobs" || exit
+    make install || exit
+  )
+}
+
+validate_tar_archive() {
+  local archive=$1 compression=$2 subtree=${3:-}
+  local member line type remainder name target resolved listing verbose
+  local -a list_args=(-tf) verbose_args=(-tvf)
+
+  case $compression in
+    gz)
+      list_args=(-tzf)
+      verbose_args=(-tvzf)
+      ;;
+    xz)
+      list_args=(-tJf)
+      verbose_args=(-tvJf)
+      ;;
+    *)
+      report_error "unsupported tar compression: $compression"
+      return
+      ;;
+  esac
+  listing=$(tar "${list_args[@]}" "$archive") || return
+  while IFS= read -r member || [[ -n $member ]]; do
+    if ! [[ -n $member && $member != /* && $member != ../* &&
+      /$member/ != *'/../'* ]]; then
+      report_error "unsafe archive member: $member"
+      return 1
+    fi
+    if [[ -n $subtree ]]; then
+      if ! [[ $member == "$subtree" || $member == "$subtree/"* ]]; then
+        report_error "unexpected archive member: $member"
+        return 1
+      fi
+    fi
+  done <<<"$listing"
+  verbose=$(LC_ALL=C tar --numeric-owner --quoting-style=literal \
+    "${verbose_args[@]}" "$archive") || return
+  while IFS= read -r line || [[ -n $line ]]; do
+    type=${line:0:1}
+    case $type in
+      - | d)
+        ;;
+      l)
+        read -r _ _ _ _ _ remainder <<<"$line"
+        if [[ $remainder != *' -> '* ]]; then
+          report_error "cannot parse archive link: $line"
+          return 1
+        fi
+        name=${remainder% -> *}
+        target=${remainder##* -> }
+        if [[ $target == /* ]]; then
+          report_error "absolute archive link: $name -> $target"
+          return 1
+        fi
+        resolved=$(readlink -m -- "/archive/$(dirname -- "$name")/$target")
+        if [[ $resolved != /archive/* ]]; then
+          report_error "archive link escapes its root: $name -> $target"
+          return 1
+        fi
+        if [[ -n $subtree ]]; then
+          if ! [[ $resolved == "/archive/$subtree" ||
+            $resolved == "/archive/$subtree/"* ]]; then
+            report_error "archive link escapes expected subtree: $name -> $target"
+            return 1
+          fi
+        fi
+        ;;
+      h)
+        report_error "archive hard links are not supported: $line"
+        return 1
+        ;;
+      *)
+        report_error "archive contains an unsupported member type: $line"
+        return 1
+        ;;
+    esac
+  done <<<"$verbose"
+}
+
+archive_member_to_file() {
+  local archive=$1 format=$2 member=$3 output=$4
+
+  case $format in
+    gz-member | gz-pair)
+      tar -xOzf "$archive" -- "$member" >"$output" || return
+      ;;
+    xz-member)
+      tar -xOJf "$archive" -- "$member" >"$output" || return
+      ;;
+    *)
+      report_error "invalid member format: $format"
+      return
+      ;;
+  esac
+  chmod 0755 "$output"
+}
+
+extract_artifact() {
+  local archive=$1 destination=$2 path
+
+  for path in "${SPEC_DESTS[@]}"; do
+    mkdir -p -- "$(dirname -- "$destination/$path")" || return
+  done
+
+  case $SPEC_FORMAT in
+    raw)
+      install -m 0755 "$archive" "$destination/${SPEC_DESTS[0]}" || return
+      ;;
+    gz-member | xz-member)
+      validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" || return
+      archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_MEMBER" \
+        "$destination/${SPEC_DESTS[0]}"
+      ;;
+    gz-pair)
+      validate_tar_archive "$archive" gz || return
+      archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_MEMBER" \
+        "$destination/${SPEC_DESTS[0]}" || return
+      archive_member_to_file "$archive" "$SPEC_FORMAT" "$SPEC_SECOND_MEMBER" \
+        "$destination/${SPEC_DESTS[1]}"
+      ;;
+    gz-tree | xz-tree)
+      validate_tar_archive "$archive" "${SPEC_FORMAT%%-*}" "$SPEC_MEMBER" || return
+      # GNU tar detects compression when reading a named archive.
+      tar -xf "$archive" -C "$destination" \
+        --no-same-owner --no-same-permissions --keep-directory-symlink -- "$SPEC_MEMBER" || return
+      if [[ $SPEC_MEMBER != "${SPEC_DESTS[0]}" ]]; then
+        mv -- "$destination/$SPEC_MEMBER" "$destination/${SPEC_DESTS[0]}"
+      fi
+      ;;
+    zip-member)
+      unzip -p "$archive" "$SPEC_MEMBER" >"$destination/${SPEC_DESTS[0]}" || return
+      chmod 0755 "$destination/${SPEC_DESTS[0]}"
+      ;;
+    *)
+      report_error "invalid artifact format: $SPEC_FORMAT"
+      ;;
+  esac
+}
+
+prepare_artifact() {
+  local catalog_name=$1 name=$2 version=$3 archive=$4 destination=$5
+
+  select_release "$catalog_name" "$name" "$version" || return
+  if [[ $RELEASE_URL == - ]]; then
+    report_error "$name $version has no direct artifact"
+    return 1
+  fi
+  artifact_layout "$name" "$version" "$RELEASE_ASSET" || return
+  if ! [[ -f $archive && ! -L $archive ]]; then
+    report_error "missing artifact: $archive"
+    return 1
+  fi
+  verify_sha256 "$archive" "$RELEASE_SHA256" || return
+  mkdir -p "$destination" || return
+  extract_artifact "$archive" "$destination"
+}
+
+verify_tool_executable() {
+  local name=$1 executable=$2 version=${3#v} output check
+  local -a arguments=()
+
+  check=${TOOL_CHECKS[$name]:-}
+  check=${check#*|}
+  read -r -a arguments <<<"${check:---version}"
+  if ! output=$(timeout 30s "$executable" "${arguments[@]}" 2>&1); then
+    report_error "$name executable check failed: ${output%%$'\n'*}"
+    return 1
+  fi
+  if [[ $output != *"$version"* ]]; then
+    report_error "$name executable did not report version $version: ${output%%$'\n'*}"
+    return 1
+  fi
+}
+
+verify_prepared_tool() {
+  local name=$1 version=$2 stage=$3
+  local entry command_name target primary
+
+  primary=${SPEC_LINKS[0]%%:*}
+  for entry in "${SPEC_LINKS[@]}"; do
+    command_name=${entry%%:*}
+    target=${entry#*:../tools/}
+    if [[ ! -x $stage/$target ]]; then
+      report_error "$name payload is missing $command_name"
+      return 1
+    fi
+    if [[ $command_name == "$primary" || $command_name == uvx ]]; then
+      verify_tool_executable "$command_name" "$stage/$target" "$version" || return
+    fi
+  done
+}
+
+prepare_tool_artifact() {
+  local catalog=$1 name=$2 version=$3 archive=$4 stage=$5
+  local source_tree built_tree build_dir
+
+  prepare_artifact "$catalog" "$name" "$version" "$archive" "$stage" || return
+  if [[ $SPEC_BUILD == true ]]; then
+    # Upstream install hooks do not quote prefix paths. Compile away from the
+    # store, then return the finished tree to its publication staging directory.
+    build_dir=$(mktemp -d /tmp/dotfiles-source-build.XXXXXX) || return
+    TEMP_PATHS+=("$build_dir")
+    source_tree=$build_dir/source
+    built_tree=$build_dir/install
+    mv -- "$stage/${SPEC_DESTS[0]}" "$source_tree" || return
+    compile_tool_source "$name" "$source_tree" "$built_tree" || return
+    mv -- "$built_tree" "$stage/${SPEC_DESTS[0]}" || return
+  fi
+  if [[ $name == nodejs ]]; then
+    prepare_node_npm "$stage/${SPEC_DESTS[0]}" "$(dirname -- "$archive")" || return
+  fi
+  verify_prepared_tool "$name" "$version" "$stage"
+}
+
+prepare_node_npm() {
+  local prefix=$1 archives=$2 archive upstream
+  local RELEASE_VERSION RELEASE_URL RELEASE_SHA256 RELEASE_ASSET
+
+  upstream=$(PATH="$prefix/bin:$PATH" "$prefix/bin/npm" --version) || return
+  printf '%s\n' "$upstream" >"$prefix/.upstream-npm-version" || return
+  select_default_release TOOL_RELEASES npm || return
+  archive=$archives/npm-$RELEASE_ASSET
+  download_file "$RELEASE_URL" "$archive" || return
+  verify_sha256 "$archive" "$RELEASE_SHA256" || return
+  PATH="$prefix/bin:$PATH" NPM_CONFIG_AUDIT=false NPM_CONFIG_UPDATE_NOTIFIER=false \
+    "$prefix/bin/npm" install --global --prefix "$prefix" "$archive" >/dev/null || return
+  PATH="$prefix/bin:$PATH" verify_tool_executable npm "$prefix/bin/npm" "$RELEASE_VERSION"
+}
+
+publish_tool_artifact() {
+  local stage=$1 destination=$2 path
+
+  for path in "${SPEC_DESTS[@]}"; do
+    mkdir -p -- "$(dirname -- "$destination/$path")" || return
+    mv -- "$stage/$path" "$destination/$path" || return
+  done
+}

@@ -8,6 +8,10 @@ rollback has been tested.
 
 Run the commands below from the repository root.
 
+For adding a new tool or disabling an existing one, follow
+[adding and removing tools](setup.md#adding-and-removing-tools).
+This runbook covers version changes and rollback.
+
 ## Local development VM
 
 Use an independent development clone, not the checkout used by the host's active
@@ -35,12 +39,14 @@ bin/task dev -- ubuntu2604
 bin/task dev -- amazonlinux2023
 ```
 
-The native Task `--` separator forwards the short platform name. The shared
-`PLATFORMS` map in `Taskfile.yml` maps OS aliases to release platform IDs and VM
-images for both `dev` and `test`. Debian and Ubuntu use
+The native Task `--` separator forwards the short platform name. In `release.env`,
+`PLATFORM_ALIASES` maps these names to release platform IDs and
+`DEFAULT_DEV_PLATFORM` selects the VM opened without an argument.
+`LXD_IMAGES` and `LXD_IMAGE_SHA256` select VM images; `DOCKER_IMAGES` selects
+the independently pinned containers for `task test`. Debian and Ubuntu use
 LXD cloud images; Amazon Linux uses the official KVM image with a checked SHA256
-and a small cloud-init bootstrap for the LXD agent. Docker build images remain
-pinned independently in `release.env`.
+and a small cloud-init bootstrap for the LXD agent. Adding an alias or changing
+an image does not require editing `Taskfile.yml`.
 
 The Amazon Linux entries in `images:` currently provide containers, not VM
 images. Amazon's generic KVM image is not preconfigured with the guest LXD agent
@@ -78,7 +84,7 @@ does not stop the VM or other sessions.
 The checkout is mounted at `/workspace/dotfiles`, the shell's initial directory.
 The ordinary guest user has the host's UID/GID and passwordless guest-only sudo.
 Only this checkout is shared. The guest has its own kernel, systemd, HOME,
-`~/bin`, asdf installations, history and Docker storage. Host HOME, SSH keys and
+the managed release store, asdf installations, history and Docker storage. Host HOME, SSH keys and
 Docker sockets are never mounted. The checkout's `bin/` is masked with a guest
 bind mount backed by `~/.local/share/dotfiles-validation`; host executables and
 absolute Python venv paths are neither used nor changed. The task bootstraps
@@ -92,13 +98,8 @@ Prepare the actual candidate inside the VM, using the normal installers:
 ./setup-tools
 ./setup-asdf
 
-for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
-  if [[ -f $file && ! -L $file && ! -e $file.before-dotfiles && ! -L $file.before-dotfiles ]]; then
-    mv -- "$file" "$file.before-dotfiles"
-  fi
-done
-
-./bstow stow bash tmux mc k9s nvim2
+./scripts/dotfiles-release set online
+./bstow stow mc
 exit
 ```
 
@@ -114,14 +115,14 @@ hash -r
 nvim --version
 dotfiles-check
 task validate
-bash nvim2/.config/nvim2/tests/check.sh
+bash nvim2/.config/nvim2/tests/check_runner.sh
 task test -- debian13
 # In Nvim2: :checkhealth
 ```
 
 `setup-tools` reuses an intact installation. A new version needs its complete
 `version|full_URL|SHA256` record; rerunning installs it and switches the link
-in `~/bin`. Earlier installations remain available for rollback. Restart the
+in `online/bin`. Earlier payloads remain in `online/tools` for rollback. Restart the
 affected application after switching versions.
 
 `task test` still uses Docker, building complete archives and installing them
@@ -129,10 +130,12 @@ as an ordinary user in separate containers with networking disabled. In the VM
 it uses the VM's own Docker daemon; on the host it uses the host daemon. The
 checkout must be clean and committed. Logs and packages remain under the printed
 temporary directory in that environment, not in a host dotfiles installation.
-Without a platform argument it checks all four platforms. Build and verification
-workers run in batches bounded by `nproc`, so a one-vCPU guest runs one platform
-at a time rather than competing with three other builds. A failed platform does
-not stop the remaining platforms, and verification only runs for successful builds.
+Without a platform argument it checks `OFFLINE_TEST_PLATFORMS` in `release.env`.
+Publication is selected separately by `OFFLINE_RELEASE_PLATFORMS` in that file.
+Build and verification workers run in batches bounded by `nproc`, so a one-vCPU
+guest runs one platform at a time rather than competing with three other builds.
+A failed platform does not stop the remaining platforms, and verification only
+runs for successful builds.
 
 No extra down task or local VM-state database is needed. To stop an idle VM or
 recreate it, use the exact name and project printed by `dev`:
@@ -441,11 +444,11 @@ docker run --rm \
     chown candidate:candidate /home/candidate
     su candidate -s /bin/bash -c '\''set -euo pipefail
       HOME=/home/candidate /src-current/setup-tools '"$tool"'
-      readlink "$HOME/bin/'"$tool"'" >"$HOME/baseline-link"
-      "$HOME/bin/'"$tool"'" version --short
+      readlink "$HOME/dotfiles-releases/online/bin/'"$tool"'" >"$HOME/baseline-link"
+      "$HOME/dotfiles-releases/online/bin/'"$tool"'" version --short
       HOME=/home/candidate /src-candidate/setup-tools '"$tool"'
-      "$HOME/bin/'"$tool"'" version --short
-      test -x "$HOME/bin/$(cat "$HOME/baseline-link")"'\''
+      "$HOME/dotfiles-releases/online/bin/'"$tool"'" version --short
+      test -x "$HOME/dotfiles-releases/online/bin/$(cat "$HOME/baseline-link")"'\''
   '
 ```
 
@@ -464,12 +467,12 @@ does not qualify a new selection.
 
 ## Daily-tool rollback
 
-Versioned installations and their state are retained under `~/bin` and
-`~/.local/state/dotfiles/setup-tools`. Inspect them before switching:
+Versioned installations and their state are retained under
+`~/dotfiles-releases/online/tools` and `online/state/setup-tools`. Inspect them before switching:
 
 ```bash
-ls -l "$HOME/bin/k9s"*
-"$HOME/bin/k9s-0.50.18" version --short
+ls -l "$HOME/dotfiles-releases/online/bin/k9s" "$HOME/dotfiles-releases/online/tools/bin/k9s-"*
+"$HOME/dotfiles-releases/online/tools/bin/k9s-0.50.18" version --short
 ```
 
 For a persistent rollback, put the earlier complete
@@ -492,10 +495,16 @@ A temporary switch may update only an existing managed relative link. Check
 both the current target and requested executable first:
 
 ```bash
-cd "$HOME/bin"
-case $(readlink k9s) in k9s-*) ;; *) exit 1 ;; esac
-test -x k9s-0.50.18
-ln -s k9s-0.50.18 .k9s.rollback
+cd "$HOME/dotfiles-releases/online/bin"
+case $(readlink k9s) in
+  ../tools/bin/k9s-*)
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+test -x ../tools/bin/k9s-0.50.18
+ln -s ../tools/bin/k9s-0.50.18 .k9s.rollback
 mv -T .k9s.rollback k9s
 hash -r
 type -a k9s
@@ -761,13 +770,14 @@ installer or dependency-building logic is duplicated in shell or Lua. The
 upstream golangci-lint binary must also support the selected project Go version.
 Go changes do not require regenerating Python locks.
 
-Run `task validate`, rebuild all four complete artifacts, and qualify them
+Run `task validate`, rebuild complete artifacts for every
+`OFFLINE_TEST_PLATFORMS` target, and qualify them
 with network access disabled as ordinary users. The tool-enabled Nvim2 suite
 checks a real multi-file package, SDK compile/run/test, offline vendoring,
 gopls diagnostics/navigation/hover/completion, import formatting, configured
 golangci-lint diagnostics and real Delve breakpoint/variables/goroutines/step,
-nearest-test and process cleanup. Test `set ID` with a retained pre-Go release
-using the newer manager. Projects requiring another SDK, uncached modules or
+nearest-test and process cleanup. Test `set ID` between current packages with
+and without `go` selected. Projects requiring another SDK, uncached modules or
 CGO libraries need their own separately prepared dependencies.
 
 ## Python environments
@@ -845,7 +855,7 @@ The `helm-schema` artifact record in `tools.env` pins the offline `schema`
 addon. Bump that record, then rebuild the ready binary and minimal no-hook
 manifest through `build-dotfiles-release`. Keep the plugin's upstream license
 when changing its distribution. yq uses the shared raw-artifact path and both
-profiles; jq stays an OS runtime prerequisite.
+tool lists; jq stays an OS runtime prerequisite.
 Do not edit generated metadata, installed plugin directories or Python locks.
 
 Qualify new candidates on all four supported platforms with the prepared OS
@@ -862,9 +872,9 @@ Python to create a suitable project venv, and export project Helm pins for the
 entire invocation as shown in
 [setup.md](setup.md#helm-schema-plugin-and-project-validation). Keep evidence
 of Task/kubeconform compatibility; command availability alone is insufficient.
-For a first pre-yq upgrade and later selection changes, keep and invoke the
-newer standalone manager or reviewed source manager. An older installed
-manager does not understand the newer metadata fields.
+Use `set ID` to switch between packages built with the current archive
+contract. For installations using an obsolete layout, follow the rebuild and
+uninstall instructions in the setup guide before installing a new package.
 
 ## Online project runtime rollback
 
@@ -894,15 +904,15 @@ run `asdf reshim nodejs VERSION` and check both `node --version` and
 `npm --version`.
 
 Kubectl and Helm are installed directly by `setup-tools` and included in the
-default `TOOLS` profile, not managed by `setup-asdf`.
+default `TOOLS` list, not managed by `setup-asdf`.
 
 Outside complete releases, online direct kubectl and Helm installations are
 the multi-version case in `setup-tools`. Run a version-qualified executable
 temporarily, or put the required version first and rerun setup:
 
 ```bash
-"$HOME/bin/kubectl-1.27.11" version --client
-"$HOME/bin/helm-3.21.0" version --short
+"$HOME/dotfiles-releases/online/bin/kubectl-1.27.11" version --client
+"$HOME/dotfiles-releases/online/bin/helm-3.21.0" version --short
 ./setup-tools kubectl helm
 ```
 
@@ -919,12 +929,12 @@ current pin. It does not adopt an unrecorded historical binary or link.
 A conflicting direct launcher, modified binary, different target or unrecorded
 installation is left untouched and must be resolved explicitly before retrying.
 
-For a recorded, intact asdf binary, the relative `~/bin/asdf` link is the selected
+For a recorded, intact asdf binary, the relative `online/bin/asdf` link is the selected
 version. A manual switch between those verified binaries is accepted; the next
 `setup-asdf` selects the catalog pin again. Old `asdf-target` and
 `pending-selection` records do not override that link. Both online installers
-share `~/.local/state/dotfiles/setup.lock` (or its XDG state equivalent), so do not
-run them concurrently or remove the lock file to force an installation.
+share the release-root directory lock with the release manager. Do not run
+installation and selection concurrently or replace the store to bypass a lock.
 
 ## Nvim2 candidate and health evidence
 
@@ -947,7 +957,7 @@ timeout --signal=TERM --kill-after=30s 1200s \
   env NVIM_APPNAME=nvim2 nvim --headless \
   '+Nvim2ToolsInstallSync' '+qa'
 timeout --signal=TERM --kill-after=30s 1200s \
-  env NVIM2_CHECK_TOOLS=1 nvim2/.config/nvim2/tests/check.sh
+  env NVIM2_CHECK_TOOLS=1 nvim2/.config/nvim2/tests/check_runner.sh
 ```
 
 Each Lua case has a 120-second limit, overridable with

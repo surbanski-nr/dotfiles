@@ -22,10 +22,16 @@ fail() {
 checkout=$test_root/'checkout with spaces'
 mkdir -p "$checkout/.git" "$checkout/scripts" "$test_root/bin" "$test_root/state"
 cp "$repo_dir/Taskfile.yml" "$checkout/Taskfile.yml"
+cp "$repo_dir/release.env" "$checkout/release.env"
+printf 'DEFAULT_DEV_PLATFORM=debian13\n' >>"$checkout/release.env"
+cp "$checkout/release.env" "$test_root/dev-config.env"
 cp "$repo_dir/scripts/dev-vm" "$repo_dir/scripts/dev-vm-setup" "$checkout/scripts/"
+# shellcheck source=../release.env
+source "$checkout/release.env"
 ln -s "$repo_dir/tests/fixtures/dev-vm/lxc" "$test_root/bin/lxc"
 ln -s "$repo_dir/tests/fixtures/dev-vm/curl" "$test_root/bin/curl"
 export TEST_DEV_STATE=$test_root/state TEST_DEV_LOG=$test_root/lxc.log TEST_DEV_PROJECT=fixture
+export TEST_DEV_IMAGE_SHA256=${LXD_IMAGE_SHA256[amzn-2023-x86_64]}
 export PATH="$test_root/bin:$PATH"
 
 run_dev() {
@@ -88,6 +94,18 @@ for alias in ubuntu2404 ubuntu2604 amazonlinux2023; do
 done
 [[ $(grep -c '^init ' "$TEST_DEV_LOG") == 4 ]] || fail 'four aliases did not create exactly four VMs'
 
+cat >>"$checkout/release.env" <<'EOF'
+PLATFORM_ALIASES[fixture]=debian-13-x86_64
+LXD_IMAGES[debian-13-x86_64]=images:fixture/debian/cloud
+DEFAULT_DEV_PLATFORM=fixture
+EOF
+run_dev >"$test_root/configured-default.log" 2>&1
+jq -se '
+  [.[] | select(.config["user.dotfiles.dev.platform"] == "fixture")] |
+  length == 1 and .[0].image == "images:fixture/debian/cloud"' \
+  "$TEST_DEV_STATE"/vm-*.json >/dev/null || fail 'release.env did not control the VM alias, image and default'
+cp "$test_root/dev-config.env" "$checkout/release.env"
+
 for invalid in 'unknown' 'debian13 ubuntu2404' 'debian13; touch unsafe'; do
   : >"$TEST_DEV_LOG"
   if run_dev -- "$invalid" >"$test_root/invalid.log" 2>&1; then
@@ -114,15 +132,16 @@ mkdir -p "$TEST_DEV_STATE" "$test_root/downloads"
 checksum=$(printf 'fixture qcow2\n' | sha256sum)
 export PLATFORM_ALIAS=amazonlinux2023 DEV_PROJECT=fixture DEV_NETWORK=fixture-net DEV_STORAGE=fixture-pool
 export DEV_CPUS=2 DEV_MEMORY=4GiB DEV_DISK=20GiB
-export PLATFORMS_JSON
-PLATFORMS_JSON=$(jq -cn --arg checksum "${checksum%% *}" '
-  {amazonlinux2023: {image: "https://fixture.invalid/image.qcow2", platform: "amzn-2023-x86_64", sha256: $checksum}}')
+printf '%s\n' \
+  'LXD_IMAGES[amzn-2023-x86_64]=https://fixture.invalid/image.qcow2' \
+  "LXD_IMAGE_SHA256[amzn-2023-x86_64]=${checksum%% *}" >>"$checkout/release.env"
 TMPDIR="$test_root/downloads" bash "$checkout/scripts/dev-vm" >"$test_root/import.log" 2>&1
 [[ -s $TEST_DEV_STATE/image.json && -s $TEST_DEV_STATE/cloud-init.yaml ]] || fail 'official QCOW2 image did not import and bootstrap its agent'
 [[ -z $(find "$test_root/downloads" -mindepth 1 -print -quit) ]] || fail 'successful import leaked temporary downloads'
 export TEST_DEV_STATE=$test_root/bad-checksum-state
 mkdir -p "$TEST_DEV_STATE"
-PLATFORMS_JSON=$(printf '%s\n' "$PLATFORMS_JSON" | jq '.amazonlinux2023.sha256 = ("a" * 64)')
+printf '%s\n' 'LXD_IMAGE_SHA256[amzn-2023-x86_64]=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  >>"$checkout/release.env"
 : >"$TEST_DEV_LOG"
 if TMPDIR="$test_root/downloads" bash "$checkout/scripts/dev-vm" >"$test_root/checksum.log" 2>&1; then
   fail 'corrupt QCOW2 image was accepted'
@@ -132,6 +151,7 @@ if grep -qE '^(init|image import) ' "$TEST_DEV_LOG"; then
 fi
 [[ -z $(find "$test_root/downloads" -mindepth 1 -print -quit) ]] || fail 'failed import leaked temporary downloads'
 
+printf 'LXD_IMAGE_SHA256[amzn-2023-x86_64]=%s\n' "${checksum%% *}" >>"$checkout/release.env"
 TEST_DEV_STATE="$test_root/cold-state" TEST_DEV_AGENT_HANG=1 timeout --kill-after=5s 25s \
   bash "$checkout/scripts/dev-vm" >"$test_root/agent-retry.log" 2>&1 ||
   fail 'initial agent connection ignored its timeout and blocked VM entry'

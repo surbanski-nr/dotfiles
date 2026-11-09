@@ -16,13 +16,15 @@ done
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 [[ -d $repo_dir/.git ]] || die 'use a standalone development clone with a .git directory'
-alias=${PLATFORM_ALIAS:-debian13}
-configuration=$(printf '%s\n' "${PLATFORMS_JSON:-}" | jq -ce --arg alias "$alias" '.[$alias]') ||
-  die "unknown platform: $alias"
-image=$(printf '%s\n' "$configuration" | jq -er '.image')
-platform=$(printf '%s\n' "$configuration" | jq -er '.platform')
-checksum=$(printf '%s\n' "$configuration" | jq -r '.sha256 // ""')
+# shellcheck source=../release.env
+source "$repo_dir/release.env"
+alias=${PLATFORM_ALIAS:-$DEFAULT_DEV_PLATFORM}
 [[ $alias =~ ^[a-z0-9]+$ ]] || die "invalid platform alias: $alias"
+platform=${PLATFORM_ALIASES[$alias]:-}
+[[ -n $platform ]] || die "unknown platform: $alias"
+image=${LXD_IMAGES[$platform]:-}
+[[ -n $image ]] || die "no LXD image configured for $platform"
+checksum=${LXD_IMAGE_SHA256[$platform]:-}
 [[ ${DEV_CPUS:-} =~ ^[1-9][0-9]*$ ]] || die 'DEV_CPUS must be a positive integer'
 for size in "${DEV_MEMORY:-}" "${DEV_DISK:-}"; do
   [[ $size =~ ^[1-9][0-9]*(MiB|GiB|MB|GB)$ ]] || die 'DEV_MEMORY and DEV_DISK need a size such as 16GiB'
@@ -114,7 +116,8 @@ case $state in
   Stopped)
     lxc_command start "$vm"
     ;;
-  Running) ;;
+  Running)
+    ;;
   *)
     die "VM $vm is $state; inspect it before continuing"
     ;;

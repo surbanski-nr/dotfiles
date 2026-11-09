@@ -131,6 +131,12 @@ local function run()
         assert(client_named(buffer, name) == nil, 'Disabled LSP attached: ' .. name)
       end
     end
+    if fixture.filetype == 'yaml.ansible' and profile.server 'ansiblels' then
+      local client = client_named(buffer, 'ansiblels')
+      local config = vim.system({ 'ansible-config', 'dump' }, { cwd = temporary, env = client.config.cmd_env, text = true, timeout = 10000 }):wait()
+      assert(config.code == 0, 'Ansible LSP cannot read project configuration: ' .. (config.stderr or ''))
+      assert(config.stdout:find(temporary .. '/ansible.cfg', 1, true), 'Ansible LSP did not load the project configuration')
+    end
     if profile.parser(fixture.parser) then
       assert(vim.wait(3000, function() return vim.treesitter.highlighter.active[buffer] ~= nil end), 'Treesitter did not highlight ' .. fixture.path)
       assert(vim.wo.foldmethod == 'expr' and vim.wo.foldexpr == 'v:lua.vim.treesitter.foldexpr()', 'Treesitter folds did not attach to ' .. fixture.path)

@@ -6,8 +6,8 @@
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck source=../../tools.env
 source "$repo_dir/tools.env"
-# shellcheck source=../../scripts/setup-profile-lib
-source "$repo_dir/scripts/setup-profile-lib"
+# shellcheck source=../../scripts/setup-tools-lib
+source "$repo_dir/scripts/setup-tools-lib"
 
 cleanup() {
   local status=$? pid
@@ -62,7 +62,14 @@ if [[ \${self##*/} == helm-* ]]; then
     exec "\$HELM_PLUGINS/helm-values-schema-json/schema" "\$@"
   elif [[ \$* == 'plugin list' ]]; then
     printf 'NAME VERSION DESCRIPTION\\n'
-    awk '\$1 == "name:" { name = \$2 } \$1 == "version:" { gsub(/"/, "", \$2); version = \$2 } END { print name, version, "fixture" }' \\
+    awk '
+      \$1 == "name:" { name = \$2 }
+      \$1 == "version:" {
+        gsub(/"/, "", \$2)
+        version = \$2
+      }
+      END { print name, version, "fixture" }
+    ' \\
       "\$HELM_PLUGINS/helm-values-schema-json/plugin.yaml"
     exit 0
   elif [[ \${1:-} == fixture-plugins ]]; then
@@ -80,9 +87,15 @@ if [[ \${0##*/} == yq ]]; then
   exit 0
 fi
 case \$(basename -- "\$0") in
-  k9s) [[ \$* == 'version --short' ]] || exit 93 ;;
-  oh-my-posh | terraform | go | kind) [[ \$* == version ]] || exit 94 ;;
-  tmux) [[ \$* == -V ]] || exit 95 ;;
+  k9s)
+    [[ \$* == 'version --short' ]] || exit 93
+    ;;
+  oh-my-posh | terraform | go | kind)
+    [[ \$* == version ]] || exit 94
+    ;;
+  tmux)
+    [[ \$* == -V ]] || exit 95
+    ;;
 esac
 printf '%s fixture $version\n' "\$(basename -- "\$0")"
 EOF
@@ -128,8 +141,12 @@ if [[ " $* " == *' -m venv '* ]]; then
   for command_name in ansible ansible-config ansible-lint ansible-playbook yamllint; do
     printf '%s\n' \
       '#!/usr/bin/env bash' \
-      'if [[ $(basename -- "$0") == ansible* && ${LC_ALL:-} != C.UTF-8 ]]; then exit 99; fi' \
-      'if [[ $(basename -- "$0") == ansible-lint && " $* " != *" --offline "* ]]; then exit 97; fi' \
+      'if [[ $(basename -- "$0") == ansible* && ${LC_ALL:-} != C.UTF-8 ]]; then' \
+      '  exit 99' \
+      'fi' \
+      'if [[ $(basename -- "$0") == ansible-lint && " $* " != *" --offline "* ]]; then' \
+      '  exit 97' \
+      'fi' \
       'printf "%s fixture 1.0\n" "$(basename -- "$0")"' \
       >"$destination/bin/$command_name"
     chmod 0755 "$destination/bin/$command_name"
@@ -147,7 +164,26 @@ make_artifact() {
   local include_go=${6:-true}
   local include_current_tools=${7:-false}
   local include_validation_tools=${8:-false}
-  local offline_profile=nvim,nodejs,python,rg,tmux,oh-my-posh,k9s,zoxide,kubectx,kubens,task,fzf,terraform,kubectl,helm
+  local -a offline_tools=(
+    nvim
+    nodejs
+    python
+    rg
+    tmux
+    tmux-sensible
+    tmux-resurrect
+    tmux-continuum
+    oh-my-posh
+    k9s
+    zoxide
+    kubectx
+    kubens
+    task
+    fzf
+    terraform
+    kubectl
+    helm
+  )
   local id=dotfiles-${commit:0:12}
   local stage=$test_root/stage-$marker release=$test_root/stage-$marker/$id
   local command_name plugin plugin_dir version
@@ -186,14 +222,14 @@ make_artifact() {
   if [[ $include_fd == true ]]; then
     write_fake_tool "$release/tools/bin/fd" "$release_version"
     ln -s ../tools/bin/fd "$release/bin/fd"
-    offline_profile+=,fd
+    offline_tools+=(fd)
   fi
   if [[ $include_go == true ]]; then
     write_fake_tool "$release/tools/go/bin/go" "$release_version"
     write_fake_tool "$release/tools/go/bin/gofmt" "$release_version"
     install -m 0755 "$repo_dir/scripts/offline-go" "$release/bin/go"
     ln -s ../tools/go/bin/gofmt "$release/bin/gofmt"
-    offline_profile+=,go
+    offline_tools+=(go)
   fi
   if [[ $include_current_tools == true ]]; then
     for command_name in kind uv uvx actionlint shellcheck gh kubeconform kyverno trivy; do
@@ -204,7 +240,7 @@ make_artifact() {
     ln -s ../tools/htop/bin/htop "$release/bin/htop"
     ln -s ../share/nvim2/mason/packages/yamllint/venv/bin/yamllint \
       "$release/bin/yamllint"
-    offline_profile+=,kind,uv,actionlint,shellcheck,yamllint,gh,htop,kubeconform,kyverno,trivy
+    offline_tools+=(kind uv actionlint shellcheck yamllint gh htop kubeconform kyverno trivy)
   fi
   if [[ $include_validation_tools == true ]]; then
     write_fake_tool "$release/tools/bin/yq" "$release_version"
@@ -225,7 +261,7 @@ jq '{properties:{replicas:{type:"integer"},tls:{"\$ref":"#/\$defs/tls.schema.jso
   tls.schema.json >schema.json
 EOF
     chmod 0755 "$plugin_dir/schema"
-    offline_profile+=,yq
+    offline_tools+=(yq helm-schema)
   fi
   ln -s python-3.12.12 "$release/tools/python"
   for command_name in nvim tmux; do
@@ -242,13 +278,16 @@ EOF
       GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid \
       GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' GIT_COMMITTER_DATE='2026-01-01T00:00:00Z' \
       git -C "$plugin_dir" commit -q -m fixture
+    git -C "$plugin_dir" checkout --detach -q
   done
-  ln -s ../packages/ansible-lint/venv/bin/ansible-lint \
-    "$release/share/nvim2/mason/bin/ansible-lint"
+  for command_name in ansible ansible-config ansible-lint ansible-playbook; do
+    ln -s "../packages/ansible-lint/venv/bin/$command_name" \
+      "$release/share/nvim2/mason/bin/$command_name"
+  done
   ln -s ../packages/yamllint/venv/bin/yamllint \
     "$release/share/nvim2/mason/bin/yamllint"
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$release/config/nvim2/tests/check.sh"
-  chmod 0755 "$release/config/nvim2/tests/check.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$release/config/nvim2/tests/check_runner.sh"
+  chmod 0755 "$release/config/nvim2/tests/check_runner.sh"
   printf 'fixture %s\n' "$marker" >"$release/config/nvim2/init.lua"
   mkdir -p "$release/config/nvim2/tests/bad%new.dir"
   printf 'fixture percent path\n' >"$release/config/nvim2/tests/bad%new.dir/example"
@@ -282,6 +321,14 @@ EOF
   printf 'yamllint==1.38.0 --hash=sha256:fixture\n' >"$release/python-locks/yamllint.lock"
   printf 'ansible-lint\t26.1.1\nyamllint\t1.38.0\n' \
     >"$release/python-locks/inventory.tsv"
+  printf '%s\t%s\t%s\t%s\n' \
+    ansible-lint 26.1.1 ansible-lint ansible,ansible-config,ansible-lint,ansible-playbook \
+    yamllint 1.38.0 yamllint yamllint \
+    >"$release/share/nvim2/mason/inventory.tsv"
+  printf 'rg\npython\n' >"$release/share/nvim2/mason/requirements.txt"
+  for plugin in ansible-lint yamllint; do
+    printf '{}\n' >"$release/share/nvim2/mason/packages/$plugin/mason-receipt.json"
+  done
   printf 'fixture wheel\n' >"$release/python-wheelhouse/fixture.whl"
   printf '%s\n' \
     "RELEASE_ID=$id" \
@@ -306,9 +353,18 @@ EOF
     "TERRAFORM_VERSION=$release_version" \
     "KUBECTL_VERSIONS=$release_version,0.9" \
     "HELM_VERSIONS=$release_version,0.9" \
-    "OFFLINE_TOOLS=$offline_profile" \
+    "OFFLINE_RELEASE_TOOLS=$(
+      IFS=,
+      printf '%s' "${offline_tools[*]}"
+    )" \
     'PAYLOAD_PATHS=bin,config,dotfiles,python-locks,python-wheelhouse,share,tools' \
     >"$release/release.env"
+  for plugin in tmux-sensible tmux-resurrect tmux-continuum; do
+    local commit_field=${plugin^^}
+    commit_field=${commit_field//-/_}_COMMIT
+    printf '%s=%s\n' "$commit_field" "$(git -C "$release/share/tmux/plugins/$plugin" rev-parse HEAD)" \
+      >>"$release/release.env"
+  done
   if [[ $include_fd == true ]]; then
     printf 'FD_VERSION=%s\n' "$release_version" >>"$release/release.env"
   fi
@@ -367,11 +423,14 @@ make_selected_artifact() {
   while IFS='=' read -r field value; do
     metadata[$field]=$value
   done <"$release/release.env"
-  printf 'RELEASE_FORMAT=2\n' >"$release/release.env"
+  : >"$release/release.env"
   for field in RELEASE_ID PLATFORM_ID SOURCE_COMMIT SOURCE_TREE BUILDER_IMAGE PAYLOAD_PATHS; do
     printf '%s=%s\n' "$field" "${metadata[$field]}" >>"$release/release.env"
   done
-  printf 'OFFLINE_TOOLS=%s\n' "$(IFS=,; printf '%s' "${chosen_tools[*]}")" >>"$release/release.env"
+  printf 'OFFLINE_RELEASE_TOOLS=%s\n' "$(
+    IFS=,
+    printf '%s' "${chosen_tools[*]}"
+  )" >>"$release/release.env"
   for tool in "${chosen_tools[@]}"; do
     fields=$(tool_metadata_fields "$tool")
     [[ -n $fields ]] || continue
@@ -389,7 +448,7 @@ make_selected_artifact() {
     done <<<"$fields"
   done
   while IFS= read -r tool; do
-    profile_has chosen_tools "$tool" && continue
+    list_has chosen_tools "$tool" && continue
     paths=$(tool_payload_paths "$tool")
     if [[ -n $paths ]]; then
       while IFS= read -r pattern; do
@@ -412,8 +471,8 @@ make_selected_artifact() {
         done
         ;;
     esac
-  done < <(profile_tool_names)
-  if ! profile_has chosen_tools nvim; then
+  done < <(known_tool_names)
+  if ! list_has chosen_tools nvim; then
     find "$release/python-locks" "$release/python-wheelhouse" -mindepth 1 -depth -delete
   fi
   repack_artifact "$marker" "${release##*/}" "$destination"

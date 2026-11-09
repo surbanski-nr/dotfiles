@@ -63,19 +63,17 @@ pushd "$HOME/github.com/surbanski/dotfiles"
 ./setup-system
 ./setup-tools
 ./setup-asdf
+./scripts/dotfiles-release set online
 
-for file in "$HOME/.bash_profile" "$HOME/.bashrc"; do
-  if [[ -f $file && ! -L $file && ! -e $file.before-dotfiles && ! -L $file.before-dotfiles ]]; then
-    mv -- "$file" "$file.before-dotfiles"
-  fi
-done
-
-./bstow stow git ssh tmux bash mc oh-my-posh k9s nvim2 gnupg
+# optionally
+./bstow stow mc gnupg
 
 source "$HOME/.bashrc"
 hash -r
 dotfiles-check
 ```
+
+Both flows expose tools through `~/dotfiles-releases/current/bin`.
 
 `bstow` is my alternative to GNU Stow that manages package files as individual symlinks,
 operating system and tools see those files in proper directories like ~ or ~/.config,

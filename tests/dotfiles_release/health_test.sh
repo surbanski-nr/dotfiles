@@ -157,20 +157,22 @@ fi
 unlink "$release/unlisted"
 run_manager set "$id_one" >/dev/null
 
-checker="$repo_dir/scripts/check-dotfiles-release"
+checker="$repo_dir/tests/tools_runner.sh"
 tty_release=$test_root/'Nvim release with spaces'
 tty_home=$test_root/'Nvim health home with spaces'
 mkdir -p "$tty_release/config/nvim2/tests" "$tty_home"
 make_selected_artifact "$commit_three" nvim-health "$test_root/nvim-health.tar.gz" \
   nvim nodejs python go rg terraform
 cp "$test_root/stage-nvim-health/$id_three/release.env" "$tty_release/release.env"
-cat >"$tty_release/config/nvim2/tests/check.sh" <<'EOF'
+cat >"$tty_release/config/nvim2/tests/check_runner.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 [[ ! -t 0 ]]
 timeout --signal=TERM --kill-after=1s 1s bash --noprofile --norc -ic \
   'printf "nvim-tty-health-ok\n"'
-if flock -n "$FIXTURE_NVIM_LOCK" true; then exit 95; fi
+if flock -n "$FIXTURE_NVIM_LOCK" true; then
+  exit 95
+fi
 sleep 30 </dev/null >/dev/null 2>&1 &
 printf '%s\n' "$!" >"$FIXTURE_NVIM_CHILD_PID"
 exit "${FIXTURE_NVIM_STATUS:-0}"
@@ -198,7 +200,7 @@ for expected in (0, 94):
         os.environ['FIXTURE_NVIM_LOCK'] = lock
         os.environ['FIXTURE_NVIM_CHILD_PID'] = child_pid_file
         os.execl('/bin/bash', 'bash', '-c',
-                 'source "$1"; source "$checker_dir/../tests/tools/nvim.sh"; '
+                 'source "$1"; source "$test_dir/tools/nvim.sh"; '
                  'exec {LOCK_FD}<"$4"; flock -x "$LOCK_FD"; '
                  'health_stage Nvim health_nvim "$2" "$3"',
                  'nvim-health-test', checker, release, home, lock)
@@ -252,5 +254,67 @@ bash -c 'source "$1"; source "$4"; health_stage ripgrep health_rg "$2" "$3"' \
   >"$test_root/functional-failure.log" 2>&1 || status=$?
 [[ $status == 96 && $(<"$test_root/functional-failure.log") == *'ripgrep health check failed (status 96)'* ]] ||
   fail 'CI functional checker omitted a runtime failure'
+
+checker_fixture=$test_root/checker-fixture
+mkdir -p "$checker_fixture/scripts" "$checker_fixture/tests/tools"
+cp "$repo_dir/tests/tools_runner.sh" "$checker_fixture/tests/tools_runner.sh"
+cp "$repo_dir/scripts/dotfiles-release" \
+  "$repo_dir/scripts/setup-tools-lib" "$repo_dir/scripts/setup-system-lib" "$checker_fixture/scripts/"
+cp "$repo_dir/tools.env" "$repo_dir/system.env" "$checker_fixture/"
+printf "TOOL_CHECKS[fixture-cli]='FIXTURE_CLI_VERSION|'\n" >>"$checker_fixture/tools.env"
+cp "$repo_dir/tests/tools/fixture.sh" "$checker_fixture/tests/tools/fixture.sh"
+cat >"$checker_fixture/tests/tools/kind.sh" <<'EOF'
+health_kind() {
+  local release=$1 output
+  output=$("$release/bin/kind" version) || return
+  printf '%s\n' "$output"
+  return "${FIXTURE_FUNCTIONAL_STATUS:-0}"
+}
+EOF
+cat >"$checker_fixture/tests/tools/fixture-cli.sh" <<'EOF'
+health_fixture_cli() {
+  local release=$1
+  "$release/bin/fixture-cli" --version
+}
+EOF
+cat >"$checker_fixture/tests/tools/bash.sh" <<'EOF'
+health_bash() {
+  printf 'fixture Bash integration\n'
+}
+EOF
+printf 'return 97\n' >"$checker_fixture/tests/tools/task.sh"
+printf 'return 98\n' >"$checker_fixture/tests/tools/uv.sh"
+
+test_home=$test_root/checker-home
+checker_archive=$test_root/checker.tar.gz
+mkdir -p "$test_home"
+make_selected_artifact "$commit_three" checker "$checker_archive" kind uv gh
+fixture_release=$test_root/stage-checker/$id_three
+write_fake_tool "$fixture_release/tools/bin/fixture-cli" 3.0
+ln -s ../tools/bin/fixture-cli "$fixture_release/bin/fixture-cli"
+sed -i '/^OFFLINE_RELEASE_TOOLS=/s/$/,fixture-cli/' "$fixture_release/release.env"
+printf 'FIXTURE_CLI_VERSION=3.0\n' >>"$fixture_release/release.env"
+bash "$repo_dir/scripts/build-standalone-script" "$checker_fixture" "$fixture_release/dotfiles-release"
+repack_artifact checker "$id_three" "$checker_archive"
+HOME="$test_home" DOTFILES_OS_RELEASE_FILE="$os_release" \
+  bash "$checker_fixture/scripts/dotfiles-release" install "$checker_archive" >/dev/null
+checker_release=$test_home/dotfiles-releases/$id_three
+HOME="$test_home" DOTFILES_OS_RELEASE_FILE="$os_release" \
+  bash "$checker_fixture/tests/tools_runner.sh" "$checker_release" \
+  >"$test_root/checker-discovery.log" 2>&1
+output=$(<"$test_root/checker-discovery.log")
+[[ $output == *'tools_runner: checking kind'* &&
+  $output == *'kind fixture 3.0'* && $output == *'fixture Bash integration'* &&
+  $output == *'tools_runner: checking fixture-cli'* &&
+  $output == *'fixture-cli fixture 3.0'* ]] ||
+  fail 'CI checker did not discover a new selected tool suite'
+
+status=0
+HOME="$test_home" DOTFILES_OS_RELEASE_FILE="$os_release" FIXTURE_FUNCTIONAL_STATUS=93 \
+  bash "$checker_fixture/tests/tools_runner.sh" "$checker_release" \
+  >"$test_root/checker-discovery-failure.log" 2>&1 || status=$?
+output=$(<"$test_root/checker-discovery-failure.log")
+[[ $status == 93 && $output == *'kind health check failed (status 93)'* ]] ||
+  fail 'CI checker omitted a failure from a discovered tool suite'
 
 printf 'dotfiles_release: health passed\n'

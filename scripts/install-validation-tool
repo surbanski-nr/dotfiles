@@ -15,6 +15,9 @@ tool=$1
 
 # shellcheck source=setup-lib
 source "$repo_dir/scripts/setup-lib"
+source "$repo_dir/scripts/setup-catalog-lib"
+source "$repo_dir/scripts/setup-recipes-lib"
+source "$repo_dir/scripts/setup-tools-lib"
 # shellcheck source=../validation.env
 source "$repo_dir/validation.env"
 validate_validation_config

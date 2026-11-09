@@ -20,6 +20,9 @@ trap cleanup EXIT
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=setup-lib
 source "$repo_dir/scripts/setup-lib"
+source "$repo_dir/scripts/setup-catalog-lib"
+source "$repo_dir/scripts/setup-recipes-lib"
+source "$repo_dir/scripts/setup-tools-lib"
 # shellcheck source=../tools.env
 source "$repo_dir/tools.env"
 validate_tool_config

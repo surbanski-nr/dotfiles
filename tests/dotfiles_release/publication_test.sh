@@ -22,9 +22,15 @@ set -euo pipefail
 source_path=${@: -2:1}
 destination=${!#}
 case $FIXTURE_FAIL_PHASE in
-  backup) [[ $destination != "$HOME/.bashrc.before-dotfiles-release" ]] || exit 91 ;;
-  link) [[ $destination != "$HOME/.bashrc" || $source_path != */.dotfiles-release-link.* ]] || exit 92 ;;
-  selection) [[ $destination != "$HOME/dotfiles-releases/current" ]] || exit 93 ;;
+  backup)
+    [[ $destination != "$HOME/.bashrc.before-dotfiles-release" ]] || exit 91
+    ;;
+  link)
+    [[ $destination != "$HOME/.bashrc" || $source_path != */.dotfiles-release-link.* ]] || exit 92
+    ;;
+  selection)
+    [[ $destination != "$HOME/dotfiles-releases/current" ]] || exit 93
+    ;;
 esac
 exec /usr/bin/mv "$@"
 EOF

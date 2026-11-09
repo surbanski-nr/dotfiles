@@ -28,6 +28,9 @@ case "$command_name:$mode" in
       source "$DOTFILES/tools.env"
       # shellcheck source=../../../scripts/setup-lib
       source "$DOTFILES/scripts/setup-lib"
+      source "$DOTFILES/scripts/setup-catalog-lib"
+      source "$DOTFILES/scripts/setup-recipes-lib"
+      source "$DOTFILES/scripts/setup-tools-lib"
       tool=$command_name
       [[ $tool != node ]] || tool=nodejs
       select_default_release TOOL_RELEASES "$tool"

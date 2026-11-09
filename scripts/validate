@@ -197,7 +197,8 @@ validate_scripts() {
   need tar
   need task
   need timeout
-  local variable
+  local platform alias image checksum
+  local -A test_platforms=() release_platforms=()
   local files=(
     bstow
     setup-asdf
@@ -205,7 +206,7 @@ validate_scripts() {
     setup-tools
     vim/setup
     tests/bstow_test.sh
-    tests/dotfiles_release_test.sh
+    tests/dotfiles_release_runner.sh
     tests/dotfiles_release_ci_test.sh
     tests/dev_vm_test.sh
     tests/k9s_preview_test.sh
@@ -216,27 +217,67 @@ validate_scripts() {
     tests/install_validation_tool_test.sh
     tests/setup_asdf_test.sh
     tests/setup_system_test.sh
-    tests/setup_tools_test.sh
+    tests/setup_tools_runner.sh
+    tests/tools_runner.sh
     tests/validate_test.sh
   )
 
   for file in scripts/setup*-lib tests/dotfiles_release/fixture.sh tests/setup_tools/fixture.sh tests/tools/*.sh; do
     [[ ! -x $file ]] || die "source-only library is executable: $file"
   done
-  for file in scripts/* tests/fixtures/*/* \
+  for file in scripts/* tests/*_runner.sh tests/fixtures/*/* \
     tests/dotfiles_release/*_test.sh tests/setup_tools/*_test.sh \
-    bstow vim/setup nvim2/.config/nvim2/tests/check.sh; do
+    bstow vim/setup nvim2/.config/nvim2/tests/check_runner.sh; do
     [[ $file == scripts/setup*-lib ]] && continue
     [[ -x $file ]] || die "executable bit is missing: $file"
   done
 
   check_shell_syntax bash release.env system.env
+  # shellcheck source=setup-system-lib
+  source scripts/setup-system-lib
   # shellcheck source=../release.env
   source release.env
-  for variable in DEBIAN_13_IMAGE UBUNTU_2404_IMAGE UBUNTU_2604_IMAGE \
-    AMZN_2023_IMAGE; do
-    [[ ${!variable} =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
-      die "$variable is not pinned to a SHA-256 digest"
+  declare -p PLATFORM_ALIASES DOCKER_IMAGES LXD_IMAGES LXD_IMAGE_SHA256 \
+    OFFLINE_TEST_PLATFORMS OFFLINE_RELEASE_PLATFORMS >/dev/null 2>&1 ||
+    die 'release.env must define platform aliases, images and offline platform lists'
+  for platform in "${!DOCKER_IMAGES[@]}"; do
+    system_validate_platform_name "$platform" || die "unsupported platform ID: $platform"
+    [[ ${DOCKER_IMAGES[$platform]} =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
+      die "Docker image for $platform is not pinned to a SHA-256 digest"
+  done
+  for platform in "${!LXD_IMAGES[@]}"; do
+    [[ -n ${DOCKER_IMAGES[$platform]:-} ]] || die "unknown LXD platform: $platform"
+    image=${LXD_IMAGES[$platform]}
+    checksum=${LXD_IMAGE_SHA256[$platform]:-}
+    [[ $image =~ ^[^[:space:]]+$ ]] || die "invalid LXD image for $platform"
+    if [[ $image == https://* ]]; then
+      [[ $checksum =~ ^[0-9a-f]{64}$ ]] || die "QCOW2 image for $platform needs a SHA256"
+    else
+      [[ -z $checksum ]] || die "remote LXD image for $platform must not have a QCOW2 checksum"
+    fi
+  done
+  for platform in "${!LXD_IMAGE_SHA256[@]}"; do
+    [[ -n ${LXD_IMAGES[$platform]:-} ]] || die "checksum has no LXD image: $platform"
+  done
+  for alias in "${!PLATFORM_ALIASES[@]}"; do
+    [[ $alias =~ ^[a-z0-9]+$ ]] || die "invalid platform alias: $alias"
+    platform=${PLATFORM_ALIASES[$alias]}
+    [[ -n $platform && -n ${LXD_IMAGES[$platform]:-} ]] || die "alias $alias has no LXD image"
+  done
+  alias=${DEFAULT_DEV_PLATFORM:-}
+  [[ $alias =~ ^[a-z0-9]+$ && -n ${PLATFORM_ALIASES[$alias]:-} ]] ||
+    die "unknown DEFAULT_DEV_PLATFORM: $alias"
+  ((${#OFFLINE_TEST_PLATFORMS[@]})) || die 'OFFLINE_TEST_PLATFORMS must not be empty'
+  for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
+    [[ -n $platform && -n ${DOCKER_IMAGES[$platform]:-} ]] || die "unknown offline test platform: $platform"
+    [[ ! -v test_platforms[$platform] ]] || die "duplicate offline test platform: $platform"
+    test_platforms[$platform]=1
+  done
+  for platform in "${OFFLINE_RELEASE_PLATFORMS[@]}"; do
+    [[ -n $platform ]] || die 'OFFLINE_RELEASE_PLATFORMS contains an empty entry'
+    [[ -v test_platforms[$platform] ]] || die "offline release platform is not tested: $platform"
+    [[ ! -v release_platforms[$platform] ]] || die "duplicate offline release platform: $platform"
+    release_platforms[$platform]=1
   done
   [[ ! -e offline ]] || die 'legacy offline source directory still exists'
   if grep -qE \
@@ -255,7 +296,8 @@ validate_scripts() {
   if [[ -d tests/fixtures ]]; then
     while IFS= read -r -d '' file; do
       case "$file" in
-        tests/fixtures/bash/* | tests/fixtures/validation/tmux-plugin) ;;
+        tests/fixtures/bash/* | tests/fixtures/validation/tmux-plugin)
+          ;;
         *)
           files+=("$file")
           ;;
@@ -267,7 +309,7 @@ validate_scripts() {
   run_test 30s bash tests/install_validation_tool_test.sh
   run_test 120s bash tests/validate_test.sh
   run_test 120s bash tests/bstow_test.sh
-  run_test 600s bash tests/dotfiles_release_test.sh
+  run_test 600s bash tests/dotfiles_release_runner.sh
   run_test 120s bash tests/dotfiles_release_ci_test.sh
   run_test 45s bash tests/dev_vm_test.sh
   run_test 30s bash tests/k9s_preview_test.sh
@@ -277,7 +319,7 @@ validate_scripts() {
   run_test 120s bash tests/scripts_test.sh
   run_test 60s bash tests/setup_asdf_test.sh
   run_test 30s bash tests/setup_system_test.sh
-  run_test 120s bash tests/setup_tools_test.sh
+  run_test 120s bash tests/setup_tools_runner.sh
 }
 
 validate_nvim2() {
@@ -286,7 +328,7 @@ validate_nvim2() {
   need shellcheck
   need stylua
   local -a test_scripts=(
-    nvim2/.config/nvim2/tests/check.sh
+    nvim2/.config/nvim2/tests/check_runner.sh
     nvim2/.config/nvim2/tests/fixtures/*.sh
   )
   local lock_file=nvim2/.config/nvim2/nvim-pack-lock.json
@@ -355,6 +397,7 @@ validate_configs() {
 }
 
 validate_tmux() {
+  need awk
   need git
   need python3
   need script
@@ -378,6 +421,13 @@ validate_tmux() {
   mkdir -p "$temporary_home/config with spaces/tmux/.tmux"
   cp "$repo_dir/tmux/.tmux.conf" "$tmux_config"
   cp "$repo_dir/tools.env" "$temporary_home/config with spaces/tools.env"
+  printf '%s\n' \
+    'TOOLS=(' \
+    '  tmux' \
+    '  tmux-sensible' \
+    '  tmux-resurrect' \
+    '  tmux-continuum' \
+    ')' >>"$temporary_home/config with spaces/tools.env"
   cp "$repo_dir/tmux/.tmux/"{eye-timer,load-plugins}.sh "$temporary_home/config with spaces/tmux/.tmux/"
   offline_root=$temporary_home/offline-releases/old
   plugin_roots=(
@@ -392,6 +442,7 @@ validate_tmux() {
       cp tests/fixtures/validation/tmux-plugin "$plugin_root/$plugin/${plugin#tmux-}.tmux"
     done
   done
+  printf 'OFFLINE_RELEASE_TOOLS=tmux,tmux-sensible,tmux-resurrect,tmux-continuum\n' >"$offline_root/release.env"
   (
     unset TMUX TMUX_OFFLINE_RELEASE_ROOT DOTFILES_TMUX_PLUGIN_DIR
     HOME="$temporary_home" timeout 10s tmux -L "$socket" \
@@ -489,6 +540,9 @@ validate_tools() {
   source validation.env
   # shellcheck source=setup-lib
   source scripts/setup-lib
+  source scripts/setup-catalog-lib
+  source scripts/setup-recipes-lib
+  source scripts/setup-tools-lib
   validate_tool_config
   validate_validation_config
   if grep -Eq \

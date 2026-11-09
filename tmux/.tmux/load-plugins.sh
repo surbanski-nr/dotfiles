@@ -9,14 +9,26 @@ source "$repo_dir/tools.env"
 
 if [[ -n ${TMUX_OFFLINE_RELEASE_ROOT:-} ]]; then
   root=$TMUX_OFFLINE_RELEASE_ROOT/share/tmux/plugins
-  tools=("${OFFLINE_RELEASE_TOOLS[@]}")
   metadata=$TMUX_OFFLINE_RELEASE_ROOT/release.env
-  if [[ -f $metadata ]] && grep -qx 'RELEASE_FORMAT=2' "$metadata"; then
-    serialized_profile=$(awk -F= '$1 == "OFFLINE_TOOLS" { print $2 }' "$metadata")
-    IFS=, read -r -a tools <<<"$serialized_profile"
-  fi
+  serialized_tools=$(awk -F= '
+    $1 == "OFFLINE_RELEASE_TOOLS" { tools = $2; count++ }
+    END {
+      if (count != 1 || tools == "") {
+        exit 1
+      }
+      print tools
+    }
+  ' "$metadata") || {
+    printf 'tmux plugins: release is missing its OFFLINE_RELEASE_TOOLS selection: %s\n' "$metadata" >&2
+    exit 1
+  }
+  IFS=, read -r -a tools <<<"$serialized_tools"
 else
-  root=${DOTFILES_TMUX_PLUGIN_DIR:-$HOME/.tmux/plugins}
+  store=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}
+  root=${DOTFILES_TMUX_PLUGIN_DIR:-$store/online/share/tmux/plugins}
+  if [[ -z ${DOTFILES_TMUX_PLUGIN_DIR:-} && ! -d $root ]]; then
+    root=$HOME/.tmux/plugins
+  fi
   tools=("${TOOLS[@]}")
 fi
 if [[ $root != /* || $root == *[[:cntrl:]]* ]]; then
@@ -35,6 +47,10 @@ for name in "${tools[@]}"; do
   fi
   entries+=("$entry")
 done
+if ((${#entries[@]})) && [[ $root == *[[:space:]]* ]]; then
+  printf 'tmux plugins: upstream plugins require a directory without whitespace: %s\n' "$root" >&2
+  exit 1
+fi
 for entry in "${entries[@]}"; do
   "$entry"
 done

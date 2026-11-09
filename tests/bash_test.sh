@@ -213,7 +213,8 @@ printf 'TOOL_RELEASES[python]=%q\n' \
   >>"$python_manifest/tools.env"
 ln -s "$repo_dir/scripts/setup-lib" "$python_manifest/scripts/setup-lib"
 ln -s "$repo_dir/scripts/setup-catalog-lib" "$python_manifest/scripts/setup-catalog-lib"
-ln -s "$repo_dir/scripts/setup-profile-lib" "$python_manifest/scripts/setup-profile-lib"
+ln -s "$repo_dir/scripts/setup-recipes-lib" "$python_manifest/scripts/setup-recipes-lib"
+ln -s "$repo_dir/scripts/setup-tools-lib" "$python_manifest/scripts/setup-tools-lib"
 printf 'TOOLS=(python)\n' >>"$python_manifest/tools.env"
 for command_name in bash grep timeout; do
   ln -s "$(command -v "$command_name")" "$python_home/bin/$command_name"

@@ -31,7 +31,7 @@ prerequisite_status=$?
 set -e
 [[ $prerequisite_status -ne 0 && $prerequisite_output == *'setup-tools: required command is missing: dotfiles-fixture-missing-command'* ]] ||
   fail 'setup-tools ignored its configured prerequisites'
-[[ ! -e $prerequisite_home/bin && ! -e $prerequisite_home/.local ]] ||
+[[ ! -e $prerequisite_home/dotfiles-releases/online/bin && ! -e $prerequisite_home/.local ]] ||
   fail 'a missing prerequisite changed the target home'
 
 set +e
@@ -47,12 +47,12 @@ set -e
 unsupported_repository=$test_root/unsupported-repository
 unsupported_home=$test_root/unsupported-home
 make_test_repo "$unsupported_repository"
-printf 'TOOLS+=(fzf)\n' >>"$unsupported_repository/tools.env"
+printf 'TOOLS+=(helm-schema)\n' >>"$unsupported_repository/tools.env"
 if run_setup "$unsupported_home" "$unsupported_repository" "$archive_root" \
   k9s >"$test_root/unsupported-profile.log" 2>&1; then
   fail 'setup-tools accepted a profile tool without a command adapter'
 fi
-[[ ! -e $unsupported_home/bin && ! -e $unsupported_home/.local ]] ||
+[[ ! -e $unsupported_home/dotfiles-releases/online/bin && ! -e $unsupported_home/.local ]] ||
   fail 'invalid profile changed the target home'
 
 kubens_repository=$test_root/kubens-repository
@@ -66,7 +66,7 @@ if kubens_output=$(run_setup "$kubens_home" "$kubens_repository" "$archive_root"
 fi
 [[ $kubens_output == *'kubectx and kubens defaults must use the same version'* ]] ||
   fail 'mismatched kubectx and kubens defaults were not reported'
-[[ ! -e $kubens_home/bin && ! -e $kubens_home/.local ]] ||
+[[ ! -e $kubens_home/dotfiles-releases/online/bin && ! -e $kubens_home/.local ]] ||
   fail 'mismatched kubectx and kubens defaults changed the target home'
 
 pin_repository=$test_root/pin-repository
@@ -88,8 +88,8 @@ append_release "$pin_repository/tools.env" TOOL_RELEASES shellcheck \
   "https://example.invalid/shellcheck/$daily_shellcheck/shellcheck-v$daily_shellcheck.linux.x86_64.tar.xz" \
   "$daily_shellcheck_digest"
 run_setup "$pin_home" "$pin_repository" "$pin_archives" shellcheck
-assert_link "$pin_home/bin/shellcheck" "shellcheck-$daily_shellcheck"
-"$pin_home/bin/shellcheck" --version | grep -F "$daily_shellcheck" >/dev/null
+assert_link "$pin_home/dotfiles-releases/online/bin/shellcheck" "../tools/bin/shellcheck-$daily_shellcheck"
+"$pin_home/dotfiles-releases/online/bin/shellcheck" --version | grep -F "$daily_shellcheck" >/dev/null
 
 missing_default_repository=$test_root/missing-default-repository
 missing_default_archives=$test_root/missing-default-archives
@@ -107,7 +107,7 @@ set -e
 [[ $missing_default_status -ne 0 &&
   $missing_default_output == *'TOOLS release k9s 99.1.0 requires an artifact'* ]] ||
   fail 'missing default artifact fell back to a later record'
-[[ ! -e $missing_default_home/bin && ! -e $missing_default_home/.local ]] ||
+[[ ! -e $missing_default_home/dotfiles-releases/online/bin && ! -e $missing_default_home/.local ]] ||
   fail 'missing default artifact changed the target home'
 
 for invalid_list in '' '   '; do
@@ -125,7 +125,7 @@ for invalid_list in '' '   '; do
   [[ $list_status -ne 0 ]] || fail 'empty project version list was accepted'
   [[ $list_output == *'TOOL_RELEASES[terraform]'* ]] ||
     fail 'empty project version list did not report its variable'
-  [[ ! -e $list_home/bin && ! -e $list_home/.local ]] ||
+  [[ ! -e $list_home/dotfiles-releases/online/bin && ! -e $list_home/.local ]] ||
     fail 'empty project version list changed the target home'
 done
 
@@ -138,7 +138,7 @@ append_release "$single_repository/tools.env" TOOL_RELEASES terraform \
   9.0.0 https://example.invalid/terraform.zip \
   0000000000000000000000000000000000000000000000000000000000000000
 run_setup "$single_home" "$single_repository" "$single_archives" k9s
-assert_link "$single_home/bin/k9s" "k9s-$K9S_VERSION"
+assert_link "$single_home/dotfiles-releases/online/bin/k9s" "../tools/bin/k9s-$K9S_VERSION"
 
 invalid_plugin_index=0
 for invalid_plugin in \
@@ -158,7 +158,7 @@ for invalid_plugin in \
   fi
   [[ $invalid_plugin_output == *'TMUX_PLUGINS[tmux-sensible]'* ]] ||
     fail 'invalid plugin error did not identify its catalog record'
-  [[ ! -e $invalid_plugin_home/bin && ! -e $invalid_plugin_home/.local &&
+  [[ ! -e $invalid_plugin_home/dotfiles-releases/online/bin && ! -e $invalid_plugin_home/.local &&
     ! -e $invalid_plugin_home/.tmux ]] ||
     fail 'an invalid Git plugin record changed HOME'
 done

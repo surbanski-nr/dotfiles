@@ -17,7 +17,6 @@ make_mason_artifact() {
   else
     make_selected_artifact "$commit_three" "$marker" "$destination" nvim rg python
   fi
-  printf 'NVIM_TOOLS_FORMAT=1\n' >>"$release/release.env"
   find "$mason/bin" "$mason/packages" "$release/python-locks" \
     "$release/python-wheelhouse" -mindepth 1 -depth -delete
   : >"$mason/inventory.tsv"
@@ -71,12 +70,24 @@ for damage in inventory receipt launcher extra-package python-inventory requirem
   release=$test_root/stage-$marker/$id_three
   mason=$release/share/nvim2/mason
   case $damage in
-    inventory) rm "$mason/inventory.tsv" ;;
-    receipt) rm "$mason/packages/stylua/mason-receipt.json" ;;
-    launcher) unlink "$mason/bin/stylua" ;;
-    extra-package) mkdir "$mason/packages/unselected" ;;
-    python-inventory) printf 'yamllint\t1.38.0\n' >"$release/python-locks/inventory.tsv" ;;
-    requirement) printf 'terraform\n' >>"$mason/requirements.txt" ;;
+    inventory)
+      rm "$mason/inventory.tsv"
+      ;;
+    receipt)
+      rm "$mason/packages/stylua/mason-receipt.json"
+      ;;
+    launcher)
+      unlink "$mason/bin/stylua"
+      ;;
+    extra-package)
+      mkdir "$mason/packages/unselected"
+      ;;
+    python-inventory)
+      printf 'yamllint\t1.38.0\n' >"$release/python-locks/inventory.tsv"
+      ;;
+    requirement)
+      printf 'terraform\n' >>"$mason/requirements.txt"
+      ;;
   esac
   repack_artifact "$marker" "$id_three" "$archive"
   if run_manager verify "$archive" >"$test_root/$damage.log" 2>&1; then
@@ -88,11 +99,13 @@ make_mason_artifact mason-manifest empty
 (
   # shellcheck source=../../scripts/build-dotfiles-release
   source "$repo_dir/scripts/build-dotfiles-release"
-  # shellcheck source=../../scripts/setup-profile-lib
-  source "$repo_dir/scripts/setup-profile-lib"
+  # shellcheck source=../../scripts/setup-catalog-lib
+  source "$repo_dir/scripts/setup-catalog-lib"
+  # shellcheck source=../../scripts/setup-tools-lib
+  source "$repo_dir/scripts/setup-tools-lib"
   # shellcheck source=../../tools.env
   source "$repo_dir/tools.env"
-  BUILD_TOOL_PROFILE=(nvim rg)
+  OFFLINE_RELEASE_TOOLS=(nvim rg)
   BUILD_TMUX_PLUGINS=()
   SETUP_SYSTEM_PACKAGES=()
   BUILD_VERSIONS[nvim]=0.12.5
@@ -106,12 +119,20 @@ make_mason_artifact mason-manifest empty
   awk '
     /^python_locks_sha256:/ {
       getline
-      if ($0 != "python_wheels_sha256:") exit 1
+      if ($0 != "python_wheels_sha256:") {
+        exit 1
+      }
       getline
-      if ($0 !~ /^nvim_pack_lock_sha256=/) exit 1
+      if ($0 !~ /^nvim_pack_lock_sha256=/) {
+        exit 1
+      }
       found = 1
     }
-    END { if (!found) exit 1 }
+    END {
+      if (!found) {
+        exit 1
+      }
+    }
   ' "$manifest_release/build-manifest.txt"
 )
 

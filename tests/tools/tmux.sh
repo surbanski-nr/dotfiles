@@ -4,15 +4,16 @@ health_tmux() {
   local release=$1 health_home=$2 socket socket_dir plugin entry option command
   local client client_input client_stderr client_pid reload_value
   local tmux=$release/bin/tmux
-  local -a profile=()
+  local state_dir=$health_home/'tmux saved state'
+  local -a selected_tools=()
   # Read and populated through namerefs.
   # shellcheck disable=SC2034
   local -A metadata=()
 
   read_release_metadata "$release/release.env" metadata || return
-  read_release_profile metadata profile || return
+  read_release_tools metadata selected_tools || return
 
-  mkdir -p "$health_home/.local/share/tmux/resurrect" || return
+  mkdir -p "$state_dir" || return
   (
     # Unix socket paths are short; a valid HOME may exceed their limit.
     socket_dir=$(mktemp -d /tmp/dotfiles-tmux.XXXXXX) || exit
@@ -67,6 +68,18 @@ health_tmux() {
       die 'tmux Shift-R did not reload the physical offline config'
       exit 1
     }
+    if list_has selected_tools tmux-resurrect; then
+      "$tmux" -S "$socket" set-option -g @resurrect-dir "$state_dir" || exit
+      "$tmux" -S "$socket" send-keys -K -c "$client" C-a C-s || exit
+      for _ in {1..100}; do
+        [[ -s $state_dir/last ]] && break
+        sleep 0.05
+      done
+      [[ -s $state_dir/last ]] || {
+        die 'tmux save key did not persist its session state'
+        exit 1
+      }
+    fi
     [[ ! -s $client_stderr ]] || {
       die 'tmux offline reload client wrote to stderr'
       exit 1
@@ -74,7 +87,7 @@ health_tmux() {
     "$tmux" -S "$socket" detach-client -t "$client" || exit
     exec {client_input_fd}>&-
     wait "$client_pid" || exit
-    for plugin in "${profile[@]}"; do
+    for plugin in "${selected_tools[@]}"; do
       [[ $plugin == tmux-* ]] || continue
       entry=$release/share/tmux/plugins/$plugin/${plugin#tmux-}.tmux
       [[ $plugin != tmux-sensible ]] || entry=$release/share/tmux/plugins/$plugin/sensible.tmux
@@ -86,7 +99,7 @@ health_tmux() {
       "$tmux" -S "$socket" run-shell "$command" || exit
       printf 'tmux-plugin=%s exit=0\n' "$plugin"
     done
-    if profile_has profile tmux-resurrect; then
+    if list_has selected_tools tmux-resurrect; then
       "$tmux" -S "$socket" list-keys -T prefix C-s || exit
     fi
   ) || return

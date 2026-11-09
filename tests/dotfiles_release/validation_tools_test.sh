@@ -32,7 +32,7 @@ assert_link "$test_home/bin/yq" yq-0.9
 [[ -d $test_root/user-plugins ]] || fail 'uninstall removed user Helm plugins'
 
 for defect in missing-yq missing-plugin missing-manifest missing-license wrong-manifest \
-  missing-yq-version missing-plugin-version invalid-version duplicate-key unknown-key legacy-fields; do
+  missing-yq-version missing-plugin-version invalid-version duplicate-key unknown-key unselected-fields; do
   marker=validation-$defect
   archive=$test_root/$marker.tar.gz
   make_artifact "$commit_three" "$marker" "$archive" 3.0 true true true true
@@ -69,8 +69,8 @@ for defect in missing-yq missing-plugin missing-manifest missing-license wrong-m
     unknown-key)
       printf 'NEW_UNKNOWN_VERSION=3.0\n' >>"$release/release.env"
       ;;
-    legacy-fields)
-      sed -i 's/,yq$//' "$release/release.env"
+    unselected-fields)
+      sed -i '/^OFFLINE_RELEASE_TOOLS=/s/,yq,/,/' "$release/release.env"
       ;;
   esac
   repack_artifact "$marker" "$id_three" "$archive"
@@ -110,7 +110,7 @@ for defect in wrong-plugin broken-yaml broken-generation; do
     tool=yq
     [[ $defect != broken-generation ]] || tool=helm-schema
     bash -c 'source "$1"; source "$4"; health_stage "validation tools" "$5" "$2" "$3"' \
-      checker-test "$repo_dir/scripts/check-dotfiles-release" \
+      checker-test "$repo_dir/tests/tools_runner.sh" \
       "$test_home/dotfiles-releases/$id_three" "$test_root/checker-$defect" "$repo_dir/tests/tools/$tool.sh" "health_${tool//-/_}" \
       >"$test_root/checker-$defect.log" 2>&1 || status=$?
     [[ $status != 0 && $(<"$test_root/checker-$defect.log") == *'validation tools health check failed'* ]] ||

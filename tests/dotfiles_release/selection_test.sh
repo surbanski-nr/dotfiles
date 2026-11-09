@@ -10,6 +10,9 @@ if bash -c '
   set -euo pipefail
   source "$1/tools.env"
   source "$1/scripts/setup-lib"
+  source "$1/scripts/setup-catalog-lib"
+  source "$1/scripts/setup-recipes-lib"
+  source "$1/scripts/setup-tools-lib"
   OFFLINE_RELEASE_TOOLS=(nvim)
   validate_tool_config offline
 ' bash "$repo_dir" >"$test_root/missing-rg-config.log" 2>&1; then
@@ -22,6 +25,9 @@ bash -c '
   set -euo pipefail
   source "$1/tools.env"
   source "$1/scripts/setup-lib"
+  source "$1/scripts/setup-catalog-lib"
+  source "$1/scripts/setup-recipes-lib"
+  source "$1/scripts/setup-tools-lib"
   OFFLINE_RELEASE_TOOLS=(nvim rg)
   validate_tool_config offline
 ' bash "$repo_dir"
@@ -35,7 +41,9 @@ make_selected_artifact "$commit_three" selected-tiny "$tiny" rg
 chosen=()
 for tool in "${OFFLINE_RELEASE_TOOLS[@]}"; do
   case $tool in
-    nvim | yamllint | k9s | trivy) continue ;;
+    nvim | yamllint | k9s | trivy)
+      continue
+      ;;
   esac
   chosen+=("$tool")
 done
@@ -111,6 +119,8 @@ for defect in "${defects[@]}"; do
     make_selected_artifact "$commit_three" "$marker" "$archive" rg go
   elif [[ $defect == missing-terraform ]]; then
     make_selected_artifact "$commit_three" "$marker" "$archive" nvim nodejs python go rg terraform
+  elif [[ $defect == missing-dependency ]]; then
+    make_selected_artifact "$commit_three" "$marker" "$archive" nvim rg python
   else
     make_selected_artifact "$commit_three" "$marker" "$archive" rg fd
   fi
@@ -123,33 +133,49 @@ for defect in "${defects[@]}"; do
       mkdir -p "$release/dotfiles/mc/.config/mc"
       printf 'config\n' >"$release/dotfiles/mc/.config/mc/ini"
       ;;
-    missing-command) unlink "$release/bin/rg" ;;
-    missing-private-go) unlink "$release/tools/go/bin/go" ;;
+    missing-command)
+      unlink "$release/bin/rg"
+      ;;
+    missing-private-go)
+      unlink "$release/tools/go/bin/go"
+      ;;
     missing-config)
       unlink "$release/dotfiles/k9s/.config/k9s/config.yaml"
       ;;
     missing-dependency)
-      printf 'OFFLINE_TOOLS=rg,nvim\nNVIM_VERSION=v3.0\n' >"$test_root/profile-data"
-      sed -i '/^OFFLINE_TOOLS=/d' "$release/release.env"
-      cat "$test_root/profile-data" >>"$release/release.env"
+      sed -i 's/^OFFLINE_RELEASE_TOOLS=.*/OFFLINE_RELEASE_TOOLS=nvim,python/; /^RG_VERSION=/d' "$release/release.env"
+      unlink "$release/bin/rg"
+      unlink "$release/tools/bin/rg"
       ;;
     missing-terraform)
+      printf 'terraform\n' >>"$release/share/nvim2/mason/requirements.txt"
       sed -i 's/,terraform$//; /^TERRAFORM_VERSION=/d' "$release/release.env"
       unlink "$release/bin/terraform"
       unlink "$release/tools/bin/terraform"
       ;;
-    empty) sed -i 's/^OFFLINE_TOOLS=.*/OFFLINE_TOOLS=/' "$release/release.env" ;;
-    duplicate) sed -i 's/^OFFLINE_TOOLS=.*/OFFLINE_TOOLS=rg,rg/' "$release/release.env" ;;
-    unknown) sed -i 's/^OFFLINE_TOOLS=.*/OFFLINE_TOOLS=rg,unknown/' "$release/release.env" ;;
-    invalid-source-commit) sed -i "s/^SOURCE_COMMIT=.*/SOURCE_COMMIT=${commit_three:0:12}invalid/" "$release/release.env" ;;
+    empty)
+      sed -i 's/^OFFLINE_RELEASE_TOOLS=.*/OFFLINE_RELEASE_TOOLS=/' "$release/release.env"
+      ;;
+    duplicate)
+      sed -i 's/^OFFLINE_RELEASE_TOOLS=.*/OFFLINE_RELEASE_TOOLS=rg,rg/' "$release/release.env"
+      ;;
+    unknown)
+      sed -i 's/^OFFLINE_RELEASE_TOOLS=.*/OFFLINE_RELEASE_TOOLS=rg,unknown/' "$release/release.env"
+      ;;
+    invalid-source-commit)
+      sed -i "s/^SOURCE_COMMIT=.*/SOURCE_COMMIT=${commit_three:0:12}invalid/" "$release/release.env"
+      ;;
   esac
   repack_artifact "$marker" "$id_three" "$archive"
   if run_manager verify "$archive" >"$test_root/$marker.log" 2>&1; then
     fail "verification accepted $defect"
   fi
   if [[ $defect == missing-terraform ]]; then
-    [[ $(<"$test_root/$marker.log") == *'nvim requires terraform'* ]] ||
+    [[ $(<"$test_root/$marker.log") == *'configured Neovim tools require terraform'* ]] ||
       fail 'verification did not report the missing Terraform dependency'
+  elif [[ $defect == missing-dependency ]]; then
+    [[ $(<"$test_root/$marker.log") == *'nvim requires rg'* ]] ||
+      fail 'verification did not report the missing ripgrep dependency'
   fi
 done
 

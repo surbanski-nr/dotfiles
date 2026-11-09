@@ -11,9 +11,10 @@ preflight_tmux_plugins() {
 
   require_command git || return
   require_command timeout || return
+  # Upstream plugins embed their directory in unquoted shell commands.
   if [[ $root != /* || $root == *[[:space:][:cntrl:]]* || -L $root ||
     ( -e $root && ! -d $root ) ]]; then
-    report_error "tmux plugin directory must be absolute, without whitespace, and not a symlink: $root"
+    report_error "tmux plugin directory must be absolute, without whitespace or control characters, and not a symlink: $root"
     return 1
   fi
   for name in "$@"; do

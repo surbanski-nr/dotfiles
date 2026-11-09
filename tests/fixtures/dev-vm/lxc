@@ -32,7 +32,7 @@ case $command in
         if [[ -e $TEST_DEV_STATE/image.json ]]; then
           checksum=$(jq -r '.properties["user.dotfiles.dev.sha256"]' "$TEST_DEV_STATE/image.json")
         else
-          checksum=$(printf '%s\n' "$PLATFORMS_JSON" | jq -r --arg alias "$PLATFORM_ALIAS" '.[$alias].sha256')
+          checksum=$TEST_DEV_IMAGE_SHA256
         fi
         printf 'Properties:\n    user.dotfiles.dev.sha256: %s\n' "$checksum"
         ;;

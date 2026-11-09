@@ -21,20 +21,24 @@ set -e
 
 metadata_commit=6666666666666666666666666666666666666666
 metadata_id=dotfiles-${metadata_commit:0:12}
-metadata_artifact=$test_root/metadata-unknown.tar.gz
-make_artifact "$metadata_commit" metadata-unknown "$metadata_artifact"
-printf 'FORMAT_VERSION=1\n' >>"$test_root/stage-metadata-unknown/$metadata_id/release.env"
-repack_artifact metadata-unknown "$metadata_id" "$metadata_artifact"
-set +e
-metadata_output=$(run_manager install "$metadata_artifact" 2>&1)
-metadata_status=$?
-set -e
-[[ $metadata_status -ne 0 &&
-  $metadata_output == *'unknown release metadata key: FORMAT_VERSION'* ]] ||
-  fail 'obsolete release metadata marker was accepted'
-assert_link "$test_home/dotfiles-releases/current" "$id_one"
-[[ ! -e $test_home/dotfiles-releases/$metadata_id ]] ||
-  fail 'invalid metadata package was retained'
+for obsolete in FORMAT_VERSION=1 RELEASE_FORMAT=2 NVIM_TOOLS_FORMAT=1; do
+  field=${obsolete%%=*}
+  marker=metadata-unknown-$field
+  metadata_artifact=$test_root/$marker.tar.gz
+  make_artifact "$metadata_commit" "$marker" "$metadata_artifact"
+  printf '%s\n' "$obsolete" >>"$test_root/stage-$marker/$metadata_id/release.env"
+  repack_artifact "$marker" "$metadata_id" "$metadata_artifact"
+  set +e
+  metadata_output=$(run_manager install "$metadata_artifact" 2>&1)
+  metadata_status=$?
+  set -e
+  [[ $metadata_status -ne 0 &&
+    $metadata_output == *"unknown or unselected release metadata key: $field"* ]] ||
+    fail "obsolete release metadata marker was accepted: $field"
+  assert_link "$test_home/dotfiles-releases/current" "$id_one"
+  [[ ! -e $test_home/dotfiles-releases/$metadata_id ]] ||
+    fail 'invalid metadata package was retained'
+done
 
 duplicate_commit=7777777777777777777777777777777777777777
 duplicate_id=dotfiles-${duplicate_commit:0:12}

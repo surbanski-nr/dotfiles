@@ -7,9 +7,6 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/fixture.sh"
 create_fixture
 
 release=$test_root/stage-one/$id_one
-# Releases whose .bashrc predates the library must still verify and install.
-unlink "$release/dotfiles/bash/.bash_history_lib"
-unlink "$release/dotfiles/scripts/bash-history-archive"
 printf 'Go UTF-8 fixture\n' >"$release/tools/Þfoo.go"
 ln -s Þfoo.go "$release/tools/utf8-link"
 ln -s lib/tmux-test/run_tests "$release/share/tmux/plugins/tmux-resurrect/run_tests"
@@ -55,7 +52,8 @@ fi
 for defect in missing-layout missing-executable missing-plugin missing-wheelhouse missing-history-library missing-history-archiver \
   dangling-plugin-runtime missing-private-nvim missing-private-tmux missing-nvim-runtime \
   missing-private-python-link public-python public-python3 \
-  incomplete-ssh checksum missing-checksum extra-file extra-root dangling-link duplicate-member installed-state \
+  incomplete-ssh missing-ssh missing-nvim-inventory missing-nvim-requirements missing-plugin-pin \
+  checksum missing-checksum extra-file extra-root dangling-link duplicate-member installed-state \
   inventory-mismatch duplicate-inventory extra-lock control-character control-link; do
   marker=verify-$defect
   archive=$test_root/$marker.tar.gz
@@ -66,7 +64,6 @@ for defect in missing-layout missing-executable missing-plugin missing-wheelhous
       find "$release/config" -depth -delete
       ;;
     missing-history-library | missing-history-archiver)
-      cp "$repo_dir/bash/.bashrc" "$release/dotfiles/bash/.bashrc"
       if [[ $defect == missing-history-library ]]; then
         unlink "$release/dotfiles/bash/.bash_history_lib"
       else
@@ -102,6 +99,18 @@ for defect in missing-layout missing-executable missing-plugin missing-wheelhous
       ;;
     incomplete-ssh)
       unlink "$release/dotfiles/ssh/.ssh/config"
+      ;;
+    missing-ssh)
+      find "$release/dotfiles/ssh" -depth -delete
+      ;;
+    missing-nvim-inventory)
+      unlink "$release/share/nvim2/mason/inventory.tsv"
+      ;;
+    missing-nvim-requirements)
+      unlink "$release/share/nvim2/mason/requirements.txt"
+      ;;
+    missing-plugin-pin)
+      sed -i '/^TMUX_SENSIBLE_COMMIT=/d' "$release/release.env"
       ;;
     dangling-link)
       ln -s missing "$release/tools/dangling"

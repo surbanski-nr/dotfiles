@@ -40,10 +40,18 @@ write_fake() {
   mkdir -p "$(dirname -- "$path")"
   cat >"$path" <<EOF
 #!/usr/bin/env bash
-if [[ '$name' == k9s && \$* != 'version --short' ]]; then exit 93; fi
-if [[ '$name' == oh-my-posh && \$* != version ]]; then exit 94; fi
-if [[ '$name' == go && \$* != version ]]; then exit 95; fi
-if [[ '$name' == kind && \$* != version ]]; then exit 96; fi
+if [[ '$name' == k9s && \$* != 'version --short' ]]; then
+  exit 93
+fi
+if [[ '$name' == oh-my-posh && \$* != version ]]; then
+  exit 94
+fi
+if [[ '$name' == go && \$* != version ]]; then
+  exit 95
+fi
+if [[ '$name' == kind && \$* != version ]]; then
+  exit 96
+fi
 if [[ '$name' == uv && \${1:-} == python ]]; then
   printf '%s\\n' "\$*" >>"\$TEST_UV_LOG"
   case \${2:-} in
@@ -60,7 +68,9 @@ if [[ '$name' == uv && \${1:-} == python ]]; then
       mkdir -p "\${XDG_CONFIG_HOME:-\$HOME/.config}/uv"
       printf '%s\\n' "\${!#}" >"\${XDG_CONFIG_HOME:-\$HOME/.config}/uv/.python-version"
       ;;
-    *) exit 99 ;;
+    *)
+      exit 99
+      ;;
   esac
   exit 0
 fi
@@ -79,7 +89,11 @@ write_source_fixture() {
 set -euo pipefail
 prefix=
 for argument in "\$@"; do
-  case \$argument in --prefix=*) prefix=\${argument#*=} ;; esac
+  case \$argument in
+    --prefix=*)
+      prefix=\${argument#*=}
+      ;;
+  esac
 done
 [[ -n \$prefix ]]
 mkdir -p "\$prefix/bin"
@@ -103,6 +117,9 @@ load_test_versions() {
   source "$repository/tools.env"
   # shellcheck disable=SC1090
   source "$repository/scripts/setup-lib"
+  source "$repository/scripts/setup-catalog-lib"
+  source "$repository/scripts/setup-recipes-lib"
+  source "$repository/scripts/setup-tools-lib"
   select_default_release TOOL_RELEASES gh
   GH_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES htop
@@ -136,7 +153,10 @@ make_test_repo() {
   cp "$repo_dir/setup-tools" "$destination/setup-tools"
   cp "$repo_dir/scripts/setup-lib" "$destination/scripts/setup-lib"
   cp "$repo_dir/scripts/setup-catalog-lib" "$destination/scripts/setup-catalog-lib"
-  cp "$repo_dir/scripts/setup-profile-lib" "$destination/scripts/setup-profile-lib"
+  cp "$repo_dir/scripts/setup-recipes-lib" "$destination/scripts/setup-recipes-lib"
+  cp "$repo_dir/scripts/setup-tools-lib" "$destination/scripts/setup-tools-lib"
+  cp "$repo_dir/scripts/setup-system-lib" "$destination/scripts/setup-system-lib"
+  cp "$repo_dir/scripts/dotfiles-release" "$destination/scripts/dotfiles-release"
   cp "$repo_dir/scripts/setup-tmux-lib" "$destination/scripts/setup-tmux-lib"
   cp "$repo_dir/tools.env" "$destination/tools.env"
   cp "$repo_dir/system.env" "$destination/system.env"
@@ -154,10 +174,29 @@ make_archives() {
   local repository=$1
   local archive_root=$2
   local work=$test_root/archive-work
-  local digest
+  local digest tool version asset records
 
   load_test_versions "$repository"
   mkdir -p "$archive_root" "$work"
+
+  for tool in kubectl helm; do
+    release_versions TOOL_RELEASES "$tool"
+    records=
+    for version in "${RELEASE_VERSIONS[@]}"; do
+      asset=$tool
+      mkdir -p "$archive_root/$tool/$version"
+      if [[ $tool == helm ]]; then
+        asset=helm.tar.gz
+        write_fake "$work/linux-amd64/helm" helm "$version"
+        tar -C "$work" -czf "$archive_root/$tool/$version/$asset" linux-amd64
+      else
+        write_fake "$archive_root/$tool/$version/$asset" "$tool" "$version"
+      fi
+      digest=$(sha256sum "$archive_root/$tool/$version/$asset" | awk '{print $1}')
+      records+="$version|https://example.invalid/$tool/$version/$asset|$digest"$'\n'
+    done
+    printf 'TOOL_RELEASES[%q]=%q\n' "$tool" "$records" >>"$repository/tools.env"
+  done
 
   write_fake "$archive_root/yq/$YQ_VERSION/yq_linux_amd64" yq "$YQ_VERSION"
   digest=$(sha256sum "$archive_root/yq/$YQ_VERSION/yq_linux_amd64" | awk '{print $1}')
@@ -261,9 +300,17 @@ destination=
 url=
 while (($#)); do
   case $1 in
-    --output) destination=$2; shift 2 ;;
-    https://example.invalid/*) url=$1; shift ;;
-    *) shift ;;
+    --output)
+      destination=$2
+      shift 2
+      ;;
+    https://example.invalid/*)
+      url=$1
+      shift
+      ;;
+    *)
+      shift
+      ;;
   esac
 done
 [[ -n $destination && -n $url ]] || exit 99
