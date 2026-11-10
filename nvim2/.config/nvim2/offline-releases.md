@@ -225,7 +225,7 @@ parser or server is a release failure.
 The supported and locally qualified Linux x86-64 platforms are Debian 13,
 Ubuntu 24.04, Ubuntu 26.04 and Amazon Linux 2023. Standalone Python wheels,
 tmux dynamic libraries and the complete Neovim profile are qualified separately
-in each pinned image. `OFFLINE_RELEASE_PLATFORMS` in `release.env` independently
+in each pinned image. `OFFLINE_RELEASE_PLATFORMS` in `platforms.env` independently
 selects which qualified artifacts the GitHub workflow publishes. Ubuntu 24.04
 publication is currently paused.
 The final runtime check uses a fresh prepared container, a read-only artifact,

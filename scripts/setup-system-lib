@@ -1,27 +1,5 @@
 #!/usr/bin/env bash
 
-load_system_config() {
-  local file=$1
-
-  if [[ ! -r $file ]]; then
-    report_error "cannot read system configuration: $file"
-    return 1
-  fi
-  # shellcheck disable=SC1090
-  source "$file"
-}
-
-load_platform_config() {
-  local file=$1
-
-  if [[ ! -r $file ]]; then
-    report_error "cannot read platform configuration: $file"
-    return 1
-  fi
-  # shellcheck disable=SC1090
-  source "$file"
-}
-
 system_validate_platform_name() {
   case $1 in
     debian-13-x86_64 | ubuntu-24.04-x86_64 | ubuntu-26.04-x86_64 | amzn-2023-x86_64)

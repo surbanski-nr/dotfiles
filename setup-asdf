@@ -36,7 +36,7 @@ main() {
         ;;
     esac
   done
-  load_config
+  load_setup_config
   if ((${#requested[@]} == 0)); then
     mapfile -t requested < <(printf '%s\n' "${!ASDF_PLUGINS[@]}" | LC_ALL=C sort)
   fi
@@ -56,8 +56,8 @@ main() {
   finish_online_setup "$REPO_DIR" "$metadata"
 }
 
-load_config() {
-  load_system_config "$REPO_DIR/system.env"
+load_setup_config() {
+  load_config "$REPO_DIR/system.env"
   validate_tool_config asdf
   select_default_release TOOL_RELEASES asdf
   ASDF_VERSION=$RELEASE_VERSION
@@ -360,7 +360,7 @@ source "$REPO_DIR/scripts/setup-recipes-lib"
 source "$REPO_DIR/scripts/setup-tools-lib"
 source "$REPO_DIR/scripts/setup-online-lib"
 source "$REPO_DIR/scripts/setup-system-lib"
-load_tool_catalog "$REPO_DIR/tools.env"
+load_config "$REPO_DIR/tools.env"
 # Initialize cleanup paths even when --help exits before setup.
 declare -a TEMP_PATHS=()
 trap cleanup_setup EXIT

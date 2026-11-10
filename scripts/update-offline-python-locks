@@ -19,12 +19,12 @@ source "$repo_dir/scripts/setup-catalog-lib"
 source "$repo_dir/scripts/setup-recipes-lib"
 source "$repo_dir/scripts/setup-tools-lib"
 source "$repo_dir/scripts/setup-system-lib"
-load_tool_catalog "$repo_dir/tools.env"
+load_config "$repo_dir/tools.env"
 validate_tool_config
 validate_tool_selection TOOLS online
 validate_tool_selection OFFLINE_RELEASE_TOOLS offline
 
-load_system_config "$repo_dir/system.env"
+load_config "$repo_dir/system.env"
 require_setup_commands update-offline-python-locks
 
 work=$(mktemp -d)

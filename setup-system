@@ -49,5 +49,5 @@ REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$REPO_DIR/scripts/setup-lib"
 # shellcheck source=scripts/setup-system-lib
 source "$REPO_DIR/scripts/setup-system-lib"
-load_system_config "$REPO_DIR/system.env"
+load_config "$REPO_DIR/system.env"
 main

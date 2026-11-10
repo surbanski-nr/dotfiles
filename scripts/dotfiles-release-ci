@@ -24,14 +24,14 @@ platform_in_list() {
 }
 
 load_platform_lists() {
-  local config=$script_dir/../release.env platform
+  local config=$script_dir/../platforms.env platform
   local -A seen_test=() seen_release=()
 
   [[ -r $config ]] || report_error "cannot read $config"
-  load_platform_config "$config" || return
+  load_config "$config" || return
   declare -p PLATFORM_ALIASES DOCKER_IMAGES \
     OFFLINE_TEST_PLATFORMS OFFLINE_RELEASE_PLATFORMS >/dev/null 2>&1 ||
-    report_error 'release.env must define platform aliases, Docker images and offline platform lists'
+    report_error 'platforms.env must define platform aliases, Docker images and offline platform lists'
   test_platforms=("${OFFLINE_TEST_PLATFORMS[@]}")
   release_platforms=("${OFFLINE_RELEASE_PLATFORMS[@]}")
   ((${#test_platforms[@]})) || report_error 'OFFLINE_TEST_PLATFORMS must not be empty'
@@ -190,9 +190,9 @@ read_builder_image() (
   local source_dir=$1 platform=$2 image
   # Read the image pin from the release snapshot without replacing the workflow's lists.
   unset DOCKER_IMAGES
-  load_platform_config "$source_dir/release.env" || return
+  load_config "$source_dir/platforms.env" || return
   declare -p DOCKER_IMAGES >/dev/null 2>&1 || {
-    report_error 'release snapshot must define DOCKER_IMAGES in release.env'
+    report_error 'release snapshot must define DOCKER_IMAGES in platforms.env'
     return 1
   }
   image=${DOCKER_IMAGES[$platform]:-}

@@ -15,13 +15,12 @@ fail() {
   exit 1
 }
 
-# shellcheck source=../tools.env
-source "$repo_dir/tools.env"
 # shellcheck source=../scripts/setup-lib
 source "$repo_dir/scripts/setup-lib"
 source "$repo_dir/scripts/setup-catalog-lib"
 source "$repo_dir/scripts/setup-recipes-lib"
 source "$repo_dir/scripts/setup-tools-lib"
+load_config "$repo_dir/tools.env"
 ASDF_VERSION=9.9.0
 
 append_release() {

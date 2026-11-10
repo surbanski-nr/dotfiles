@@ -114,12 +114,11 @@ load_test_versions() {
   local repository=$1
 
   # shellcheck disable=SC1090
-  source "$repository/tools.env"
-  # shellcheck disable=SC1090
   source "$repository/scripts/setup-lib"
   source "$repository/scripts/setup-catalog-lib"
   source "$repository/scripts/setup-recipes-lib"
   source "$repository/scripts/setup-tools-lib"
+  load_config "$repository/tools.env"
   select_default_release TOOL_RELEASES gh
   GH_VERSION=$RELEASE_VERSION
   select_default_release TOOL_RELEASES htop

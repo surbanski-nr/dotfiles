@@ -1045,7 +1045,7 @@ check_online_asdf() (
   source "$release/dotfiles/scripts/setup-catalog-lib"
   # This checkout can differ from the embedded offline catalog. Keep its
   # declarations inside this subshell.
-  load_tool_catalog "$release/dotfiles/tools.env"
+  load_config "$release/dotfiles/tools.env"
   target=$(readlink -f -- "$release/bin/asdf") || return
   expected=${target##*/asdf-}
   output=$(timeout 30s "$release/bin/asdf" version) || return

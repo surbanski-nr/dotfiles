@@ -11,7 +11,7 @@ tool=$1
 
 source "$repo_dir/scripts/setup-catalog-lib"
 source "$repo_dir/scripts/setup-recipes-lib"
-load_tool_catalog "$repo_dir/validation.env"
+load_config "$repo_dir/validation.env"
 validate_validation_config
 for configured_tool in "${VALIDATION_TOOLS[@]}"; do
   if [[ $configured_tool == yamllint ]]; then

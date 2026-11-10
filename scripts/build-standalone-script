@@ -16,16 +16,12 @@ embed_file() {
 source_dir=$1 output=$2
 # shellcheck source=setup-lib
 source "$source_dir/scripts/setup-lib"
-# shellcheck source=setup-catalog-lib
-source "$source_dir/scripts/setup-catalog-lib"
-# shellcheck source=setup-system-lib
-source "$source_dir/scripts/setup-system-lib"
 mkdir -p -- "$(dirname -- "$output")"
 {
   printf '#!/usr/bin/env bash\n# Generated from repository sources; edit those sources, not this artifact.\n\n'
   printf '##### BEGIN system.env (runtime and Docker) #####\n'
   (
-    load_system_config "$source_dir/system.env"
+    load_config "$source_dir/system.env"
     declare -p SYSTEM_RUNTIME_PACKAGES SYSTEM_RUNTIME_COMMANDS \
       SYSTEM_DEBIAN_RUNTIME_PACKAGES SYSTEM_AMZN_RUNTIME_PACKAGES \
       SYSTEM_DEBIAN_DOCKER_PACKAGES SYSTEM_AMZN_DOCKER_PACKAGES \
@@ -35,7 +31,7 @@ mkdir -p -- "$(dirname -- "$output")"
   printf '##### END system.env (runtime and Docker) #####\n'
   printf '\n##### BEGIN tools.env (TOOL_CHECKS) #####\n'
   (
-    load_tool_catalog "$source_dir/tools.env"
+    load_config "$source_dir/tools.env"
     declare -p TOOL_CHECKS
   )
   printf '##### END tools.env (TOOL_CHECKS) #####\n'

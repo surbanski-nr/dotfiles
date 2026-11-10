@@ -103,8 +103,7 @@ make_mason_artifact mason-manifest empty
   source "$repo_dir/scripts/setup-catalog-lib"
   # shellcheck source=../../scripts/setup-tools-lib
   source "$repo_dir/scripts/setup-tools-lib"
-  # shellcheck source=../../tools.env
-  source "$repo_dir/tools.env"
+  load_config "$repo_dir/tools.env"
   OFFLINE_RELEASE_TOOLS=(nvim rg)
   BUILD_TMUX_PLUGINS=()
   SETUP_SYSTEM_PACKAGES=()

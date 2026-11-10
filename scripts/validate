@@ -226,13 +226,13 @@ validate_scripts() {
     [[ -x $file ]] || report_error "executable bit is missing: $file"
   done
 
-  check_shell_syntax bash release.env system.env
+  check_shell_syntax bash platforms.env system.env
   # shellcheck source=setup-system-lib
   source scripts/setup-system-lib
-  load_platform_config "$repo_dir/release.env"
+  load_config "$repo_dir/platforms.env"
   declare -p PLATFORM_ALIASES DOCKER_IMAGES LXD_IMAGES LXD_IMAGE_SHA256 \
     OFFLINE_TEST_PLATFORMS OFFLINE_RELEASE_PLATFORMS >/dev/null 2>&1 ||
-    report_error 'release.env must define platform aliases, images and offline platform lists'
+    report_error 'platforms.env must define platform aliases, images and offline platform lists'
   for platform in "${!DOCKER_IMAGES[@]}"; do
     system_validate_platform_name "$platform" || report_error "unsupported platform ID: $platform"
     [[ ${DOCKER_IMAGES[$platform]} =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] ||
@@ -275,7 +275,7 @@ validate_scripts() {
   [[ ! -e offline ]] || report_error 'legacy offline source directory still exists'
   if grep -qE \
     'nvim2-release|NVIM2_RELEASE|TARGET_(USER|UID|HOME)' \
-    scripts/dotfiles-release scripts/build-dotfiles-release release.env \
+    scripts/dotfiles-release scripts/build-dotfiles-release platforms.env \
     .github/workflows/dotfiles-release.yml; then
     report_error 'offline release files retain a legacy name or baked target identity'
   fi
@@ -412,8 +412,10 @@ validate_tmux() {
   cleanup_tmux_home=$temporary_home
   cleanup_tmux_socket=$socket
   tmux_config=$temporary_home/'config with spaces/tmux/explicit.tmux.conf'
-  mkdir -p "$temporary_home/config with spaces/tmux/.tmux"
+  mkdir -p "$temporary_home/config with spaces/tmux/.tmux" \
+    "$temporary_home/config with spaces/scripts"
   cp "$repo_dir/tmux/.tmux.conf" "$tmux_config"
+  cp "$repo_dir/scripts/setup-lib" "$temporary_home/config with spaces/scripts/"
   cp "$repo_dir/tools.env" "$temporary_home/config with spaces/tools.env"
   printf '%s\n' \
     'TOOLS=(' \
@@ -531,8 +533,8 @@ validate_tools() {
   source scripts/setup-catalog-lib
   source scripts/setup-recipes-lib
   source scripts/setup-tools-lib
-  load_tool_catalog "$repo_dir/tools.env"
-  load_tool_catalog "$repo_dir/validation.env"
+  load_config "$repo_dir/tools.env"
+  load_config "$repo_dir/validation.env"
   validate_tool_config
   validate_tool_selection TOOLS online
   validate_tool_selection OFFLINE_RELEASE_TOOLS offline

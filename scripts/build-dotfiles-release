@@ -46,8 +46,8 @@ load_build_config() {
     report_error "missing $source_dir/tools.env"
     return 1
   }
-  [[ -f $source_dir/release.env ]] || {
-    report_error "missing $source_dir/release.env"
+  [[ -f $source_dir/platforms.env ]] || {
+    report_error "missing $source_dir/platforms.env"
     return 1
   }
   [[ -f $source_dir/scripts/setup-lib ]] || {
@@ -62,8 +62,8 @@ load_build_config() {
   source "$source_dir/scripts/setup-system-lib" || return
   # shellcheck source=setup-tmux-lib
   source "$source_dir/scripts/setup-tmux-lib" || return
-  load_system_config "$source_dir/system.env" || return
-  load_tool_catalog "$source_dir/tools.env" || return
+  load_config "$source_dir/system.env" || return
+  load_config "$source_dir/tools.env" || return
   validate_tool_config offline || return
   validate_tool_selection OFFLINE_RELEASE_TOOLS offline || return
   local tool
@@ -95,14 +95,14 @@ load_build_config() {
     BUILD_VERSIONS[npm]=$RELEASE_VERSION
     artifact_layout npm "$RELEASE_VERSION" "$RELEASE_ASSET" || return
   fi
-  load_platform_config "$source_dir/release.env" || return
+  load_config "$source_dir/platforms.env" || return
 }
 
 install_build_packages() {
   local platform=$1 role=$2
 
   if ! declare -p SYSTEM_RUNTIME_PACKAGES >/dev/null 2>&1; then
-    load_system_config "$builder_script_dir/../system.env" || return
+    load_config "$builder_script_dir/../system.env" || return
   fi
   install_system_packages "$platform" "$role" true
 }

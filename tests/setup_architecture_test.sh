@@ -41,7 +41,7 @@ done
   # Catalog validation must work without recipe or installer functions.
   source "$repo_dir/scripts/setup-lib"
   source "$repo_dir/scripts/setup-catalog-lib"
-  load_tool_catalog "$repo_dir/tools.env"
+  load_config "$repo_dir/tools.env"
   validate_tool_config
 )
 

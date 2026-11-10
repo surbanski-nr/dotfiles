@@ -5,6 +5,18 @@ report_error() {
   return 1
 }
 
+# Repository configuration is trusted Bash; package metadata has a separate parser.
+load_config() {
+  local file=$1
+
+  if [[ ! -r $file ]]; then
+    report_error "cannot read configuration: $file"
+    return 1
+  fi
+  # shellcheck disable=SC1090
+  source "$file"
+}
+
 require_command() {
   command -v "$1" >/dev/null 2>&1 || report_error "required command is missing: $1"
 }

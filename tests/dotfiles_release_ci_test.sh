@@ -26,9 +26,9 @@ workflow_dir=$test_root/workflow
 mkdir -p "$source_dir/scripts" "$workflow_dir/scripts" "$workflow_dir/tests"
 cp "$repo_dir/Taskfile.yml" "$source_dir/Taskfile.yml"
 cp "$repo_dir/scripts/dotfiles-release-ci" "$source_dir/scripts/dotfiles-release-ci"
-cp "$repo_dir/release.env" "$source_dir/release.env"
+cp "$repo_dir/platforms.env" "$source_dir/platforms.env"
 # Exercise publication and parallel qualification independently of the currently enabled targets.
-cat >>"$source_dir/release.env" <<'EOF'
+cat >>"$source_dir/platforms.env" <<'EOF'
 OFFLINE_TEST_PLATFORMS=(
   debian-13-x86_64
   ubuntu-24.04-x86_64
@@ -41,7 +41,7 @@ OFFLINE_RELEASE_PLATFORMS=(
   amzn-2023-x86_64
 )
 EOF
-cp "$source_dir/release.env" "$workflow_dir/release.env"
+cp "$source_dir/platforms.env" "$workflow_dir/platforms.env"
 cp "$repo_dir/scripts/dotfiles-release-ci" "$workflow_dir/scripts/dotfiles-release-ci"
 ln -s "$repo_dir/tools.env" "$workflow_dir/tools.env"
 ln -s "$repo_dir/tests/tools" "$workflow_dir/tests/tools"
@@ -51,9 +51,8 @@ for script in "$repo_dir/scripts/dotfiles-release" "$repo_dir/scripts/"*-lib; do
 done
 printf '%s\n' \
   'DOCKER_IMAGES[debian-13-x86_64]=fixture.invalid/debian:13@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
-  >>"$source_dir/release.env"
-# shellcheck source=../release.env
-source "$source_dir/release.env"
+  >>"$source_dir/platforms.env"
+load_config "$source_dir/platforms.env"
 test_platform_count=${#OFFLINE_TEST_PLATFORMS[@]}
 release_platform_count=${#OFFLINE_RELEASE_PLATFORMS[@]}
 build_failure_platform=${OFFLINE_TEST_PLATFORMS[0]}
@@ -163,38 +162,38 @@ if [[ -n $excluded_release_platform ]]; then
     "$test_root/excluded-platform.log" >/dev/null || fail 'excluded release platform was not identified'
 fi
 
-cp "$workflow_dir/release.env" "$test_root/workflow-config.env"
+cp "$workflow_dir/platforms.env" "$test_root/workflow-config.env"
 for invalid in duplicate untested unknown-os missing-image empty; do
-  cp "$test_root/workflow-config.env" "$workflow_dir/release.env"
+  cp "$test_root/workflow-config.env" "$workflow_dir/platforms.env"
   case $invalid in
     duplicate)
-      printf 'OFFLINE_TEST_PLATFORMS+=(debian-13-x86_64)\n' >>"$workflow_dir/release.env"
+      printf 'OFFLINE_TEST_PLATFORMS+=(debian-13-x86_64)\n' >>"$workflow_dir/platforms.env"
       ;;
     untested)
-      printf 'OFFLINE_RELEASE_PLATFORMS+=(ubuntu-28.04-x86_64)\n' >>"$workflow_dir/release.env"
+      printf 'OFFLINE_RELEASE_PLATFORMS+=(ubuntu-28.04-x86_64)\n' >>"$workflow_dir/platforms.env"
       ;;
     unknown-os)
       printf '%s\n' \
         'DOCKER_IMAGES[ubuntu-28.04-x86_64]=fixture.invalid/ubuntu:28@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
-        'OFFLINE_TEST_PLATFORMS+=(ubuntu-28.04-x86_64)' >>"$workflow_dir/release.env"
+        'OFFLINE_TEST_PLATFORMS+=(ubuntu-28.04-x86_64)' >>"$workflow_dir/platforms.env"
       ;;
     missing-image)
-      printf 'unset "DOCKER_IMAGES[debian-13-x86_64]"\n' >>"$workflow_dir/release.env"
+      printf 'unset "DOCKER_IMAGES[debian-13-x86_64]"\n' >>"$workflow_dir/platforms.env"
       ;;
     empty)
-      printf 'OFFLINE_TEST_PLATFORMS=()\nOFFLINE_RELEASE_PLATFORMS=()\n' >>"$workflow_dir/release.env"
+      printf 'OFFLINE_TEST_PLATFORMS=()\nOFFLINE_RELEASE_PLATFORMS=()\n' >>"$workflow_dir/platforms.env"
       ;;
   esac
   if run_preflight >"$test_root/config-$invalid.log" 2>&1; then
     fail "workflow accepted $invalid platform configuration"
   fi
 done
-cp "$test_root/workflow-config.env" "$workflow_dir/release.env"
-printf 'OFFLINE_RELEASE_PLATFORMS=()\n' >>"$workflow_dir/release.env"
+cp "$test_root/workflow-config.env" "$workflow_dir/platforms.env"
+printf 'OFFLINE_RELEASE_PLATFORMS=()\n' >>"$workflow_dir/platforms.env"
 run_preflight >"$test_root/publication-disabled.log" 2>&1
 matrix | jq -e 'length == 0' >/dev/null || fail 'disabled publication scheduled platform jobs'
 grep -Fx 'should_run=false' "$GITHUB_OUTPUT" >/dev/null || fail 'disabled publication scheduled a release'
-cp "$test_root/workflow-config.env" "$workflow_dir/release.env"
+cp "$test_root/workflow-config.env" "$workflow_dir/platforms.env"
 
 make_archive "$PLATFORM" true
 cp "$test_root/$archive" "$TEST_RELEASE_ASSETS/$archive"
@@ -373,8 +372,8 @@ for file in build.log prepare-runtime.log release.env build-manifest.txt archive
   [[ -s $RUNNER_TEMP/dotfiles-evidence/$PLATFORM/$file ]] || fail 'build evidence was not preserved'
 done
 
-cp "$source_dir/release.env" "$test_root/source-config.env"
-printf 'DEBIAN_13_IMAGE=%s\n' "${DOCKER_IMAGES[debian-13-x86_64]}" >"$source_dir/release.env"
+cp "$source_dir/platforms.env" "$test_root/source-config.env"
+printf 'DEBIAN_13_IMAGE=%s\n' "${DOCKER_IMAGES[debian-13-x86_64]}" >"$source_dir/platforms.env"
 : >"$TEST_DOCKER_LOG"
 if run_ci verify "$source_dir" "$test_root/output" >"$test_root/legacy-image.log" 2>&1; then
   fail 'qualification accepted obsolete image variables in a release snapshot'
@@ -382,13 +381,13 @@ fi
 grep -F 'release snapshot must define DOCKER_IMAGES' "$test_root/legacy-image.log" >/dev/null ||
   fail 'qualification did not explain the unsupported image configuration'
 [[ ! -s $TEST_DOCKER_LOG ]] || fail 'qualification touched Docker with obsolete image variables'
-printf 'declare -gA DOCKER_IMAGES=()\n' >"$source_dir/release.env"
+printf 'declare -gA DOCKER_IMAGES=()\n' >"$source_dir/platforms.env"
 : >"$TEST_DOCKER_LOG"
 if run_ci verify "$source_dir" "$test_root/output" >"$test_root/missing-image.log" 2>&1; then
   fail 'qualification accepted a release snapshot without its Docker image'
 fi
 [[ ! -s $TEST_DOCKER_LOG ]] || fail 'qualification touched Docker with a missing release image'
-cp "$test_root/source-config.env" "$source_dir/release.env"
+cp "$test_root/source-config.env" "$source_dir/platforms.env"
 
 mv "$source_dir/scripts/setup-system-lib" "$test_root/setup-system-lib"
 : >"$TEST_DOCKER_LOG"
@@ -465,8 +464,7 @@ for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
   [[ $(grep -Fxc "### $platform" "$qualification_root/summary.md") -eq 1 ]] ||
     fail "parallel qualification lost or duplicated the summary for $platform"
 done
-# shellcheck source=../release.env
-source "$source_dir/release.env"
+load_config "$source_dir/platforms.env"
 for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
   image=${DOCKER_IMAGES[$platform]}
   [[ $(grep -Fxc "pull $image" "$TEST_DOCKER_LOG") -eq 1 ]] || fail 'qualification did not use the pinned platform image'
@@ -593,12 +591,12 @@ for phase in build verify; do
   cancellation_pid=
 done
 
-cat >>"$source_dir/release.env" <<'EOF'
+cat >>"$source_dir/platforms.env" <<'EOF'
 PLATFORM_ALIASES[fixture]=ubuntu-24.04-x86_64
 OFFLINE_TEST_PLATFORMS=(ubuntu-24.04-x86_64)
 OFFLINE_RELEASE_PLATFORMS=()
 EOF
-git -C "$source_dir" add release.env
+git -C "$source_dir" add platforms.env
 git -C "$source_dir" -c user.name=fixture -c user.email=fixture@example.invalid \
   commit -qm 'reduced qualification configuration'
 TEST_COMMIT=$(git -C "$source_dir" rev-parse HEAD)
@@ -614,9 +612,9 @@ for alias in '' fixture; do
   TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
     run_task_test "${task_args[@]}" >"$test_root/configured-selection.log" 2>&1
   [[ $(grep -c ' build ' "$TEST_DOCKER_LOG") == 1 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") == 1 ]] ||
-    fail 'release.env did not restrict qualification to one platform'
+    fail 'platforms.env did not restrict qualification to one platform'
   grep -F 'ubuntu-24.04-x86_64: build=0 verify=0;' "$test_root/configured-selection.log" >/dev/null ||
-    fail 'release.env did not control the new alias and default test selection'
+    fail 'platforms.env did not control the new alias and default test selection'
 done
 : >"$TEST_DOCKER_LOG"
 if run_task_test -- debian13 >"$test_root/omitted-platform.log" 2>&1; then

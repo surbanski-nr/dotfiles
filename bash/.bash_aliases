@@ -154,7 +154,7 @@ dotfiles-check() (
     source "$manifest_dir/scripts/setup-lib"
     source "$manifest_dir/scripts/setup-catalog-lib"
     source "$manifest_dir/scripts/setup-tools-lib"
-    load_tool_catalog "$manifest_dir/tools.env"
+    load_config "$manifest_dir/tools.env"
     validate_tool_config online || return
     validate_tool_selection TOOLS online || return
     selected=("${TOOLS[@]}")

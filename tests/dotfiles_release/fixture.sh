@@ -8,7 +8,7 @@ repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 source "$repo_dir/scripts/setup-lib"
 # shellcheck source=../../scripts/setup-catalog-lib
 source "$repo_dir/scripts/setup-catalog-lib"
-load_tool_catalog "$repo_dir/tools.env"
+load_config "$repo_dir/tools.env"
 # shellcheck source=../../scripts/setup-tools-lib
 source "$repo_dir/scripts/setup-tools-lib"
 

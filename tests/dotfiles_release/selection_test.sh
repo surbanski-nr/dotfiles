@@ -8,11 +8,11 @@ create_fixture
 
 if bash -c '
   set -euo pipefail
-  source "$1/tools.env"
   source "$1/scripts/setup-lib"
   source "$1/scripts/setup-catalog-lib"
   source "$1/scripts/setup-recipes-lib"
   source "$1/scripts/setup-tools-lib"
+  load_config "$1/tools.env"
   OFFLINE_RELEASE_TOOLS=(nvim)
   validate_tool_config offline
   validate_tool_selection OFFLINE_RELEASE_TOOLS offline
@@ -24,11 +24,11 @@ fi
 
 bash -c '
   set -euo pipefail
-  source "$1/tools.env"
   source "$1/scripts/setup-lib"
   source "$1/scripts/setup-catalog-lib"
   source "$1/scripts/setup-recipes-lib"
   source "$1/scripts/setup-tools-lib"
+  load_config "$1/tools.env"
   OFFLINE_RELEASE_TOOLS=(nvim rg)
   validate_tool_config offline
   validate_tool_selection OFFLINE_RELEASE_TOOLS offline

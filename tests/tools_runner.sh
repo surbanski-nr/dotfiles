@@ -13,7 +13,7 @@ source "$test_dir/../scripts/setup-tools-lib"
 source "$test_dir/../scripts/setup-system-lib"
 # shellcheck source=../scripts/dotfiles-release-lib
 source "$test_dir/../scripts/dotfiles-release-lib"
-load_tool_catalog "$test_dir/../tools.env"
+load_config "$test_dir/../tools.env"
 # shellcheck source=tools/fixture.sh
 source "$test_dir/tools/fixture.sh"
 

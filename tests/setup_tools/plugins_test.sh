@@ -212,7 +212,7 @@ shift 2
 source "$repository/scripts/setup-lib"
 source "$repository/scripts/setup-catalog-lib"
 source "$repository/scripts/setup-tmux-lib"
-load_tool_catalog "$repository/tools.env"
+load_config "$repository/tools.env"
 TEMP_PATHS=()
 trap cleanup_setup EXIT
 for plugin in "$@"; do

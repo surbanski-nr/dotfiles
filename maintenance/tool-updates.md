@@ -39,7 +39,7 @@ bin/task dev -- ubuntu2604
 bin/task dev -- amazonlinux2023
 ```
 
-The native Task `--` separator forwards the short platform name. In `release.env`,
+The native Task `--` separator forwards the short platform name. In `platforms.env`,
 `PLATFORM_ALIASES` maps these names to release platform IDs and
 `DEFAULT_DEV_PLATFORM` selects the VM opened without an argument.
 `LXD_IMAGES` and `LXD_IMAGE_SHA256` select VM images; `DOCKER_IMAGES` selects
@@ -130,7 +130,7 @@ as an ordinary user in separate containers with networking disabled. In the VM
 it uses the VM's own Docker daemon; on the host it uses the host daemon. The
 checkout must be clean and committed. Logs and packages remain under the printed
 temporary directory in that environment, not in a host dotfiles installation.
-Without a platform argument it checks `OFFLINE_TEST_PLATFORMS` in `release.env`.
+Without a platform argument it checks `OFFLINE_TEST_PLATFORMS` in `platforms.env`.
 Publication is selected separately by `OFFLINE_RELEASE_PLATFORMS` in that file.
 Build and verification workers run in batches bounded by `nproc`, so a one-vCPU
 guest runs one platform at a time rather than competing with three other builds.
@@ -832,7 +832,7 @@ Keep each needed exact client version in `tools.env` as a complete
 record into each release, with the first record as its default. To add a
 version, append a verified upstream record; to change the default, move the
 required record first. Remove an old record only when it is no longer needed.
-Do not change the launcher, regenerate Python locks or edit `release.env`.
+Do not change the launcher, regenerate Python locks or edit generated `release.env`.
 Run `task validate`, build the matching platform package and qualify its
 offline install and full CI qualification before deploying.
 

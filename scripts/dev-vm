@@ -5,8 +5,6 @@ set -euo pipefail
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 # shellcheck source=setup-lib
 source "$repo_dir/scripts/setup-lib"
-# shellcheck source=setup-system-lib
-source "$repo_dir/scripts/setup-system-lib"
 
 [[ $# == 0 ]] || report_error 'use task dev -- PLATFORM'
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || report_error 'a Linux x86-64 LXD host is required'
@@ -16,7 +14,7 @@ for command_name in lxc jq flock timeout sha256sum git; do
 done
 
 [[ -d $repo_dir/.git ]] || report_error 'use a standalone development clone with a .git directory'
-load_platform_config "$repo_dir/release.env"
+load_config "$repo_dir/platforms.env"
 alias=${PLATFORM_ALIAS:-$DEFAULT_DEV_PLATFORM}
 [[ $alias =~ ^[a-z0-9]+$ ]] || report_error "invalid platform alias: $alias"
 platform=${PLATFORM_ALIASES[$alias]:-}

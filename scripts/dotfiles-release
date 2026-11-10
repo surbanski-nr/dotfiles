@@ -36,7 +36,7 @@ setup_host() (
   if ! declare -p SYSTEM_RUNTIME_PACKAGES >/dev/null 2>&1; then
     local script_dir
     script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || return
-    load_system_config "$script_dir/../system.env" || return
+    load_config "$script_dir/../system.env" || return
   fi
   system_validate_host
   SETUP_TEMP_DIR=$(mktemp -d)
@@ -590,7 +590,7 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   if ! declare -p TOOL_CHECKS >/dev/null 2>&1; then
     # shellcheck source=setup-catalog-lib
     source "$manager_dir/setup-catalog-lib"
-    load_tool_catalog "$manager_dir/../tools.env"
+    load_config "$manager_dir/../tools.env"
   fi
 
   RELEASE_ROOT=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}

@@ -27,7 +27,7 @@ tasks:
       No host SSH keys, HOME or Docker socket are shared. Run setup-* in the VM.
       Exiting a shell leaves the VM running; another invocation opens a new shell.
 
-      Platform aliases and the default VM are configured in release.env.
+      Platform aliases and the default VM are configured in platforms.env.
       Example: task dev DEV_MEMORY=8GiB -- ubuntu2404
     dir: '{{.ROOT_DIR}}'
     env:
@@ -131,7 +131,7 @@ tasks:
       Run in a development VM to use its Docker instead of the host daemon.
       The checkout must be clean and committed; Git operations stay on the host.
 
-      Platform aliases and the default test list are configured in release.env.
+      Platform aliases and the default test list are configured in platforms.env.
       Example: task test -- ubuntu2404
     dir: '{{.ROOT_DIR}}'
     env:

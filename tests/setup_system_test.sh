@@ -3,6 +3,8 @@
 set -euo pipefail
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=../scripts/setup-lib
+source "$repo_dir/scripts/setup-lib"
 test_root=$(mktemp -d)
 online_setup_script=$repo_dir/setup-system
 release_manager=$test_root/download/dotfiles-release
@@ -158,8 +160,7 @@ if PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
 fi
 [[ ! -e $package_log ]] || fail 'invalid arguments reached the package manager'
 
-# shellcheck source=../system.env
-source "$repo_dir/system.env"
+load_config "$repo_dir/system.env"
 for command_name in "${SYSTEM_RUNTIME_COMMANDS[@]}" "${SYSTEM_SETUP_COMMANDS[@]}"; do
   [[ -e $fixture_bin/$command_name ]] || ln -s /bin/true "$fixture_bin/$command_name"
 done
@@ -356,8 +357,7 @@ grep -Fx $'dnf\tinstall\t-y\tgnupg2' "$package_log" >/dev/null ||
 
 # shellcheck source=../scripts/setup-system-lib
 source "$repo_dir/scripts/setup-system-lib"
-# shellcheck source=../system.env
-source "$repo_dir/system.env"
+load_config "$repo_dir/system.env"
 system_package_list amzn:2023 build
 printf '%s\n' "${SETUP_SYSTEM_PACKAGES[@]}" | grep -Fx cargo >/dev/null ||
   fail 'Amazon build omitted cargo'

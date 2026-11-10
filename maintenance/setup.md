@@ -200,10 +200,10 @@ changed; there is no automatic adoption.
 Entry scripts explicitly source the sibling libraries they use and coordinate
 their calls. There is no chain of implicit library imports:
 
-- `scripts/setup-lib` supplies common errors, prerequisites, list membership,
-  locking and cleanup. `report_error()` returns failure; the caller decides
-  whether to return, recover or end the process.
-- `scripts/setup-catalog-lib` loads and validates tool catalogs, selects release
+- `scripts/setup-lib` supplies configuration loading, common errors,
+  prerequisites, list membership, locking and cleanup. `report_error()` returns
+  failure; the caller decides whether to return, recover or end the process.
+- `scripts/setup-catalog-lib` validates tool catalogs, selects release
   and Git plugin records, and writes tool metadata from those records.
 - `scripts/setup-recipes-lib` describes artifact layouts and prepares concrete
   payloads: hashing, extraction, executable checks and source compilation.
@@ -212,8 +212,8 @@ their calls. There is no chain of implicit library imports:
   metadata-field and payload rules, and checks tool inventories.
 - `scripts/setup-online-lib` manages the connected store, its lock, directories
   and publication. The caller supplies the checkout and prepared metadata.
-- `scripts/setup-system-lib` loads system/platform configuration and owns OS
-  detection and package roles.
+- `scripts/setup-system-lib` validates platforms and owns OS detection and
+  package roles.
 - `scripts/setup-tmux-lib` installs and verifies tmux Git checkouts using the
   repository and commit supplied by setup-tools or the builder.
 - `scripts/dotfiles-release-lib` supplies shared release metadata parsing,
@@ -228,10 +228,12 @@ tmux's Git pins are also selected explicitly by their entry scripts.
 Libraries can reuse common helpers; catalog validation does not call recipes,
 and recipes do not select catalog records.
 
-`load_tool_catalog(PATH)`, `load_system_config(PATH)` and
-`load_platform_config(PATH)` read trusted Bash configuration from an explicit
-repository or source-snapshot path. Generated package `release.env` is parsed
-as strict metadata by `dotfiles-release-lib`; it is never sourced as code.
+`load_config(PATH)` in `scripts/setup-lib` reads trusted Bash configuration from
+an explicit repository or source-snapshot path. Entry scripts use it for
+`tools.env`, `validation.env`, `system.env` and `platforms.env`, then call the
+appropriate library to validate or select their data. Generated package
+`release.env` is parsed as strict metadata by `dotfiles-release-lib`; it is never
+sourced as code.
 There is no configuration registry or cache. Sourcing a library only defines
 functions; it does not set shell options, initialize installer state, register
 traps or load configuration. Entry scripts own those decisions.
@@ -813,7 +815,7 @@ bin/task test -- ubuntu2404
 ```
 
 The task uses `scripts/dotfiles-release-ci test` and the immutable images from
-`release.env`. By default it builds every platform in
+`platforms.env`. By default it builds every platform in
 `OFFLINE_TEST_PLATFORMS` in parallel, waits for all builds to finish, then
 prepares and verifies successful builds in parallel.
 Each installation uses a fresh container, an ordinary user and `--network none`.
@@ -827,6 +829,8 @@ The task prints a retained `/tmp/dotfiles-qualification.XXXXXX` directory:
 `dotfiles-evidence/PLATFORM/` contains build, prerequisite-preparation and
 offline-install logs, including complete `build-only.log` and `verify.log`
 output for each worker; `summary.md` contains successful package sizes and hashes.
+Worker output goes to those files while the task waits. Use `tail -f` with the
+printed worker log path to follow long builds and integrity checks.
 Failure on one platform does not stop the others. The task prints each
 platform's build and verification exit codes and log directory at the end,
 and adds these results to `summary.md`. Verification is skipped only for a
@@ -839,7 +843,7 @@ fixture tests, including reduced tool lists, rather than this full qualification
 
 ### Managing OS support and offline publication
 
-Platform selection and image configuration live in `release.env`:
+Platform selection and image configuration live in `platforms.env`:
 
 - `PLATFORM_ALIASES` maps names such as `ubuntu2404` to platform IDs such as
   `ubuntu-24.04-x86_64`. Both `task dev -- NAME` and `task test -- NAME` use it.
@@ -908,7 +912,7 @@ To add a future platform such as Ubuntu 28.04 or Debian 14:
    embedded by `scripts/build-standalone-script`. Add that family's bootstrap
    prerequisites in `scripts/dev-vm-setup`; its existing Debian/Ubuntu branch
    already covers new versions of those distributions.
-3. In `release.env`, add its short alias to `PLATFORM_ALIASES`, its pinned
+3. In `platforms.env`, add its short alias to `PLATFORM_ALIASES`, its pinned
    Docker image to `DOCKER_IMAGES` and its VM image to `LXD_IMAGES`.
    Add `LXD_IMAGE_SHA256` only for a direct QCOW2 download. The tasks, CI image
    selection and image validation use these maps without OS-specific edits.
@@ -928,7 +932,7 @@ To add a future platform such as Ubuntu 28.04 or Debian 14:
    `bin/task test -- NEW_ALIAS`. Add it to `OFFLINE_RELEASE_PLATFORMS`
    only after these checks succeed.
 
-Fully retiring an OS requires reversing those additions in `release.env` and
+Fully retiring an OS requires reversing those additions in `platforms.env` and
 `scripts/setup-system-lib`, updating the help in `setup-system` and
 `scripts/build-dotfiles-release`, then removing its focused cases and
 supported-platform documentation listed above. If it is the default VM, select
@@ -941,20 +945,19 @@ distribution family; also remove that family's embedded arrays from
 artifact matrix from the release list, so it has no OS target list to edit.
 The shared platform rules are embedded so the standalone manager can recognize
 an archive without a checkout. Task aliases, VM and container image
-metadata, publication and default qualification are centralized in `release.env`.
+metadata, publication and default qualification are centralized in `platforms.env`.
 The workflow reads `DOCKER_IMAGES` from the selected release's source snapshot.
 Snapshots with older individual image variables are unsupported; use a release
 tag from current sources.
 
-To build only one platform, select its image from `release.env` and keep the
+To build only one platform, select its image from `platforms.env` and keep the
 checkout read-only in the builder:
 
 ```bash
 set -euo pipefail
 test -z "$(git status --porcelain --untracked-files=normal)"
 source scripts/setup-lib
-source scripts/setup-system-lib
-load_platform_config "$PWD/release.env"
+load_config "$PWD/platforms.env"
 platform=debian-13-x86_64
 image=${DOCKER_IMAGES[$platform]}
 output=${1:-"$PWD/offline-output"}
@@ -1031,8 +1034,9 @@ Neovim runtime tree, pinned plugin Git metadata, parsers, queries, Mason receipt
 tmux plugins, Python locks and the temporary wheelhouse.
 `release.env`, `build-manifest.txt` and `SHA256SUMS` record source identity,
 layout, versions, inputs and content.
-The generated payload-root `release.env` is distinct from the source repository's
-`release.env`, which contains builder image pins and is not bundled.
+The generated payload-root `release.env` records installation metadata. Platform
+configuration and builder image pins live in the source repository's
+`platforms.env`, which is not bundled.
 After venv creation the retained installation removes the wheelhouse and
 records a new local manifest covering file contents, modes and symlink targets.
 
@@ -1744,7 +1748,7 @@ set -euo pipefail
 source scripts/setup-lib
 source scripts/setup-catalog-lib
 source scripts/setup-recipes-lib
-load_tool_catalog "$PWD/tools.env"
+load_config "$PWD/tools.env"
 select_default_release TOOL_RELEASES krew
 archive=$(mktemp)
 work=$(mktemp -d)
