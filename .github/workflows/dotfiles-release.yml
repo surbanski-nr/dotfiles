@@ -56,7 +56,7 @@ jobs:
     needs: preflight
     if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 45
     permissions:
       contents: write  # Required to upload release assets.
     strategy:

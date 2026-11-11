@@ -186,6 +186,8 @@ fi
 
 ln -s "$(command -v actionlint)" "$test_bin/actionlint"
 ln -s "$repo_dir/tests/fixtures/validation/zizmor-offline" "$test_bin/zizmor"
+printf 'print("Image publication fixture passed")\n' \
+  >"$syntax_repo/tests/dotfiles_image_ci_test.py"
 zizmor_log=$test_root/zizmor.log
 env -u GH_TOKEN -u GITHUB_TOKEN TEST_ZIZMOR_LOG="$zizmor_log" \
   VALIDATION_TOOLS_DIR="$test_root/empty-tools" PATH="$test_bin" \

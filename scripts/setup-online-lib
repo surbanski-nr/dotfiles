@@ -57,7 +57,7 @@ prepare_online_directories() {
     fi
   fi
   path=$BIN_DIR/dotfiles-release
-  target=../dotfiles/scripts/dotfiles-release
+  target=../dotfiles/dotfiles-release
   if [[ -e $path || -L $path ]]; then
     if ! [[ -L $path && $(readlink -- "$path") == "$target" ]]; then
       report_error "refusing unmanaged manager command: $path"
@@ -110,6 +110,6 @@ finish_online_setup() {
   fi
   temporary=$BIN_DIR/.dotfiles-release.link.$$
   TEMP_PATHS+=("$temporary")
-  ln -s ../dotfiles/scripts/dotfiles-release "$temporary" || return
+  ln -s ../dotfiles/dotfiles-release "$temporary" || return
   mv -T -- "$temporary" "$BIN_DIR/dotfiles-release"
 }

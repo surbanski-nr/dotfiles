@@ -48,7 +48,7 @@ done
 (
   trap ':' EXIT INT TERM
   before_traps=$(trap -p)
-  source "$repo_dir/tests/tools_runner.sh"
+  source "$repo_dir/tests/offline_tools_runner.sh"
   [[ $(trap -p) == "$before_traps" && ${TEMP_PATHS[*]} == caller-owned &&
     $TRANSACTION_ACTIVE == caller-owned ]] ||
     fail 'functional runner initialized the release CLI lifecycle'

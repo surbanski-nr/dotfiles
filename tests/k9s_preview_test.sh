@@ -3,6 +3,78 @@
 set -euo pipefail
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+
+cleanup_integration() {
+  local status=$?
+
+  trap - EXIT
+  set +e
+  tmux -S "$tmux_socket" send-keys -t preview-check C-c
+  for _ in {1..50}; do
+    if [[ $(tmux -S "$tmux_socket" display-message -p -t preview-check '#{pane_dead}') == 1 ]]; then
+      break
+    fi
+    sleep 0.1
+  done
+  tmux -S "$tmux_socket" capture-pane -p -S -300 -t preview-check >>"$test_root/terminal.log"
+  tmux -S "$tmux_socket" kill-server
+  if ! timeout --kill-after=10s 180s "$task_executable" --dir "$checkout" k9s:clean; then
+    status=1
+  fi
+  exit "$status"
+}
+
+if [[ ${1:-} == integration ]]; then
+  test_root=$(mktemp -d "$PWD/k9s-preview-test.XXXXXX")
+  checkout=$test_root/checkout
+  tmux_socket=$test_root/tmux.socket
+  task_executable=$(type -P task)
+  cp -a "$repo_dir" "$checkout"
+
+  trap cleanup_integration EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  printf -v command '%q --dir %q k9s' "$task_executable" "$checkout"
+  # tmux supplies a terminal and a readable TUI capture, without loading dotfiles.
+  tmux -S "$tmux_socket" -f /dev/null new-session -d -s preview-check -x 140 -y 45 "$command" \
+    \; set-option -t preview-check remain-on-exit on
+  deadline=$((SECONDS + 600))
+  while true; do
+    if [[ $(tmux -S "$tmux_socket" display-message -p -t preview-check '#{pane_dead}') == 1 ]]; then
+      tmux -S "$tmux_socket" capture-pane -p -S -300 -t preview-check >&2
+      exit 1
+    fi
+    screen=$(tmux -S "$tmux_socket" capture-pane -p -t preview-check)
+    if [[ $screen == *preview-logger* && $screen == *Running* ]]; then
+      break
+    fi
+    if (( SECONDS >= deadline )); then
+      printf '%s\n' "$screen" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  printf '%s\n' "$screen" >"$test_root/terminal.log"
+  tmux -S "$tmux_socket" send-keys -l -t preview-check ':q'
+  tmux -S "$tmux_socket" send-keys -t preview-check Enter
+  deadline=$((SECONDS + 30))
+  until [[ $(tmux -S "$tmux_socket" display-message -p -t preview-check '#{pane_dead}') == 1 ]]; do
+    if (( SECONDS >= deadline )); then
+      tmux -S "$tmux_socket" capture-pane -p -t preview-check >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+  test "$(tmux -S "$tmux_socket" display-message -p -t preview-check '#{pane_dead_status}')" = 0
+  printf 'k9s_preview: real preview passed; logs: %s\n' "$test_root"
+  exit 0
+fi
+if (( $# > 0 )); then
+  printf 'usage: k9s_preview_test.sh [integration]\n' >&2
+  exit 2
+fi
+
 task_executable=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}/task
 test_root=$(mktemp -d)
 preview_pid=

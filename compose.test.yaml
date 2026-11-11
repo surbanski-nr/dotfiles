@@ -1,0 +1,24 @@
+---
+name: dotfiles-test
+
+services:
+  dev:
+    image: dotfiles:local
+    build: .
+    user: "${DOTFILES_UID:-1000}:${DOTFILES_GID:-1000}"
+    group_add:
+      - "${DOTFILES_DOCKER_GID:-0}"
+    init: true
+    stdin_open: true
+    tty: true
+    network_mode: host
+    environment:
+      DOCKER_HOST: unix:///var/run/docker.sock
+      TERM: ${TERM:-xterm-256color}
+      COLORTERM: ${COLORTERM:-truecolor}
+    volumes:
+      - type: bind
+        source: ${DOTFILES_DOCKER_SOCKET:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        bind:
+          create_host_path: false

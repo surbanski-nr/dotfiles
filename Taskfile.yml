@@ -42,9 +42,9 @@ tasks:
       - bash scripts/dev-vm
 
   k9s:
-    desc: Preview k9s in the development VM using a reusable kind cluster
+    desc: Preview k9s using a reusable kind cluster
     summary: |
-      Run inside the development VM with Docker, kind, kubectl and k9s installed.
+      Run in an environment with Docker, kind, kubectl and k9s installed.
       Create or reuse this checkout's cluster, deploy preview workloads and open k9s.
       Repository configuration is linked into a private writable preview profile.
       Exiting k9s leaves the cluster running. Use task k9s:clean to remove it.
@@ -58,6 +58,63 @@ tasks:
     dir: '{{.ROOT_DIR}}'
     cmds:
       - bash scripts/k9s-preview clean
+
+  devcontainer:
+    desc: Build and open a persistent development container
+    dir: '{{.ROOT_DIR}}'
+    interactive: true
+    cmds:
+      - task: devcontainer:up
+      - docker compose --file compose.yaml exec dev bash --login
+
+  devcontainer:build:
+    desc: Build the independent Debian development image
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - |
+        docker compose \
+          --file compose.yaml \
+          build \
+          --no-cache \
+          --build-arg DEV_UID="$(id -u)" \
+          --build-arg DEV_GID="$(id -g)"
+
+  update:mise-locks:
+    desc: Regenerate mise.lock with the image's pinned mise
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - |
+        docker build \
+          --target mise \
+          --tag dotfiles:mise \
+          .
+      - |
+        docker run \
+          --rm \
+          --user "${DOTFILES_UID:-$(id -u)}:${DOTFILES_GID:-$(id -g)}" \
+          --env MISE_GLOBAL_CONFIG_FILE=/config/mise.toml \
+          --env MISE_DATA_DIR=/tmp/mise \
+          --env MISE_CACHE_DIR=/tmp/mise/cache \
+          --env MISE_STATE_DIR=/tmp/mise/state \
+          --workdir /config \
+          --mount "type=bind,source=$PWD,target=/config" \
+          dotfiles:mise \
+          mise lock \
+            --global \
+            --platform linux-x64
+
+  devcontainer:up:
+    desc: Build without cache and start the development container
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - task: devcontainer:build
+      - docker compose --file compose.yaml up -d --no-build
+
+  devcontainer:clean:
+    desc: Remove the development container and retain its HOME volume
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - docker compose --file compose.yaml down
 
   validate:
     desc: Run all validation tasks in parallel
@@ -106,7 +163,7 @@ tasks:
       - bash scripts/validate tools
 
   validate:workflows:
-    desc: Check GitHub Actions syntax and security
+    desc: Check GitHub Actions syntax, security and publication
     deps:
       - tools:actionlint
       - tools:shellcheck
@@ -121,6 +178,19 @@ tasks:
       - bash scripts/update-offline-python-locks
 
   test:
+    desc: Qualify offline packages and the development image
+    summary: |
+      Run offline qualification, then build and test a separate development image.
+      The offline default is all platforms; a CLI alias selects one platform.
+      The image test uses a disposable container and always cleans it up.
+      The persistent development container stays running.
+
+      Example: task test -- ubuntu2404
+    cmds:
+      - task: test:offline
+      - task: test:devcontainer
+
+  test:offline:
     desc: Build and qualify offline packages in Docker (default all platforms)
     summary: |
       Build all platforms, then verify archives, install and run
@@ -132,12 +202,28 @@ tasks:
       The checkout must be clean and committed; Git operations stay on the host.
 
       Platform aliases and the default test list are configured in platforms.env.
-      Example: task test -- ubuntu2404
+      Example: task test:offline -- ubuntu2404
     dir: '{{.ROOT_DIR}}'
     env:
       PLATFORM_ALIAS: '{{.CLI_ARGS}}'
     cmds:
       - bash scripts/dotfiles-release-ci test "$PWD" "$PLATFORM_ALIAS"
+
+  test:devcontainer:
+    desc: Build, test and remove an isolated development container
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - defer: docker compose --file compose.test.yaml down
+      - |
+        docker compose \
+          --file compose.test.yaml \
+          build \
+          --no-cache
+      - docker compose --file compose.test.yaml up -d --no-build
+      - |
+        docker compose --file compose.test.yaml exec -T dev \
+          timeout --kill-after=10s 1800s \
+          bash --login -ic 'exec bash /opt/dotfiles/tests/container_tools_runner.sh'
 
   tools:actionlint:
     internal: true

@@ -606,17 +606,20 @@ assert_contains "$launcher_unset_output" \
 assert_contains "$launcher_unset_output" 'go-root=unset go-toolchain=unset go-markers='
 
 path_home=$test_root/path-home
-mkdir -p "$path_home/.venv/bin" "$path_home/.asdf/shims" "$path_home/bin"
+mkdir -p "$path_home/.venv/bin" "$path_home/.asdf/shims" "$path_home/bin" \
+  "$path_home/.local/share/mise/shims"
 ln -s "$command_fixture" "$path_home/.venv/bin/python"
 ln -s "$command_fixture" "$path_home/.asdf/shims/terraform"
 ln -s "$command_fixture" "$path_home/bin/terraform"
+ln -s "$command_fixture" "$path_home/.local/share/mise/shims/mise-only-tool"
 path_output=$(
   run_interactive_scenario path-order \
-    env HOME="$path_home" VIRTUAL_ENV="$path_home/.venv" \
+    env -u MISE_DATA_DIR HOME="$path_home" VIRTUAL_ENV="$path_home/.venv" \
     PATH="$path_home/bin:$original_path" TERM=xterm-256color
 )
 assert_contains "$path_output" "python=$path_home/.venv/bin/python"
 assert_contains "$path_output" "terraform=$path_home/bin/terraform"
+assert_contains "$path_output" "mise=$path_home/.local/share/mise/shims/mise-only-tool editors=vi:vi:vi"
 path_line=$(grep '^path=' <<<"$path_output")
 [[ ${path_line#path=} == "$path_home/.venv/bin:"* ]] ||
   fail 'active virtual environment lost PATH precedence'

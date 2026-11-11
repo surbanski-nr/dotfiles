@@ -151,7 +151,7 @@ make_test_repo() {
   mkdir -p "$destination/scripts"
   cp "$repo_dir/setup-tools" "$destination/setup-tools"
   cp "$repo_dir/scripts/"*-lib "$destination/scripts/"
-  cp "$repo_dir/scripts/dotfiles-release" "$destination/scripts/dotfiles-release"
+  cp "$repo_dir/dotfiles-release" "$destination/dotfiles-release"
   cp "$repo_dir/tools.env" "$destination/tools.env"
   cp "$repo_dir/system.env" "$destination/system.env"
 }

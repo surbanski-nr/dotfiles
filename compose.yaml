@@ -1,0 +1,57 @@
+---
+services:
+  dev:
+    image: ghcr.io/surbanski-nr/dotfiles:latest
+    build: .
+    user: "${DOTFILES_UID:-1000}:${DOTFILES_GID:-1000}"
+    group_add:
+      - "${DOTFILES_DOCKER_GID:-0}"
+    init: true
+    stdin_open: true
+    tty: true
+    network_mode: host
+    working_dir: ${DOTFILES_WORKSPACE:-${HOME}/work}
+    environment:
+      DOCKER_HOST: unix:///var/run/docker.sock
+      SSH_AUTH_SOCK: /run/ssh-agent
+      TERM: ${TERM:-xterm-256color}
+      COLORTERM: ${COLORTERM:-truecolor}
+    volumes:
+      - type: volume
+        source: home
+        target: /home/dev
+      - type: bind
+        source: ${XDG_STATE_HOME:-${HOME}/.local/state}/nvim2
+        target: /home/dev/.local/state/nvim2
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${XDG_DATA_HOME:-${HOME}/.local/share}/tmux/resurrect
+        target: /home/dev/.local/share/tmux/resurrect
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOME}/bin
+        target: /home/dev/bin
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SSH_AUTH_SOCK:?Start and unlock an SSH agent on the host}
+        target: /run/ssh-agent
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${DOTFILES_WORKSPACE:-${HOME}/work}
+        target: ${DOTFILES_WORKSPACE:-${HOME}/work}
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${DOTFILES_DOCKER_SOCKET:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        bind:
+          create_host_path: false
+
+volumes:
+  home:

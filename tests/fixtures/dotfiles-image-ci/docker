@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+printf '%s\n' "$*" >>"$TEST_DOCKER_LOG"
+argument=${2:-}
+if [[ ${TEST_DOCKER_FAILURE:-} == "$1" ||
+      ${TEST_DOCKER_FAILURE:-} == "$1:${argument##*:}" ]]; then
+  exit 76
+fi
+
+case $1 in
+  login)
+    cat >/dev/null
+    ;;
+  build | logout)
+    ;;
+  push)
+    printf '%s\n' "${2##*:}" >>"$TEST_IMAGE_TAGS"
+    ;;
+  *)
+    exit 2
+    ;;
+esac

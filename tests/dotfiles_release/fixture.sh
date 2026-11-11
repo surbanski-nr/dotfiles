@@ -483,7 +483,7 @@ make_selected_artifact() {
 
 run_manager() {
   HOME=$test_home DOTFILES_OS_RELEASE_FILE=$os_release \
-    bash "$repo_dir/scripts/dotfiles-release" "$@"
+    bash "$repo_dir/dotfiles-release" "$@"
 }
 
 create_fixture() {

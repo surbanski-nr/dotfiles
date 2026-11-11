@@ -97,7 +97,7 @@ check_checksum() {
 verify_asset() {
   local platform=$1 archive=$2 root=dotfiles-${COMMIT_SHA:0:12} metadata
   printf 'Verifying %s.\n' "${archive##*/}"
-  bash "$script_dir/dotfiles-release" verify "$archive" || return
+  bash "$script_dir/../dotfiles-release" verify "$archive" || return
   metadata=$(tar -xOzf "$archive" "$root/release.env") || return
   [[ $(awk -F= '$1 == "PLATFORM_ID" { print $2 }' <<<"$metadata") == "$platform" &&
     $(awk -F= '$1 == "SOURCE_COMMIT" { print $2 }' <<<"$metadata") == "$COMMIT_SHA" ]] ||
@@ -270,12 +270,14 @@ build_and_qualify() {
     --env DOTFILES=/tmp/inherited-dotfiles --env DOTFILES_AUTO_ROOT=/tmp/inherited-auto-root \
     --volume "$archive:/artifact.tar.gz:ro" \
     --volume "$delivered_manager:/usr/local/bin/dotfiles-release:ro" \
-    --volume "$script_dir:/scripts:ro" --volume "$script_dir/../tools.env:/tools.env:ro" \
+    --volume "$script_dir/../dotfiles-release:/dotfiles-release:ro" \
+    --volume "$script_dir:/scripts:ro" \
+    --volume "$script_dir/../tools.env:/tools.env:ro" \
     --volume "$script_dir/../tests:/tests:ro" "$runtime_image" \
     bash -euo pipefail -c \
-    'bash /scripts/dotfiles-release verify /artifact.tar.gz
+    'bash /dotfiles-release verify /artifact.tar.gz
      bash /usr/local/bin/dotfiles-release install /artifact.tar.gz
-     bash /tests/tools_runner.sh "$DOTFILES_RELEASE_ROOT/current"' \
+     bash /tests/offline_tools_runner.sh "$DOTFILES_RELEASE_ROOT/current"' \
     2>&1 | tee "$evidence/offline-verify.log"
 
   size=$(stat --format=%s "$archive")

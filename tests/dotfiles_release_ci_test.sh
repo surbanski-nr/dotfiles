@@ -45,8 +45,9 @@ cp "$source_dir/platforms.env" "$workflow_dir/platforms.env"
 cp "$repo_dir/scripts/dotfiles-release-ci" "$workflow_dir/scripts/dotfiles-release-ci"
 ln -s "$repo_dir/tools.env" "$workflow_dir/tools.env"
 ln -s "$repo_dir/tests/tools" "$workflow_dir/tests/tools"
-ln -s "$repo_dir/tests/tools_runner.sh" "$workflow_dir/tests/tools_runner.sh"
-for script in "$repo_dir/scripts/dotfiles-release" "$repo_dir/scripts/"*-lib; do
+ln -s "$repo_dir/tests/offline_tools_runner.sh" "$workflow_dir/tests/offline_tools_runner.sh"
+ln -s "$repo_dir/dotfiles-release" "$workflow_dir/dotfiles-release"
+for script in "$repo_dir/scripts/"*-lib; do
   ln -s "$script" "$workflow_dir/scripts/${script##*/}"
 done
 printf '%s\n' \
@@ -67,8 +68,8 @@ for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
 done
 
 cp "$repo_dir/tools.env" "$source_dir/tools.env"
-cp "$repo_dir/scripts/dotfiles-release" "$source_dir/scripts/dotfiles-release"
-printf '\n# Fixture release snapshot differs from workflow tooling.\n' >>"$source_dir/scripts/dotfiles-release"
+cp "$repo_dir/dotfiles-release" "$source_dir/dotfiles-release"
+printf '\n# Fixture release snapshot differs from workflow tooling.\n' >>"$source_dir/dotfiles-release"
 printf '#!/bin/sh\nexit 0\n' >"$source_dir/scripts/build-dotfiles-release"
 cp "$repo_dir/scripts/build-standalone-script" "$source_dir/scripts/build-standalone-script"
 cp "$repo_dir/scripts/"*-lib "$source_dir/scripts/"
@@ -133,8 +134,8 @@ run_ci() {
   bash "$workflow_dir/scripts/dotfiles-release-ci" "$@"
 }
 task_executable=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}/task
-run_task_test() {
-  "$task_executable" --dir "$source_dir" test "$@"
+run_offline_task() {
+  "$task_executable" --dir "$source_dir" test:offline "$@"
 }
 run_preflight() {
   : >"$GITHUB_OUTPUT"
@@ -145,7 +146,7 @@ matrix() {
 }
 
 make_archive
-root=$(HOME="$test_root/empty-home" bash "$repo_dir/scripts/dotfiles-release" verify "$test_root/$archive")
+root=$(HOME="$test_root/empty-home" bash "$repo_dir/dotfiles-release" verify "$test_root/$archive")
 [[ $root == *"verified $RELEASE_TAG ($PLATFORM)"* && -z $(find "$test_root/empty-home" -mindepth 1 -print -quit) ]] ||
   fail 'archive verification changed HOME or did not report its identity'
 run_preflight
@@ -249,7 +250,7 @@ HOME="$test_root/empty-home" bash "$TEST_RELEASE_ASSETS/dotfiles-release" verify
 (cd "$TEST_RELEASE_ASSETS" && sha256sum --check --strict dotfiles-release.sha256 >/dev/null)
 for source in 'system.env (runtime and Docker)' 'tools.env (TOOL_CHECKS)' \
   scripts/setup-lib scripts/setup-system-lib scripts/setup-tools-lib \
-  scripts/dotfiles-release-lib scripts/dotfiles-release; do
+  scripts/dotfiles-release-lib dotfiles-release; do
   if ! grep -Fx "##### BEGIN $source #####" "$TEST_RELEASE_ASSETS/dotfiles-release" >/dev/null ||
     ! grep -Fx "##### END $source #####" "$TEST_RELEASE_ASSETS/dotfiles-release" >/dev/null; then
     fail "published manager does not identify its $source source block"
@@ -438,7 +439,7 @@ for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
 done
 : >"$TEST_DOCKER_LOG"
 TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" TEST_PARALLEL_DIR="$qualification_parallel" \
-  run_task_test >"$test_root/qualification.log" 2>&1
+  run_offline_task >"$test_root/qualification.log" 2>&1
 awk -v expected="$test_platform_count" '
   /^built / { builds++ }
   / verify / {
@@ -553,7 +554,7 @@ for alias in "${!PLATFORM_ALIASES[@]}"; do
   [[ " ${OFFLINE_TEST_PLATFORMS[*]} " == *" $platform "* ]] || continue
   : >"$TEST_DOCKER_LOG"
   TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
-    run_task_test -- "$alias" >"$test_root/qualification-single.log" 2>&1
+    run_offline_task -- "$alias" >"$test_root/qualification-single.log" 2>&1
   [[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq 1 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq 1 ]] ||
     fail 'single-platform qualification ran other platforms'
   grep -F "$platform: build=0 verify=0;" "$test_root/qualification-single.log" >/dev/null ||
@@ -610,23 +611,23 @@ for alias in '' fixture; do
   [[ -z $alias ]] || task_args=(-- "$alias")
   : >"$TEST_DOCKER_LOG"
   TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
-    run_task_test "${task_args[@]}" >"$test_root/configured-selection.log" 2>&1
+    run_offline_task "${task_args[@]}" >"$test_root/configured-selection.log" 2>&1
   [[ $(grep -c ' build ' "$TEST_DOCKER_LOG") == 1 && $(grep -c ' verify ' "$TEST_DOCKER_LOG") == 1 ]] ||
     fail 'platforms.env did not restrict qualification to one platform'
   grep -F 'ubuntu-24.04-x86_64: build=0 verify=0;' "$test_root/configured-selection.log" >/dev/null ||
     fail 'platforms.env did not control the new alias and default test selection'
 done
 : >"$TEST_DOCKER_LOG"
-if run_task_test -- debian13 >"$test_root/omitted-platform.log" 2>&1; then
-  fail 'task test accepted a platform omitted from the test list'
+if run_offline_task -- debian13 >"$test_root/omitted-platform.log" 2>&1; then
+  fail 'task test:offline accepted a platform omitted from the test list'
 fi
 [[ ! -s $TEST_DOCKER_LOG ]] || fail 'an omitted qualification platform touched Docker'
 
 : >"$TEST_DOCKER_LOG"
-if run_task_test -- invalid-platform >"$test_root/qualification-alias.log" 2>&1; then
-  fail 'task test accepted an unsupported alias'
+if run_offline_task -- invalid-platform >"$test_root/qualification-alias.log" 2>&1; then
+  fail 'task test:offline accepted an unsupported alias'
 fi
-[[ ! -s $TEST_DOCKER_LOG ]] || fail 'task test started Docker for an unsupported alias'
+[[ ! -s $TEST_DOCKER_LOG ]] || fail 'task test:offline started Docker for an unsupported alias'
 : >"$TEST_DOCKER_LOG"
 if run_ci test "$source_dir" invalid-platform >"$test_root/qualification-platform.log" 2>&1; then
   fail 'qualification accepted an unsupported platform'

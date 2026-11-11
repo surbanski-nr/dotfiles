@@ -292,6 +292,8 @@ case $TEST_SCENARIO in
     load_bashrc
     printf 'path=%s terraform=%s python=%s\n' "$PATH" \
       "$(command -v terraform)" "$(command -v python)"
+    printf 'mise=%s editors=%s:%s:%s\n' \
+      "$(command -v mise-only-tool)" "$EDITOR" "$VISUAL" "$GIT_EDITOR"
     ;;
   fzf-init)
     load_bashrc

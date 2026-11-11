@@ -373,7 +373,7 @@ fi
 config_repo=$test_root/config-repo
 mkdir -p "$config_repo/scripts"
 cp "$repo_dir/scripts/"*-lib "$config_repo/scripts/"
-cp "$repo_dir/scripts/dotfiles-release" "$config_repo/scripts/dotfiles-release"
+cp "$repo_dir/dotfiles-release" "$config_repo/dotfiles-release"
 cp "$repo_dir/tools.env" "$config_repo/tools.env"
 cp "$repo_dir/system.env" "$config_repo/system.env"
 printf 'SYSTEM_RUNTIME_PACKAGES+=(fixture-package)\n' >>"$config_repo/system.env"
@@ -629,7 +629,7 @@ printf 'private shell configuration\n' >"$setup_home/.bashrc"
 ln -s existing-release "$setup_home/dotfiles-releases/current"
 home_before=$(tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -C "$setup_home" -cf - . | sha256sum)
-for manager in "$repo_dir/scripts/dotfiles-release" "$release_manager"; do
+for manager in "$repo_dir/dotfiles-release" "$release_manager"; do
   PATH="$fixture_bin" TEST_PACKAGE_LOG="$package_log" \
     HOME="$setup_home" SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
     SETUP_SYSTEM_ETC_DIR="$test_root/unchanged-home-etc" \

@@ -157,7 +157,7 @@ fi
 unlink "$release/unlisted"
 run_manager set "$id_one" >/dev/null
 
-checker="$repo_dir/tests/tools_runner.sh"
+checker="$repo_dir/tests/offline_tools_runner.sh"
 tty_release=$test_root/'Nvim release with spaces'
 tty_home=$test_root/'Nvim health home with spaces'
 mkdir -p "$tty_release/config/nvim2/tests" "$tty_home"
@@ -250,31 +250,31 @@ printf '#!/usr/bin/env bash\nexit 96\n' >"$functional_release/bin/rg"
 chmod 0755 "$functional_release/bin/rg"
 status=0
 bash -c 'source "$1"; source "$4"; health_stage ripgrep health_rg "$2" "$3"' \
-  checker-test "$checker" "$functional_release" "$test_root/functional-home" "$repo_dir/tests/tools/rg.sh" \
+  checker-test "$checker" "$functional_release/bin" "$test_root/functional-home" "$repo_dir/tests/tools/rg.sh" \
   >"$test_root/functional-failure.log" 2>&1 || status=$?
 [[ $status == 96 && $(<"$test_root/functional-failure.log") == *'ripgrep health check failed (status 96)'* ]] ||
   fail 'CI functional checker omitted a runtime failure'
 
 checker_fixture=$test_root/checker-fixture
 mkdir -p "$checker_fixture/scripts" "$checker_fixture/tests/tools"
-cp "$repo_dir/tests/tools_runner.sh" "$checker_fixture/tests/tools_runner.sh"
-cp "$repo_dir/scripts/dotfiles-release" "$checker_fixture/scripts/"
+cp "$repo_dir/tests/offline_tools_runner.sh" "$checker_fixture/tests/offline_tools_runner.sh"
+cp "$repo_dir/dotfiles-release" "$checker_fixture/"
 cp "$repo_dir/scripts/"*-lib "$checker_fixture/scripts/"
 cp "$repo_dir/tools.env" "$repo_dir/system.env" "$checker_fixture/"
 printf "TOOL_CHECKS[fixture-cli]='FIXTURE_CLI_VERSION|'\n" >>"$checker_fixture/tools.env"
 cp "$repo_dir/tests/tools/fixture.sh" "$checker_fixture/tests/tools/fixture.sh"
 cat >"$checker_fixture/tests/tools/kind.sh" <<'EOF'
 health_kind() {
-  local release=$1 output
-  output=$("$release/bin/kind" version) || return
+  local bin=$1 output
+  output=$("$bin/kind" version) || return
   printf '%s\n' "$output"
   return "${FIXTURE_FUNCTIONAL_STATUS:-0}"
 }
 EOF
 cat >"$checker_fixture/tests/tools/fixture-cli.sh" <<'EOF'
 health_fixture_cli() {
-  local release=$1
-  "$release/bin/fixture-cli" --version
+  local bin=$1
+  "$bin/fixture-cli" --version
 }
 EOF
 cat >"$checker_fixture/tests/tools/bash.sh" <<'EOF'
@@ -297,21 +297,21 @@ printf 'FIXTURE_CLI_VERSION=3.0\n' >>"$fixture_release/release.env"
 bash "$repo_dir/scripts/build-standalone-script" "$checker_fixture" "$fixture_release/dotfiles-release"
 repack_artifact checker "$id_three" "$checker_archive"
 HOME="$test_home" DOTFILES_OS_RELEASE_FILE="$os_release" \
-  bash "$checker_fixture/scripts/dotfiles-release" install "$checker_archive" >/dev/null
+  bash "$checker_fixture/dotfiles-release" install "$checker_archive" >/dev/null
 checker_release=$test_home/dotfiles-releases/$id_three
 HOME="$test_home" DOTFILES_OS_RELEASE_FILE="$os_release" \
-  bash "$checker_fixture/tests/tools_runner.sh" "$checker_release" \
+  bash "$checker_fixture/tests/offline_tools_runner.sh" "$checker_release" \
   >"$test_root/checker-discovery.log" 2>&1
 output=$(<"$test_root/checker-discovery.log")
-[[ $output == *'tools_runner: checking kind'* &&
+[[ $output == *'offline_tools_runner.sh: checking kind'* &&
   $output == *'kind fixture 3.0'* && $output == *'fixture Bash integration'* &&
-  $output == *'tools_runner: checking fixture-cli'* &&
+  $output == *'offline_tools_runner.sh: checking fixture-cli'* &&
   $output == *'fixture-cli fixture 3.0'* ]] ||
   fail 'CI checker did not discover a new selected tool suite'
 
 status=0
 HOME="$test_home" DOTFILES_OS_RELEASE_FILE="$os_release" FIXTURE_FUNCTIONAL_STATUS=93 \
-  bash "$checker_fixture/tests/tools_runner.sh" "$checker_release" \
+  bash "$checker_fixture/tests/offline_tools_runner.sh" "$checker_release" \
   >"$test_root/checker-discovery-failure.log" 2>&1 || status=$?
 output=$(<"$test_root/checker-discovery-failure.log")
 [[ $status == 93 && $output == *'kind health check failed (status 93)'* ]] ||

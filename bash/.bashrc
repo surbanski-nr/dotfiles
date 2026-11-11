@@ -107,6 +107,7 @@ unset _dotfiles_path_entries _dotfiles_path_entry _dotfiles_clean_path \
   _dotfiles_previous_auto_root
 
 add_to_path "$HOME/.local/share/nvim2/mason/bin"
+add_to_path "${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"
 add_to_path "$HOME/.local/bin"
 add_to_path "$DOTFILES/scripts"
 add_to_path "$HOME/.krew/bin"
@@ -346,6 +347,7 @@ unset _dotfiles_omp_provider
 export NVIM_APPNAME="${NVIM_APPNAME:-nvim2}"
 export VISUAL=vi
 export EDITOR=vi
+export GIT_EDITOR=vi
 
 if [ -f ~/.extras ]; then
   # Private optional configuration is outside this repository's analysis.

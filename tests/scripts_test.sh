@@ -345,4 +345,76 @@ cmp "$test_root/context-before" "$reconcile_home/kube-backup-contexts.txt" ||
 cmp "$test_root/prefix-before" "$reconcile_home/kube-log-prefixes.txt" ||
   fail 'bstow changed kube-log-prefixes.txt'
 
+task_executable=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}/task
+compose_bin=$test_root/compose-bin
+mkdir "$compose_bin"
+cat >"$compose_bin/docker" <<'BASH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $1 == compose ]]
+[[ $2 == --file ]]
+[[ $3 == compose.yaml || $3 == compose.test.yaml ]]
+operation=$4
+if [[ $operation == exec ]]; then
+  if [[ $3 == compose.yaml ]]; then
+    [[ ${*:5} == 'dev bash --login' ]]
+  else
+    [[ ${*:5} == *'/opt/dotfiles/tests/container_tools_runner.sh'* ]]
+  fi
+fi
+printf '%s:%s\n' "$3" "$operation" >>"$TEST_COMPOSE_LOG"
+if [[ $operation == "$TEST_COMPOSE_FAILURE" ]]; then
+  exit 73
+fi
+BASH
+chmod 0755 "$compose_bin/docker"
+for task_name in devcontainer test:devcontainer; do
+  compose_file=compose.yaml
+  if [[ $task_name == test:devcontainer ]]; then
+    compose_file=compose.test.yaml
+  fi
+  for failure in none build up exec; do
+    compose_log=$test_root/compose-$task_name-$failure.log
+    run_command env PATH="$compose_bin:$PATH" TEST_COMPOSE_LOG="$compose_log" \
+      TEST_COMPOSE_FAILURE="$failure" "$task_executable" --dir "$repo_dir" \
+      --silent --exit-code "$task_name"
+    expected_status=73
+    expected_operations=$compose_file:build
+    if [[ $failure != build ]]; then
+      expected_operations+=$'\n'$compose_file:up
+    fi
+    if [[ $failure != build && $failure != up ]]; then
+      expected_operations+=$'\n'$compose_file:exec
+    fi
+    if [[ $task_name == test:devcontainer ]]; then
+      expected_operations+=$'\n'$compose_file:down
+    fi
+    if [[ $failure == none ]]; then
+      expected_status=0
+    fi
+    assert_status "$expected_status" "$task_name failure at $failure"
+    [[ $(<"$compose_log") == "$expected_operations" ]] ||
+      fail "$task_name used the wrong Compose lifecycle after $failure"
+  done
+done
+
+task_fixture=$test_root/task-fixture
+mkdir -p "$task_fixture/scripts"
+cp "$repo_dir/Taskfile.yml" "$task_fixture/Taskfile.yml"
+cat >"$task_fixture/scripts/dotfiles-release-ci" <<'BASH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $1 == test && $2 == "$PWD" ]]
+printf '%s\n' "$3" >"$TEST_OFFLINE_LOG"
+BASH
+compose_log=$test_root/compose-all.log
+offline_log=$test_root/offline-alias.log
+run_command env PATH="$compose_bin:$PATH" TEST_COMPOSE_LOG="$compose_log" \
+  TEST_OFFLINE_LOG="$offline_log" TEST_COMPOSE_FAILURE=none \
+  "$task_executable" --dir "$task_fixture" --silent --exit-code test -- ubuntu2404
+assert_status 0 'test aggregate'
+[[ $(<"$offline_log") == ubuntu2404 ]] || fail 'test did not forward the offline platform alias'
+[[ $(<"$compose_log") == $'compose.test.yaml:build\ncompose.test.yaml:up\ncompose.test.yaml:exec\ncompose.test.yaml:down' ]] ||
+  fail 'test did not qualify the image independently of the development container'
+
 printf 'Script tests passed\n'

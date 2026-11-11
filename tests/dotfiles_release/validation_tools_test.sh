@@ -110,7 +110,7 @@ for defect in wrong-plugin broken-yaml broken-generation; do
     tool=yq
     [[ $defect != broken-generation ]] || tool=helm-schema
     bash -c 'source "$1"; source "$4"; health_stage "validation tools" "$5" "$2" "$3"' \
-      checker-test "$repo_dir/tests/tools_runner.sh" \
+      checker-test "$repo_dir/tests/offline_tools_runner.sh" \
       "$test_home/dotfiles-releases/$id_three" "$test_root/checker-$defect" "$repo_dir/tests/tools/$tool.sh" "health_${tool//-/_}" \
       >"$test_root/checker-$defect.log" 2>&1 || status=$?
     [[ $status != 0 && $(<"$test_root/checker-$defect.log") == *'validation tools health check failed'* ]] ||

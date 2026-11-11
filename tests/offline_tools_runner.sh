@@ -17,28 +17,17 @@ load_config "$test_dir/../tools.env"
 # shellcheck source=tools/fixture.sh
 source "$test_dir/tools/fixture.sh"
 
-health_stage() {
-  local label=$1 status
-  shift
-
-  printf 'tools_runner: checking %s\n' "$label"
-  "$@" && return
-  status=$?
-  report_error "$label health check failed (status $status)" || true
-  return "$status"
-}
-
 main() {
   local release=${1:-} health_home tool
   local DOTFILES_IGNORE_USER_BIN=1 VIRTUAL_ENV='' KUBECTL_VERSION='' HELM_VERSION=''
   local PYTHONDONTWRITEBYTECODE=1
   local LC_ALL=C.UTF-8 LANG=C.UTF-8
   local RELEASE_ROOT
-  local -a selected_tools=()
+  local -a selected_tools=() check_args=()
   local -A release_metadata=()
 
   (($# == 1)) || {
-    report_error 'usage: tools_runner RELEASE_DIRECTORY'
+    report_error 'usage: offline_tools_runner.sh RELEASE_DIRECTORY'
     return 2
   }
   release=$(readlink -f -- "$release") || return
@@ -69,7 +58,32 @@ main() {
     fi
     # shellcheck disable=SC1090
     source "$test_dir/tools/$tool.sh" || return
-    health_stage "$tool" "health_${tool//-/_}" "$release" "$health_home" || return
+    check_args=("$release/bin" "$health_home")
+    case "$tool" in
+      nvim | helm-schema)
+        check_args[0]=$release
+        ;;
+      tmux)
+        check_args=("$release/bin/tmux" "$health_home" "$release/dotfiles/tmux/.tmux.conf"
+          "$release/share/tmux/plugins" "${selected_tools[@]}")
+        ;;
+      kubectl | helm)
+        check_args+=("${release_metadata[${tool^^}_VERSIONS]}")
+        ;;
+      yq)
+        check_args+=("${release_metadata[YQ_VERSION]}")
+        ;;
+      uv)
+        check_args+=("$release/tools/python/bin/python3")
+        ;;
+      k9s)
+        check_args+=("$release/dotfiles/k9s/.config/k9s")
+        if [[ -d $release/share/nvim2/mason/packages/yamllint ]]; then
+          check_args+=("$release/share/nvim2/mason/packages/yamllint/venv/bin/yamllint")
+        fi
+        ;;
+    esac
+    health_stage "$tool" "health_${tool//-/_}" "${check_args[@]}" || return
   done
   # shellcheck source=tools/bash.sh
   source "$test_dir/tools/bash.sh" || return

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+[[ $1 == api ]] || exit 2
+endpoint=$2
+printf '%s\n' "$endpoint" >>"$TEST_API_LOG"
+
+release_json() {
+  find "$TEST_RELEASE_ASSETS" -maxdepth 1 -type f -printf '%f\n' |
+    jq -Rsc '
+      {id: 42, assets: (
+        split("\n") | map(select(length > 0)) |
+        map({name: ., id: (if . == "compose.yaml" then 101 else 102 end)})
+      )}
+    '
+}
+
+case $endpoint in
+  */releases/tags/* | */releases/42)
+    if [[ -n ${TEST_RELEASE_ERROR:-} ]]; then
+      printf 'HTTP %s\n' "$TEST_RELEASE_ERROR" >&2
+      exit 75
+    fi
+    release_json
+    ;;
+  */commits/*)
+    printf '%s\n' "$TEST_COMMIT"
+    ;;
+  users/*/packages/container/*/versions | orgs/*/packages/container/*/versions)
+    if [[ -n ${TEST_PACKAGE_ERROR:-} ]]; then
+      printf 'HTTP %s\n' "$TEST_PACKAGE_ERROR" >&2
+      exit 75
+    fi
+    if [[ ! -f $TEST_IMAGE_TAGS ]]; then
+      printf 'HTTP 404\n' >&2
+      exit 75
+    fi
+    cat "$TEST_IMAGE_TAGS"
+    ;;
+  */releases/assets/101 | */releases/assets/102)
+    if [[ ${TEST_DOWNLOAD_FAIL:-0} == 1 ]]; then
+      printf 'Asset download unavailable\n' >&2
+      exit 75
+    fi
+    asset=compose.yaml
+    if [[ $endpoint == */102 ]]; then
+      asset=compose.yaml.sha256
+    fi
+    cat "$TEST_RELEASE_ASSETS/$asset"
+    ;;
+  https://uploads.github.com/*/releases/42/assets\?name=*)
+    asset=${endpoint##*name=}
+    input=
+    shift 2
+    while (($#)); do
+      case $1 in
+        --method | --header)
+          shift 2
+          ;;
+        --input)
+          input=$2
+          shift 2
+          ;;
+        *)
+          exit 2
+          ;;
+      esac
+    done
+    [[ -n $input && ! -e $TEST_RELEASE_ASSETS/$asset ]] || exit 3
+    cp -- "$input" "$TEST_RELEASE_ASSETS/$asset"
+    printf '%s\n' "$asset" >>"$TEST_UPLOAD_LOG"
+    if [[ ${TEST_UPLOAD_FAIL_AFTER_COMPOSE:-0} == 1 && $asset == compose.yaml ]]; then
+      exit 77
+    fi
+    ;;
+  *)
+    exit 2
+    ;;
+esac

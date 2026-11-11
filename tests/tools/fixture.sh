@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+health_stage() {
+  local label=$1 status
+  shift
+
+  printf '%s: checking %s\n' "${0##*/}" "$label"
+  "$@" && return
+  status=$?
+  report_error "$label health check failed (status $status)" || true
+  return "$status"
+}
+
 health_chart() {
   local chart=$1
   mkdir -p "$chart/templates" || return

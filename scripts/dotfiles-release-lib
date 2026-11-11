@@ -838,7 +838,7 @@ validate_online_installation() {
     }
   done
   [[ -L $release/bin/dotfiles-release && -x $release/bin/dotfiles-release &&
-    $(readlink -- "$release/bin/dotfiles-release") == ../dotfiles/scripts/dotfiles-release ]] || {
+    $(readlink -- "$release/bin/dotfiles-release") == ../dotfiles/dotfiles-release ]] || {
     report_error 'online manager command is missing or incorrect'
     return 1
   }
@@ -846,7 +846,7 @@ validate_online_installation() {
   read_installation_tools "$release" online_tools || return
   for file in bash/.bashrc bash/.bash_profile bash/.bash_aliases bash/.bash_history_lib \
     git/.gitconfig vim/.vimrc ssh/.ssh/config \
-    ssh/.config/systemd/user/dotfiles-ssh-agent.service scripts/dotfiles-release \
+    ssh/.config/systemd/user/dotfiles-ssh-agent.service dotfiles-release \
     tools.env scripts/setup-lib scripts/setup-catalog-lib scripts/setup-tools-lib \
     scripts/setup-system-lib scripts/dotfiles-release-lib; do
     [[ -f $release/dotfiles/$file ]] || {

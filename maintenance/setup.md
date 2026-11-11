@@ -9,6 +9,342 @@ while payload installation and selection never use `sudo`.
 For repository maintenance, see [adding and removing tools](#adding-and-removing-tools)
 and [managing OS support and offline publication](#managing-os-support-and-offline-publication).
 
+## Container development
+
+This is an independent installation path using a Debian 13 image on a Linux
+host. Dockerfile installs the CLI tools, pinned tmux plugins and Neovim
+dependencies. `compose.yaml` runs the everyday container; `compose.test.yaml`
+runs an isolated container for development and tests. Taskfile uses direct
+Docker and Compose commands.
+
+### Host preparation
+
+Choose the host daemon before starting Compose. For rootless Docker, follow
+the [Docker rootless installation instructions](https://docs.docker.com/engine/security/rootless/)
+and use:
+
+```bash
+docker context use rootless
+export DOTFILES_DOCKER_SOCKET="$XDG_RUNTIME_DIR/docker.sock"
+export DOTFILES_UID=0 DOTFILES_GID=0 DOTFILES_DOCKER_GID=0
+docker info
+```
+
+For a regular Docker daemon instead:
+
+```bash
+export DOTFILES_UID="$(id -u)" DOTFILES_GID="$(id -g)"
+export DOTFILES_DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+```
+
+Images default to UID/GID 1000:1000. Local builds use the actual host IDs.
+Rootless runs the container as UID 0 in its user namespace, mapped to the
+ordinary host user. This permits access to that user's socket and workspace.
+
+Prepare the host directories as your ordinary user. Compose requires them to
+exist: `create_host_path: true` on a regular Docker daemon creates missing
+directories as root, so the container's ordinary user cannot write to them.
+
+```bash
+mkdir -p "$HOME/work" "$HOME/bin" \
+  "${XDG_STATE_HOME:-$HOME/.local/state}/nvim2" \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/tmux/resurrect"
+```
+
+If you do not already have an SSH agent, start one and unlock your key in the
+same host shell that will run Compose:
+
+```bash
+eval "$(ssh-agent -s)" && ssh-add "$HOME/.ssh/github"
+```
+
+Replace `github` with your key's filename. If an agent is already available,
+run only `ssh-add "$HOME/.ssh/github"`. `ssh-add -l` lists loaded identities.
+Then enter the everyday container with
+`docker compose up -d && docker compose exec dev bash`.
+
+The everyday workspace defaults to `~/work` and is mounted at the same
+absolute path so sibling containers created through the Docker socket can use
+files there as bind sources. Set `DOTFILES_WORKSPACE` only when you need a
+different existing absolute path. The test container uses the image's private
+filesystem and does not mount a host workspace.
+
+### Everyday container and shared state
+
+From the checkout, run:
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose exec dev bash
+# Inside Bash:
+tmux new-session -A -s work
+```
+
+`compose.yaml` defaults to `ghcr.io/surbanski-nr/dotfiles:latest`. It always
+mounts the host Neovim state, tmux-resurrect data, read-only `~/bin` overrides
+and SSH agent. Neovim's ShaDa and Telescope history and tmux saves can therefore
+follow you between the container and an online or offline host installation.
+The named HOME volume preserves Bash history, Kubernetes credentials and other
+user files when the everyday container is replaced or upgraded. It contains
+configuration links, while installed tools and plugins remain in the image.
+
+The state sources respect the host's `XDG_STATE_HOME` and `XDG_DATA_HOME`.
+If the host still saves tmux sessions in `~/.tmux/resurrect`, change the
+resurrect bind's source in `compose.yaml` to that directory; keep its container
+target at `/home/dev/.local/share/tmux/resurrect`. Saved working directories
+must exist in both environments.
+
+The SSH agent authenticates without copying private keys. The normal Compose
+project name comes from the checkout directory. To stop the container while
+keeping its HOME, run `docker compose down`. Add `--volumes` to also remove
+that private HOME; the host bind directories remain.
+
+Bash reads the image's ordinary `.bashrc`, including mise shims and Mason
+binaries in PATH. `EDITOR`, `VISUAL` and `GIT_EDITOR` remain `vi`.
+The tmux prefix remains `Ctrl+a`. If an outer host tmux uses the same prefix,
+press `Ctrl+a Ctrl+a` before the inner tmux command. Leaving tmux keeps the
+container running. Recreating it terminates its processes and tmux sessions.
+
+Configuration lives in `/opt/dotfiles`, mise tools in `/opt/mise`, Neovim
+plugins, parsers and Mason tools in `/opt/nvim2`, and tmux plugins in
+`/opt/tmux/plugins`. HOME contains configuration links created by `bstow`,
+plus these directory links:
+
+```text
+~/.local/share/nvim2 -> /opt/nvim2
+~/.tmux/plugins -> /opt/tmux/plugins
+```
+
+These links follow the selected image after an upgrade, while user state
+persists. Docker copies the image's initial HOME into a new named volume.
+If an upgrade adds, removes or renames configuration files, run ordinary
+`bstow restow` inside that instance for the affected packages:
+
+```bash
+"$DOTFILES/bstow" -d "$DOTFILES" -t "$HOME" restow nvim2
+```
+
+New config packages also need links in an existing HOME volume. For example,
+after upgrading to an image that includes Midnight Commander:
+
+```bash
+"$DOTFILES/bstow" -d "$DOTFILES" -t "$HOME" stow mc
+```
+
+To build the everyday image locally from the checkout:
+
+```bash
+docker compose build --no-cache \
+  --build-arg DEV_UID="$(id -u)" \
+  --build-arg DEV_GID="$(id -g)"
+docker compose up -d --pull never
+```
+
+Everyday builds use the host UID/GID for writable bind mounts. Test builds use
+the Dockerfile's defaults (1000:1000), because they do not mount host user directories.
+
+### Docker access and Kubernetes
+
+Both containers use the host's Docker socket. kind, minikube and `docker run`
+create sibling containers through that daemon. Access to the socket gives
+access to its containers, volumes and permitted host mounts.
+
+Compose uses host networking. For rootless Docker this is the daemon's network
+namespace; RootlessKit forwards published ports to the actual host. Rootless
+Kubernetes needs cgroup v2 and a Docker service with cgroup delegation.
+
+Inside Bash in the development container:
+
+```bash
+kind create cluster --name dev
+# Rootless uses mapped UID 0, so minikube needs --force:
+minikube start -p dev --driver=docker --container-runtime=containerd --force
+cd "$DOTFILES"
+task k9s
+task k9s:clean
+```
+
+For a regular daemon's ordinary container user, omit minikube's `--force`.
+Choose separate kind cluster names and minikube profiles for each instance.
+Run k9s-preview in one instance at a time.
+
+### Image development and tests
+
+Run `task dev` to edit this checkout in the development VM. Host versions remain
+in `tools.env`; image CLI versions are in the root `mise.toml`. After changing
+mise versions, regenerate the lock and qualify both installation paths:
+
+```bash
+task update:mise-locks
+task validate
+task test
+task devcontainer
+```
+
+Skip `update:mise-locks` when only configuration changes. It regenerates the
+root `mise.lock` with the Dockerfile's pinned mise. The lock task uses the
+configured user IDs for its bind mount, including UID/GID 0 for rootless Docker.
+Edit the TOML and regenerate the lock; do not edit generated files by hand.
+`task test` runs `test:offline`, then `test:devcontainer`. The offline part requires
+a clean committed checkout so the archive matches its recorded source commit.
+Image builds and `task test:devcontainer` accept uncommitted changes.
+Mise remains installed in the runtime image; use `mise` directly from its Bash shell.
+
+Mise supports several installed versions of one tool. The first entry in its
+TOML array is the default. Kubectl and Helm list the same retained versions as
+`tools.env`: kubectl 1.36.0, 1.34.12 and 1.27.11, and Helm 4.3.0 and 3.21.0.
+The 2.4.0 record in `tools.env` belongs to the separate `helm-schema` plugin.
+Keep these two version lists aligned when updating either installation path,
+then regenerate `mise.lock` and rebuild the image.
+
+Inside the container, choose another installed version for one command:
+
+```bash
+mise exec kubectl@1.34.12 -- kubectl version --client
+mise exec helm@3.21.0 -- helm version --short
+```
+
+Or select it for commands in the current Bash session, including a tmux pane:
+
+```bash
+export MISE_KUBECTL_VERSION=1.34.12
+export MISE_HELM_VERSION=3.21.0
+# Restore the image defaults:
+unset MISE_KUBECTL_VERSION MISE_HELM_VERSION
+```
+
+Use these variables with the image's mise shims. The host installation's
+`KUBECTL_VERSION` and `HELM_VERSION` belong to its offline launchers.
+
+`task devcontainer` uses the everyday `compose.yaml`: it builds without cache,
+starts the container and opens a login Bash shell. Exiting leaves the container
+running, just as `task dev` leaves its VM running and `task k9s` leaves its cluster
+running. These development tasks do not run tests.
+
+The individual development tasks also use `compose.yaml`:
+
+- `devcontainer:build` builds the local `latest` image without cache and with the host IDs.
+- `devcontainer:up` calls that build task, then starts the container.
+- `devcontainer:clean` removes the container and retains its HOME volume and shared host state.
+
+`task test:devcontainer` uses `compose.test.yaml` to build `dotfiles:local`, start
+its separate container and run functional checks. Task's `defer` removes that
+container even when build, startup or tests fail. Its project is `dotfiles-test`.
+HOME, Neovim state, tmux saves and `bin` live in its disposable filesystem, with
+no persistent volume, host workspace or SSH agent. It shares only the Docker
+socket. The everyday container can keep running while you test another tool version.
+
+Dockerfile owns installation: apt packages, mise, pinned tmux plugins,
+configuration links and Neovim dependencies. Add a new image CLI tool to
+`mise.toml` or the apt list. Neovim's LSP, formatter, linter and parser
+configuration controls its editor dependencies; Mason installs those enabled
+tools.
+
+The apt list covers the runtime commands from `system.env`, including Debian
+tools such as `ip` and `vi`. It also installs Midnight Commander and the
+Docker and Compose clients. It does not reproduce the complete host setup
+list: the image uses mise installations and needs neither a systemd service
+nor a Docker daemon. Host libraries used only to compile asdf tools are also
+unnecessary; `build-essential` and `pkg-config` remain for editor dependencies.
+
+Simple Dockerfile steps use `RUN` with `&&` and line continuations. The plugin
+loop and Neovim installation use Bash heredocs, supported by Docker's build
+syntax, so their loop and embedded Lua remain readable without extra escaping.
+
+Mason exposes `ansible-lint`, while the `ansible-core` dependency keeps
+`ansible`, `ansible-config` and `ansible-playbook` in its venv. Offline builds
+and the image add three relative links in Mason's `bin` for those commands.
+This is the Mason package's declared interface, rather than an installation
+failure. Installing Ansible again from apt would add another version while
+`ansible-lint` would still install its own `ansible-core` dependency.
+The links expose only the Ansible helpers; adding the entire venv to global PATH
+would also expose its Python, pip and unrelated dependencies. The connected
+Ansible LSP already receives that venv in its own `cmd_env.PATH`.
+
+`tests/container_tools_runner.sh` runs inside the image via
+`test:devcontainer`. It uses the functional cases under `tests/tools/` shared
+with `tests/offline_tools_runner.sh`, plus the full Nvim2 runner. It checks tool
+behavior, Python dependencies, Bash history, tmux configuration and plugins,
+and Neovim from a tmux login shell. Shared runtime requirements come from
+`SYSTEM_RUNTIME_COMMANDS` in `system.env`. CLI version probes come from
+`TOOL_CHECKS` in `tools.env` and `SYSTEM_PROBES` in `system.env`;
+the image's mise tool selection remains in `mise.toml`.
+Kubectl and Helm functional checks run for every configured image version.
+Mason expectations come from the enabled Neovim configuration through its
+existing runner. There is one image tools runner; Task invokes it directly.
+
+`k9s_preview_test.sh` uses fakes by default to check failures and recovery;
+its explicit `integration` mode opens the real k9s TUI on kind. It uses tmux
+with an empty configuration solely to supply a terminal and capture TUI output;
+tmux configuration and plugins are checked by `tests/tools/tmux.sh`.
+After `task test:devcontainer` has built the image, start a fresh test container
+for the real preview check:
+
+```bash
+docker compose --file compose.test.yaml up -d --no-build
+docker compose --file compose.test.yaml exec dev \
+  bash --login -ic 'bash /opt/dotfiles/tests/k9s_preview_test.sh integration'
+docker compose --file compose.test.yaml down
+```
+
+The test removes its own kind cluster and retains logs inside the container
+until Compose removes it. Functional checks run locally after building; the
+image publication workflow builds and publishes the image.
+
+### Published images and release Compose
+
+`.github/workflows/dotfiles-image.yml` runs on Ubuntu 26.04, independently of
+the offline package workflow. Publishing a GitHub release or manually selecting
+an existing release tag starts the workflow. It resolves the GitHub release ID
+and checks out that release's commit, including on manual runs. Starting on
+`release.published` ensures the release already exists
+when Compose is attached, so this workflow needs no tag-push polling loop.
+The offline workflow retains its existing tag-push preflight. The image
+workflow publishes the image as
+`ghcr.io/surbanski-nr/dotfiles:COMMIT`, with the full commit SHA, and updates
+`latest` to that same image. If GitHub Packages already contains the commit tag,
+the workflow skips building and publishing the image. Neither the commit tag
+nor `latest` is changed on reruns. The workflow delegates release checks and
+missing Compose uploads to `scripts/dotfiles-image-ci`, as the offline workflow
+does with `scripts/dotfiles-release-ci`.
+The `ci/` prefix in both workflows is their checkout directory, rather than
+another script directory in the repository.
+
+It attaches missing `compose.yaml` and `compose.yaml.sha256` assets to that
+release ID, preserving existing files. A missing checksum is calculated from
+the existing Compose; a missing Compose is checked against an existing checksum
+before upload. `task validate:workflows` tests publication and recovery with
+mocked GitHub and Docker clients. This generated Compose uses the exact commit
+image and omits the local build instruction, so it can run outside a checkout.
+Download it into its own
+directory, after the host preparation above:
+
+```bash
+mkdir -p "$HOME/dotfiles-container"
+cd "$HOME/dotfiles-container"
+gh release download dotfiles-SHORT_SHA --repo surbanski-nr/dotfiles \
+  --pattern 'compose.yaml*'
+sha256sum --check --strict compose.yaml.sha256
+docker compose up -d
+docker compose exec dev bash
+```
+
+The repository Compose follows `latest`; the release Compose stays on its
+commit. To upgrade or roll back a release installation, replace Compose with
+the file from the desired release and run `docker compose up -d` again.
+The named HOME and host state mounts are retained.
+
+After first publication, set the GHCR package visibility to public in GitHub
+Packages. Public container images are free under the
+[GitHub Packages billing policy](https://docs.github.com/en/billing/concepts/product-billing/github-packages).
+For transport without registry access:
+
+```bash
+docker save ghcr.io/surbanski-nr/dotfiles:COMMIT | gzip > dotfiles-image.tar.gz
+gzip -dc dotfiles-image.tar.gz | docker load
+```
+
 ## Connected machine
 
 Clone the repository, then run:
@@ -19,7 +355,7 @@ cd "$HOME/github.com/surbanski/dotfiles"
 ./setup-tools
 # Optional online project runtimes:
 ./setup-asdf terraform nodejs terragrunt
-./scripts/dotfiles-release set online
+./dotfiles-release set online
 # Additional packages outside the managed installation:
 ./bstow --dry-run -v -t "$HOME" stow \
   mc gnupg codex
@@ -46,9 +382,21 @@ Both flows publish managed commands through the same selection:
   dotfiles-COMMIT/         prepared offline package with a frozen checkout
 ```
 
+The repository's public manager is `./dotfiles-release`. If an existing online
+installation's manager link still points to its former `scripts/` location,
+update that link once before running `setup-tools` again:
+
+```bash
+readlink "${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}/online/bin/dotfiles-release"
+# If it prints ../dotfiles/scripts/dotfiles-release:
+ln -sfn \
+  ../dotfiles/dotfiles-release \
+  "${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}/online/bin/dotfiles-release"
+```
+
 Use an absolute `DOTFILES_RELEASE_ROOT` to relocate the whole store. Both
 connected installers always write `online`, even while an offline package is
-selected. Setup prepares tools; `./scripts/dotfiles-release set online` selects
+selected. Setup prepares tools; `./dotfiles-release set online` selects
 them and links base Bash, Git, SSH and Vim configuration plus selected tools'
 configuration into HOME. The same manager handles offline selection, backups,
 recovery and uninstall. Online configuration follows edits and pulls in the Git
@@ -505,7 +853,7 @@ After commenting a connected entry, run `./setup-tools` without names.
 It removes that tool's authenticated command links from `online/bin` while
 retaining versioned payloads and ownership records for rollback. Named requests
 install only the requested tools and do not prune other commands.
-Then run `./scripts/dotfiles-release set online` to reconcile HOME configuration
+Then run `./dotfiles-release set online` to reconcile HOME configuration
 with the new selection. User overrides in `~/bin` and optional asdf/provider
 data are preserved. To remove the whole online installation, use
 `dotfiles-release uninstall online`; the editable checkout stays outside it.
@@ -576,7 +924,7 @@ selection or an asdf plugin.
    `release_projection()` in
    [scripts/dotfiles-release-lib](../scripts/dotfiles-release-lib) and
    `managed_home_links()` in
-   [scripts/dotfiles-release](../scripts/dotfiles-release), guarded by selection,
+   [dotfiles-release](../dotfiles-release), guarded by selection,
    so the shared manager can activate, remove and restore them in both flows.
    Keep mutable user data outside frozen offline payloads. A plugin, private
    editor dependency or custom launcher may need a focused builder or runtime
@@ -615,16 +963,21 @@ Verification has separate jobs:
   `scripts/dotfiles-release-lib` for presence, isolated execution and versions.
   These checks normally follow the shared tool rules and `TOOL_CHECKS`; add
   manager branches only for special payload structure or runtime behaviour.
-- `tests/tools_runner.sh` first calls the packaged manager's public `health`
+- `tests/offline_tools_runner.sh` first calls the packaged manager's public `health`
   command, then runs extended functional checks during offline qualification.
   It loads shared read-only helpers, without sourcing the manager CLI or taking
   over its traps and transaction state. A source-only, non-executable
   `tests/tools/mytool.sh` registers its suite automatically for a selected
-  tool. Define `health_mytool()` with the release directory and disposable
+  tool. Define `health_mytool()` with the executable directory and disposable
   HOME as its two arguments; replace hyphens with underscores in function
-  names. Invoke the packaged executable by its release path, prepare inputs
+  names. Invoke `"$bin/mytool"`, prepare inputs
   under that disposable HOME, assert useful output or behaviour, and propagate
-  failures. Tests must work without network access. Tools without a dedicated
+  failures. Keep package metadata in the runner; pass extra arguments only
+  when a suite needs selected versions or configuration paths. The uv suite
+  also accepts a Python executable; the offline runner passes the private
+  `tools/python/bin/python3` instead of exposing Python in `bin/`. These cases can
+  also be called by `tests/container_tools_runner.sh` for an image tool.
+  Tests must work without network access. Tools without a dedicated
   functional suite still receive the common presence and version checks.
   Bash always has an integration suite; uv's Python-management suite additionally
   requires selected Python.
@@ -807,20 +1160,21 @@ For a complete local qualification, run from a clean committed checkout on a
 connected machine with Docker access:
 
 ```bash
-bin/task test
+bin/task test:offline
 # Show usage and the location of the platform configuration:
-bin/task --summary test
+bin/task --summary test:offline
 # Build and qualify just one platform:
-bin/task test -- ubuntu2404
+bin/task test:offline -- ubuntu2404
 ```
 
-The task uses `scripts/dotfiles-release-ci test` and the immutable images from
+`task test` runs this offline task, then `test:devcontainer` for the independent
+development image. The offline task uses `scripts/dotfiles-release-ci test` and the immutable images from
 `platforms.env`. By default it builds every platform in
 `OFFLINE_TEST_PLATFORMS` in parallel, waits for all builds to finish, then
 prepares and verifies successful builds in parallel.
 Each installation uses a fresh container, an ordinary user and `--network none`.
 Each job verifies the archive, installs it with the downloaded manager, then
-runs `tests/tools_runner.sh` from the trusted workflow checkout.
+runs `tests/offline_tools_runner.sh` from the trusted workflow checkout.
 That CI-only checker runs the full functional suites and verifies installed
 content before and after them. It is not needed on the target host.
 The task prints a retained `/tmp/dotfiles-qualification.XXXXXX` directory:
@@ -1013,7 +1367,7 @@ published. `scripts/build-standalone-script` generates the manager from the
 matching release sources: runtime and Docker configuration from `system.env`,
 tool probes from `tools.env`, `scripts/setup-lib`, `scripts/setup-system-lib`,
 `scripts/setup-tools-lib`, `scripts/dotfiles-release-lib` and the
-`scripts/dotfiles-release` CLI. `##### BEGIN SOURCE #####` and
+root `dotfiles-release` CLI. `##### BEGIN SOURCE #####` and
 `##### END SOURCE #####` comments identify each embedded block. Edit the
 repository sources, not generated scripts; there is no second offline
 installer implementation. The published manager is extracted from the
@@ -1124,7 +1478,7 @@ release through the same code used by `set ID`. Reinstalling an unchanged
 retained ID reuses it after integrity and runtime checks.
 
 Extended functional cases are grouped by tool in `tests/tools/` and run by
-`tests/tools_runner.sh` according to the package's declared selection.
+`tests/offline_tools_runner.sh` according to the package's declared selection.
 Bash integration checks follow that selection too; full Nvim tests stay in the
 editor's test directory. A missing selected program is a failure, not a skipped
 test. Installer tests remain grouped by verification, installation, switching,

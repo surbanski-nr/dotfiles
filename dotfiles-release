@@ -23,8 +23,9 @@ install prepares the release offline, checks its runtime and activates it.
 It never runs setup, installs OS packages or uses sudo.
 health checks installed integrity and runtime, defaulting to current.
 --skip-health skips runtime probes, never integrity or safety checks.
-set activates an installed release, or the connected installation with `set online`. uninstall removes a release, defaulting
-to current, and restores saved files when removing the active release.
+set activates an installed release, or the connected installation with `set online`.
+uninstall removes a release, defaulting to current, and restores saved files when
+removing the active release.
 EOF
 }
 
@@ -35,8 +36,8 @@ setup_host() (
 
   if ! declare -p SYSTEM_RUNTIME_PACKAGES >/dev/null 2>&1; then
     local script_dir
-    script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || return
-    load_config "$script_dir/../system.env" || return
+    script_dir=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")") || return
+    load_config "$script_dir/system.env" || return
   fi
   system_validate_host
   SETUP_TEMP_DIR=$(mktemp -d)
@@ -572,25 +573,25 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   manager_dir=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")
   # The standalone manager already contains these libraries and TOOL_CHECKS.
   if ! declare -F report_error >/dev/null; then
-    # shellcheck source=setup-lib
-    source "$manager_dir/setup-lib"
+    # shellcheck source=scripts/setup-lib
+    source "$manager_dir/scripts/setup-lib"
   fi
   if ! declare -F tool_metadata_fields >/dev/null; then
-    # shellcheck source=setup-tools-lib
-    source "$manager_dir/setup-tools-lib"
+    # shellcheck source=scripts/setup-tools-lib
+    source "$manager_dir/scripts/setup-tools-lib"
   fi
   if ! declare -F system_validate_platform_name >/dev/null; then
-    # shellcheck source=setup-system-lib
-    source "$manager_dir/setup-system-lib"
+    # shellcheck source=scripts/setup-system-lib
+    source "$manager_dir/scripts/setup-system-lib"
   fi
   if ! declare -F health_release >/dev/null; then
-    # shellcheck source=dotfiles-release-lib
-    source "$manager_dir/dotfiles-release-lib"
+    # shellcheck source=scripts/dotfiles-release-lib
+    source "$manager_dir/scripts/dotfiles-release-lib"
   fi
   if ! declare -p TOOL_CHECKS >/dev/null 2>&1; then
-    # shellcheck source=setup-catalog-lib
-    source "$manager_dir/setup-catalog-lib"
-    load_config "$manager_dir/../tools.env"
+    # shellcheck source=scripts/setup-catalog-lib
+    source "$manager_dir/scripts/setup-catalog-lib"
+    load_config "$manager_dir/tools.env"
   fi
 
   RELEASE_ROOT=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}

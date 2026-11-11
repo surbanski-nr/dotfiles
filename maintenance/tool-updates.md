@@ -98,7 +98,7 @@ Prepare the actual candidate inside the VM, using the normal installers:
 ./setup-tools
 ./setup-asdf
 
-./scripts/dotfiles-release set online
+./dotfiles-release set online
 ./bstow stow mc
 exit
 ```

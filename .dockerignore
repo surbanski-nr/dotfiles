@@ -1,0 +1,9 @@
+.git
+.cache
+bin
+artifacts
+build
+**/__pycache__
+**/*.swp
+**/*.swo
+**/*.pyc

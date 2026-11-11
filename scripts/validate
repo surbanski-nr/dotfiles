@@ -194,6 +194,7 @@ validate_scripts() {
   local -A test_platforms=() release_platforms=()
   local files=(
     bstow
+    dotfiles-release
     setup-asdf
     setup-system
     setup-tools
@@ -202,6 +203,7 @@ validate_scripts() {
     tests/dotfiles_release_runner.sh
     tests/dotfiles_release_ci_test.sh
     tests/dev_vm_test.sh
+    tests/container_tools_runner.sh
     tests/k9s_preview_test.sh
     tests/offline_debug_adapter_test.sh
     tests/offline_go_test.sh
@@ -212,7 +214,7 @@ validate_scripts() {
     tests/setup_architecture_test.sh
     tests/setup_system_test.sh
     tests/setup_tools_runner.sh
-    tests/tools_runner.sh
+    tests/offline_tools_runner.sh
     tests/validate_test.sh
   )
 
@@ -221,7 +223,7 @@ validate_scripts() {
   done
   for file in scripts/* tests/*_runner.sh tests/fixtures/*/* \
     tests/dotfiles_release/*_test.sh tests/setup_tools/*_test.sh \
-    bstow vim/setup nvim2/.config/nvim2/tests/check_runner.sh; do
+    bstow dotfiles-release vim/setup nvim2/.config/nvim2/tests/check_runner.sh; do
     [[ $file == scripts/*-lib ]] && continue
     [[ -x $file ]] || report_error "executable bit is missing: $file"
   done
@@ -275,7 +277,7 @@ validate_scripts() {
   [[ ! -e offline ]] || report_error 'legacy offline source directory still exists'
   if grep -qE \
     'nvim2-release|NVIM2_RELEASE|TARGET_(USER|UID|HOME)' \
-    scripts/dotfiles-release scripts/build-dotfiles-release platforms.env \
+    dotfiles-release scripts/build-dotfiles-release platforms.env \
     .github/workflows/dotfiles-release.yml; then
     report_error 'offline release files retain a legacy name or baked target identity'
   fi
@@ -582,9 +584,13 @@ validate_workflows() {
   require_command zizmor
   local token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
   local discovered_token
+  local yaml_python
 
   actionlint -color
   yamllint --strict --config-file .yamllint.yml .github/workflows
+  # Use the YAML parser already installed in yamllint's isolated environment.
+  yaml_python=$(dirname -- "$(readlink -f -- "$(command -v yamllint)")")/python
+  run_test 60s "$yaml_python" tests/dotfiles_image_ci_test.py
   if [[ -z $token ]] && command -v gh >/dev/null 2>&1; then
     if discovered_token=$(gh auth token 2>/dev/null); then
       token=$discovered_token

@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
 
 health_tmux() {
-  local release=$1 health_home=$2 socket socket_dir plugin entry option command
+  local tmux=$1 health_home=$2 config=$3 plugin_dir=$4
+  local socket socket_dir plugin entry option command
   local client client_input client_stderr client_pid reload_value
-  local tmux=$release/bin/tmux
   local state_dir=$health_home/'tmux saved state'
-  local -a selected_tools=()
-  # Read and populated through namerefs.
-  # shellcheck disable=SC2034
-  local -A metadata=()
-
-  read_release_metadata "$release/release.env" metadata || return
-  read_release_tools metadata selected_tools || return
+  shift 4
+  local -a selected_tools=("$@")
 
   mkdir -p "$state_dir" || return
   (
@@ -20,6 +15,7 @@ health_tmux() {
     socket=$socket_dir/socket
     unset TMUX
     export HOME="$health_home"
+    export DOTFILES_TMUX_PLUGIN_DIR="$plugin_dir"
     # shellcheck disable=SC2329
     cleanup_health_tmux() {
       # shellcheck disable=SC2317
@@ -27,14 +23,14 @@ health_tmux() {
       cleanup_path "$socket_dir"
     }
     trap cleanup_health_tmux EXIT
-    "$tmux" -S "$socket" new-session -d -s health || exit
+    "$tmux" -S "$socket" -f "$config" new-session -d -s health || exit
     option=$("$tmux" -S "$socket" show-options -gv prefix)
     [[ $option == C-a ]] || {
       report_error "tmux prefix is $option, expected C-a"
       exit 1
     }
     option=$("$tmux" -S "$socket" show-options -gv @dotfiles-config)
-    [[ $option == "$release/dotfiles/tmux/.tmux.conf" ]] || {
+    [[ $option == "$config" ]] || {
       report_error 'tmux did not retain its physical config'
       exit 1
     }
@@ -65,7 +61,7 @@ health_tmux() {
       sleep 0.02
     done
     [[ $reload_value == top ]] || {
-      report_error 'tmux Shift-R did not reload the physical offline config'
+      report_error 'tmux Shift-R did not reload the physical config'
       exit 1
     }
     if list_has selected_tools tmux-resurrect; then
@@ -81,7 +77,7 @@ health_tmux() {
       }
     fi
     [[ ! -s $client_stderr ]] || {
-      report_error 'tmux offline reload client wrote to stderr'
+      report_error 'tmux reload client wrote to stderr'
       exit 1
     }
     "$tmux" -S "$socket" detach-client -t "$client" || exit
@@ -89,8 +85,8 @@ health_tmux() {
     wait "$client_pid" || exit
     for plugin in "${selected_tools[@]}"; do
       [[ $plugin == tmux-* ]] || continue
-      entry=$release/share/tmux/plugins/$plugin/${plugin#tmux-}.tmux
-      [[ $plugin != tmux-sensible ]] || entry=$release/share/tmux/plugins/$plugin/sensible.tmux
+      entry=$plugin_dir/$plugin/${plugin#tmux-}.tmux
+      [[ $plugin != tmux-sensible ]] || entry=$plugin_dir/$plugin/sensible.tmux
       [[ -x $entry || -f $entry ]] || {
         report_error "tmux plugin entry point is missing: $entry"
         exit 1

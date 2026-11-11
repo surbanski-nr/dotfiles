@@ -1,0 +1,110 @@
+---
+name: Build dotfiles container image
+
+'on':
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing dotfiles release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read  # Check whether the commit image already exists.
+
+concurrency:
+  group: dotfiles-image-${{ inputs.release_tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Find release, image and incomplete Compose assets
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+      commit_sha: ${{ steps.release.outputs.commit_sha }}
+      image: ${{ steps.release.outputs.image }}
+      build_image: ${{ steps.release.outputs.build_image }}
+      attach_compose: ${{ steps.release.outputs.attach_compose }}
+    steps:
+      - name: Check out workflow tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: ci
+
+      - name: Resolve release and missing assets
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+          PACKAGE_OWNER_TYPE: ${{ github.event.repository.owner.type }}
+        run: bash ci/scripts/dotfiles-image-ci preflight
+
+  image:
+    name: Build or complete the development image release
+    needs: preflight
+    if: >-
+      needs.preflight.outputs.build_image == 'true' ||
+      needs.preflight.outputs.attach_compose == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: write  # Attach missing Compose assets to the release.
+      packages: write  # Publish a missing commit image to GHCR.
+    env:
+      RELEASE_ID: ${{ needs.preflight.outputs.release_id }}
+      IMAGE: ${{ needs.preflight.outputs.image }}
+    steps:
+      - name: Check out workflow tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: ci
+
+      - name: Check out the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.preflight.outputs.commit_sha }}
+          path: release-source
+
+      - name: Sign in to GHCR
+        if: needs.preflight.outputs.build_image == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io \
+            --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Build and publish the missing image
+        if: needs.preflight.outputs.build_image == 'true'
+        run: |
+          latest_image=${IMAGE%:*}:latest
+          docker build \
+            --platform linux/amd64 \
+            --progress plain \
+            --tag "$IMAGE" \
+            --tag "$latest_image" \
+            release-source
+          # publish the commit tag last so a failed latest push can be retried.
+          docker push "$latest_image"
+          docker push "$IMAGE"
+
+      - name: Complete missing Compose assets
+        if: needs.preflight.outputs.attach_compose == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          bash ci/scripts/dotfiles-image-ci publish-compose
+          "$GITHUB_WORKSPACE/release-source/compose.yaml"
+
+      - name: Remove registry credentials
+        if: always() && needs.preflight.outputs.build_image == 'true'
+        run: docker logout ghcr.io
