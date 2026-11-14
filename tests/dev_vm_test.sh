@@ -39,12 +39,17 @@ export PATH="$test_root/bin:$PATH"
 run_dev() {
   "$task_executable" --dir "$checkout" dev DEV_PROJECT=fixture "$@"
 }
+run_clean() {
+  "$task_executable" --dir "$checkout" dev:clean DEV_PROJECT=fixture "$@"
+}
+run_clean >"$test_root/empty-clean.log" 2>&1 || fail 'cleanup failed without a VM'
 COLORTERM=truecolor run_dev >"$test_root/default.log" 2>&1
+[[ $(<"$TEST_DEV_STATE/shell-user") == devvm ]] || fail 'guest shell did not use the devvm account'
 [[ $(<"$TEST_DEV_STATE/shell-colorterm") == truecolor ]] || fail 'guest shell lost host truecolor support'
 vm=$(jq -r .name "$TEST_DEV_STATE"/vm-*.json)
 [[ $vm == dotfiles-dev-debian13-*-* ]] || fail 'default task did not create a named Debian VM'
 jq -e --arg root "$checkout" '
-  .type == "virtual-machine" and .config["limits.cpu"] == "1" and
+  .type == "virtual-machine" and .config["limits.cpu"] == "8" and
   .config["limits.memory"] == "16GiB" and .devices.root.size == "80GiB" and
   .devices.checkout.source == $root and .devices.checkout.path == "/workspace/dotfiles" and
   (.devices | keys == ["checkout", "root"])' "$TEST_DEV_STATE/vm-$vm.json" >/dev/null ||
@@ -55,6 +60,14 @@ COLORTERM='' run_dev -- debian13 >"$test_root/no-colorterm.log" 2>&1
 [[ ! -s $TEST_DEV_STATE/shell-colorterm ]] || fail 'guest shell forced unadvertised truecolor support'
 grep -F "guest-shell $vm" "$test_root/reuse.log" >/dev/null || fail 'explicit Debian did not reuse the default VM'
 [[ $(grep -c '^init ' "$TEST_DEV_LOG") == 1 ]] || fail 'reopening a shell created another VM'
+
+if TEST_DEV_GUEST_USER=unexpected run_dev >"$test_root/account.log" 2>&1; then
+  fail 'an unexpected guest account opened the shell'
+fi
+grep -F 'guest account must be devvm' "$test_root/account.log" >/dev/null || fail 'unexpected account lacked an explanation'
+if grep -q 'guest-shell' "$test_root/account.log"; then
+  fail 'an unexpected guest account opened the shell'
+fi
 
 TEST_DEV_SHELL_READY=$test_root/ready TEST_DEV_SHELL_RELEASE=$test_root/release \
   run_dev -- debian13 >"$test_root/held-shell.log" 2>&1 &
@@ -128,6 +141,40 @@ if run_dev >"$test_root/unexpected.log" 2>&1; then
   fail 'an unexpected checkout mount was reused'
 fi
 grep -F 'unexpected type or checkout mount' "$test_root/unexpected.log" >/dev/null || fail 'unsafe reuse lacked an explanation'
+if run_clean >"$test_root/unsafe-clean.log" 2>&1; then
+  fail 'cleanup accepted an unexpected checkout mount'
+fi
+[[ -f $state ]] || fail 'unsafe cleanup removed the VM'
+jq --arg root "$checkout" '.devices.checkout.source = $root' "$state" >"$state.next"
+mv "$state.next" "$state"
+
+duplicate=$TEST_DEV_STATE/vm-duplicate.json
+jq '.name = "duplicate"' "$state" >"$duplicate"
+if run_clean >"$test_root/ambiguous-clean.log" 2>&1; then
+  fail 'cleanup accepted multiple VMs for the same checkout and platform'
+fi
+[[ -f $state && -f $duplicate ]] || fail 'ambiguous cleanup removed a VM'
+rm "$duplicate"
+
+foreign=$TEST_DEV_STATE/vm-foreign-checkout.json
+jq '.name = "foreign-checkout" | .config["user.dotfiles.dev.root"] = "/another/checkout" |
+  .devices.checkout.source = "/another/checkout"' "$state" >"$foreign"
+: >"$TEST_DEV_LOG"
+run_clean >"$test_root/clean.log" 2>&1
+[[ ! -e $state && -f $foreign ]] || fail 'cleanup did not isolate the current checkout'
+for alias in ubuntu2404 ubuntu2604 amazonlinux2023 fixture; do
+  jq -se --arg alias "$alias" '
+    [.[] | select(.config["user.dotfiles.dev.platform"] == $alias)] | length == 1' \
+    "$TEST_DEV_STATE"/vm-*.json >/dev/null || fail "cleanup removed another platform: $alias"
+done
+if grep -Eq '^(init|start|exec|image) ' "$TEST_DEV_LOG"; then
+  fail 'cleanup created or prepared a VM'
+fi
+run_clean >"$test_root/repeated-clean.log" 2>&1 || fail 'repeated cleanup was not harmless'
+[[ -f $foreign ]] || fail 'repeated cleanup removed another checkout'
+run_clean -- ubuntu2404 >"$test_root/platform-clean.log" 2>&1
+jq -se '[.[] | select(.config["user.dotfiles.dev.platform"] == "ubuntu2404")] | length == 0' \
+  "$TEST_DEV_STATE"/vm-*.json >/dev/null || fail 'explicit cleanup selected the wrong platform'
 
 export TEST_DEV_STATE=$test_root/cold-state TEST_DEV_COLD_IMAGE=1
 mkdir -p "$TEST_DEV_STATE" "$test_root/downloads"

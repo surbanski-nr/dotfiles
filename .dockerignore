@@ -3,6 +3,7 @@
 bin
 artifacts
 build
+vim/setup
 **/__pycache__
 **/*.swp
 **/*.swo

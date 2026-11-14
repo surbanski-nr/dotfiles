@@ -347,6 +347,9 @@ cmp "$test_root/prefix-before" "$reconcile_home/kube-log-prefixes.txt" ||
 
 task_executable=${VALIDATION_TOOLS_DIR:-$repo_dir/bin}/task
 compose_bin=$test_root/compose-bin
+compose_socket=$test_root/docker.sock
+# Socket metadata is enough for these mocked Compose lifecycle checks.
+: >"$compose_socket"
 mkdir "$compose_bin"
 cat >"$compose_bin/docker" <<'BASH'
 #!/usr/bin/env bash
@@ -357,8 +360,9 @@ set -euo pipefail
 operation=$4
 if [[ $operation == exec ]]; then
   if [[ $3 == compose.yaml ]]; then
-    [[ ${*:5} == 'dev bash --login' ]]
+    [[ ${*:5} == '--user devcontainer dev bash --login' ]]
   else
+    [[ ${*:5} == '-T --user devcontainer dev '* ]]
     [[ ${*:5} == *'/opt/dotfiles/tests/container_tools_runner.sh'* ]]
   fi
 fi
@@ -370,20 +374,31 @@ BASH
 chmod 0755 "$compose_bin/docker"
 for task_name in devcontainer test:devcontainer; do
   compose_file=compose.yaml
+  failures=(none build up exec)
   if [[ $task_name == test:devcontainer ]]; then
     compose_file=compose.test.yaml
+    failures=(none build run up exec)
   fi
-  for failure in none build up exec; do
+  for failure in "${failures[@]}"; do
     compose_log=$test_root/compose-$task_name-$failure.log
     run_command env PATH="$compose_bin:$PATH" TEST_COMPOSE_LOG="$compose_log" \
-      TEST_COMPOSE_FAILURE="$failure" "$task_executable" --dir "$repo_dir" \
+      DOTFILES_DOCKER_SOCKET="$compose_socket" TEST_COMPOSE_FAILURE="$failure" \
+      "$task_executable" --dir "$repo_dir" \
       --silent --exit-code "$task_name"
     expected_status=73
     expected_operations=$compose_file:build
     if [[ $failure != build ]]; then
-      expected_operations+=$'\n'$compose_file:up
+      if [[ $task_name == test:devcontainer ]]; then
+        expected_operations+=$'\n'$compose_file:run
+        if [[ $failure != run ]]; then
+          expected_operations+=$'\n'$compose_file:run
+        fi
+      fi
+      if [[ $failure != run ]]; then
+        expected_operations+=$'\n'$compose_file:up
+      fi
     fi
-    if [[ $failure != build && $failure != up ]]; then
+    if [[ $failure != build && $failure != run && $failure != up ]]; then
       expected_operations+=$'\n'$compose_file:exec
     fi
     if [[ $task_name == test:devcontainer ]]; then
@@ -410,11 +425,18 @@ BASH
 compose_log=$test_root/compose-all.log
 offline_log=$test_root/offline-alias.log
 run_command env PATH="$compose_bin:$PATH" TEST_COMPOSE_LOG="$compose_log" \
+  DOTFILES_DOCKER_SOCKET="$compose_socket" \
   TEST_OFFLINE_LOG="$offline_log" TEST_COMPOSE_FAILURE=none \
   "$task_executable" --dir "$task_fixture" --silent --exit-code test -- ubuntu2404
 assert_status 0 'test aggregate'
 [[ $(<"$offline_log") == ubuntu2404 ]] || fail 'test did not forward the offline platform alias'
-[[ $(<"$compose_log") == $'compose.test.yaml:build\ncompose.test.yaml:up\ncompose.test.yaml:exec\ncompose.test.yaml:down' ]] ||
+expected_operations='compose.test.yaml:build
+compose.test.yaml:run
+compose.test.yaml:run
+compose.test.yaml:up
+compose.test.yaml:exec
+compose.test.yaml:down'
+[[ $(<"$compose_log") == "$expected_operations" ]] ||
   fail 'test did not qualify the image independently of the development container'
 
 printf 'Script tests passed\n'

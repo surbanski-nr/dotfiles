@@ -9,6 +9,14 @@ case $- in
 *) return ;;
 esac
 
+if [[ -z ${USER:-} ]]; then
+  USER=$(id -un)
+  export USER
+fi
+if [[ -z ${LOGNAME:-} ]]; then
+  export LOGNAME=$USER
+fi
+
 _dotfiles_warn() {
   printf 'dotfiles: %s\n' "$*" >&2
 }
@@ -107,6 +115,9 @@ unset _dotfiles_path_entries _dotfiles_path_entry _dotfiles_clean_path \
   _dotfiles_previous_auto_root
 
 add_to_path "$HOME/.local/share/nvim2/mason/bin"
+if [[ -n ${MISE_SYSTEM_DATA_DIR:-} ]]; then
+  add_to_path "$MISE_SYSTEM_DATA_DIR/shims"
+fi
 add_to_path "${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"
 add_to_path "$HOME/.local/bin"
 add_to_path "$DOTFILES/scripts"

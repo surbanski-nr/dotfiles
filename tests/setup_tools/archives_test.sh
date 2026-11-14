@@ -96,4 +96,4 @@ set -e
   fail 'checksum failure changed the selected version'
 [[ ! -e $failure_home/dotfiles-releases/online/tools/bin/k9s-99.1.0 ]] || fail 'checksum failure installed a candidate'
 
-printf 'setup_tools: archives passed\n'
+printf 'setup-tools tests: archives passed\n'

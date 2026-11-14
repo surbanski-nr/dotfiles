@@ -24,6 +24,7 @@ fail() {
 source_dir=$test_root/source
 workflow_dir=$test_root/workflow
 mkdir -p "$source_dir/scripts" "$workflow_dir/scripts" "$workflow_dir/tests"
+cp "$repo_dir/.gitignore" "$source_dir/.gitignore"
 cp "$repo_dir/Taskfile.yml" "$source_dir/Taskfile.yml"
 cp "$repo_dir/scripts/dotfiles-release-ci" "$source_dir/scripts/dotfiles-release-ci"
 cp "$repo_dir/platforms.env" "$source_dir/platforms.env"
@@ -375,7 +376,7 @@ for file in build.log prepare-runtime.log release.env build-manifest.txt archive
 done
 
 cp "$source_dir/platforms.env" "$test_root/source-config.env"
-printf 'DEBIAN_13_IMAGE=%s\n' "${DOCKER_IMAGES[debian-13-x86_64]}" >"$source_dir/platforms.env"
+printf 'DEBIAN_13_IMAGE=%s\n' "${DOCKER_IMAGES['debian-13-x86_64']}" >"$source_dir/platforms.env"
 : >"$TEST_DOCKER_LOG"
 if run_ci verify "$source_dir" "$test_root/output" >"$test_root/legacy-image.log" 2>&1; then
   fail 'qualification accepted obsolete image variables in a release snapshot'
@@ -473,6 +474,34 @@ for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
 done
 
 : >"$TEST_DOCKER_LOG"
+ln -s "$source_dir" "$test_root/checkout-link"
+# Simulate a full default /tmp while the shared checkout still has space.
+cat >"$test_root/bin/mktemp" <<'EOF'
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ ${TEST_DEFAULT_TMP_FULL:-} == 1 && -z ${TMPDIR:-} && $* != */* ]]; then
+  printf 'mktemp: default temporary filesystem is full\n' >&2
+  exit 1
+fi
+exec /usr/bin/mktemp "$@"
+EOF
+chmod 0755 "$test_root/bin/mktemp"
+if ! env -u TMPDIR TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
+  TEST_DOCKER_SHARED_ROOT="$source_dir" TEST_DEFAULT_TMP_FULL=1 \
+  "$task_executable" --color=false --dir "$test_root/checkout-link" test:offline -- debian13 \
+  >"$test_root/qualification-shared.log" 2>&1; then
+  cat "$test_root/qualification-shared.log" >&2
+  fail 'qualification could not exchange artifacts with Docker through the shared checkout'
+fi
+qualification_root=$(sed -n 's/^Offline packages and logs: //p' "$test_root/qualification-shared.log")
+grep -F 'debian-13-x86_64: build=0 verify=0;' "$qualification_root/summary.md" >/dev/null ||
+  fail 'qualification did not install the archive produced through the shared checkout'
+[[ -z $(git -C "$source_dir" status --porcelain --untracked-files=normal) ]] ||
+  fail 'retained qualification artifacts made the checkout dirty'
+
+: >"$TEST_DOCKER_LOG"
 qualification_parallel=$test_root/qualification-parallel-failure
 mkdir -p "$qualification_parallel"
 set +e
@@ -492,16 +521,14 @@ for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
 done
 
 for cpu_count in 4 2 1; do
-  qualification_parallel=
-  if ((cpu_count == 4)); then
-    qualification_parallel=$test_root/qualification-parallel-partial
-    mkdir -p "$qualification_parallel"
-  fi
+  qualification_parallel=$test_root/qualification-parallel-partial-$cpu_count
+  mkdir -p "$qualification_parallel"
   worker_events=$test_root/qualification-workers-$cpu_count
   : >"$TEST_DOCKER_LOG"
   set +e
   TMPDIR="$qualification_tmp" TEST_BUILD_ARCHIVES_DIR="$qualification_archives" \
     TEST_CI_CPUS="$cpu_count" TEST_WORKER_EVENTS="$worker_events" \
+    TEST_WORKER_PLATFORMS="${OFFLINE_TEST_PLATFORMS[*]}" \
     TEST_PARALLEL_DIR="$qualification_parallel" TEST_PARALLEL_VERIFY_COUNT=3 \
     TEST_BUILD_FAIL="$build_failure_platform" TEST_VERIFY_FAIL="$verify_failure_platform" \
     run_ci test "$source_dir" >"$test_root/qualification-partial.log" 2>&1
@@ -509,7 +536,7 @@ for cpu_count in 4 2 1; do
   set -e
   [[ $qualification_status -eq 81 ]] || fail 'qualification hid the failed platform'
   [[ $(grep -c ' build ' "$TEST_DOCKER_LOG") -eq $test_platform_count &&
-    $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq $((test_platform_count - 1)) ]] ||
+  $(grep -c ' verify ' "$TEST_DOCKER_LOG") -eq $((test_platform_count - 1)) ]] ||
     fail 'one failed platform stopped qualification of the others'
   awk -v cpus="$cpu_count" -v builds="$test_platform_count" \
     -v verifications="$((test_platform_count - 1))" '
@@ -522,7 +549,10 @@ for cpu_count in 4 2 1; do
           peak["build"] != (cpus < builds ? cpus : builds) ||
           peak["verify"] != (cpus < verifications ? cpus : verifications)) exit 1
     }
-  ' "$worker_events" || fail "qualification did not respect $cpu_count available CPUs"
+  ' "$worker_events" || {
+    cat "$worker_events" >&2
+    fail "qualification did not respect $cpu_count available CPUs"
+  }
   qualification_root=$(sed -n 's/^Offline packages and logs: //p' "$test_root/qualification-partial.log")
   for platform in "${OFFLINE_TEST_PLATFORMS[@]}"; do
     if [[ $platform == "$build_failure_platform" ]]; then

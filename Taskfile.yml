@@ -5,7 +5,7 @@ env:
   VALIDATION_TOOLS_DIR: '{{.ROOT_DIR}}/bin'
 
 vars:
-  DEV_CPUS: '1'
+  DEV_CPUS: '8'
   DEV_MEMORY: 16GiB
   DEV_DISK: 80GiB
   DEV_PROJECT: default
@@ -35,7 +35,7 @@ tasks:
       Exiting a shell leaves the VM running; another invocation opens a new shell.
 
       Platform aliases and the default VM are configured in platforms.env.
-      Example: task dev DEV_MEMORY=8GiB -- ubuntu2404
+      Example: task dev DEV_CPUS=4 DEV_MEMORY=8GiB -- ubuntu2404
     dir: '{{.ROOT_DIR}}'
     env:
       PLATFORM_ALIAS: '{{.CLI_ARGS}}'
@@ -47,6 +47,19 @@ tasks:
       DEV_STORAGE: '{{.DEV_STORAGE}}'
     cmds:
       - bash scripts/dev-vm
+
+  dev:clean:
+    desc: Remove this checkout's selected development VM and its guest files
+    summary: |
+      Remove the VM for the current checkout and selected platform.
+      The default platform comes from platforms.env.
+      Example: task dev:clean -- ubuntu2404
+    dir: '{{.ROOT_DIR}}'
+    env:
+      PLATFORM_ALIAS: '{{.CLI_ARGS}}'
+      DEV_PROJECT: '{{.DEV_PROJECT}}'
+    cmds:
+      - bash scripts/dev-vm clean
 
   k9s:
     desc: Preview k9s using a reusable kind cluster
@@ -72,7 +85,20 @@ tasks:
     interactive: true
     cmds:
       - task: devcontainer:up
-      - docker compose --file compose.yaml exec dev bash --login
+      - task: devcontainer:enter
+
+  devcontainer:enter:
+    desc: Open a login shell in the running development container
+    dir: '{{.ROOT_DIR}}'
+    interactive: true
+    cmds:
+      - |
+        docker compose \
+          --file compose.yaml \
+          exec \
+          --user devcontainer \
+          dev \
+          bash --login
 
   devcontainer:build:
     desc: Build the independent Debian development image
@@ -82,9 +108,7 @@ tasks:
         docker compose \
           --file compose.yaml \
           build \
-          --no-cache \
-          --build-arg DEV_UID="$(id -u)" \
-          --build-arg DEV_GID="$(id -g)"
+          --no-cache
 
   update:mise-locks:
     desc: Regenerate mise.lock with the image's pinned mise
@@ -114,8 +138,24 @@ tasks:
     desc: Build without cache and start the development container
     dir: '{{.ROOT_DIR}}'
     cmds:
+      - |
+        mkdir -p \
+          "${DOTFILES_WORKSPACE:-$HOME/work}" \
+          "$HOME/bin" \
+          "${XDG_STATE_HOME:-$HOME/.local/state}/nvim2" \
+          "${XDG_DATA_HOME:-$HOME/.local/share}/tmux/resurrect"
       - task: devcontainer:build
-      - docker compose --file compose.yaml up -d --no-build
+      - |
+        export DOTFILES_UID="${DOTFILES_UID:-$(id -u)}"
+        export DOTFILES_GID="${DOTFILES_GID:-$(id -g)}"
+        docker_socket=${DOTFILES_DOCKER_SOCKET:-/var/run/docker.sock}
+        docker_group=${DOTFILES_DOCKER_GID:-$(stat -c '%g' "$docker_socket")}
+        export DOTFILES_DOCKER_GID=$docker_group
+        docker compose --file compose.yaml up \
+          --detach \
+          --no-build \
+          --wait \
+          --wait-timeout 30
 
   devcontainer:clean:
     desc: Remove the development container and retain its HOME volume
@@ -226,9 +266,32 @@ tasks:
           --file compose.test.yaml \
           build \
           --no-cache
-      - docker compose --file compose.test.yaml up -d --no-build
       - |
-        docker compose --file compose.test.yaml exec -T dev \
+        # Exercise GIDs already present in the image; the full test uses new IDs.
+        for runtime_id in 1000 0; do
+          timeout --foreground --kill-after=5s 30s \
+            docker compose --file compose.test.yaml run \
+              --rm \
+              --no-deps \
+              --no-TTY \
+              --env "DOTFILES_UID=$runtime_id" \
+              --env "DOTFILES_GID=$runtime_id" \
+              dev bash -ec '
+                test "$(id -u)" = "$DOTFILES_UID"
+                test "$(id -g)" = "$DOTFILES_GID"
+              '
+        done
+      - |
+        docker_socket=${DOTFILES_DOCKER_SOCKET:-/var/run/docker.sock}
+        docker_group=${DOTFILES_DOCKER_GID:-$(stat -c '%g' "$docker_socket")}
+        export DOTFILES_DOCKER_GID=$docker_group
+        docker compose --file compose.test.yaml up \
+          --detach \
+          --no-build \
+          --wait \
+          --wait-timeout 30
+      - |
+        docker compose --file compose.test.yaml exec -T --user devcontainer dev \
           timeout --kill-after=10s 1800s \
           bash --login -ic 'exec bash /opt/dotfiles/tests/container_tools_runner.sh'
 

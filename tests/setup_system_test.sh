@@ -94,6 +94,16 @@ if [[ ${TEST_PACKAGE_TTY_PROBE:-0} == 1 ]]; then
   [[ -t 0 ]] || exit 77
   IFS= read -r reply || exit 78
   [[ $reply == package-tty-probe ]] || exit 79
+  "$TEST_REAL_PYTHON" - <<'PYTHON' || exit 80
+import os
+import termios
+
+# sudo can leave the package manager outside its terminal's foreground group.
+os.setpgid(0, 0)
+with open("/dev/tty", "rb", buffering=0) as terminal:
+    settings = termios.tcgetattr(terminal)
+    termios.tcsetattr(terminal, termios.TCSANOW, settings)
+PYTHON
 fi
 printf 'apt-get' >>"$TEST_PACKAGE_LOG"
 printf '\t%s' "$@" >>"$TEST_PACKAGE_LOG"
@@ -229,6 +239,7 @@ fi
 
 real_timeout=$(command -v timeout)
 real_script=$(command -v script)
+real_python=$(command -v python3)
 unlink "$fixture_bin/timeout"
 cat >"$fixture_bin/timeout" <<'EOF'
 #!/usr/bin/env bash
@@ -246,19 +257,24 @@ done
 exec "$TEST_REAL_TIMEOUT" "${arguments[@]}"
 EOF
 chmod 0755 "$fixture_bin/timeout"
+unlink "$fixture_bin/docker"
 # The command is expanded by the shell inside the pseudo-terminal.
 # shellcheck disable=SC2016
-if ! printf 'package-tty-probe\npackage-tty-probe\n' |
+if ! printf '%s\n' \
+  package-tty-probe \
+  package-tty-probe \
+  package-tty-probe \
+  package-tty-probe |
   "$real_timeout" --foreground --kill-after=2s 15s env PATH="$fixture_bin" \
     TEST_REAL_TIMEOUT="$real_timeout" TEST_ONLINE_SETUP_SCRIPT="$online_setup_script" \
-    TEST_PACKAGE_TTY_PROBE=1 TEST_PACKAGE_LOG="$package_log" \
+    TEST_PACKAGE_TTY_PROBE=1 TEST_REAL_PYTHON="$real_python" TEST_PACKAGE_LOG="$package_log" \
     SETUP_SYSTEM_OS_RELEASE_FILE="$debian_release" \
     "$real_script" --quiet --return --command 'exec "$TEST_ONLINE_SETUP_SCRIPT"' \
     "$test_root/package-tty.log" >"$test_root/package-tty.output" 2>&1; then
-  fail 'package installation could not read its real terminal'
+  fail 'package installation could not read or restore its real terminal'
 fi
 grep -F 'host setup packages ready' "$test_root/package-tty.log" >/dev/null ||
-  fail 'package installation stopped or timed out while reading its terminal'
+  fail 'package installation stopped or timed out while using its terminal'
 unlink "$fixture_bin/timeout"
 ln -s "$real_timeout" "$fixture_bin/timeout"
 

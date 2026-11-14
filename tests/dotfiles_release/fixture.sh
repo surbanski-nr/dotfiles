@@ -394,7 +394,7 @@ EOF
   printf 'marker=%s\n' "$marker" >"$release/build-manifest.txt"
   (
     cd "$release" || exit
-    find . -type f ! -name SHA256SUMS -print0 | sort -z |
+    find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z |
       xargs -0 sha256sum >../SHA256SUMS
     mv ../SHA256SUMS SHA256SUMS
   )
@@ -407,7 +407,7 @@ repack_artifact() {
 
   (
     cd "$release" || exit
-    find . -type f ! -name SHA256SUMS -print0 | sort -z |
+    find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z |
       xargs -0 sha256sum >"$test_root/$marker-SHA256SUMS"
     mv "$test_root/$marker-SHA256SUMS" SHA256SUMS
   )
@@ -487,6 +487,8 @@ run_manager() {
 }
 
 create_fixture() {
+  # Keep each scenario's configuration and state inside its fixture HOME.
+  unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_STATE_HOME
   test_root=$(mktemp -d)
   os_release=$test_root/os-release
   test_home=$test_root/home

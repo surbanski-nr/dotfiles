@@ -56,4 +56,4 @@ run_manager uninstall "$id_one" >/dev/null
 run_manager install "$artifact_one" >/dev/null
 assert_link "$test_home/dotfiles-releases/current" "$id_one"
 
-printf 'dotfiles_release: recovery passed\n'
+printf 'dotfiles-release tests: recovery passed\n'

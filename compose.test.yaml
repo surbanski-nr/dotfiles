@@ -5,7 +5,6 @@ services:
   dev:
     image: dotfiles:local
     build: .
-    user: "${DOTFILES_UID:-1000}:${DOTFILES_GID:-1000}"
     group_add:
       - "${DOTFILES_DOCKER_GID:-0}"
     init: true
@@ -13,8 +12,11 @@ services:
     tty: true
     network_mode: host
     environment:
+      DOTFILES_UID: ${DOTFILES_UID:-1001}
+      DOTFILES_GID: ${DOTFILES_GID:-1001}
+      DOTFILES_DOCKER_GID: ${DOTFILES_DOCKER_GID:-0}
       DOCKER_HOST: unix:///var/run/docker.sock
-      TERM: ${TERM:-xterm-256color}
+      TERM: xterm-256color
       COLORTERM: ${COLORTERM:-truecolor}
     volumes:
       - type: bind

@@ -154,4 +154,4 @@ cmp "$test_root/kube-context-before" "$test_home/kube-backup-contexts.txt" ||
 cmp "$test_root/kube-prefix-before" "$test_home/kube-log-prefixes.txt" ||
   fail 'setup-tools reconciliation changed kube-log-prefixes.txt'
 
-printf 'setup_tools: install passed\n'
+printf 'setup-tools tests: install passed\n'

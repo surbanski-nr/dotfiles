@@ -163,4 +163,4 @@ for invalid_plugin in \
     fail 'an invalid Git plugin record changed HOME'
 done
 
-printf 'setup_tools: configuration passed\n'
+printf 'setup-tools tests: configuration passed\n'

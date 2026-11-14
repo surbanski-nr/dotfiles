@@ -25,11 +25,7 @@ if [[ -n ${TMUX_OFFLINE_RELEASE_ROOT:-} ]]; then
   }
   IFS=, read -r -a selected_tools <<<"$serialized_tools"
 else
-  store=${DOTFILES_RELEASE_ROOT:-$HOME/dotfiles-releases}
-  root=${DOTFILES_TMUX_PLUGIN_DIR:-$store/online/share/tmux/plugins}
-  if [[ -z ${DOTFILES_TMUX_PLUGIN_DIR:-} && ! -d $root ]]; then
-    root=$HOME/.tmux/plugins
-  fi
+  root=${DOTFILES_TMUX_PLUGIN_DIR:-$HOME/.tmux/plugins}
   selected_tools=("${TOOLS[@]}")
 fi
 if [[ $root != /* || $root == *[[:cntrl:]]* ]]; then
@@ -46,12 +42,13 @@ for name in "${selected_tools[@]}"; do
     printf 'tmux plugins: missing %s; run setup-tools or reinstall the offline release\n' "$entry" >&2
     exit 1
   fi
+  entry=$(readlink -f -- "$entry")
+  if [[ $entry == *[[:space:]]* ]]; then
+    printf 'tmux plugins: upstream plugins require a directory without whitespace: %s\n' "${entry%/*}" >&2
+    exit 1
+  fi
   entries+=("$entry")
 done
-if ((${#entries[@]})) && [[ $root == *[[:space:]]* ]]; then
-  printf 'tmux plugins: upstream plugins require a directory without whitespace: %s\n' "$root" >&2
-  exit 1
-fi
 for entry in "${entries[@]}"; do
   "$entry"
 done

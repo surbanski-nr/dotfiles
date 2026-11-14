@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+runtime_uid=${DOTFILES_UID:-1000}
+runtime_gid=${DOTFILES_GID:-1000}
+
+if [[ ! $runtime_uid =~ ^[0-9]+$ || ! $runtime_gid =~ ^[0-9]+$ ]]; then
+  printf 'devcontainer: DOTFILES_UID and DOTFILES_GID must be numeric\n' >&2
+  exit 1
+fi
+
+if ! getent passwd devcontainer >/dev/null; then
+  if ! getent group "$runtime_gid" >/dev/null; then
+    groupadd --gid "$runtime_gid" devcontainer
+  fi
+
+  useradd \
+    --non-unique \
+    --uid "$runtime_uid" \
+    --gid "$runtime_gid" \
+    --groups dotfiles \
+    --no-create-home \
+    --no-log-init \
+    --key UID_MIN=0 \
+    --home-dir /home/devcontainer \
+    --shell /bin/bash \
+    devcontainer
+fi
+
+runtime_groups=dotfiles
+if [[ -n ${DOTFILES_DOCKER_GID:-} ]]; then
+  runtime_groups+=",$DOTFILES_DOCKER_GID"
+fi
+
+exec setpriv --reuid="$runtime_uid" --regid="$runtime_gid" \
+  --groups "$runtime_groups" "$@"

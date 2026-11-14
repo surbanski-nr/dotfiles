@@ -118,4 +118,4 @@ for defect in wrong-plugin broken-yaml broken-generation; do
   fi
 done
 
-printf 'dotfiles_release: validation tools passed\n'
+printf 'dotfiles-release tests: validation tools passed\n'

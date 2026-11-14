@@ -122,4 +122,4 @@ run_manager uninstall >/dev/null
 [[ $(<"$test_home/.bashrc") == 'saved before interruption' ]] ||
   fail 'uninstall did not restore the previously saved original'
 
-printf 'dotfiles_release: paths passed\n'
+printf 'dotfiles-release tests: paths passed\n'

@@ -538,7 +538,7 @@ pack_dotfiles_source() {
     [[ -z $package ]] || paths+=("$package")
   done
   git -c safe.directory="$source_dir" -C "$source_dir" archive HEAD -- "${paths[@]}" |
-    tar -x -C "$release/dotfiles" || return
+    tar -x --exclude=vim/setup -C "$release/dotfiles" || return
 }
 
 build_release() {

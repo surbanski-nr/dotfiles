@@ -6,7 +6,12 @@ repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 # shellcheck source=setup-lib
 source "$repo_dir/scripts/setup-lib"
 
-[[ $# == 0 ]] || report_error 'use task dev -- PLATFORM'
+action=dev
+if [[ ${1:-} == clean ]]; then
+  action=clean
+  shift
+fi
+[[ $# == 0 ]] || report_error 'use task dev or task dev:clean -- PLATFORM'
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || report_error 'a Linux x86-64 LXD host is required'
 ((EUID != 0)) || report_error 'run task dev as the ordinary checkout owner, not root'
 for command_name in lxc jq flock timeout sha256sum git; do
@@ -19,16 +24,19 @@ alias=${PLATFORM_ALIAS:-$DEFAULT_DEV_PLATFORM}
 [[ $alias =~ ^[a-z0-9]+$ ]] || report_error "invalid platform alias: $alias"
 platform=${PLATFORM_ALIASES[$alias]:-}
 [[ -n $platform ]] || report_error "unknown platform: $alias"
-image=${LXD_IMAGES[$platform]:-}
-[[ -n $image ]] || report_error "no LXD image configured for $platform"
-checksum=${LXD_IMAGE_SHA256[$platform]:-}
-[[ ${DEV_CPUS:-} =~ ^[1-9][0-9]*$ ]] || report_error 'DEV_CPUS must be a positive integer'
-for size in "${DEV_MEMORY:-}" "${DEV_DISK:-}"; do
-  [[ $size =~ ^[1-9][0-9]*(MiB|GiB|MB|GB)$ ]] || report_error 'DEV_MEMORY and DEV_DISK need a size such as 16GiB'
-done
-for setting in DEV_PROJECT DEV_NETWORK DEV_STORAGE; do
-  [[ -n ${!setting:-} ]] || report_error "$setting is required"
-done
+[[ -n ${DEV_PROJECT:-} ]] || report_error 'DEV_PROJECT is required'
+if [[ $action == dev ]]; then
+  image=${LXD_IMAGES[$platform]:-}
+  [[ -n $image ]] || report_error "no LXD image configured for $platform"
+  checksum=${LXD_IMAGE_SHA256[$platform]:-}
+  [[ ${DEV_CPUS:-} =~ ^[1-9][0-9]*$ ]] || report_error 'DEV_CPUS must be a positive integer'
+  for size in "${DEV_MEMORY:-}" "${DEV_DISK:-}"; do
+    [[ $size =~ ^[1-9][0-9]*(MiB|GiB|MB|GB)$ ]] || report_error 'DEV_MEMORY and DEV_DISK need a size such as 16GiB'
+  done
+  for setting in DEV_NETWORK DEV_STORAGE; do
+    [[ -n ${!setting:-} ]] || report_error "$setting is required"
+  done
+fi
 
 lxc_command() {
   timeout --kill-after=5s 600s lxc --project "$DEV_PROJECT" "$@"
@@ -43,6 +51,24 @@ matches=$(printf '%s\n' "$instances" | jq -c --arg root "$repo_dir" --arg alias 
     .config["user.dotfiles.dev.platform"] == $alias)]')
 count=$(printf '%s\n' "$matches" | jq length)
 ((count <= 1)) || report_error "multiple development VMs match this checkout and $alias; inspect them with lxc --project $DEV_PROJECT list"
+if ((count == 1)); then
+  printf '%s\n' "$matches" | jq -e --arg root "$repo_dir" '
+    .[0].type == "virtual-machine" and .[0].devices.checkout.source == $root and
+    .[0].devices.checkout.path == "/workspace/dotfiles"' >/dev/null ||
+    report_error 'matching VM has an unexpected type or checkout mount; inspect it before continuing'
+  vm=$(printf '%s\n' "$matches" | jq -r '.[0].name')
+fi
+
+if [[ $action == clean ]]; then
+  if ((count == 0)); then
+    printf 'No development VM for %s in LXD project %s\n' "$alias" "$DEV_PROJECT"
+  else
+    printf 'Removing %s in LXD project %s\n' "$vm" "$DEV_PROJECT"
+    lxc_command delete "$vm" --force
+  fi
+  exit 0
+fi
+
 stage=
 trap '[[ -z $stage ]] || find "$stage" -depth -delete' EXIT
 
@@ -100,11 +126,6 @@ CLOUD_INIT
     lxc_command config device add "$vm" cloud-init disk source=cloud-init:config
   fi
 else
-  printf '%s\n' "$matches" | jq -e --arg root "$repo_dir" '
-    .[0].type == "virtual-machine" and .[0].devices.checkout.source == $root and
-    .[0].devices.checkout.path == "/workspace/dotfiles"' >/dev/null ||
-    report_error 'matching VM has an unexpected type or checkout mount; inspect it before continuing'
-  vm=$(printf '%s\n' "$matches" | jq -r '.[0].name')
   printf 'Reusing %s in LXD project %s\n' "$vm" "$DEV_PROJECT"
 fi
 
@@ -142,11 +163,11 @@ for attempt in 1 2 3; do
 done
 account=$(lxc_command exec "$vm" --disable-stdin -- getent passwd "$(id -u)")
 IFS=: read -r guest_user _ _ _ _ guest_home _ <<<"$account"
-[[ -n $guest_user && $guest_home == /home/* ]] || report_error 'guest account has an unexpected home'
+[[ $guest_user == devvm && $guest_home == /home/* ]] || report_error 'guest account must be devvm with a home under /home'
 exec 9>&-
 printf 'Opening %s. Exit leaves the VM running.\n' "$vm"
-# runuser initializes supplementary groups, including Docker after setup-system.
+# A PAM login provides the systemd user session used by the shared SSH agent.
 exec lxc --project "$DEV_PROJECT" exec "$vm" --env "TERM=${TERM:-xterm-256color}" \
   --env "COLORTERM=${COLORTERM:-}" \
-  --cwd /workspace/dotfiles -- runuser --user "$guest_user" -- \
-  env "HOME=$guest_home" "USER=$guest_user" "LOGNAME=$guest_user" bash -l
+  -- su --login --pty --whitelist-environment=COLORTERM "$guest_user" \
+  --command 'cd /workspace/dotfiles && exec bash --login'

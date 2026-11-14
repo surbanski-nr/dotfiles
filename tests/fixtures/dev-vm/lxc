@@ -101,6 +101,10 @@ case $command in
         ;;
     esac
     ;;
+  delete)
+    [[ $# == 2 && $2 == --force ]] || exit 1
+    rm -- "$TEST_DEV_STATE/vm-$1.json"
+    ;;
   start)
     state=$TEST_DEV_STATE/vm-$1.json
     jq '.status = "Running"' "$state" >"$state.next"
@@ -139,9 +143,11 @@ case $command in
         cat >/dev/null
         ;;
       getent)
-        printf 'dev:x:%s:%s:Development:/home/dev:/bin/bash\n' "$(id -u)" "$(id -g)"
+        printf '%s:x:%s:%s:Development:/home/devvm:/bin/bash\n' \
+          "${TEST_DEV_GUEST_USER:-devvm}" "$(id -u)" "$(id -g)"
         ;;
-      runuser)
+      runuser | su)
+        printf '%s' "$5" >"$TEST_DEV_STATE/shell-user"
         printf '%s' "$guest_colorterm" >"$TEST_DEV_STATE/shell-colorterm"
         printf 'guest-shell %s\n' "$name"
         if [[ -n ${TEST_DEV_SHELL_READY:-} ]]; then

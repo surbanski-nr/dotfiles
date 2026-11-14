@@ -181,4 +181,4 @@ for defect in "${defects[@]}"; do
   fi
 done
 
-printf 'dotfiles_release: selection passed\n'
+printf 'dotfiles-release tests: selection passed\n'

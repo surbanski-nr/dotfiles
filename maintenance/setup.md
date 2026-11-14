@@ -20,8 +20,7 @@ Docker and Compose commands.
 ### Host preparation
 
 Choose the host daemon before starting Compose. For rootless Docker, follow
-the [Docker rootless installation instructions](https://docs.docker.com/engine/security/rootless/)
-and use:
+[rootless Docker on the host](#rootless-docker-on-the-host), then use:
 
 ```bash
 docker context use rootless
@@ -30,20 +29,22 @@ export DOTFILES_UID=0 DOTFILES_GID=0 DOTFILES_DOCKER_GID=0
 docker info
 ```
 
-For a regular Docker daemon instead:
+For a regular Docker daemon, `task devcontainer:up` reads the host UID/GID and
+the socket's group automatically. When using Compose directly, set them first:
 
 ```bash
 export DOTFILES_UID="$(id -u)" DOTFILES_GID="$(id -g)"
 export DOTFILES_DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
 ```
 
-Images default to UID/GID 1000:1000. Local builds use the actual host IDs.
+The image creates the `devcontainer` account with these IDs when it starts.
+The same published image works with different host IDs without rebuilding it.
 Rootless runs the container as UID 0 in its user namespace, mapped to the
 ordinary host user. This permits access to that user's socket and workspace.
 
-Prepare the host directories as your ordinary user. Compose requires them to
-exist: `create_host_path: true` on a regular Docker daemon creates missing
-directories as root, so the container's ordinary user cannot write to them.
+`task devcontainer:up` creates the required host directories as the calling
+user before building the image. For direct Compose use, create them yourself
+as your ordinary user:
 
 ```bash
 mkdir -p "$HOME/work" "$HOME/bin" \
@@ -51,23 +52,112 @@ mkdir -p "$HOME/work" "$HOME/bin" \
   "${XDG_DATA_HOME:-$HOME/.local/share}/tmux/resurrect"
 ```
 
-If you do not already have an SSH agent, start one and unlock your key in the
-same host shell that will run Compose:
+Compose requires these directories to exist. Automatic creation by a regular
+Docker daemon would make them owned by root, so the container's ordinary user
+could not write to them.
+
+Use the [shared SSH agent](#shared-ssh-agent) below before
+starting Compose.
+
+The everyday workspace defaults to the host's `~/work` and is mounted at the
+same absolute path so sibling containers created through the Docker socket can
+use files there as bind sources. Compose opens shells in this directory.
+It does not create a workspace link inside the HOME volume. Mounting only at
+`/work` would require translating paths back to the host for those Docker commands.
+Set `DOTFILES_WORKSPACE` only when you need a different existing absolute path.
+The test container uses the image's private filesystem and does not mount a
+host workspace.
+
+### Shared SSH agent
+
+Keep one agent on the host. Compose forwards its socket as `/run/ssh-agent`;
+every container Bash terminal, tmux window and pane inherits that socket.
+Adding a key on the host makes it available in all of them immediately.
+The agent starts empty and asks for no passphrase until you run `ssh-add` on
+the host.
+
+For a host using only the image and Compose, start an ordinary OpenSSH agent
+with a fixed socket. No repository checkout or systemd service is required:
 
 ```bash
-eval "$(ssh-agent -s)" && ssh-add "$HOME/.ssh/github"
+mkdir -p -m 700 "${XDG_RUNTIME_DIR:-$HOME/.ssh}"
+export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-$HOME/.ssh}/dotfiles-ssh-agent.socket"
+if [[ ! -S $SSH_AUTH_SOCK ]]; then
+  eval "$(ssh-agent -a "$SSH_AUTH_SOCK" -s)"
+fi
 ```
 
-Replace `github` with your key's filename. If an agent is already available,
-run only `ssh-add "$HOME/.ssh/github"`. `ssh-add -l` lists loaded identities.
-Then enter the everyday container with
-`docker compose up -d && docker compose exec dev bash`.
+Compose uses this socket by default when `SSH_AUTH_SOCK` is unset. An existing
+host agent can also be forwarded by exporting its socket in `SSH_AUTH_SOCK`.
+Repeating the commands above reuses a running agent.
 
-The everyday workspace defaults to `~/work` and is mounted at the same
-absolute path so sibling containers created through the Docker socket can use
-files there as bind sources. Set `DOTFILES_WORKSPACE` only when you need a
-different existing absolute path. The test container uses the image's private
-filesystem and does not mount a host workspace.
+Alternatively, use the included `dotfiles-ssh-agent.service` on a host or VM
+with a systemd user session. Full online/offline activation already registers
+the service, and host Bash starts it when no working agent was inherited.
+To also start it automatically with your user session, run these commands
+on the host, from the dotfiles checkout:
+
+```bash
+systemctl --user link "$PWD/ssh/.config/systemd/user/dotfiles-ssh-agent.service"
+systemctl --user add-wants default.target dotfiles-ssh-agent.service
+systemctl --user start dotfiles-ssh-agent.service
+export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/dotfiles-ssh-agent.socket"
+```
+
+Skip `link` if online/offline activation already registered the service.
+Otherwise, keep the checkout available because `link` points to its unit file.
+The unit has no `[Install]` section, so `add-wants` enables automatic startup
+through `default.target`. Choose this service or the manual agent above before
+starting Compose; both use the same socket path.
+
+On Ubuntu hosts and LXD VMs, `XDG_RUNTIME_DIR` is normally `/run/user/$(id -u)`,
+created for your logged-in user with mode `700`. The service stores its socket
+there. Compose forwards it to `/run/ssh-agent`; container shells use
+`SSH_AUTH_SOCK` and do not need their own systemd service or `XDG_RUNTIME_DIR`.
+
+To start the user service at host or VM boot, before logging in, enable
+lingering for your user:
+
+```bash
+sudo loginctl enable-linger "$(id -un)"
+```
+
+Lingering also keeps user services running after logout. It is optional and
+is not enabled by setup scripts. Check the agent and its logs with:
+
+```bash
+systemctl --user status dotfiles-ssh-agent.service
+journalctl --user -u dotfiles-ssh-agent.service -b
+```
+
+With either approach, unlock keys on the host, before or after starting the
+container:
+
+```bash
+ssh-add "$HOME/.ssh/github" "$HOME/.ssh/bitbucket"
+ssh-add -l
+```
+
+Use your actual key filenames. Run `ssh-add` on the host; Git in the container
+authenticates through the forwarded socket. Private key files stay on the host.
+
+The container keeps its own SSH configuration and `known_hosts` in its HOME
+volume. On the first connection, verify the server fingerprint before
+accepting it. Once trusted, it remains known after a container upgrade.
+
+Systemd manages the agent's lifetime and restart when you use the service.
+Container Bash preserves the forwarded agent instead of starting another one.
+
+Stopping or restarting an agent, including after a reboot, clears its keys.
+Systemd starts an empty agent and never asks for a passphrase. Run `ssh-add`
+again to unlock your keys. If its socket was recreated, recreate the container
+to refresh the socket mount:
+
+```bash
+docker compose up -d --no-build --wait --force-recreate
+```
+
+Then unlock the keys on the host again.
 
 ### Everyday container and shared state
 
@@ -75,8 +165,8 @@ From the checkout, run:
 
 ```bash
 docker compose pull
-docker compose up -d
-docker compose exec dev bash
+docker compose up -d --wait
+docker compose exec --user devcontainer dev bash
 # Inside Bash:
 tmux new-session -A -s work
 ```
@@ -87,12 +177,26 @@ and SSH agent. Neovim's ShaDa and Telescope history and tmux saves can therefore
 follow you between the container and an online or offline host installation.
 The named HOME volume preserves Bash history, Kubernetes credentials and other
 user files when the everyday container is replaced or upgraded. It contains
-configuration links, while installed tools and plugins remain in the image.
+configuration links and additional mise installations. Bundled tools and
+plugins remain in the image.
+
+Shared paths follow the tools' defaults: Neovim uses `.local/state/nvim2`,
+and tmux-resurrect uses `.local/share/tmux/resurrect`. The container's CLI tools
+are managed by mise; `dotfiles-releases` belongs to host online/offline installations.
+
+The workspace and shared state are bind mounts, not files stored in the HOME
+volume. Each state bind covers just its target directory inside that volume;
+the rest of `.local` remains private. Writes go to the host while the bind is
+present. Recreating the container without that bind reveals the volume's
+underlying directory and its own contents; it does not copy the host's state
+into the volume.
+The image prepares both state directories with write access, so they also work
+without the host binds.
 
 The state sources respect the host's `XDG_STATE_HOME` and `XDG_DATA_HOME`.
 If the host still saves tmux sessions in `~/.tmux/resurrect`, change the
 resurrect bind's source in `compose.yaml` to that directory; keep its container
-target at `/home/dev/.local/share/tmux/resurrect`. Saved working directories
+target at `/home/devcontainer/.local/share/tmux/resurrect`. Saved working directories
 must exist in both environments.
 
 The SSH agent authenticates without copying private keys. The normal Compose
@@ -102,11 +206,14 @@ that private HOME; the host bind directories remain.
 
 Bash reads the image's ordinary `.bashrc`, including mise shims and Mason
 binaries in PATH. `EDITOR`, `VISUAL` and `GIT_EDITOR` remain `vi`.
+Compose sets `TERM=xterm-256color` for terminal applications.
+`vim/setup` remains a manual helper in the checkout; setup scripts, releases
+and images do not run or link it into HOME.
 The tmux prefix remains `Ctrl+a`. If an outer host tmux uses the same prefix,
 press `Ctrl+a Ctrl+a` before the inner tmux command. Leaving tmux keeps the
 container running. Recreating it terminates its processes and tmux sessions.
 
-Configuration lives in `/opt/dotfiles`, mise tools in `/opt/mise`, Neovim
+Configuration lives in `/opt/dotfiles`, bundled mise tools in `/opt/mise`, Neovim
 plugins, parsers and Mason tools in `/opt/nvim2`, and tmux plugins in
 `/opt/tmux/plugins`. HOME contains configuration links created by `bstow`,
 plus these directory links:
@@ -132,27 +239,55 @@ after upgrading to an image that includes Midnight Commander:
 "$DOTFILES/bstow" -d "$DOTFILES" -t "$HOME" stow mc
 ```
 
-To build the everyday image locally from the checkout:
+### User IDs and ready images
+
+Linux checks numeric UID/GID when accessing bind mounts. The host user can be
+called `azureuser` and the container user `devcontainer`; the names do not need
+to match. Compose defaults to `1000:1000`. On a regular Docker host, select your
+IDs before starting an already built or downloaded image:
 
 ```bash
-docker compose build --no-cache \
-  --build-arg DEV_UID="$(id -u)" \
-  --build-arg DEV_GID="$(id -g)"
-docker compose up -d --pull never
+export DOTFILES_UID="$(id -u)" DOTFILES_GID="$(id -g)"
+docker compose up -d --wait
+docker compose exec --user devcontainer dev bash
 ```
 
-Everyday builds use the host UID/GID for writable bind mounts. Test builds use
-the Dockerfile's defaults (1000:1000), because they do not mount host user directories.
+The build prepares HOME and tools as root for the fixed `dotfiles` group
+(GID 1000). The runtime account is created when the container starts, using the
+selected UID/GID. `useradd --no-create-home` registers `devcontainer` without
+creating, moving or changing ownership of HOME or host binds. The entrypoint
+then runs the container command with the `dotfiles` and Docker socket groups.
+It does not inherit the startup process's groups. Rootless uses the mapped
+UID 0 described above.
+
+The healthcheck reads only the account's UID, GID and HOME. Compose `--wait`
+waits for account creation before opening a shell.
+
+Always use `exec --user devcontainer` when opening another process: Docker exec
+bypasses the entrypoint and otherwise starts it as root. `task devcontainer`
+includes this option and detects host IDs for a regular daemon.
+
+`task devcontainer:build` rebuilds tools and configuration for local development;
+host user IDs are runtime settings. Copying only Compose to another host and
+pulling the image is sufficient after host preparation.
+
+Existing HOME files retain their ownership. If you move a populated volume to
+a different UID, back it up and adjust that private volume's ownership or start
+with a fresh volume. Host bind directories remain owned by the host user.
 
 ### Docker access and Kubernetes
 
 Both containers use the host's Docker socket. kind, minikube and `docker run`
 create sibling containers through that daemon. Access to the socket gives
-access to its containers, volumes and permitted host mounts.
+access to its containers, volumes and permitted host mounts. A rootful daemon's
+socket effectively grants root access to the host. A rootless daemon's socket
+grants access within the permissions of the user running that daemon.
 
-Compose uses host networking. For rootless Docker this is the daemon's network
-namespace; RootlessKit forwards published ports to the actual host. Rootless
-Kubernetes needs cgroup v2 and a Docker service with cgroup delegation.
+Compose uses host networking. Before Docker Engine 29.5, rootless host networking
+uses the daemon's network namespace; RootlessKit forwards published ports to the
+actual host. Since Docker Engine 29.5, `--network host` can use the actual host
+network namespace. Rootless Kubernetes needs cgroup v2 and a Docker service with
+cgroup delegation.
 
 Inside Bash in the development container:
 
@@ -168,6 +303,201 @@ task k9s:clean
 For a regular daemon's ordinary container user, omit minikube's `--force`.
 Choose separate kind cluster names and minikube profiles for each instance.
 Run k9s-preview in one instance at a time.
+
+### Rootless Docker on the host
+
+Rootless is an [official Docker Engine mode](https://docs.docker.com/engine/security/rootless/).
+Both the daemon and containers run inside a user namespace. Container UID 0 maps
+to the ordinary user running the daemon; other container IDs use that user's
+subordinate UID/GID ranges. This differs from `userns-remap`, which keeps the
+daemon running as host root.
+
+#### Install on Debian or Ubuntu
+
+These commands assume Docker CE is installed from Docker's official APT
+repository. For a new host or an existing distribution `docker.io` installation,
+first follow Docker's [Debian](https://docs.docker.com/engine/install/debian/)
+or [Ubuntu](https://docs.docker.com/engine/install/ubuntu/) installation steps.
+`setup-system` installs Docker CE on a new host but deliberately keeps an
+existing Docker installation, so it does not migrate `docker.io` for you.
+
+Install the rootless helper and user-session prerequisites:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  dbus-user-session \
+  docker-ce-rootless-extras \
+  slirp4netns \
+  uidmap
+```
+
+Log in over SSH or through a normal login session as the intended ordinary user.
+If `dbus-user-session` was newly installed, log out and back in first. The session
+must provide `XDG_RUNTIME_DIR` and a working `systemctl --user` bus.
+Check the mapping helpers and subordinate ID allocations:
+
+```bash
+command -v newuidmap newgidmap
+cat /etc/subuid /etc/subgid
+```
+
+Your login must have at least 65,536 subordinate IDs in each file, for example
+`azureuser:100000:65536`. The installer explains missing prerequisites, including
+how to allocate ranges when they are absent. On Ubuntu 24.04 and later, the
+APT installation uses the packaged AppArmor profile for `/usr/bin/rootlesskit`;
+no global relaxation of user-namespace restrictions is needed.
+
+#### Try a temporary daemon
+
+You can test rootless without changing Docker contexts or stopping the system
+daemon. Use Docker's `dockerd-rootless.sh` launcher: it prepares the user namespace
+and its private `/run/docker`. Running `dockerd --rootless` directly skips that
+preparation and can fail while the rootful daemon is running.
+
+Run this as the ordinary user, in the same login shell throughout the test:
+
+```bash
+rootless_test_dir=$(mktemp -d /tmp/docker-rootless-test.XXXXXX)
+printf '{}\n' >"$rootless_test_dir/daemon.json"
+DOCKERD_ROOTLESS_ROOTLESSKIT_STATE_DIR="$rootless_test_dir/rootlesskit" \
+  dockerd-rootless.sh \
+    --config-file="$rootless_test_dir/daemon.json" \
+    --data-root="$rootless_test_dir/data" \
+    --exec-root="$rootless_test_dir/exec" \
+    --pidfile="$rootless_test_dir/daemon.pid" \
+    --host="unix://$rootless_test_dir/docker.sock" \
+    >"$rootless_test_dir/daemon.log" 2>&1 &
+rootless_test_pid=$!
+```
+
+Keep the test data outside `$XDG_RUNTIME_DIR`: the launcher's private `/run` can
+introduce symlinks in root filesystem paths that the container runtime rejects.
+
+Inspect the log with `tail -n 40 "$rootless_test_dir/daemon.log"`. Once it reports
+`API listen`, check the daemon and run a container:
+
+```bash
+docker --host "unix://$rootless_test_dir/docker.sock" info
+docker --host "unix://$rootless_test_dir/docker.sock" run --rm hello-world
+```
+
+The server's security options must include `rootless`. For the bind-mount example
+below, use the same `--host` option with `docker run`. The temporary daemon has its
+own socket, configuration and image/container data. Existing rootful containers
+keep running.
+
+When finished, stop only this daemon and remove its test data:
+
+```bash
+kill "$rootless_test_pid"
+wait "$rootless_test_pid" || true
+rootlesskit --net=host rm -rf -- "$rootless_test_dir"
+unset rootless_test_dir rootless_test_pid
+```
+
+RootlessKit performs the removal inside the user namespace because image files
+may belong to subordinate UIDs. This test does not install a service or change
+the default Docker context.
+
+#### Deploy the user service
+
+Run the installer as the ordinary user, without `sudo`:
+
+```bash
+dockerd-rootless-setuptool.sh install --force
+systemctl --user enable --now docker
+sudo loginctl enable-linger "$(id -un)"
+unset DOCKER_HOST DOCKER_CONTEXT
+docker context use rootless
+docker info
+docker run --rm hello-world
+```
+
+`--force` allows installation alongside an active rootful daemon. It does not
+grant host root privileges. `docker info` must show context `rootless` and
+`rootless` under the server's security options. Lingering starts the user daemon
+after a reboot and keeps it running after logout.
+
+The user service is `~/.config/systemd/user/docker.service`, its configuration is
+`~/.config/docker/daemon.json`, and data defaults to `~/.local/share/docker`.
+Its socket is `$XDG_RUNTIME_DIR/docker.sock`. Use `systemctl --user restart docker`
+to restart it and `journalctl --user -u docker` to inspect its logs.
+
+#### Switch from the rootful daemon
+
+Install and verify rootless as above before disabling the system daemon.
+This creates a separate Docker installation with its own containers, images and
+named volumes. Switching contexts does not move the existing devcontainer HOME.
+The rootful data remains available when you switch back.
+
+To copy the local development image while both daemons are running:
+
+```bash
+docker --context default image save ghcr.io/surbanski-nr/dotfiles:latest |
+  docker --context rootless image load
+```
+
+Alternatively, pull or rebuild the image using the rootless context. If you want
+to keep the old named HOME, stop its container and
+[back up and restore the volume](https://docs.docker.com/engine/storage/volumes/#back-up-restore-or-migrate-data-volumes)
+between the two contexts before starting Compose with rootless. Restore with
+container UID 0 and `tar --no-same-owner`, so the restored files belong to the
+rootless user. Shared host workspace, Neovim state and tmux saves stay at the same
+host paths and need no copy.
+
+When ready to replace the system daemon, stop it and its socket activation:
+
+```bash
+sudo systemctl disable --now docker.service docker.socket
+```
+
+This stops containers still using the system daemon. Follow
+[host preparation](#host-preparation) to select the rootless socket and UID/GID 0
+for Compose, then run `task devcontainer`. Rootless UID 0 is intentional here:
+it maps to your host UID and can access your workspace and Docker socket.
+
+#### Container root and host bind mounts
+
+After verifying the rootless context, you can test a container with UID 0 and a
+host `/root` bind mount:
+
+```bash
+docker run --rm \
+  --user 0 \
+  --network none \
+  --mount type=bind,source=/root,target=/host-root \
+  alpine:3.21.3 \
+  sh -c 'id; ls -ldn /host-root; ls /host-root'
+```
+
+The bind mount itself can succeed. With the usual host ownership `root:root` and
+permissions `0700`, listing or opening files below `/host-root` fails with
+`Permission denied`; container root also cannot write there. An unmapped host
+owner is commonly displayed as UID/GID 65534. A source below that directory,
+such as `/root/example`, can fail before the container starts because the daemon
+cannot traverse `/root`.
+
+Mounting the host filesystem `/` has the same permission rules. World-readable
+system files remain readable, and your own host files can remain writable.
+Rootless protects host root privileges; it does not isolate your account's data
+from a container that has bind mounts or access to its Docker socket. Even
+`--privileged` stays within the rootless user namespace.
+
+#### Return to the rootful daemon
+
+```bash
+systemctl --user disable --now docker
+unset DOCKER_HOST DOCKER_CONTEXT DOTFILES_DOCKER_SOCKET
+unset DOTFILES_UID DOTFILES_GID DOTFILES_DOCKER_GID
+sudo systemctl enable --now docker.service docker.socket
+docker context use default
+docker info
+```
+
+The old rootful images and HOME volumes are still there. The rootless data is
+also retained for a later switch back. Run the ordinary
+[host preparation](#host-preparation) before starting Compose again.
 
 ### Image development and tests
 
@@ -205,6 +535,43 @@ mise exec kubectl@1.34.12 -- kubectl version --client
 mise exec helm@3.21.0 -- helm version --short
 ```
 
+To save a personal default for future shells and container recreations:
+
+```bash
+mise use --global kubectl@1.34.12
+mise use --global helm@3.21.0
+```
+
+Mise saves these choices in `~/.config/mise/config.toml`, inside the named HOME
+volume. The image defaults remain in `/etc/mise/config.toml`, and bundled tools
+stay in `/opt/mise`. Additional versions installed with `mise use` go into
+`~/.local/share/mise`, so HOME preserves their binaries too. Changing the image
+updates its defaults for tools that you have not overridden.
+
+A project's `mise.toml` takes priority over global defaults. To force a version
+even in projects with their own configuration:
+
+```bash
+mise use --override kubectl@1.34.12
+```
+
+That selection is saved in `~/.config/mise/config.override.toml`. Remove your
+selection to return to the project or image default:
+
+```bash
+mise use --global --remove kubectl
+mise use --override --remove kubectl
+```
+
+List available, installed and currently selected versions:
+
+```bash
+mise ls-remote kubectl
+mise ls-remote kubectl 1.34
+mise ls --installed kubectl
+mise ls --current kubectl
+```
+
 Or select it for commands in the current Bash session, including a tmux pane:
 
 ```bash
@@ -224,8 +591,9 @@ running. These development tasks do not run tests.
 
 The individual development tasks also use `compose.yaml`:
 
-- `devcontainer:build` builds the local `latest` image without cache and with the host IDs.
+- `devcontainer:build` builds the local `latest` image without cache.
 - `devcontainer:up` calls that build task, then starts the container.
+- `devcontainer:enter` opens a login Bash shell in the running container; `devcontainer` calls it after startup.
 - `devcontainer:clean` removes the container and retains its HOME volume and shared host state.
 
 `task test:devcontainer` uses `compose.test.yaml` to build `dotfiles:local`, start
@@ -248,9 +616,9 @@ list: the image uses mise installations and needs neither a systemd service
 nor a Docker daemon. Host libraries used only to compile asdf tools are also
 unnecessary; `build-essential` and `pkg-config` remain for editor dependencies.
 
-Simple Dockerfile steps use `RUN` with `&&` and line continuations. The plugin
-loop and Neovim installation use Bash heredocs, supported by Docker's build
-syntax, so their loop and embedded Lua remain readable without extra escaping.
+Dockerfile steps use `RUN` with `&&` and line continuations. Each tmux plugin
+has its own step. Neovim installs in headless Ex mode so installation errors
+fail the build.
 
 Mason exposes `ansible-lint`, while the `ansible-core` dependency keeps
 `ansible`, `ansible-config` and `ansible-playbook` in its venv. Offline builds
@@ -266,7 +634,17 @@ Ansible LSP already receives that venv in its own `cmd_env.PATH`.
 `test:devcontainer`. It uses the functional cases under `tests/tools/` shared
 with `tests/offline_tools_runner.sh`, plus the full Nvim2 runner. It checks tool
 behavior, Python dependencies, Bash history, tmux configuration and plugins,
-and Neovim from a tmux login shell. Shared runtime requirements come from
+and Neovim from a tmux login shell. The test container defaults to UID/GID 1001
+to exercise a ready image with non-default host IDs. It also checks writable
+HOME and tool directories, runtime groups and SSH account lookup.
+It also starts a private test agent, adds a temporary key from one Bash shell
+and verifies signing from another shell after reload and from a tmux pane.
+This check uses no host SSH keys or host agent.
+Before the full checks, short-lived containers also check startup with GIDs
+1000 and 0, which already exist in the image. UID/GID 0 checks account startup.
+Testing the actual rootless daemon requires
+[rootless Docker on the host](#rootless-docker-on-the-host).
+Shared runtime requirements come from
 `SYSTEM_RUNTIME_COMMANDS` in `system.env`. CLI version probes come from
 `TOOL_CHECKS` in `tools.env` and `SYSTEM_PROBES` in `system.env`;
 the image's mise tool selection remains in `mise.toml`.
@@ -282,8 +660,8 @@ After `task test:devcontainer` has built the image, start a fresh test container
 for the real preview check:
 
 ```bash
-docker compose --file compose.test.yaml up -d --no-build
-docker compose --file compose.test.yaml exec dev \
+docker compose --file compose.test.yaml up -d --no-build --wait
+docker compose --file compose.test.yaml exec --user devcontainer dev \
   bash --login -ic 'bash /opt/dotfiles/tests/k9s_preview_test.sh integration'
 docker compose --file compose.test.yaml down
 ```
@@ -326,13 +704,13 @@ cd "$HOME/dotfiles-container"
 gh release download dotfiles-SHORT_SHA --repo surbanski-nr/dotfiles \
   --pattern 'compose.yaml*'
 sha256sum --check --strict compose.yaml.sha256
-docker compose up -d
-docker compose exec dev bash
+docker compose up -d --wait
+docker compose exec --user devcontainer dev bash
 ```
 
 The repository Compose follows `latest`; the release Compose stays on its
 commit. To upgrade or roll back a release installation, replace Compose with
-the file from the desired release and run `docker compose up -d` again.
+the file from the desired release and run `docker compose up -d --wait` again.
 The named HOME and host state mounts are retained.
 
 After first publication, set the GHCR package visibility to public in GitHub
@@ -345,6 +723,101 @@ docker save ghcr.io/surbanski-nr/dotfiles:COMMIT | gzip > dotfiles-image.tar.gz
 gzip -dc dotfiles-image.tar.gz | docker load
 ```
 
+## Development VM host (LXD)
+
+LXD is optional host infrastructure. It is not installed by `setup-system` or
+listed in `system.env`, so ordinary online/offline installations and the
+development image do not depend on it. `task dev` runs virtual machines and
+requires `/dev/kvm`. When the host is itself a VM, its hypervisor must expose
+nested virtualization.
+
+On a new Debian or Ubuntu host, install LXD separately:
+
+```bash
+test -c /dev/kvm
+sudo apt-get update
+sudo apt-get install -y snapd
+sudo snap install lxd --channel=5.21/stable
+sudo usermod --append --groups lxd "$(id -un)"
+```
+
+Log out and back in to apply group membership and the Snap executable path.
+Initialize a new LXD installation with the defaults used by the Taskfile:
+
+```bash
+lxd init --auto --storage-backend=dir --storage-pool=default
+lxc info
+lxc storage list
+lxc network list
+bash scripts/install-validation-tool task
+./bin/task dev
+```
+
+For an existing LXD installation, use its configured project, storage pool and
+network. Pass `DEV_PROJECT`, `DEV_STORAGE` and `DEV_NETWORK` to the task when
+they differ from `default`, `default` and `lxdbr0`. Platform images and the
+default OS are configured in `platforms.env`.
+
+`DEV_CPUS`, `DEV_MEMORY` and `DEV_DISK` at the top of `Taskfile.yml` set the
+resources for new VMs: 8 CPUs, 16 GiB RAM and an 80 GiB disk. Override them
+for one new VM with:
+
+```bash
+./bin/task dev DEV_CPUS=4 DEV_MEMORY=8GiB DEV_DISK=40GiB -- ubuntu2404
+```
+
+Reopening an existing VM preserves its resources. To increase CPU allocation
+without restarting it, run these commands on the LXD host, replacing
+`VM_NAME` with its name from `lxc list`. Linux may leave hotplugged CPUs
+offline, so the second command brings them online and prints the usable count:
+
+```bash
+lxc config set VM_NAME limits.cpu 8
+lxc exec VM_NAME -- bash -c '
+  set -euo pipefail
+  for cpu_online in /sys/devices/system/cpu/cpu*/online; do
+    if [[ $(<"$cpu_online") == 0 ]]; then
+      printf "1\n" >"$cpu_online"
+    fi
+  done
+  nproc
+'
+```
+
+If a guest under nested virtualization logs RCU stalls, missing timer wakeups
+or `soft lockup` before losing the shell or restarting, test a fixed host CPU
+set. This helped on the Azure host used for development; a larger numeric CPU
+limit alone did not. The range `0-7` keeps eight vCPUs, starts them together and
+pins each to a host CPU. Check that those CPU numbers exist on your host:
+
+```bash
+lscpu --extended=CPU,ONLINE
+lxc stop VM_NAME --timeout 30
+lxc config set VM_NAME limits.cpu 0-7
+lxc start VM_NAME
+```
+
+This is a setting for that VM, not a Taskfile default. To return to an ordinary
+CPU count, stop the VM, set `limits.cpu` to `8`, then start it again.
+
+Each checkout and platform has its own persistent VM. The guest account is
+`devvm`, with the checkout owner's numeric UID/GID. If an image or an older VM
+already has an account with that UID, preparation renames it and preserves its
+existing HOME path and files. Close existing sessions and user services for that
+account before the first rename. Exiting the shell keeps the VM running. A PAM
+login supplies the systemd user session needed by the shared SSH agent after
+the Bash/SSH configuration has been installed.
+
+Remove a development VM, including its private guest HOME and disk, with:
+
+```bash
+./bin/task dev:clean
+./bin/task dev:clean -- ubuntu2404
+```
+
+Cleanup selects the current checkout, configured LXD project and platform. It
+refuses ambiguous matches and unexpected checkout mounts.
+
 ## Connected machine
 
 Clone the repository, then run:
@@ -353,7 +826,7 @@ Clone the repository, then run:
 cd "$HOME/github.com/surbanski/dotfiles"
 ./setup-system
 ./setup-tools
-# Optional online project runtimes:
+# Project runtimes used by the current Neovim features:
 ./setup-asdf terraform nodejs terragrunt
 ./dotfiles-release set online
 # Additional packages outside the managed installation:
@@ -364,6 +837,8 @@ cd "$HOME/github.com/surbanski/dotfiles"
 
 source "$HOME/.bashrc"
 hash -r
+# Install the configured editor tools and parsers once, or after changing them:
+nvim --headless '+Nvim2ToolsInstallSync' '+qa!'
 dotfiles-check
 ```
 
@@ -431,9 +906,12 @@ compatibility path.
 Interactive Bash shells preserve a working inherited agent, including SSH
 forwarding. Otherwise they use the fixed socket of `dotfiles-ssh-agent.service`.
 Starting the user service is idempotent, so Bash and tmux panes using this
-socket share keys added in any one of them. The managed SSH config selects
-`~/.ssh/github` and `~/.ssh/bitbucket`. Enter the passphrase in a terminal with
-`ssh-add ~/.ssh/github ~/.ssh/bitbucket`, or on the first SSH connection, which
+socket share keys added in any one of them. The service waits for ssh-agent's
+parent to create the socket before reporting that startup has finished, so
+the start/export command can be followed by `ssh-add` or Compose immediately.
+The managed SSH config selects `~/.ssh/github` and `~/.ssh/bitbucket`.
+Enter the passphrase in a terminal with `ssh-add ~/.ssh/github ~/.ssh/bitbucket`,
+or on the first SSH connection, which
 adds the key automatically. Systemd starts the empty agent and never prompts
 for passphrases. Keys remain unlocked only until the agent stops; restarting
 the agent or rebooting requires adding them again. User lingering is not
@@ -724,6 +1202,19 @@ does not change that installation's packages, services or user groups, and it
 does not require a working Docker daemon to complete setup. This includes a
 conflicting provider such as distribution Docker, Podman compatibility or a
 standalone containerd. Configure access to an existing runtime separately.
+For a regular local Docker daemon whose socket belongs to the `docker` group,
+add the intended ordinary user to that group:
+
+```bash
+sudo usermod --append --groups docker -- "$(id -un)"
+```
+
+Log out and back in before running `docker info` or `task k9s`. Reloading
+`.bashrc` updates PATH but does not refresh the current process's group
+membership. In the development VM, exit its shell and reopen it with `task dev`.
+Rootless Docker uses the user-owned socket described above and does not need
+membership in the system `docker` group.
+
 Without an installed runtime, a legacy `docker.list` or differing
 `docker.sources` still stops new Docker installation rather than being
 overwritten.
@@ -751,6 +1242,9 @@ daemon check 30 seconds. Timed-out commands are killed after another five second
 Host setup announces the package role and platform, names each apt/dnf
 operation before starting it and streams command output as it runs. APT setup
 runs `apt-get update` followed by `apt-get install` for the configured packages.
+Package commands ignore `SIGTTOU`, so restoring terminal settings cannot stop
+APT after its final `libc-bin` trigger when sudo owns the terminal's foreground
+process group. Terminal input remains available, including sudo's password prompt.
 Network/DNS/connection failures and timeouts are warnings, not fatal errors.
 The script continues independent steps, tries package installation even if
 an index refresh failed, and reports missing prerequisites after a network
@@ -1172,12 +1666,19 @@ development image. The offline task uses `scripts/dotfiles-release-ci test` and 
 `platforms.env`. By default it builds every platform in
 `OFFLINE_TEST_PLATFORMS` in parallel, waits for all builds to finish, then
 prepares and verifies successful builds in parallel.
+The number of workers is the smaller of `nproc` and the selected platform
+count. It is fixed when the task starts; increasing VM CPUs affects the
+worker count on the next run.
 Each installation uses a fresh container, an ordinary user and `--network none`.
 Each job verifies the archive, installs it with the downloaded manager, then
 runs `tests/offline_tools_runner.sh` from the trusted workflow checkout.
 That CI-only checker runs the full functional suites and verifies installed
 content before and after them. It is not needed on the target host.
-The task prints a retained `/tmp/dotfiles-qualification.XXXXXX` directory:
+The task prints a retained `.cache/dotfiles-qualification.XXXXXX` directory
+inside the checkout. Git ignores it. When running in the devcontainer through
+the host Docker socket, this keeps artifacts in the shared workspace, visible
+at the same absolute path to both the client and the daemon. If you set
+`TMPDIR`, that directory must also be shared at the same absolute path.
 `output/PLATFORM/` contains the archive and standalone installer with their
 `.sha256` files;
 `dotfiles-evidence/PLATFORM/` contains build, prerequisite-preparation and
@@ -1242,6 +1743,8 @@ comment its entries in both offline platform lists. Keep its alias and images.
 To change the default development VM, edit only `DEFAULT_DEV_PLATFORM`, for
 example `DEFAULT_DEV_PLATFORM=ubuntu2604`. An image change affects newly created
 VMs; existing VMs continue to be reused with their current image and resources.
+Use `task dev:clean -- NAME` followed by `task dev -- NAME` to recreate one with
+the updated image or resources.
 
 The `runs-on: ubuntu-24.04` values under `.github/workflows` select GitHub-hosted
 CI runners. They do not select Ubuntu 24.04 as an offline package target and do
@@ -2064,8 +2567,11 @@ Connected checkouts live under `online/share/tmux/plugins/PLUGIN`.
 store with `DOTFILES_RELEASE_ROOT`. Tmux plugin directories must not contain
 whitespace: upstream save/restore commands embed their paths without shell
 quoting. If HOME contains spaces, choose a store without spaces before setup;
-configuration and user data may still live under HOME. The online loader uses
-`online/share/tmux/plugins`, with `~/.tmux/plugins` as the bootstrap fallback.
+configuration and user data may still live under HOME. The loader uses the
+selected checkouts exposed at `~/.tmux/plugins`; in the container, this path
+points to `/opt/tmux/plugins` from the image. It resolves each entry point to
+its physical path before starting the plugin, so projection links under a
+HOME with spaces work with a store without spaces.
 `DOTFILES_TMUX_PLUGIN_DIR` is a runtime override for an independently managed
 plugin root, not an installer destination. This replaces the TPM-specific
 `TMUX_PLUGIN_MANAGER_PATH` setting.

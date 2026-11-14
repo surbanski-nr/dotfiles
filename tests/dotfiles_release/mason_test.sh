@@ -153,9 +153,14 @@ python_path=$(HOME=$test_home VIRTUAL_ENV='' NVIM_APPNAME=nvim2 \
   PATH="$system_python_bin:/usr/bin:/bin" "$launcher_release/bin/nvim")
 [[ $python_path == "$launcher_release/tools/python/bin/python3" ]] ||
   fail "Neovim did not select its standalone Python without Ansible: $python_path"
-python_path=$(HOME=$test_home VIRTUAL_ENV='' NVIM_APPNAME=nvim2 PATH="$system_python_bin:/usr/bin:/bin" \
-  TEST_BASHRC="$repo_dir/bash/.bashrc" "$launcher_release/bin/nvim" shell 2>/dev/null)
+# Isolate PATH additions from the caller's mise installation.
+python_path=$(
+  HOME=$test_home VIRTUAL_ENV='' NVIM_APPNAME=nvim2 \
+    MISE_DATA_DIR=$test_root/mise MISE_SYSTEM_DATA_DIR='' \
+    PATH="$system_python_bin:/usr/bin:/bin" \
+    TEST_BASHRC="$repo_dir/bash/.bashrc" "$launcher_release/bin/nvim" shell 2>/dev/null
+)
 [[ $python_path == "$system_python_bin/python3" ]] ||
   fail "Neovim terminal retained its private Python: $python_path"
 
-printf 'dotfiles_release: Mason subsets and missing declared payload checks passed\n'
+printf 'dotfiles-release tests: Mason subsets and missing declared payload checks passed\n'

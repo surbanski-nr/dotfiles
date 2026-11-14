@@ -71,6 +71,11 @@ case $TEST_SCENARIO in
     load_bashrc
     load_bashrc
     ;;
+  shell-user)
+    load_bashrc
+    load_bashrc
+    printf 'user=%s logname=%s\n' "$USER" "$LOGNAME"
+    ;;
   prompt-history)
     set +o history
     PROMPT_COMMAND='printf "user\n" >>"$TEST_PROMPT_LOG"'

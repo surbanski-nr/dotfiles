@@ -27,8 +27,8 @@ for scenario in "${scenarios[@]}"; do
     printf "Unknown scenario: %s\nAvailable: %s\n" "$scenario" "${available[*]}" >&2
     exit 2
   fi
-  printf "dotfiles_release: running %s\n" "$scenario"
+  printf "dotfiles-release tests: running %s\n" "$scenario"
   bash "$test_dir/${scenario}_test.sh"
 done
 
-printf "dotfiles_release: all scenarios passed\n"
+printf "dotfiles-release tests: all scenarios passed\n"

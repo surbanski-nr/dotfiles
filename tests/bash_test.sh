@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-unset DOTFILES_IGNORE_USER_BIN
+unset DOTFILES_IGNORE_USER_BIN MISE_DATA_DIR MISE_SYSTEM_DATA_DIR
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 command_fixture=$repo_dir/tests/fixtures/bash/command
@@ -299,6 +299,21 @@ mkdir -p "$test_root/logs"
 reload_home=$test_root/reload-home
 mkdir -p "$reload_home"
 ln -s "$repo_dir/bash/.bash_aliases" "$reload_home/.bash_aliases"
+
+identity_home=$test_root/identity-home
+mkdir -p "$identity_home"
+user_output=$(
+  run_interactive_scenario shell-user timeout 15s env -i \
+    HOME="$identity_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color
+)
+assert_contains "$user_output" "user=$(id -un) logname=$(id -un)"
+user_output=$(
+  run_interactive_scenario shell-user timeout 15s env -i \
+    HOME="$identity_home" PATH="$test_root/bin:$original_path" TERM=xterm-256color \
+    USER=existing-user LOGNAME=existing-login
+)
+assert_contains "$user_output" 'user=existing-user logname=existing-login'
+
 link_command zoxide
 reload_output=$(
   run_interactive_scenario prompt-history timeout 15 env HOME="$reload_home" \
@@ -313,7 +328,7 @@ done
   fail 'prompt did not append the local command to shared history'
 for hook in user zoxide; do
   [[ $(grep -cx "$hook" "$test_root/prompts.log") -eq 2 ]] ||
-    fail "$hook prompt ran more than once per prompt after reload"
+    fail "$hook prompt did not run exactly once per prompt after reload"
 done
 
 shared_history_home=$test_root/shared-history-home

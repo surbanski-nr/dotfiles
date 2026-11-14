@@ -6,7 +6,9 @@ export DOTFILES_IGNORE_USER_BIN=1
 IFS=: read -r -a path_entries <<<"$PATH"
 clean_path=
 for entry in "${path_entries[@]}"; do
-  [[ -n $entry ]] || continue
+  if [[ -z $entry || $entry == "$HOME/bin" ]]; then
+    continue
+  fi
   clean_path+=${clean_path:+:}$entry
 done
 export PATH=$clean_path
@@ -365,7 +367,7 @@ validate_configs() {
   local json_files=()
   local yaml_files=()
 
-  if git grep --untracked -nI -E '[[:blank:]]+$' -- .; then
+  if git --no-pager grep --untracked -nI -E '[[:blank:]]+$' -- .; then
     report_error 'trailing whitespace found'
   else
     grep_status=$?
@@ -405,7 +407,7 @@ validate_tmux() {
   local socket="dotfiles-validate-$$"
   local client configured_path pane_active_border_style pane_border_lines
   local pane_border_style repeat_time reloaded_value status_style tmux_config
-  local temporary_home window_status_current_style
+  local projected_home temporary_home window_status_current_style
   local client_input client_stderr
   local plugin plugin_root expected_plugins offline_root
   local -a plugin_roots=()
@@ -429,9 +431,11 @@ validate_tmux() {
     '  tmux-continuum' \
     ')' >>"$temporary_home/config with spaces/tools.env"
   cp "$repo_dir/tmux/.tmux/"{eye-timer,load-plugins}.sh "$temporary_home/config with spaces/tmux/.tmux/"
+  mkdir -p "$temporary_home/.tmux"
+  ln -s "$temporary_home/image-plugins" "$temporary_home/.tmux/plugins"
   offline_root=$temporary_home/offline-releases/old
   plugin_roots=(
-    "$temporary_home/.tmux/plugins"
+    "$temporary_home/image-plugins"
     "$temporary_home/custom-plugins"
     "$offline_root/share/tmux/plugins"
     "$temporary_home/offline-releases/new/share/tmux/plugins"
@@ -470,11 +474,23 @@ validate_tmux() {
   configured_path=$(HOME="$temporary_home" tmux -L "$socket" show-options -gv @dotfiles-config)
   [[ $configured_path == "$tmux_config" ]] ||
     report_error "tmux reload path does not preserve explicit -f config: $configured_path"
-  plugin_root=$temporary_home/.tmux/plugins
+  plugin_root=$temporary_home/image-plugins
   expected_plugins="$plugin_root/tmux-sensible/sensible.tmux|$plugin_root/tmux-resurrect/resurrect.tmux|$plugin_root/tmux-continuum/continuum.tmux"
   reloaded_value=$(HOME="$temporary_home" tmux -L "$socket" show-options -gqv @validation-plugins)
   [[ $reloaded_value == "$expected_plugins" ]] ||
     report_error "tmux did not load the default plugins in order: $reloaded_value"
+  projected_home="$temporary_home/home with spaces"
+  mkdir -p "$projected_home/.tmux/plugins"
+  for plugin in tmux-sensible tmux-resurrect tmux-continuum; do
+    ln -s "$plugin_root/$plugin" "$projected_home/.tmux/plugins/$plugin"
+  done
+  HOME="$temporary_home" tmux -L "$socket" set-environment -g HOME "$projected_home"
+  HOME="$temporary_home" tmux -L "$socket" set-option -gu @validation-plugins
+  HOME="$temporary_home" tmux -L "$socket" source-file "$tmux_config"
+  reloaded_value=$(HOME="$temporary_home" tmux -L "$socket" show-options -gqv @validation-plugins)
+  [[ $reloaded_value == "$expected_plugins" ]] ||
+    report_error "tmux did not resolve selected plugins with spaces in HOME: $reloaded_value"
+  HOME="$temporary_home" tmux -L "$socket" set-environment -g HOME "$temporary_home"
   HOME="$temporary_home" tmux -L "$socket" set-option -gu @validation-plugins
   HOME="$temporary_home" tmux -L "$socket" set-environment -g \
     DOTFILES_TMUX_PLUGIN_DIR "$temporary_home/custom-plugins"

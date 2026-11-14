@@ -4,13 +4,6 @@ set -euo pipefail
 
 printf '%s\n' "$*" >>"$TEST_DOCKER_LOG"
 
-worker_window() {
-  [[ -n ${TEST_WORKER_EVENTS:-} ]] || return 0
-  printf '%s start %s\n' "$1" "$PLATFORM" >>"$TEST_WORKER_EVENTS"
-  sleep 0.5
-  printf '%s end %s\n' "$1" "$PLATFORM" >>"$TEST_WORKER_EVENTS"
-}
-
 block_worker() {
   [[ ${TEST_HANG_PHASE:-} == "$1" ]] || return 0
   trap 'exit 143' TERM
@@ -22,25 +15,47 @@ block_worker() {
 
 parallel_barrier() {
   [[ -n ${TEST_PARALLEL_DIR:-} ]] || return 0
-  local phase=$1 deadline=$((SECONDS + 5)) expected=4
+  local phase=$1 deadline=$((SECONDS + 5)) expected=4 batch=0 index
+  local -a platforms=() started
   [[ $phase != verify ]] || expected=${TEST_PARALLEL_VERIFY_COUNT:-4}
-  local -a started
-  : >"$TEST_PARALLEL_DIR/$phase-$PLATFORM"
+  if [[ -n ${TEST_WORKER_PLATFORMS:-} ]]; then
+    read -r -a platforms <<<"$TEST_WORKER_PLATFORMS"
+    for index in "${!platforms[@]}"; do
+      if [[ ${platforms[$index]} == "$PLATFORM" ]]; then
+        batch=$((index / TEST_CI_CPUS))
+        break
+      fi
+    done
+    expected=0
+    for ((index = batch * TEST_CI_CPUS; index < (batch + 1) * TEST_CI_CPUS && index < ${#platforms[@]}; index++)); do
+      if [[ $phase == verify && ${platforms[$index]} == "${TEST_BUILD_FAIL:-}" ]]; then
+        continue
+      fi
+      ((expected += 1))
+    done
+  fi
+  # Synchronize each batch instead of relying on timed worker windows.
+  if [[ -n ${TEST_WORKER_EVENTS:-} ]]; then
+    printf '%s start %s\n' "$phase" "$PLATFORM" >>"$TEST_WORKER_EVENTS"
+  fi
+  : >"$TEST_PARALLEL_DIR/$phase-$batch-$PLATFORM"
   while :; do
-    started=("$TEST_PARALLEL_DIR/$phase-"*)
-    ((${#started[@]} == expected)) && return 0
+    started=("$TEST_PARALLEL_DIR/$phase-$batch-"*)
+    ((${#started[@]} == expected)) && break
     if ((SECONDS >= deadline)); then
       printf 'fixture %s workers did not run in parallel\n' "$phase" >&2
       return 84
     fi
     sleep 0.02
   done
+  if [[ -n ${TEST_WORKER_EVENTS:-} ]]; then
+    printf '%s end %s\n' "$phase" "$PLATFORM" >>"$TEST_WORKER_EVENTS"
+  fi
 }
 
 case $1 in
   run)
     if [[ " $* " == *' build '* ]]; then
-      worker_window build
       parallel_barrier build
       block_worker build
       if [[ ${TEST_BUILD_FAIL:-0} == 1 || ${TEST_BUILD_FAIL:-0} == "$PLATFORM" ]]; then
@@ -52,6 +67,11 @@ case $1 in
           output_dir=${arg%:/out}
         fi
       done
+      if [[ -n ${TEST_DOCKER_SHARED_ROOT:-} &&
+        $output_dir != "$TEST_DOCKER_SHARED_ROOT/"* ]]; then
+        printf 'fixture output bind is outside the shared checkout\n' >&2
+        exit 85
+      fi
       archive=dotfiles-${COMMIT_SHA:0:12}-$PLATFORM.tar.gz
       source_archive=$TEST_BUILD_ARCHIVE
       if [[ -n ${TEST_BUILD_ARCHIVES_DIR:-} ]]; then
@@ -62,7 +82,6 @@ case $1 in
       printf 'built %s\n' "$PLATFORM" >>"$TEST_DOCKER_LOG"
       printf 'fixture build succeeded\n'
     elif [[ " $* " == *' verify '* ]]; then
-      worker_window verify
       parallel_barrier verify
       [[ " $* " == *' --init '* && " $* " == *' --network none '* && " $* " == *' --user '* ]] || exit 2
       [[ " $* " == *' install /artifact.tar.gz'* && " $* " == *'tools_runner.sh'* ]] || exit 2

@@ -62,6 +62,14 @@ git init -q "$syntax_repo"
 printf '.cache/\n' >"$syntax_repo/.gitignore"
 PATH="$test_bin" /bin/bash "$syntax_repo/scripts/validate" configs
 
+printf -v terminal_command '%q ' env PATH="$test_bin" \
+  GIT_PAGER=dotfiles-missing-pager PAGER=dotfiles-missing-pager \
+  /bin/bash "$syntax_repo/scripts/validate" configs
+terminal_output=$(
+  SHELL=/bin/bash "$test_bin/script" --quiet --return \
+    --command "$terminal_command" /dev/null </dev/null 2>&1
+) || fail "terminal validation depended on an unavailable pager: $terminal_output"
+
 check_whitespace_failure() {
   local state=$1 output
   if output=$(PATH="$test_bin" /bin/bash "$syntax_repo/scripts/validate" configs 2>&1); then
@@ -73,6 +81,19 @@ check_whitespace_failure() {
 
 printf 'trailing space \ntrailing tab\t\n' >"$syntax_repo/whitespace.txt"
 check_whitespace_failure 'an untracked file'
+if terminal_output=$(
+  SHELL=/bin/bash "$test_bin/script" --quiet --return \
+    --command "$terminal_command" /dev/null </dev/null 2>&1
+); then
+  fail 'terminal validation accepted trailing whitespace with an unavailable pager'
+fi
+terminal_output=$(python3 -c '
+import re
+import sys
+print(re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", sys.stdin.read()))
+' <<<"$terminal_output")
+[[ $terminal_output == *'whitespace.txt:1:'* && $terminal_output == *'whitespace.txt:2:'* ]] ||
+  fail "terminal whitespace failure did not identify both invalid lines: $terminal_output"
 git -C "$syntax_repo" add .
 git -C "$syntax_repo" -c user.name=fixture \
   -c user.email=fixture@example.invalid -c commit.gpgsign=false \
@@ -155,15 +176,17 @@ for file in bash_test.sh bash_history_test.sh; do
 done
 
 connected_home=$test_root/connected-home
-mkdir -p "$connected_home/bin"
-mv "$test_bin/tmux" "$connected_home/bin/tmux"
+connected_tools=$connected_home/dotfiles-releases/current/bin
+mkdir -p "$connected_home/bin" "$connected_tools"
+mv "$test_bin/tmux" "$connected_tools/tmux"
+ln -s /bin/false "$connected_home/bin/tmux"
 ln -s /bin/false "$connected_home/bin/shellcheck"
-if ! HOME="$connected_home" PATH="$connected_home/bin:$test_bin" \
+if ! HOME="$connected_home" PATH="$connected_home/bin:$connected_tools:$test_bin" \
   VALIDATION_TOOLS_DIR="$test_bin" /bin/bash "$repo_dir/scripts/validate" tmux \
   >"$test_root/connected-tmux.log" 2>&1; then
   fail "validation could not use connected tmux with pinned ShellCheck: $(<"$test_root/connected-tmux.log")"
 fi
-mv "$connected_home/bin/tmux" "$test_bin/tmux"
+mv "$connected_tools/tmux" "$test_bin/tmux"
 
 rm "$test_bin/tmux"
 ln -s "$repo_dir/tests/fixtures/validation/tmux-fail-show-options" \
@@ -277,7 +300,10 @@ for mode in ('bash', 'tmux'):
             result = subprocess.run(['tmux', '-S', str(socket), 'has-session'], timeout=3,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             assert result.returncode != 0, 'Ctrl+C left the private timer server running'
-            assert not socket.parent.exists(), 'Ctrl+C left the private timer test directory'
+            assert not socket.parent.exists(), (
+                'Ctrl+C left the private timer test directory\n' +
+                output.decode(errors='replace')[-2000:]
+            )
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         try:

@@ -2,7 +2,6 @@
 # Surb skin
 # -----------------------------------------------------------------------------
 
-# Default text follows the terminal; light accents use a neutral white.
 fg: &fg "default"
 bg: &bg "default"
 mark: &mark "darkgoldenrod"
@@ -55,9 +54,10 @@ k9s:
       bgColor: *white
       activeColor: *active
     status:
-      newColor: "white"
+      # Rows need explicit colors because k9s reuses them as the cursor background.
+      newColor: *white
       modifyColor: *text
-      addColor: "ghostwhite"
+      addColor: *white
       errorColor: *err
       highlightColor: *active
       killColor: *slate
@@ -76,10 +76,10 @@ k9s:
       cursorFgColor: "black"
       markColor: *mark
       header:
-        fgColor: *white
+        fgColor: *fg
         bgColor: *bg
         sorterColor: *fg
-        selectedSortColumnColor: *white
+        selectedSortColumnColor: *fg
     xray:
       fgColor: *fg
       bgColor: *bg

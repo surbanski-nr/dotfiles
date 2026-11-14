@@ -41,4 +41,4 @@ lock_holder_pid=
 run_manager install "$artifact_one" >/dev/null
 run_manager uninstall >/dev/null
 
-printf 'dotfiles_release: locking passed\n'
+printf 'dotfiles-release tests: locking passed\n'

@@ -112,4 +112,4 @@ set -e
 [[ $corrupt_status -ne 0 && $corrupt_output == *'archive checksums do not match'* ]] ||
   fail 'artifact with a corrupt payload was accepted'
 
-printf 'dotfiles_release: integrity passed\n'
+printf 'dotfiles-release tests: integrity passed\n'

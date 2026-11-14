@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=setup-lib
 source "$script_dir/setup-lib"
 # shellcheck source=setup-system-lib
@@ -97,7 +97,8 @@ check_checksum() {
 verify_asset() {
   local platform=$1 archive=$2 root=dotfiles-${COMMIT_SHA:0:12} metadata
   printf 'Verifying %s.\n' "${archive##*/}"
-  bash "$script_dir/../dotfiles-release" verify "$archive" || return
+  # Use the job's working directory; /tmp may be a small tmpfs.
+  TMPDIR=$work bash "$script_dir/../dotfiles-release" verify "$archive" || return
   metadata=$(tar -xOzf "$archive" "$root/release.env") || return
   [[ $(awk -F= '$1 == "PLATFORM_ID" { print $2 }' <<<"$metadata") == "$platform" &&
     $(awk -F= '$1 == "SOURCE_COMMIT" { print $2 }' <<<"$metadata") == "$COMMIT_SHA" ]] ||
@@ -291,7 +292,8 @@ build_and_qualify() {
 }
 
 test_all_platforms() {
-  local source_dir phase platform source_status evidence status parallelism batch_start result=0
+  local source_dir phase platform source_status evidence status temporary_root
+  local parallelism batch_start result=0
   local requested_platform=${2:-}
   local -a selected=() batch=()
   local -A build_status=() verify_status=()
@@ -309,7 +311,7 @@ test_all_platforms() {
     report_error "unsupported platform: $requested_platform"
     return 2
   }
-  source_dir=$(CDPATH='' cd -- "$1" && pwd)
+  source_dir=$(CDPATH='' cd -- "$1" && pwd -P)
   COMMIT_SHA=$(git -C "$source_dir" rev-parse HEAD)
   source_status=$(git -C "$source_dir" status --porcelain --untracked-files=normal)
   [[ -z $source_status ]] ||
@@ -322,7 +324,10 @@ test_all_platforms() {
   timeout 10s docker info >/dev/null || report_error 'Docker must be available to the current user'
 
   RELEASE_TAG=dotfiles-${COMMIT_SHA:0:7}
-  RUNNER_TEMP=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-qualification.XXXXXX")
+  # Bind sources must also be visible to the daemon when using a host Docker socket.
+  temporary_root=${TMPDIR:-$source_dir/.cache}
+  mkdir -p "$temporary_root"
+  RUNNER_TEMP=$(mktemp -d "$temporary_root/dotfiles-qualification.XXXXXX")
   GITHUB_RUN_ID=local-${RUNNER_TEMP##*/}
   GITHUB_RUN_ATTEMPT=1
   GITHUB_STEP_SUMMARY=$RUNNER_TEMP/summary.md

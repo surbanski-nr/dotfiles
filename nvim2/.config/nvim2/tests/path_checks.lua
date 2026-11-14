@@ -26,7 +26,8 @@ assert(vim.fn.writefile(
 local expected = vim.env.TEST_EXPECTED
 assert(vim.fn.exepath('path-probe') == expected, 'Mason startup demoted the selected provider')
 local function output(args)
-  local result = vim.system(args, { text = true }):wait(10000)
+  -- Pipe-based commands must not inherit the caller's controlling terminal.
+  local result = vim.system(args, { text = true, detach = true }):wait(10000)
   assert(result.code == 0, result.stderr)
   return vim.trim(result.stdout)
 end
@@ -75,6 +76,8 @@ end
 assert(vim.fn.filereadable(bashrc) == 1, 'dotfiles Bash configuration is required')
 for _, mode in ipairs { 'enabled', 'venv', 'ignored', 'nonexecutable' } do
   local environment = vim.fn.environ()
+  -- HOME is a fixture; keep the parent's installed plugins.
+  environment.XDG_DATA_HOME = vim.env.XDG_DATA_HOME or vim.fs.dirname(vim.fn.stdpath 'data')
   environment.HOME = root
   environment.PATH = root .. '/bin:' .. root .. '/managed/bin:' .. vim.env.PATH .. '::'
   environment.DOTFILES_IGNORE_USER_BIN = mode == 'ignored' and '1' or ''

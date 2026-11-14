@@ -178,4 +178,4 @@ if run_manager verify --skip-health "$artifact_one" >/dev/null 2>&1; then
   fail 'verify accepted a runtime bypass flag'
 fi
 
-printf 'dotfiles_release: verification passed\n'
+printf 'dotfiles-release tests: verification passed\n'

@@ -97,4 +97,4 @@ fi
 [[ $(<"$invalid_lock_home/dotfiles-releases") == 'private root bytes' ]] ||
   fail 'invalid release root was changed'
 
-printf 'setup_tools: locking passed\n'
+printf 'setup-tools tests: locking passed\n'

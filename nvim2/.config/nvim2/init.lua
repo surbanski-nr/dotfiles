@@ -649,8 +649,8 @@ do
     end,
   })
 
-  -- Enable the following language servers
-  --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
+  -- Enable the language servers declared in custom.lsp.
+  -- After changing configured tools, run :Nvim2ToolsInstallSync.
   --  See `:help lsp-config` for information about keys and how to configure
   local custom_lsp = require 'custom.lsp'
   local servers = custom_lsp.servers
@@ -662,7 +662,7 @@ do
     gh 'WhoIsSethDaniel/mason-tool-installer.nvim',
   }
 
-  -- Automatically install LSPs and related tools to stdpath for Neovim
+  -- Configure Mason; installation is explicit through :Nvim2ToolsInstallSync.
   require('mason').setup(custom_lsp.mason)
   custom_lsp.restore_path()
 

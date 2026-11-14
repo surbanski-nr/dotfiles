@@ -86,4 +86,4 @@ for command_name in kind uv uvx gh go gofmt fd; do
 done
 assert_link "$test_home/bin/htop" htop-0.9/bin/htop
 
-printf 'dotfiles_release: tool_lists passed\n'
+printf 'dotfiles-release tests: tool_lists passed\n'

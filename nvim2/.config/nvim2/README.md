@@ -67,13 +67,19 @@ configuration, and optionally uninstalling its Mason tools, follow
 [Temporarily disabling language support](guide.md#temporarily-disabling-language-support).
 That section also explains the current functional-test and offline-release limits.
 
-On a connected machine, first install the full Go SDK with
-`./setup-tools go` from the repository root. gopls and the Go tools require it
-both during Mason installation and when working on projects. Then run:
+On a connected machine, first run `./setup-tools` from the repository root for
+Python and the full Go SDK, then `./setup-asdf nodejs terraform` for Node.js/npm
+and the Terraform CLI used by the current features. Then install the editor
+tools and parsers explicitly:
 
 ```vim
 :Nvim2ToolsInstallSync
 ```
+
+Run this again after changing the configured tools. If a language server such
+as `yaml-language-server` cannot start, check that its Mason package is installed
+and that its runtime is available. YAML LSP needs Node.js; gopls and the Go tools
+need the Go SDK both during installation and while working on projects.
 
 Then validate the complete profile from the shell:
 

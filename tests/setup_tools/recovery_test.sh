@@ -126,4 +126,4 @@ set -e
 [[ $modified_output == *'managed installation was modified'* ]] ||
   fail 'modified retained installation did not report a conflict'
 
-printf 'setup_tools: recovery passed\n'
+printf 'setup-tools tests: recovery passed\n'

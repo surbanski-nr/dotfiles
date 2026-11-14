@@ -50,4 +50,4 @@ fi
 [[ $(<"$python_xdg/uv/.python-version") == 3.9.0 ]] ||
   fail 'Python installation failure changed the global pin'
 
-printf 'setup_tools: python passed\n'
+printf 'setup-tools tests: python passed\n'

@@ -28,11 +28,11 @@ SETUP_TEMP_DIR=$(mktemp -d /run/dotfiles-dev.XXXXXX)
 trap 'find "$SETUP_TEMP_DIR" -depth -delete' EXIT
 
 if ! getent group "$guest_gid" >/dev/null; then
-  groupadd --gid "$guest_gid" dotfiles-dev
+  groupadd --gid "$guest_gid" devvm
 fi
 account=$(getent passwd "$guest_uid" || true)
 if [[ -z $account ]]; then
-  useradd --create-home --uid "$guest_uid" --gid "$guest_gid" --shell /bin/bash dotfiles-dev
+  useradd --create-home --uid "$guest_uid" --gid "$guest_gid" --shell /bin/bash devvm
   account=$(getent passwd "$guest_uid")
 fi
 IFS=: read -r guest_user _ _ _ _ guest_home _ <<<"$account"
@@ -40,6 +40,10 @@ IFS=: read -r guest_user _ _ _ _ guest_home _ <<<"$account"
   printf 'dev-vm-setup: refusing unexpected guest home\n' >&2
   exit 1
 }
+if [[ $guest_user != devvm ]]; then
+  usermod --login devvm "$guest_user"
+  guest_user=devvm
+fi
 usermod --gid "$guest_gid" --shell /bin/bash "$guest_user"
 
 packages=()

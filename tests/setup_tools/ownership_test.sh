@@ -143,4 +143,4 @@ grep -F 'invalid installation state' "$test_root/corrupt-state.log" >/dev/null |
 [[ ! -e $corrupt_home/dotfiles-releases/online/tools/bin/k9s-$K9S_VERSION ]] ||
   fail 'malformed state installed a payload'
 
-printf 'setup_tools: ownership passed\n'
+printf 'setup-tools tests: ownership passed\n'

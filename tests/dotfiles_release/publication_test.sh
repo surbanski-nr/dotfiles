@@ -85,4 +85,4 @@ run_manager uninstall >/dev/null
 ! -e $test_home/dotfiles-releases/$id_one ]] ||
   fail 'retry did not restore and remove the active release'
 
-printf 'dotfiles_release: publication passed\n'
+printf 'dotfiles-release tests: publication passed\n'

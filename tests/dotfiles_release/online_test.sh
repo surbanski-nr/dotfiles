@@ -39,6 +39,8 @@ BASH
 
 online=$test_home/dotfiles-releases/online
 run_manager set online >/dev/null
+[[ ! -e $test_home/setup && ! -L $test_home/setup ]] ||
+  fail 'online activation linked the manual Vim helper into HOME'
 assert_link "$test_home/dotfiles-releases/current" online
 assert_link "$online/dotfiles" "$online_source"
 assert_link "$test_home/.gitconfig" "$test_home/dotfiles-releases/current/dotfiles/git/.gitconfig"
@@ -140,4 +142,4 @@ run_manager uninstall >/dev/null
   $(<"$test_home/.local/share/nvim2/mason/keep") == 'cached editor data' ]] ||
   fail 'uninstall did not restore the original HOME configuration and editor data'
 
-printf 'dotfiles_release: online passed\n'
+printf 'dotfiles-release tests: online passed\n'

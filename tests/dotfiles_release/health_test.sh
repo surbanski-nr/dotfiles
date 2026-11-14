@@ -317,4 +317,4 @@ output=$(<"$test_root/checker-discovery-failure.log")
 [[ $status == 93 && $output == *'kind health check failed (status 93)'* ]] ||
   fail 'CI checker omitted a failure from a discovered tool suite'
 
-printf 'dotfiles_release: health passed\n'
+printf 'dotfiles-release tests: health passed\n'

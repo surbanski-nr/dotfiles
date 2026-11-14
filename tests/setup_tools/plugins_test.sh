@@ -264,4 +264,4 @@ fi
 [[ $(<"$test_root/missing-selected-plugin.log") == *'missing '*'/tmux-resurrect/resurrect.tmux'* ]] ||
   fail 'loader did not explain the missing selected plugin'
 
-printf 'Setup tools plugin tests passed\n'
+printf 'setup-tools tests: plugins passed\n'

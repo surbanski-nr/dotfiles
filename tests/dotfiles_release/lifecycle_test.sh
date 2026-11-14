@@ -164,4 +164,4 @@ assert_link "$test_home/bin/rg" rg-0.9
   fail 'release lifecycle changed user bin, its modes, backups or links'
 [[ ! -e $TEST_DOCKER_LOG ]] || fail 'release operations ran host setup or attempted network downloads'
 
-printf 'dotfiles_release: lifecycle passed\n'
+printf 'dotfiles-release tests: lifecycle passed\n'
