@@ -70,10 +70,12 @@ FROM mise AS tools
 
 COPY mise.toml /etc/mise/config.toml
 COPY mise.lock /etc/mise/mise.lock
+COPY .mise/locks /etc/mise/.mise/locks
 
 RUN chmod 0644 \
         /etc/mise/config.toml \
         /etc/mise/mise.lock \
+    && chmod -R a+rX /etc/mise/.mise/locks \
     && mise install \
         --locked \
         --jobs 4 \

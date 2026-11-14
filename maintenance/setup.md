@@ -515,6 +515,15 @@ task devcontainer
 Skip `update:mise-locks` when only configuration changes. It regenerates the
 root `mise.lock` with the Dockerfile's pinned mise. The lock task uses the
 configured user IDs for its bind mount, including UID/GID 0 for rootless Docker.
+Its temporary HOME lets signature verification cache trust roots even when
+the numeric UID has no account in the build image.
+It installs the configured uv and Python versions with `mise install uv python`,
+then runs `mise lock` in the same disposable container. This records dependency
+graphs for Python-backed tools alongside their pinned versions.
+Those generated files live under `.mise/locks` and Dockerfile copies them
+alongside `mise.lock` for installation with `--locked`. The image makes them
+readable by its runtime user because mise generates them with mode `600`.
+Commit `mise.toml`, `mise.lock` and the generated `.mise/locks` files together.
 Edit the TOML and regenerate the lock; do not edit generated files by hand.
 `task test` runs `test:offline`, then `test:devcontainer`. The offline part requires
 a clean committed checkout so the archive matches its recorded source commit.
@@ -608,6 +617,12 @@ configuration links and Neovim dependencies. Add a new image CLI tool to
 `mise.toml` or the apt list. Neovim's LSP, formatter, linter and parser
 configuration controls its editor dependencies; Mason installs those enabled
 tools.
+
+Azure CLI (`az`), AWS CLI (`aws`), Claude Code (`claude`), Codex (`codex`),
+GitHub Copilot CLI (`copilot`) and GitHub CLI (`gh`) are included through mise.
+Their image versions are pinned in `mise.toml`; regenerate `mise.lock` with
+`task update:mise-locks` after changing them. These additions apply only to the
+devcontainer and leave the host online/offline tool lists unchanged.
 
 The apt list covers the runtime commands from `system.env`, including Debian
 tools such as `ip` and `vi`. It also installs Midnight Commander and the
@@ -1698,14 +1713,16 @@ fixture tests, including reduced tool lists, rather than this full qualification
 
 ### Managing OS support and offline publication
 
-Platform selection and image configuration live in `platforms.env`:
+Platform selection and pinned image configuration live in `platforms.env`:
 
 - `PLATFORM_ALIASES` maps names such as `ubuntu2404` to platform IDs such as
   `ubuntu-24.04-x86_64`. Both `task dev -- NAME` and `task test -- NAME` use it.
   `DEFAULT_DEV_PLATFORM` selects the alias used by `task dev` without an argument.
 - `LXD_IMAGES` selects development VM images by platform ID.
-  `LXD_IMAGE_SHA256` is needed only for direct QCOW2 downloads, currently Amazon
-  Linux. Remote LXD cloud images do not use this checksum map.
+  Remote images use `remote:fingerprint`; direct QCOW2 downloads, currently
+  Amazon Linux, use `"HTTPS_URL|SHA256"` in the same map. The LXD fingerprint
+  identifies the complete LXD image; the QCOW2 checksum verifies the downloaded
+  disk file before it is imported.
 - `DOCKER_IMAGES` pins the container images used for building and qualification
   by platform ID. These are independent of the VM images.
 - `OFFLINE_TEST_PLATFORMS` selects the platforms built and installed by the
@@ -1746,6 +1763,21 @@ VMs; existing VMs continue to be reused with their current image and resources.
 Use `task dev:clean -- NAME` followed by `task dev -- NAME` to recreate one with
 the updated image or resources.
 
+To refresh the development VM pins, resolve the latest image from each
+configured remote. Keep `--vm`: a container image has a different fingerprint.
+Check that the output describes the intended OS and x86-64 architecture, then
+copy its full `Fingerprint` into the matching `LXD_IMAGES` entry and update
+the alias/build-date comment:
+
+```bash
+lxc image info images:debian/13/cloud --vm
+lxc image info ubuntu:24.04 --vm
+lxc image info ubuntu:26.04 --vm
+```
+
+Remote servers can retire old builds. Refresh a pin if it no longer resolves.
+`task validate` checks the pin format locally and does not contact LXD.
+
 The `runs-on: ubuntu-24.04` values under `.github/workflows` select GitHub-hosted
 CI runners. They do not select Ubuntu 24.04 as an offline package target and do
 not need to change when its artifact publication is paused.
@@ -1771,7 +1803,7 @@ To add a future platform such as Ubuntu 28.04 or Debian 14:
    already covers new versions of those distributions.
 3. In `platforms.env`, add its short alias to `PLATFORM_ALIASES`, its pinned
    Docker image to `DOCKER_IMAGES` and its VM image to `LXD_IMAGES`.
-   Add `LXD_IMAGE_SHA256` only for a direct QCOW2 download. The tasks, CI image
+   Use `remote:fingerprint` or `"HTTPS_URL|SHA256"`. The tasks, CI image
    selection and image validation use these maps without OS-specific edits.
 4. Add focused cases to `tests/setup_system_test.sh`,
    `tests/dev_vm_test.sh` and `tests/dotfiles_release_ci_test.sh`.

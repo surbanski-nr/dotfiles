@@ -13,6 +13,58 @@ url = "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_
 url_api = "https://api.github.com/repos/rhysd/actionlint/releases/assets/384924896"
 provenance = "github-attestations"
 
+[[tools.aws]]
+version = "2.40.2"
+backend = "aqua:aws/aws-cli"
+specifiers = ["2.40.2"]
+
+[tools.aws."platforms.linux-x64"]
+checksum = "sha256:a9ac0d635e97fab65e234ae1519fa6bd2b02d72120bf965a8ff6eaf7611f1833"
+url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.40.2.zip"
+
+[[tools.azure-cli]]
+version = "2.92.0"
+backend = "pypi:azure-cli"
+specifiers = ["2.92.0"]
+uv = { path = ".mise/locks/azure-cli/2.92.0~a837e014", digest = "sha256:d84a973a3f0029f159694573fe8ff6767395a0372e8120018fec33d37d0ea19e" }
+
+[tools.azure-cli.options]
+dependency_prereleases = "allow"
+with = '["pip"]'
+
+[[tools.claude]]
+version = "2.1.323"
+backend = "aqua:anthropics/claude-code"
+specifiers = ["2.1.323"]
+
+[tools.claude."platforms.linux-x64"]
+checksum = "sha256:522255678548859b9799b7b098c03a3aa286c9a9ede01957e35f4713ccc43631"
+checksum_source = "mise-versions"
+url = "https://github.com/anthropics/claude-code/releases/download/v2.1.323/claude-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/anthropics/claude-code/releases/assets/741010604"
+
+[[tools.codex]]
+version = "0.169.0"
+backend = "aqua:openai/codex"
+specifiers = ["0.169.0"]
+
+[tools.codex."platforms.linux-x64"]
+checksum = "sha256:3b8ed091149cc63a59046b9f094bcfa21cdb4dda15ede441ce369bcee4a71ba0"
+checksum_source = "mise-versions"
+url = "https://github.com/openai/codex/releases/download/rust-v0.169.0/codex-package-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/openai/codex/releases/assets/742918488"
+
+[[tools.copilot]]
+version = "1.0.111"
+backend = "aqua:github/copilot-cli"
+specifiers = ["1.0.111"]
+
+[tools.copilot."platforms.linux-x64"]
+checksum = "sha256:33ea4378ccc829bc18520648ad97c8fb1d9de4ba478ebff8eb2ad890aa0a95c8"
+checksum_source = "mise-versions"
+url = "https://github.com/github/copilot-cli/releases/download/v1.0.111/copilot-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/github/copilot-cli/releases/assets/743798618"
+
 [[tools.fd]]
 version = "10.5.0"
 backend = "aqua:sharkdp/fd"
@@ -36,14 +88,14 @@ url = "https://github.com/junegunn/fzf/releases/download/v0.74.4/fzf-0.74.4-linu
 url_api = "https://api.github.com/repos/junegunn/fzf/releases/assets/558287768"
 
 [[tools.gh]]
-version = "2.101.0"
+version = "2.104.0"
 backend = "aqua:cli/cli"
-specifiers = ["2.101.0"]
+specifiers = ["2.104.0"]
 
 [tools.gh."platforms.linux-x64"]
-checksum = "sha256:9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8"
-url = "https://github.com/cli/cli/releases/download/v2.101.0/gh_2.101.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/cli/cli/releases/assets/565857134"
+checksum = "sha256:98cb101ad87dbbd3f6b2f2bfcbd43197ccd07643140121d8a9cfaa91eadbc24e"
+url = "https://github.com/cli/cli/releases/download/v2.104.0/gh_2.104.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/cli/cli/releases/assets/740718892"
 provenance = "github-attestations"
 
 [[tools.go]]

@@ -98,6 +98,11 @@ for command_name in "${!SYSTEM_PROBES[@]}"; do
     "${version_args[@]}"
 done
 
+for command_name in az aws claude codex copilot; do
+  health_stage "$command_name version" timeout --kill-after=5s 30s \
+    "$command_name" --version
+done
+
 for tool in kubectl helm; do
   # shellcheck disable=SC1090
   source "$repo_dir/tests/tools/$tool.sh"

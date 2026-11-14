@@ -235,7 +235,7 @@ validate_scripts() {
   # shellcheck source=setup-system-lib
   source scripts/setup-system-lib
   load_config "$repo_dir/platforms.env"
-  declare -p PLATFORM_ALIASES DOCKER_IMAGES LXD_IMAGES LXD_IMAGE_SHA256 \
+  declare -p PLATFORM_ALIASES DOCKER_IMAGES LXD_IMAGES \
     OFFLINE_TEST_PLATFORMS OFFLINE_RELEASE_PLATFORMS >/dev/null 2>&1 ||
     report_error 'platforms.env must define platform aliases, images and offline platform lists'
   for platform in "${!DOCKER_IMAGES[@]}"; do
@@ -245,17 +245,14 @@ validate_scripts() {
   done
   for platform in "${!LXD_IMAGES[@]}"; do
     [[ -n ${DOCKER_IMAGES[$platform]:-} ]] || report_error "unknown LXD platform: $platform"
-    image=${LXD_IMAGES[$platform]}
-    checksum=${LXD_IMAGE_SHA256[$platform]:-}
+    IFS='|' read -r image checksum <<<"${LXD_IMAGES[$platform]}"
     [[ $image =~ ^[^[:space:]]+$ ]] || report_error "invalid LXD image for $platform"
     if [[ $image == https://* ]]; then
       [[ $checksum =~ ^[0-9a-f]{64}$ ]] || report_error "QCOW2 image for $platform needs a SHA256"
     else
+      [[ $image =~ ^[[:alnum:]_.-]+:[0-9a-f]{64}$ ]] || report_error "LXD image for $platform is not pinned to a fingerprint"
       [[ -z $checksum ]] || report_error "remote LXD image for $platform must not have a QCOW2 checksum"
     fi
-  done
-  for platform in "${!LXD_IMAGE_SHA256[@]}"; do
-    [[ -n ${LXD_IMAGES[$platform]:-} ]] || report_error "checksum has no LXD image: $platform"
   done
   for alias in "${!PLATFORM_ALIASES[@]}"; do
     [[ $alias =~ ^[a-z0-9]+$ ]] || report_error "invalid platform alias: $alias"

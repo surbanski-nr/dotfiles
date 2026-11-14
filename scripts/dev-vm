@@ -26,9 +26,13 @@ platform=${PLATFORM_ALIASES[$alias]:-}
 [[ -n $platform ]] || report_error "unknown platform: $alias"
 [[ -n ${DEV_PROJECT:-} ]] || report_error 'DEV_PROJECT is required'
 if [[ $action == dev ]]; then
-  image=${LXD_IMAGES[$platform]:-}
+  IFS='|' read -r image checksum <<<"${LXD_IMAGES[$platform]:-}"
   [[ -n $image ]] || report_error "no LXD image configured for $platform"
-  checksum=${LXD_IMAGE_SHA256[$platform]:-}
+  if [[ $image == https://* ]]; then
+    [[ $checksum =~ ^[0-9a-f]{64}$ ]] || report_error 'invalid QCOW2 image or SHA256'
+  elif [[ ! $image =~ ^[[:alnum:]_.-]+:[0-9a-f]{64}$ || -n $checksum ]]; then
+    report_error 'remote LXD image must use remote:fingerprint'
+  fi
   [[ ${DEV_CPUS:-} =~ ^[1-9][0-9]*$ ]] || report_error 'DEV_CPUS must be a positive integer'
   for size in "${DEV_MEMORY:-}" "${DEV_DISK:-}"; do
     [[ $size =~ ^[1-9][0-9]*(MiB|GiB|MB|GB)$ ]] || report_error 'DEV_MEMORY and DEV_DISK need a size such as 16GiB'
@@ -76,7 +80,6 @@ if ((count == 0)); then
   repo_key=$(printf '%s' "$repo_dir" | sha256sum)
   vm=dotfiles-dev-$alias-${repo_key:0:8}-$(date -u +%Y%m%dT%H%M%SZ)
   if [[ -n $checksum ]]; then
-    [[ $checksum =~ ^[0-9a-f]{64}$ && $image == https://* ]] || report_error 'invalid QCOW2 image or SHA256'
     image_alias=dotfiles-dev-$alias-${checksum:0:12}
     if ! lxc_command image info "$image_alias" >/dev/null 2>&1; then
       command -v curl >/dev/null || report_error 'curl is required to download the QCOW2 image'

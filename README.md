@@ -123,7 +123,7 @@ docker compose exec --user devcontainer dev bash
 
 `system.env` contains OS package lists and host setup prerequisites for various platforms I test against. OS packages use the current repository version without pins (distros are relatively stable, well tested and behind on versions, I decided not to overcomplicate this part).
 
-`platforms.env` contains Docker/LXD images and the OS lists used for testing and release publication.
+`platforms.env` pins Docker and development VM images and contains the OS lists used for testing and release publication.
 
 The devcontainer image is the latest and experimental addition, it installs its tools with mise via `mise.toml`
 and downloads in the generated `mise.lock`, instead of using my own package manager.

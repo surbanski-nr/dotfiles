@@ -2,7 +2,12 @@ min_version = "2026.11.5"
 
 [tools]
 actionlint = "1.7.12"
-gh = "2.101.0"
+azure-cli = "2.92.0"
+aws = "2.40.2"
+claude = "2.1.323"
+codex = "0.169.0"
+copilot = "1.0.111"
+gh = "2.104.0"
 kyverno = "1.19.1"
 task = "3.53.1"
 trivy = "0.74.0"

@@ -123,6 +123,7 @@ tasks:
         docker run \
           --rm \
           --user "${DOTFILES_UID:-$(id -u)}:${DOTFILES_GID:-$(id -g)}" \
+          --env HOME=/tmp \
           --env MISE_GLOBAL_CONFIG_FILE=/config/mise.toml \
           --env MISE_DATA_DIR=/tmp/mise \
           --env MISE_CACHE_DIR=/tmp/mise/cache \
@@ -130,9 +131,12 @@ tasks:
           --workdir /config \
           --mount "type=bind,source=$PWD,target=/config" \
           dotfiles:mise \
-          mise lock \
-            --global \
-            --platform linux-x64
+          bash -ec '
+            mise install uv python
+            mise lock \
+              --global \
+              --platform linux-x64
+          '
 
   devcontainer:up:
     desc: Build without cache and start the development container
