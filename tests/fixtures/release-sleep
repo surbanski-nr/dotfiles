@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ -n ${TEST_RELEASE_SLEEP_LOG:-} && $# == 1 && $1 == 10 ]]; then
+  printf '%s\n' "$1" >>"$TEST_RELEASE_SLEEP_LOG"
+  exit 0
+fi
+
+exec /bin/sleep "$@"

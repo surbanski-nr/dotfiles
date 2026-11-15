@@ -358,6 +358,12 @@ set -euo pipefail
 [[ $2 == --file ]]
 [[ $3 == compose.yaml || $3 == compose.test.yaml ]]
 operation=$4
+if [[ $operation == up || $operation == run ]]; then
+  if [[ " ${*:5} " != *' --pull never '* ]]; then
+    printf 'Compose must use the locally built development image\n' >&2
+    exit 1
+  fi
+fi
 if [[ $operation == exec ]]; then
   if [[ $3 == compose.yaml ]]; then
     [[ ${*:5} == '--user devcontainer dev bash --login' ]]

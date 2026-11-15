@@ -18,6 +18,14 @@ release_json() {
 
 case $endpoint in
   */releases/tags/* | */releases/42)
+    if [[ $endpoint == */releases/tags/* && -n ${TEST_RELEASE_LOOKUP_LOG:-} ]]; then
+      printf 'lookup\n' >>"$TEST_RELEASE_LOOKUP_LOG"
+      lookup=$(wc -l <"$TEST_RELEASE_LOOKUP_LOG")
+      if ((lookup <= ${TEST_RELEASE_PENDING_ATTEMPTS:-0})); then
+        printf 'HTTP 404\n' >&2
+        exit 75
+      fi
+    fi
     if [[ -n ${TEST_RELEASE_ERROR:-} ]]; then
       printf 'HTTP %s\n' "$TEST_RELEASE_ERROR" >&2
       exit 75

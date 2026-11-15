@@ -113,37 +113,31 @@ extract_manager() {
 }
 
 preflight() {
-  local release_file=$work/release.json error_file=$work/release-error.txt
-  local object_file=$work/tag-object.json attempts=1 attempt object_type
+  local release_file=$work/release.json
+  local release_error=$work/release-error.txt attempt status
+  local object_file=$work/tag-object.json object_type
   local platform asset build_archive matrix
-  local release_found=false manager_complete=false should_run=false
+  local manager_complete=false should_run=false
   local -a selected=()
 
-  if [[ $EVENT_NAME == workflow_dispatch ]]; then
-    RELEASE_TAG=$INPUT_RELEASE_TAG
-  else
-    RELEASE_TAG=$TAG_NAME
+  if [[ ! ${RELEASE_TAG:-} =~ ^dotfiles-[0-9a-f]{7,40}$ ]]; then
+    report_error "invalid release tag: ${RELEASE_TAG:-unset}"
   fi
-  [[ $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{7,40}$ ]] || report_error "invalid release tag: $RELEASE_TAG"
   printf 'Resolving release %s.\n' "$RELEASE_TAG"
-  [[ $EVENT_NAME != push ]] || attempts=6
-  for ((attempt = 1; attempt <= attempts; attempt++)); do
+  for attempt in {1..6}; do
     if timeout 30s gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
-      >"$release_file" 2>"$error_file"; then
-      release_found=true
+      >"$release_file" 2>"$release_error"; then
       break
+    else
+      status=$?
     fi
-    if ! grep -q 'HTTP 404' "$error_file"; then
-      cat "$error_file" >&2
-      return 1
+    if ((attempt == 6)) || ! grep -q 'HTTP 404' "$release_error"; then
+      cat "$release_error" >&2
+      return "$status"
     fi
-    ((attempt == attempts)) || sleep 10
+    printf 'Release %s is not visible yet (%s/6); retrying in 10s.\n' "$RELEASE_TAG" "$attempt"
+    sleep 10
   done
-  if [[ $release_found != true ]]; then
-    printf 'Release %s does not exist; skipping.\n' "$RELEASE_TAG"
-    printf '%s\n' "release_tag=$RELEASE_TAG" 'platforms=[]' 'should_run=false' >>"$GITHUB_OUTPUT"
-    return
-  fi
   jq -e '.assets | type == "array"' "$release_file" >/dev/null
   timeout 30s gh api "repos/$REPOSITORY/git/ref/tags/$RELEASE_TAG" >"$object_file"
   object_type=$(jq -r '.object.type' "$object_file")

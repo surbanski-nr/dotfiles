@@ -172,6 +172,16 @@ health_stage tmux health_tmux "$(type -P tmux)" "$health_home" \
   "$repo_dir/tmux/.tmux.conf" /opt/tmux/plugins "${plugins[@]}"
 
 printf 'container-tools: checking shared SSH agent and Neovim from tmux login Bash\n'
+
+login_bash() {
+  local command
+
+  # Compose exec -T has no controlling terminal for interactive Bash startup.
+  printf -v command '%q ' bash --login -ic "$@"
+  SHELL=/bin/bash timeout --kill-after=2s 15s \
+    script --quiet --return --command "$command" /dev/null </dev/null
+}
+
 # The test owns this agent and key; it never uses the host's identities.
 export SSH_AUTH_SOCK=$health_home/ssh-agent.socket
 unset SSH_AGENT_PID
@@ -183,16 +193,16 @@ health_stage 'SSH agent startup' timeout --kill-after=2s 10s bash -c '
     sleep 0.05
   done
 '
-health_stage 'empty SSH agent in login Bash' timeout --kill-after=2s 15s \
-  bash --login -ic 'ssh-add -l >/dev/null 2>&1; [[ $? -eq 1 ]]'
+health_stage 'empty SSH agent in login Bash' login_bash \
+  'ssh-add -l >/dev/null 2>&1; [[ $? -eq 1 ]]'
 ssh-keygen -q -t ed25519 -N '' -C container-check -f "$health_home/ssh-key"
 tmux -S "$tmux_socket" new-session -d -s check
 # shellcheck disable=SC2016
-health_stage 'add SSH key from login Bash' timeout --kill-after=2s 15s \
-  bash --login -ic 'ssh-add "$1"' agent-check "$health_home/ssh-key"
+health_stage 'add SSH key from login Bash' login_bash \
+  'ssh-add "$1"' agent-check "$health_home/ssh-key"
 # shellcheck disable=SC2016
-health_stage 'shared SSH key after Bash reload' timeout --kill-after=2s 15s \
-  bash --login -ic 'source "$HOME/.bashrc"; ssh-add -T "$1"' \
+health_stage 'shared SSH key after Bash reload' login_bash \
+  'source "$HOME/.bashrc"; ssh-add -T "$1"' \
     agent-check "$health_home/ssh-key.pub"
 printf -v command 'ssh-add -T %q && nvim --version > %q' \
   "$health_home/ssh-key.pub" "$health_home/tmux-nvim-version"

@@ -234,6 +234,7 @@ def shell_files(root, files):
 
 
 def paths(script, site, word, files, hint="", executable=False):
+    """Resolve a shell word against an index of names and absolute paths."""
     matches = {}
     if hint and hint != "/dev/null":
         for candidate in (os.path.normpath(str(Path(script.path).parent / hint)), hint):
@@ -251,7 +252,7 @@ def paths(script, site, word, files, hint="", executable=False):
         for base in (script.root, script.root / Path(script.path).parent):
             candidate = os.path.normpath(value if value.startswith("/") else str(base / value))
             if any(char in candidate for char in "*?["):
-                selected = [path for path in files if fnmatch.fnmatchcase(str(script.root / path), candidate)]
+                selected = [path for path, absolute in files.items() if fnmatch.fnmatchcase(absolute, candidate)]
             else:
                 relative = os.path.relpath(candidate, script.root)
                 selected = [relative] if relative in files else []
@@ -259,8 +260,8 @@ def paths(script, site, word, files, hint="", executable=False):
                 if not executable or os.access(script.root / path, os.X_OK):
                     matches[path] = "possible" if "*" in candidate or executable and "/" not in value else "exact"
         if "*" in value and "/" in value:
-            for path in files:
-                if fnmatch.fnmatchcase(str(script.root / path), value):
+            for path, absolute in files.items():
+                if fnmatch.fnmatchcase(absolute, value):
                     if executable and not os.access(script.root / path, os.X_OK):
                         continue
                     matches.setdefault(path, "possible")
@@ -313,7 +314,7 @@ def shell_arguments(words, index):
 
 
 def discover_scripts(root, parser):
-    files = set(repository_files(root))
+    files = {path: str(root / path) for path in repository_files(root)}
     pending = sorted(shell_files(root, files), reverse=True)
     scripts = {}
     while pending:
@@ -439,6 +440,7 @@ def checkout_directories(path):
 class Graph:
     def __init__(self, scripts):
         self.scripts = {script.path: script for script in scripts}
+        self.files = {path: str(script.root / path) for path, script in self.scripts.items()}
         self.nodes, self.edges, self.unresolved = {}, {}, []
         self.imported, self.symbols, self.resolutions = defaultdict(set), defaultdict(list), {}
         for script in scripts:
@@ -524,7 +526,7 @@ class Graph:
                     continue
                 if not site.context:
                     source_sites[site.owner].append((script, site, index + 1))
-                matches = paths(script, site, site.node["Args"][index + 1], self.scripts, source_hint(site))
+                matches = paths(script, site, site.node["Args"][index + 1], self.files, source_hint(site))
                 for path, certainty in matches.items():
                     self.edge(script, site, "file:" + path, "source", certainty)
                     self.imported[(script.path, site.context)].add(path)
@@ -548,7 +550,7 @@ class Graph:
                     for helper, source_site, offset in source_sites[target]:
                         bindings = helper.bind(target, helper.bindings[helper.id] | arguments)
                         bound_site = replace(source_site, extra=bindings)
-                        matches = paths(helper, bound_site, source_site.node["Args"][offset], self.scripts,
+                        matches = paths(helper, bound_site, source_site.node["Args"][offset], self.files,
                                         source_hint(source_site))
                         for path in matches:
                             self.edge(script, site, "file:" + path, "source", "possible")
@@ -587,6 +589,7 @@ class Graph:
 
     def relationships(self):
         closure, contexts = self.visibility()
+        variables = [node for node in self.nodes.values() if node["kind"] == "variable"]
         forwarders = set()
         for script in self.scripts.values():
             for site in script.calls:
@@ -619,7 +622,7 @@ class Graph:
                     if code_index is not None:
                         continue
                     if offset is not None:
-                        matches = paths(script, site, site.node["Args"][offset], self.scripts)
+                        matches = paths(script, site, site.node["Args"][offset], self.files)
                         for path, certainty in matches.items():
                             self.edge(script, site, "file:" + path, "check" if syntax_only else "execute",
                                       "possible" if shell_index != index else certainty)
@@ -627,7 +630,7 @@ class Graph:
                             self.missing(script, site, "execute", "External or unresolved shell script path.")
                 elif not targets:
                     raw = fragment(site.node["Args"][index], site.source)
-                    matches = paths(script, site, site.node["Args"][index], self.scripts, executable=True)
+                    matches = paths(script, site, site.node["Args"][index], self.files, executable=True)
                     for path, certainty in matches.items():
                         if not path.endswith(".env"):
                             self.edge(script, site, "file:" + path, "execute", certainty)
@@ -646,8 +649,8 @@ class Graph:
                     name = name.replace(UNKNOWN, "*")
                     if "*" in name:
                         visible = closure.get((script.path, site.context), set()) if site.context else contexts[script.path]
-                        candidates = [node["id"] for node in self.nodes.values() if node["kind"] == "variable"
-                                      and node["file"] in visible and fnmatch.fnmatchcase(node["name"], name)]
+                        candidates = [node["id"] for node in variables
+                                      if node["file"] in visible and fnmatch.fnmatchcase(node["name"], name)]
                     else:
                         candidates = self.resolve(script.path, name, "variable", closure, contexts, site.context)
                     for target in candidates:

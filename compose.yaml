@@ -2,6 +2,7 @@
 services:
   dev:
     image: ghcr.io/surbanski-nr/dotfiles:latest
+    pull_policy: always
     build: .
     group_add:
       - "${DOTFILES_DOCKER_GID:-0}"

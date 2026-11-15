@@ -6,6 +6,14 @@ case ${1:-} in
   api)
     case $2 in
       */releases/tags/*)
+        if [[ -n ${TEST_RELEASE_LOOKUP_LOG:-} ]]; then
+          printf 'lookup\n' >>"$TEST_RELEASE_LOOKUP_LOG"
+          lookup=$(wc -l <"$TEST_RELEASE_LOOKUP_LOG")
+          if ((lookup <= ${TEST_RELEASE_PENDING_ATTEMPTS:-0})); then
+            printf 'HTTP 404\n' >&2
+            exit 1
+          fi
+        fi
         if [[ -n ${TEST_RELEASE_ERROR:-} ]]; then
           printf 'HTTP %s\n' "$TEST_RELEASE_ERROR" >&2
           exit 1

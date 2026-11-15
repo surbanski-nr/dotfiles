@@ -158,6 +158,7 @@ tasks:
         docker compose --file compose.yaml up \
           --detach \
           --no-build \
+          --pull never \
           --wait \
           --wait-timeout 30
 
@@ -278,6 +279,7 @@ tasks:
               --rm \
               --no-deps \
               --no-TTY \
+              --pull never \
               --env "DOTFILES_UID=$runtime_id" \
               --env "DOTFILES_GID=$runtime_id" \
               dev bash -ec '
@@ -292,12 +294,13 @@ tasks:
         docker compose --file compose.test.yaml up \
           --detach \
           --no-build \
+          --pull never \
           --wait \
           --wait-timeout 30
       - |
         docker compose --file compose.test.yaml exec -T --user devcontainer dev \
           timeout --kill-after=10s 1800s \
-          bash --login -ic 'exec bash /opt/dotfiles/tests/container_tools_runner.sh'
+          bash --login -c 'exec bash /opt/dotfiles/tests/container_tools_runner.sh'
 
   tools:actionlint:
     internal: true

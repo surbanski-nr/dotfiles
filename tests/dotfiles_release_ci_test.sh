@@ -92,16 +92,16 @@ export GITHUB_OUTPUT=$test_root/outputs
 export GITHUB_STEP_SUMMARY=$test_root/summary
 export GITHUB_RUN_ID=fixture
 export GITHUB_RUN_ATTEMPT=1
-export EVENT_NAME=workflow_dispatch
-export INPUT_RELEASE_TAG=$RELEASE_TAG
-export TAG_NAME=$RELEASE_TAG
 export TEST_RELEASE_ASSETS=$test_root/assets
+export TEST_RELEASE_LOOKUP_LOG=$test_root/release-lookups
+export TEST_RELEASE_SLEEP_LOG=$test_root/release-delays
 export TEST_UPLOAD_LOG=$test_root/uploads
 export TEST_DOCKER_LOG=$test_root/docker.log
 mkdir -p "$RUNNER_TEMP" "$TEST_RELEASE_ASSETS" "$test_root/empty-home" "$test_root/bin"
 ln -s "$repo_dir/tests/fixtures/dotfiles-release-ci/gh" "$test_root/bin/gh"
 ln -s "$repo_dir/tests/fixtures/dotfiles-release-ci/docker" "$test_root/bin/docker"
 ln -s "$repo_dir/tests/fixtures/dotfiles-release-ci/nproc" "$test_root/bin/nproc"
+ln -s "$repo_dir/tests/fixtures/release-sleep" "$test_root/bin/sleep"
 export PATH="$test_root/bin:$PATH"
 archive=$RELEASE_TAG-$PLATFORM.tar.gz
 
@@ -141,6 +141,8 @@ run_offline_task() {
 }
 run_preflight() {
   : >"$GITHUB_OUTPUT"
+  : >"$TEST_RELEASE_LOOKUP_LOG"
+  : >"$TEST_RELEASE_SLEEP_LOG"
   run_ci preflight
 }
 matrix() {
@@ -156,6 +158,17 @@ matrix | jq -e --argjson count "$release_platform_count" \
   'length == $count and all(.[]; .build_archive == true)' >/dev/null ||
   fail 'missing archives did not select every release build'
 grep -Fx 'should_run=true' "$GITHUB_OUTPUT" >/dev/null || fail 'missing assets did not schedule work'
+
+if ! TEST_RELEASE_PENDING_ATTEMPTS=2 run_preflight >"$test_root/delayed-release.log" 2>&1; then
+  cat "$test_root/delayed-release.log" >&2
+  fail 'temporarily unavailable release lookup failed'
+fi
+matrix | jq -e --argjson count "$release_platform_count" \
+  'length == $count and all(.[]; .build_archive == true)' >/dev/null ||
+  fail 'temporarily unavailable release did not schedule its missing archives'
+[[ $(wc -l <"$TEST_RELEASE_LOOKUP_LOG") == 3 ]] || fail 'release lookup did not stop after success'
+[[ $(<"$TEST_RELEASE_SLEEP_LOG") == $'10\n10' ]] || fail 'temporary 404 did not wait between lookups'
+
 if [[ -n $excluded_release_platform ]]; then
   if PLATFORM=$excluded_release_platform run_ci publish "$test_root/nonexistent-output" \
     >"$test_root/excluded-platform.log" 2>&1; then
@@ -221,13 +234,23 @@ find "$TEST_RELEASE_ASSETS" -maxdepth 1 -type f -delete
 : >"$TEST_UPLOAD_LOG"
 make_archive
 
-TEST_RELEASE_ERROR=404 run_preflight >"$test_root/absent.log"
-grep -Fx 'should_run=false' "$GITHUB_OUTPUT" >/dev/null || fail 'missing release was not skipped'
+if TEST_RELEASE_ERROR=404 run_preflight >"$test_root/absent.log" 2>&1; then
+  fail 'missing release was silently skipped'
+fi
+[[ ! -s $GITHUB_OUTPUT ]] || fail 'missing release produced job outputs'
+[[ $(wc -l <"$TEST_RELEASE_LOOKUP_LOG") == 6 ]] || fail 'missing release did not exhaust bounded retries'
+[[ $(<"$TEST_RELEASE_SLEEP_LOG") == $'10\n10\n10\n10\n10' ]] ||
+  fail 'missing release did not wait between its six lookups'
 if TEST_RELEASE_ERROR=403 run_preflight >"$test_root/denied.log" 2>&1; then
   fail 'API permission failure was hidden'
 fi
-if INPUT_RELEASE_TAG=bad-tag run_preflight >"$test_root/tag.log" 2>&1; then
+[[ $(wc -l <"$TEST_RELEASE_LOOKUP_LOG") == 1 && ! -s $TEST_RELEASE_SLEEP_LOG ]] ||
+  fail 'API permission failure was retried'
+if RELEASE_TAG=bad-tag run_preflight >"$test_root/tag.log" 2>&1; then
   fail 'invalid tag was accepted'
+fi
+if RELEASE_TAG='' run_preflight >"$test_root/empty-tag.log" 2>&1; then
+  fail 'missing tag was accepted'
 fi
 if TEST_COMMIT=2222222222222222222222222222222222222222 run_preflight >"$test_root/commit.log" 2>&1; then
   fail 'tag/commit mismatch was accepted'

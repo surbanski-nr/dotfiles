@@ -20,6 +20,9 @@ class ImagePublicationTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix='dotfiles-image-ci.')
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        self.bin = self.root / 'bin'
+        self.bin.mkdir()
+        (self.bin / 'sleep').symlink_to(REPO / 'tests/fixtures/release-sleep')
         self.source = self.root / 'release-source'
         self.source.mkdir()
         self.assets = self.root / 'assets'
@@ -28,6 +31,8 @@ class ImagePublicationTest(unittest.TestCase):
         self.api_log = self.root / 'api.log'
         self.docker_log = self.root / 'docker.log'
         self.upload_log = self.root / 'uploads.log'
+        self.release_lookup_log = self.root / 'release-lookups.log'
+        self.retry_log = self.root / 'release-delays.log'
         shutil.copy(REPO / 'compose.yaml', self.source / 'compose.yaml')
         with (self.source / 'compose.yaml').open('a') as compose:
             compose.write('\n# Source from the release commit.\n')
@@ -45,7 +50,11 @@ class ImagePublicationTest(unittest.TestCase):
                  'commit', '--quiet', '-m', 'workflow branch')
         self.env = {
             **os.environ,
-            'PATH': str(REPO / 'tests/fixtures/dotfiles-image-ci') + os.pathsep + os.environ['PATH'],
+            'PATH': os.pathsep.join([
+                str(self.bin),
+                str(REPO / 'tests/fixtures/dotfiles-image-ci'),
+                os.environ['PATH'],
+            ]),
             'GH_TOKEN': 'fixture',
             'GITHUB_ACTOR': 'fixture',
             'GITHUB_REPOSITORY': 'fixture/Repo',
@@ -55,6 +64,8 @@ class ImagePublicationTest(unittest.TestCase):
             'PACKAGE_OWNER_TYPE': 'User',
             'TEST_COMMIT': self.commit,
             'TEST_RELEASE_ASSETS': str(self.assets),
+            'TEST_RELEASE_LOOKUP_LOG': str(self.release_lookup_log),
+            'TEST_RELEASE_SLEEP_LOG': str(self.retry_log),
             'TEST_IMAGE_TAGS': str(self.tags),
             'TEST_API_LOG': str(self.api_log),
             'TEST_DOCKER_LOG': str(self.docker_log),
@@ -88,7 +99,10 @@ class ImagePublicationTest(unittest.TestCase):
         self.env['RUNNER_TEMP'] = str(runner)
         self.env['GITHUB_OUTPUT'] = str(runner / 'outputs')
         Path(self.env['GITHUB_OUTPUT']).touch()
-        for log in (self.api_log, self.docker_log, self.upload_log):
+        for log in (
+            self.api_log, self.docker_log, self.upload_log,
+            self.release_lookup_log, self.retry_log,
+        ):
             log.write_text('')
         steps = {step['name']: step for step in WORKFLOW['jobs']['image']['steps']}
         preflight = self.run_ci('preflight')
@@ -225,6 +239,26 @@ class ImagePublicationTest(unittest.TestCase):
         self.run_workflow(expected_status=75)
         self.assertNotIn('build ', self.docker_log.read_text())
         self.assertEqual(self.upload_log.read_text(), '')
+        self.assertEqual(self.release_lookup_log.read_text().splitlines(), ['lookup'] * 6)
+        self.assertEqual(self.retry_log.read_text().splitlines(), ['10'] * 5)
+        self.assertEqual(Path(self.env['GITHUB_OUTPUT']).read_text(), '')
+
+    def test_release_lookup_recovers_from_temporary_404(self):
+        self.env['TEST_RELEASE_PENDING_ATTEMPTS'] = '2'
+        self.run_workflow()
+        self.check_assets()
+        self.assertEqual(self.release_lookup_log.read_text().splitlines(), ['lookup'] * 3)
+        self.assertEqual(self.retry_log.read_text().splitlines(), ['10', '10'])
+
+    def test_release_errors_fail_without_retry(self):
+        for error in ('403', '500'):
+            with self.subTest(error=error):
+                self.env['TEST_RELEASE_ERROR'] = error
+                self.run_workflow(expected_status=75)
+                self.assertEqual(self.release_lookup_log.read_text().splitlines(), ['lookup'])
+                self.assertEqual(self.retry_log.read_text(), '')
+                self.assertEqual(self.docker_log.read_text(), '')
+                self.assertEqual(self.upload_log.read_text(), '')
 
     def test_commit_mismatch_prevents_building(self):
         self.env['TEST_COMMIT'] = '0' * 40

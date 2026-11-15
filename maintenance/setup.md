@@ -164,17 +164,22 @@ Then unlock the keys on the host again.
 From the checkout, run:
 
 ```bash
-docker compose pull
 docker compose up -d --wait
 docker compose exec --user devcontainer dev bash
 # Inside Bash:
 tmux new-session -A -s work
 ```
 
-`compose.yaml` defaults to `ghcr.io/surbanski-nr/dotfiles:latest`. It always
-mounts the host Neovim state, tmux-resurrect data, read-only `~/bin` overrides
-and SSH agent. Neovim's ShaDa and Telescope history and tmux saves can therefore
-follow you between the container and an online or offline host installation.
+`compose.yaml` defaults to `ghcr.io/surbanski-nr/dotfiles:latest` with
+`pull_policy: always`, so each `up` checks the registry for that tag.
+Development tasks build locally, then use `--pull never` when starting the
+container. This keeps their newly built image selected instead of replacing it
+with the published one.
+
+Compose always mounts the host Neovim state, tmux-resurrect data, read-only
+`~/bin` overrides and SSH agent. Neovim's ShaDa and Telescope history and tmux
+saves can therefore follow you between the container and an online or offline
+host installation.
 The named HOME volume preserves Bash history, Kubernetes credentials and other
 user files when the everyday container is replaced or upgraded. It contains
 configuration links and additional mise installations. Bundled tools and
@@ -692,9 +697,16 @@ the offline package workflow. Publishing a GitHub release or manually selecting
 an existing release tag starts the workflow. It resolves the GitHub release ID
 and checks out that release's commit, including on manual runs. Starting on
 `release.published` ensures the release already exists
-when Compose is attached, so this workflow needs no tag-push polling loop.
-The offline workflow retains its existing tag-push preflight. The image
-workflow publishes the image as
+when assets are attached. Both workflows use this event for `dotfiles-*`
+releases; pushing a tag alone does not start either workflow. They can run in
+parallel because the image workflow attaches `compose.yaml` and its checksum,
+while the offline workflow attaches platform archives and the standalone
+manager. Manual runs also require an existing release. If GitHub's API returns
+HTTP 404 for the release lookup, both preflights make up to six attempts,
+waiting 10 seconds between them to allow for API visibility delays. Other API
+errors fail immediately; a release still missing after the final attempt also
+fails preflight instead of silently skipping publication.
+The image workflow publishes the image as
 `ghcr.io/surbanski-nr/dotfiles:COMMIT`, with the full commit SHA, and updates
 `latest` to that same image. If GitHub Packages already contains the commit tag,
 the workflow skips building and publishing the image. Neither the commit tag

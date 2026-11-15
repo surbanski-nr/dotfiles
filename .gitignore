@@ -1,6 +1,7 @@
 lazy-lock.json
 .DS_Store
 .cache/
+__pycache__/
 /bin/
 /maintenance/shell-map.html
 /mc/.config/mc/panels.ini

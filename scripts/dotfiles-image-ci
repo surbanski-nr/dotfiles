@@ -8,6 +8,7 @@ source "$script_dir/setup-lib"
 
 preflight() {
   local release_file=$RUNNER_TEMP/image-release.json
+  local release_error=$RUNNER_TEMP/image-release-error.txt attempt status
   local tags_file=$RUNNER_TEMP/image-tags.txt error_file=$RUNNER_TEMP/package-error.txt
   local release_id commit_sha repository package_endpoint package_scope=users
   local build_image=true attach_compose=true
@@ -15,7 +16,20 @@ preflight() {
   if [[ ! $RELEASE_TAG =~ ^dotfiles-[0-9a-f]{7,40}$ ]]; then
     report_error "invalid release tag: $RELEASE_TAG"
   fi
-  timeout 30s gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_file"
+  for attempt in {1..6}; do
+    if timeout 30s gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+      >"$release_file" 2>"$release_error"; then
+      break
+    else
+      status=$?
+    fi
+    if ((attempt == 6)) || ! grep -q 'HTTP 404' "$release_error"; then
+      cat "$release_error" >&2
+      return "$status"
+    fi
+    printf 'Release %s is not visible yet (%s/6); retrying in 10s.\n' "$RELEASE_TAG" "$attempt"
+    sleep 10
+  done
   release_id=$(jq -er '.id | numbers' "$release_file")
   commit_sha=$(timeout 30s gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq '.sha')
   if [[ ! $commit_sha =~ ^[0-9a-f]{40}$ || $commit_sha != "${RELEASE_TAG#dotfiles-}"* ]]; then
